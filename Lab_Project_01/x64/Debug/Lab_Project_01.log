@@ -1,0 +1,6 @@
+﻿cl : コマンド ライン  warning D9025: '/sdl' より '/GS-' が優先されます。
+  DrawPixel.cpp
+C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\DrawPixel.cpp(231,24): warning C4244: '初期化中': 'float' から 'int' への変換です。データが失われる可能性があります。
+C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\DrawPixel.cpp(231,69): warning C4244: '初期化中': 'float' から 'int' への変換です。データが失われる可能性があります。
+C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\DrawPixel.cpp(235,45): warning C4244: '初期化中': 'float' から 'int' への変換です。データが失われる可能性があります。
+  Lab_Project_01.vcxproj -> C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\x64\Debug\Lab_Project_01.exe
