@@ -36,6 +36,7 @@ struct Player {
     float scale;
     float angle;
     float speedScale;
+    int hp;
 };
 
 struct Enemy {
@@ -48,6 +49,23 @@ struct Enemy {
     EnemyState state;
     float patrolLeft, patrolRight;
     float attackTimer;
+    int hp;
+};
+
+struct PressurePlate {
+    float x, y, width, height;
+    bool isPressed;
+    float requiredScale;
+};
+
+struct ChikuwaBlock {
+    float x, y, width, height;
+    float originalY;
+    float rideTimer;
+    float fallDelay;
+    bool isFalling;
+    float vy;
+    bool isPlayerOn;
 };
 
 struct CutPoint {
@@ -59,12 +77,17 @@ struct Bullet {
     float x, y, vx;
     bool isActive;
     int handle;
+    float width, height;
 };
 
 struct ContextMenu {
     bool isOpen;
     int x, y, width, height;
 };
+
+bool CheckCollision(float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
+    return (x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2);
+}
 
 int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
 {
@@ -86,23 +109,26 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
     int ew, eh;
     GetGraphSize(enemyHandle, &ew, &eh);
 
-    Player player = { 100.0f, 300.0f, 0.0f, 0.0f, playerHandle, 0, false, pw, ph, 1.0f, 0.0f, 1.0f };
-    Enemy enemy = { 450.0f, 300.0f, 0.0f, 0.0f, enemyHandle, 1, ew, eh, 1.0f, PATROL, 300.0f, 600.0f, 0.0f };
+    Player player = { 100.0f, 300.0f, 0.0f, 0.0f, playerHandle, 0, false, pw, ph, 1.0f, 0.0f, 1.0f, 30000 };
+    Enemy enemy = { 450.0f, 300.0f, 0.0f, 0.0f, enemyHandle, 1, ew, eh, 1.0f, PATROL, 300.0f, 600.0f, 0.0f, 3 };
+
+    PressurePlate plate = { 220.0f, 390.0f, 60.0f, 10.0f, false, 1.5f }; // スケール1.5以上で起動
+    ChikuwaBlock chikuwa = { 360.0f, 280.0f, 80.0f, 15.0f, 280.0f, 0.0f, 45.0f, false, 0.0f, false }; // 45フレームで落下
 
     std::vector<CutPoint> cuts;
     std::vector<Bullet> bullets(MAX_BULLETS);
     std::vector<Bullet> enemyBullets(MAX_BULLETS);
 
     for (int i = 0; i < MAX_BULLETS; i++) {
-        bullets[i].isActive = false; bullets[i].handle = bulletHandle;
-        enemyBullets[i].isActive = false; enemyBullets[i].handle = enemyBulletHandle;
+        bullets[i].isActive = false; bullets[i].handle = bulletHandle; bullets[i].width = 16.0f; bullets[i].height = 16.0f;
+        enemyBullets[i].isActive = false; enemyBullets[i].handle = enemyBulletHandle; enemyBullets[i].width = 16.0f; enemyBullets[i].height = 16.0f;
     }
 
     float groundY = 400.0f;
     bool isPaused = false, isEditMode = false, isFastForward = false, isStepFrame = false;
     bool isDragging = false, isScaling = false, isRotating = false;
-    bool isInspScale = false, isInspAngle = false, isInspSpeed = false;
-    float dragOffsetX = 0, dragOffsetY = 0, baseScale = 1.0f, baseAngle = 0.0f, baseSpeed = 1.0f;
+    bool isInspScale = false, isInspAngle = false, isInspSpeed = false, isInspChikuwa = false;
+    float dragOffsetX = 0, dragOffsetY = 0, baseScale = 1.0f, baseAngle = 0.0f, baseSpeed = 1.0f, baseChikuwaDelay = 45.0f;
     int lastMouseX = 0, lastMouseY = 0;
     float tempCutStart = -1.0f, globalTimeScale = 1.0f;
     ContextMenu menu = { false, 0, 0, 160, 120 };
@@ -110,6 +136,8 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
 
     int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
     int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
+
+    bool isGameOver = false;
 
     while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
     {
@@ -144,6 +172,11 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
         float rangeSpeed = (player.x > SCREEN_WIDTH / 2) ? 1.5f : 1.0f;
         float finalTimeScale = globalTimeScale * rangeSpeed * player.speedScale;
 
+        //ゲームオバー
+        if (player.hp <= 0 || enemy.hp <= 0) {
+            isGameOver = true;
+        }
+
         if (isEditMode) {
             if (currentRightClick && !lastRightClick) { menu.isOpen = true; menu.x = mx; menu.y = my; }
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
@@ -162,6 +195,7 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
                     }
                     else if (my >= menu.y + 81 && my <= menu.y + 115) {
                         player.scale = 1.0f; player.angle = 0.0f; player.speedScale = 1.0f;
+                        player.hp = 3; enemy.hp = 3; isGameOver = false;
                         menu.isOpen = false;
                     }
                 }
@@ -176,6 +210,7 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
                     if (my >= 45 && my <= 65) { isInspScale = true; lastMouseX = mx; baseScale = player.scale; }
                     else if (my >= 66 && my <= 85) { isInspAngle = true; lastMouseX = mx; baseAngle = player.angle; }
                     else if (my >= 86 && my <= 105) { isInspSpeed = true; lastMouseX = mx; baseSpeed = player.speedScale; }
+                    else if (my >= 115 && my <= 135) { isInspChikuwa = true; lastMouseX = mx; baseChikuwaDelay = chikuwa.fallDelay; } //ちくわブロック調整
                 }
 
                 if (!lastLeftClick && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
@@ -200,10 +235,11 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
                 if (isInspScale) { player.scale = baseScale + (float)(mx - lastMouseX) * 0.01f; if (player.scale < 0.1f) player.scale = 0.1f; }
                 if (isInspAngle) { player.angle = baseAngle + (float)(mx - lastMouseX) * 0.02f; }
                 if (isInspSpeed) { player.speedScale = baseSpeed + (float)(mx - lastMouseX) * 0.05f; if (player.speedScale < 0) player.speedScale = 0; }
+                if (isInspChikuwa) { chikuwa.fallDelay = baseChikuwaDelay + (float)(mx - lastMouseX) * 0.5f; if (chikuwa.fallDelay < 10) chikuwa.fallDelay = 10.0; } //ちくわブロック調整
             }
             else {
                 isDragging = isScaling = isRotating = false;
-                isInspScale = isInspAngle = isInspSpeed = false;
+                isInspScale = isInspAngle = isInspSpeed = isInspChikuwa = false;
             }
         }
 
@@ -233,7 +269,8 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
 
         SetDrawScreen(gameScreen);
         ClearDrawScreen();
-        if ((!isPaused && !isDragging && !isScaling && !isRotating) || isStepFrame) {
+
+        if (((!isPaused && !isDragging && !isScaling && !isRotating) || isStepFrame) && !isGameOver) {
             float ts = isStepFrame ? 1.0f : finalTimeScale;
             player.vy += GRAVITY * ts; player.x += player.vx * ts; player.y += player.vy * ts;
             float tp = player.x / (float)SCREEN_WIDTH;
@@ -243,50 +280,138 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
             }
             for (int i = 0; i < MAX_BULLETS; i++) { if (bullets[i].isActive) { bullets[i].x += bullets[i].vx * ts; if (bullets[i].x < -50 || bullets[i].x >(float)SCREEN_WIDTH + 50) bullets[i].isActive = false; } }
 
-            float distX = std::abs(player.x - enemy.x);
-            float distY = std::abs(player.y - enemy.y);
+            if (enemy.hp > 0) {
+                //中心座標を計算
+                float pCenterX = player.x + (player.width * player.scale) / 2.0f;
+                float pCenterY = player.y + (player.height * player.scale) / 2.0f;
+                float eCenterX = enemy.x + (enemy.width * enemy.scale) / 2.0f;
+                float eCenterY = enemy.y + (enemy.height * enemy.scale) / 2.0f;
 
-            if (distX <= ENEMY_ATTACK_RANGE_X && distY <= ENEMY_ATTACK_RANGE_Y) {
-                enemy.state = ATTACK;
-            }
-            else {
-                enemy.state = PATROL;
-            }
+                //中心座標で距離を測る
+                float distX = std::abs(pCenterX - eCenterX);
+                float distY = std::abs(pCenterY - eCenterY);
 
-            if (enemy.state == PATROL) {
-                if (enemy.direction == 1) {
-                    enemy.vx = -ENEMY_WALK_SPEED;
-                    if (enemy.x <= enemy.patrolLeft) enemy.direction = 0;
+                if (distX <= ENEMY_ATTACK_RANGE_X && distY <= ENEMY_ATTACK_RANGE_Y) {
+                    enemy.state = ATTACK;
                 }
                 else {
-                    enemy.vx = ENEMY_WALK_SPEED;
-                    if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
+                    enemy.state = PATROL;
                 }
-            }
-            else if (enemy.state == ATTACK) {
-                enemy.vx = 0.0f;
-                enemy.direction = (player.x < enemy.x) ? 1 : 0;
 
-                if (enemy.attackTimer > 0) enemy.attackTimer -= 1.0f * ts;
-
-                if (enemy.attackTimer <= 0) {
-                    for (int i = 0; i < MAX_BULLETS; i++) {
-                        if (!enemyBullets[i].isActive) {
-                            enemyBullets[i].isActive = true;
-                            enemyBullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
-                            enemyBullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
-                            enemyBullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.5f : -BULLET_SPEED * 0.5f);
-                            break;
-                        }
+                if (enemy.state == PATROL) {
+                    if (enemy.direction == 1) {
+                        enemy.vx = -ENEMY_WALK_SPEED;
+                        if (enemy.x <= enemy.patrolLeft) enemy.direction = 0;
                     }
-                    enemy.attackTimer = ENEMY_ATTACK_COOLDOWN;
+                    else {
+                        enemy.vx = ENEMY_WALK_SPEED;
+                        if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
+                    }
                 }
+                else if (enemy.state == ATTACK) {
+                    enemy.vx = 0.0f;
+                    enemy.direction = (player.x < enemy.x) ? 1 : 0;
+
+                    if (enemy.attackTimer > 0) enemy.attackTimer -= 1.0f * ts;
+
+                    if (enemy.attackTimer <= 0) {
+                        for (int i = 0; i < MAX_BULLETS; i++) {
+                            if (!enemyBullets[i].isActive) {
+                                enemyBullets[i].isActive = true;
+                                enemyBullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
+                                enemyBullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
+                                enemyBullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.5f : -BULLET_SPEED * 0.5f);
+                                break;
+                            }
+                        }
+                        enemy.attackTimer = ENEMY_ATTACK_COOLDOWN;
+                    }
+                }
+                enemy.vy += GRAVITY * ts;
+                enemy.x += enemy.vx * ts;
+                enemy.y += enemy.vy * ts;
             }
-            enemy.vy += GRAVITY * ts;
-            enemy.x += enemy.vx * ts;
-            enemy.y += enemy.vy * ts;
 
             for (int i = 0; i < MAX_BULLETS; i++) { if (enemyBullets[i].isActive) { enemyBullets[i].x += enemyBullets[i].vx * ts; if (enemyBullets[i].x < -50 || enemyBullets[i].x >(float)SCREEN_WIDTH + 50) enemyBullets[i].isActive = false; } }
+
+            //pressure plate
+            float pX2 = player.x + player.width * player.scale;
+            float pY2 = player.y + player.height * player.scale;
+            if (pX2 > plate.x && player.x < plate.x + plate.width &&
+                pY2 >= groundY - 2.0f && pY2 <= groundY + 2.0f) {
+
+                if (player.scale >= plate.requiredScale) {
+                    plate.isPressed = true;
+                }
+                else {
+                    plate.isPressed = false;
+                }
+            }
+            else {
+                plate.isPressed = false;
+            }
+
+            //ちくわブロック
+            if (pX2 > chikuwa.x && player.x < chikuwa.x + chikuwa.width && std::abs(pY2 - chikuwa.y) < 5.0f && player.vy >= 0) {
+                chikuwa.isPlayerOn = true;
+                player.y = chikuwa.y - player.height * player.scale;
+                player.vy = 0;
+                player.isJumping = false;
+            }
+            else {
+                chikuwa.isPlayerOn = false;
+            }
+
+            // ちくわブロックの状態更新
+            if (chikuwa.isPlayerOn && !chikuwa.isFalling) {
+                chikuwa.rideTimer += 1.0f * ts;
+                if (chikuwa.rideTimer >= chikuwa.fallDelay) {
+                    chikuwa.isFalling = true;
+                }
+            }
+            else if (!chikuwa.isFalling) {
+                chikuwa.rideTimer = 0.0f;
+                chikuwa.y = chikuwa.originalY;
+            }
+
+            if (chikuwa.isFalling) {
+                chikuwa.vy += GRAVITY * ts;
+                chikuwa.y += chikuwa.vy * ts;
+
+                if (chikuwa.y > SCREEN_HEIGHT + 100) {
+                    chikuwa.rideTimer += 1.0f * ts;
+                    if (chikuwa.rideTimer > 180.0f) {
+                        chikuwa.isFalling = false;
+                        chikuwa.y = chikuwa.originalY;
+                        chikuwa.vy = 0;
+                        chikuwa.rideTimer = 0.0f;
+                    }
+                }
+            }
+
+            //弾のあたり判定
+            //敵へ
+            if (enemy.hp > 0) {
+                for (int i = 0; i < MAX_BULLETS; i++) {
+                    if (bullets[i].isActive) {
+                        if (CheckCollision(bullets[i].x, bullets[i].y, bullets[i].width, bullets[i].height,
+                            enemy.x, enemy.y, enemy.width * enemy.scale, enemy.height * enemy.scale)) {
+                            bullets[i].isActive = false; // 弾消滅
+                            enemy.hp--;                  // 敵のHP減少
+                        }
+                    }
+                }
+            }
+            //プレイヤーへ
+            for (int i = 0; i < MAX_BULLETS; i++) {
+                if (enemyBullets[i].isActive) {
+                    if (CheckCollision(enemyBullets[i].x, enemyBullets[i].y, enemyBullets[i].width, enemyBullets[i].height,
+                        player.x, player.y, player.width * player.scale, player.height * player.scale)) {
+                        enemyBullets[i].isActive = false; // 弾消滅
+                        player.hp--;                      // プレイヤーのHP減少
+                    }
+                }
+            }
         }
 
         // Always ground collision
@@ -300,18 +425,56 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
         }
 
         for (int i = 0; i < SCREEN_WIDTH / 64 + 1; i++) DrawGraph(i * 64, (int)groundY, yukaHandle, TRUE);
-        int cx = (int)(player.x + (player.width * player.scale) / 2.0f);
-        int cy = (int)(player.y + (player.height * player.scale) / 2.0f);
-        if (player.direction == 0) DrawRotaGraph(cx, cy, player.scale, player.angle, player.handle, TRUE);
-        else DrawRotaGraph(cx, cy, player.scale, player.angle, player.handle, TRUE, TRUE);
+        //pressure plateの描画
+        if (plate.isPressed) {
+            DrawBox((int)plate.x, (int)plate.y + 5, (int)(plate.x + plate.width), (int)(plate.y + plate.height), GetColor(0, 238, 0), TRUE);
+        }
+        else {
+            DrawBox((int)plate.x, (int)plate.y, (int)(plate.x + plate.width), (int)(plate.y + plate.height), GetColor(150, 150, 150), TRUE);
+        }
+        // 条件表示
+        DrawString((int)plate.x - 10, (int)plate.y - 15, "Mass>=1.5", GetColor(255, 255, 255));
+
+        //ちくわブロックの描画
+        float shakeX = 0.0f;
+        // 乗られていて、まだ落ちていない時はカタカタ揺らす
+        if (chikuwa.rideTimer > 0 && !chikuwa.isFalling) {
+            shakeX = sinf(chikuwa.rideTimer * 1.0f) * 3.0f; // 左右に3ピクセル揺らす
+        }
+        DrawBox((int)(chikuwa.x + shakeX), (int)chikuwa.y, (int)(chikuwa.x + chikuwa.width + shakeX), (int)(chikuwa.y + chikuwa.height), GetColor(222, 184, 135), TRUE);
+        DrawBox((int)(chikuwa.x + shakeX), (int)chikuwa.y, (int)(chikuwa.x + chikuwa.width + shakeX), (int)(chikuwa.y + chikuwa.height), GetColor(139, 69, 19), FALSE);
+
+        if (player.hp > 0) {
+            int cx = (int)(player.x + (player.width * player.scale) / 2.0f);
+            int cy = (int)(player.y + (player.height * player.scale) / 2.0f);
+            if (player.direction == 0) DrawRotaGraph(cx, cy, player.scale, player.angle, player.handle, TRUE);
+            else DrawRotaGraph(cx, cy, player.scale, player.angle, player.handle, TRUE, TRUE);
+            DrawFormatString((int)player.x, (int)player.y - 20, GetColor(0, 255, 0), "PLAYER HP:%d", player.hp); //HP
+        }
+
         for (int i = 0; i < MAX_BULLETS; i++) if (bullets[i].isActive) DrawGraph((int)bullets[i].x, (int)bullets[i].y, bullets[i].handle, TRUE);
 
-        int ex = (int)(enemy.x + (enemy.width * enemy.scale) / 2.0f);
-        int ey = (int)(enemy.y + (enemy.height * enemy.scale) / 2.0f);
-        if (enemy.direction == 0) DrawRotaGraph(ex, ey, enemy.scale, 0.0f, enemy.handle, TRUE);
-        else DrawRotaGraph(ex, ey, enemy.scale, 0.0f, enemy.handle, TRUE, TRUE);
+        if (enemy.hp > 0) {
+            int ex = (int)(enemy.x + (enemy.width * enemy.scale) / 2.0f);
+            int ey = (int)(enemy.y + (enemy.height * enemy.scale) / 2.0f);
+            if (enemy.direction == 0) DrawRotaGraph(ex, ey, enemy.scale, 0.0f, enemy.handle, TRUE);
+            else DrawRotaGraph(ex, ey, enemy.scale, 0.0f, enemy.handle, TRUE, TRUE);
+            DrawFormatString((int)enemy.x, (int)enemy.y - 20, GetColor(255, 0, 0), "ENEMY HP:%d", enemy.hp); //HP
+        }
 
         for (int i = 0; i < MAX_BULLETS; i++) if (enemyBullets[i].isActive) DrawGraph((int)enemyBullets[i].x, (int)enemyBullets[i].y, enemyBullets[i].handle, TRUE);
+
+        //ゲームオーバー画面描画
+        if (player.hp <= 0) {
+            SetFontSize(48);
+            DrawString(SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 - 24, "GAME OVER", GetColor(255, 0, 0));
+            SetFontSize(16);
+        }
+        else if (enemy.hp <= 0) {
+            SetFontSize(48);
+            DrawString(SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 - 24, "VICTORY!", GetColor(255, 255, 0));
+            SetFontSize(16);
+        }
 
         SetDrawScreen(DX_SCREEN_BACK);
         ClearDrawScreen();
@@ -335,6 +498,7 @@ int WINAPI WinMain(HINSTANCE h, HINSTANCE hp, LPSTR l, int n)
             DrawFormatString(WINDOW_WIDTH - 240, 50, isInspScale ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Scale: %.2f", player.scale);
             DrawFormatString(WINDOW_WIDTH - 240, 70, isInspAngle ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Angle: %.2f", player.angle);
             DrawFormatString(WINDOW_WIDTH - 240, 90, isInspSpeed ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Speed: %.1f", player.speedScale);
+            DrawFormatString(WINDOW_WIDTH - 240, 115, isInspChikuwa ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Chikuwa Delay: %.1f", chikuwa.fallDelay); //ちくわブロックのインスペクター
             DrawBox(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT - 90, WINDOW_WIDTH / 2 + 50, WINDOW_HEIGHT - 70, GetColor(80, 80, 80), TRUE);
             DrawString(WINDOW_WIDTH / 2 - 25, WINDOW_HEIGHT - 85, isPaused ? "RESUME" : "PAUSE", GetColor(255, 255, 255));
             if (menu.isOpen) {
