@@ -1,0 +1,6 @@
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Lab_Editor.exe
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Lab_Editor.dll
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Lab_Editor.deps.json
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Lab_Editor.runtimeconfig.json
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Lab_Editor.pdb
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\Publish\Newtonsoft.Json.dll

@@ -1,0 +1,17 @@
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Lab_Editor.exe
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Lab_Editor.deps.json
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Lab_Editor.runtimeconfig.json
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Lab_Editor.dll
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Lab_Editor.pdb
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\bin\x64\Debug\net8.0-windows\Newtonsoft.Json.dll
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.csproj.AssemblyReference.cache
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.AssemblyInfoInputs.cache
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.AssemblyInfo.cs
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.csproj.CoreCompileInputs.cache
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.csproj.Up2Date
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.dll
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\refint\Lab_Editor.dll
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.pdb
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\Lab_Editor.genruntimeconfig.cache
+C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\obj\x64\Debug\net8.0-windows\ref\Lab_Editor.dll
