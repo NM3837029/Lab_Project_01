@@ -1,0 +1,42 @@
+[
+  {
+    "id": 0,
+    "name": "なし（空気）",
+    "color": "#B4D2F0",
+    "collidable": false,
+    "deadly": false,
+    "sprite": ""
+  },
+  {
+    "id": 1,
+    "name": "地面 (Jimen)",
+    "color": "#50A03C",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/jimen.png"
+  },
+  {
+    "id": 2,
+    "name": "土 (Tuti)",
+    "color": "#8C643C",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/tuti.png"
+  },
+  {
+    "id": 3,
+    "name": "棘床（即死）",
+    "color": "#CC3333",
+    "collidable": false,
+    "deadly": true,
+    "sprite": "img/spikes.png"
+  },
+  {
+    "id": 4,
+    "name": "岩盤",
+    "color": "#555555",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/tuti.png"
+  }
+]

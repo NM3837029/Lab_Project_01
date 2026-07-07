@@ -1,0 +1,23 @@
+[
+  {
+    "id": "item_double_jump",
+    "name": "Double Jump Boots",
+    "type_enum": 1,
+    "sprite": "img/player.png",
+    "grant_ability": "DoubleJump"
+  },
+  {
+    "id": "item_dash",
+    "name": "Dash Ring",
+    "type_enum": 2,
+    "sprite": "img/player.png",
+    "grant_ability": "Dash"
+  },
+  {
+    "id": "item_fireball",
+    "name": "Fire Flower",
+    "type_enum": 3,
+    "sprite": "img/bullet.png",
+    "grant_ability": "ShootFireball"
+  }
+]

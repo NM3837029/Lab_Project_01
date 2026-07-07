@@ -4,7 +4,7 @@ namespace Lab_Editor;
 
 public partial class Form1 : Form
 {
-    private readonly string projectRoot = @"C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01";
+    private readonly string projectRoot;
     private readonly string assetsPath;
     private readonly string stagesPath;
     private readonly string exePath;
@@ -19,6 +19,7 @@ public partial class Form1 : Form
 
     public Form1()
     {
+        projectRoot = FindProjectRoot();
         assetsPath = Path.Combine(projectRoot, "assets");
         stagesPath = Path.Combine(assetsPath, "stages");
         exePath = Path.Combine(projectRoot, "x64", "Debug", "Lab_Project_01.exe");
@@ -26,6 +27,18 @@ public partial class Form1 : Form
         InitializeComponent();
         mapCanvas.AssetsPath = assetsPath;
         KeyPreview = true;
+    }
+
+    private string FindProjectRoot()
+    {
+        string? dir = AppDomain.CurrentDomain.BaseDirectory;
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (File.Exists(Path.Combine(dir, "Lab_Project_01.vcxproj")))
+                return dir;
+            dir = Path.GetDirectoryName(dir);
+        }
+        return AppDomain.CurrentDomain.BaseDirectory;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)

@@ -1,0 +1,115 @@
+Created At: 2026-05-25T13:44:28Z
+Completed At: 2026-05-25T13:44:28Z
+File Path: `file:///C:/Users/naots/Documents/OriginalGame/C++/Lab_Project_01/DrawPixel.cpp`
+Total Lines: 602
+Total Bytes: 28985
+Showing lines 1 to 602
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: #include "DxLib.h"
+2: #include <vector>
+3: #include <stdio.h>
+4: 
+5: // Constants
+6: const int SCREEN_WIDTH = 640;
+7: const int SCREEN_HEIGHT = 480;
+8: const int WINDOW_WIDTH = 1280;
+9: const int WINDOW_HEIGHT = 720;
+10: const float GRAVITY = 0.5f;
+11: const int MAX_BULLETS = 40;
+12: const float BULLET_SPEED = 20.0f;
+13: const float JUMP_POWER = -12.0f;
+14: const float WALK_SPEED = 4.0f;
+15: const float DASH_SPEED = 8.0f;
+16: 
+17: // History Limit
+18: const size_t MAX_HISTORY_FRAMES = 600; // About 10 seconds at 60fps
+19: 
+20: // Individual History States
+21: struct PlayerState {
+22:     float x, y, vx, vy;
+23:     int direction;
+24:     bool isJumping;
+25:     float scale, angle, speedScale;
+26: };
+27: 
+28: struct EnemyState {
+29:     float x, y, vx, vy;
+30:     int direction;
+31:     float scale, angle, speedScale;
+32:     bool isActive;
+33: };
+34: 
+35: struct BulletState {
+36:     float x, y, vx;
+37:     bool isActive;
+38: };
+39: 
+40: // Main Structures
+41: struct Player {
+42:     float x, y;
+43:     float vx, vy;
+44:     int handle;
+45:     int direction; 
+46:     bool isJumping;
+47:     int width, height;
+48:     float scale;
+49:     float angle;
+50:     float speedScale;
+51:     
+52:     // Rewind track
+53:     bool isRewinding;
+54:     std::vector<PlayerState> history;
+55: };
+56: 
+57: struct Enemy {
+58:     float x, y;
+59:     float vx, vy;
+60:     int handle;
+61:     int direction; 
+62:     int width, height;
+63:     float scale;
+64:     float angle;
+65:     float speedScale;
+66:     bool isActive;
+67: 
+68:     // Rewind track
+69:     bool isRewindin
+<truncated 28335 bytes>
+_WIDTH / 2 - 25, WINDOW_HEIGHT - 85, isPaused ? "RESUME" : "PAUSE", GetColor(255, 255, 255));
+568: 
+569:             // Context Menu Popup Draw
+570:             if (menu.isOpen) {
+571:                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(50, 50, 50), TRUE);
+572:                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(180, 180, 180), FALSE);
+573: 
+574:                 char rewindStr[32];
+575:                 sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
+576: 
+577:                 DrawString(menu.x + 10, menu.y + 10, rewindStr, GetColor(255, 255, 255));
+578:                 DrawString(menu.x + 10, menu.y + 35, "Speed +0.5", GetColor(255, 255, 255));
+579:                 DrawString(menu.x + 10, menu.y + 60, "Speed -0.5", GetColor(255, 255, 255));
+580:                 DrawString(menu.x + 10, menu.y + 85, "Flip Object", GetColor(255, 255, 255));
+581:                 DrawString(menu.x + 10, menu.y + 110, "Reset All", GetColor(255, 255, 255));
+582:             }
+583: 
+584:             // Visual feedback indicator for global rewind
+585:             if (isRKeyPressed && selectedType == SELECT_NONE) {
+586:                 static int blinkTimer = 0;
+587:                 blinkTimer = (blinkTimer + 1) % 30;
+588:                 if (blinkTimer < 15) {
+589:                     DrawString(WINDOW_WIDTH / 2 - 80, 20, "<< GLOBAL REWINDING", GetColor(255, 100, 100));
+590:                 }
+591:             }
+592: 
+593:             DrawString(10, 10, "PROFESSIONAL EDIT MODE", GetColor(255, 255, 0));
+594:         } else {
+595:             DrawExtendGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen, TRUE);
+596:             if (isPaused) DrawString(WINDOW_WIDTH / 2 - 40, WINDOW_HEIGHT / 2, "PAUSED", GetColor(255, 255, 255));
+597:         }
+598:         ScreenFlip();
+599:     }
+600:     DxLib_End();
+601:     return 0;
+602: }
+The above content shows the entire, complete file contents of the requested file.
+

@@ -14,6 +14,6 @@ build_property.PlatformNeutralAssembly =
 build_property.EnforceExtendedAnalyzerRules = 
 build_property._SupportedPlatformList = Linux,macOS,Windows
 build_property.RootNamespace = Lab_Editor
-build_property.ProjectDir = C:\Users\naots\Documents\OriginalGame\Lab_Editor\Lab_Editor\
+build_property.ProjectDir = C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Editor\Lab_Editor\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 

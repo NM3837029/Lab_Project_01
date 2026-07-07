@@ -1,0 +1,38 @@
+[
+  {
+    "id": "enemy_patrol",
+    "name": "Patrol Slime",
+    "type_enum": 0,
+    "hp": 3,
+    "width": 64,
+    "height": 64,
+    "sprite": "img/player.png"
+  },
+  {
+    "id": "enemy_jumper",
+    "name": "Jumping Frog",
+    "type_enum": 1,
+    "hp": 2,
+    "width": 64,
+    "height": 64,
+    "sprite": "img/player.png"
+  },
+  {
+    "id": "enemy_stationary",
+    "name": "Stationary Cannon",
+    "type_enum": 2,
+    "hp": 5,
+    "width": 64,
+    "height": 64,
+    "sprite": "img/player.png"
+  },
+  {
+    "id": "enemy_patrol_shooter",
+    "name": "Patrol Shooter",
+    "type_enum": 3,
+    "hp": 3,
+    "width": 64,
+    "height": 64,
+    "sprite": "img/player.png"
+  }
+]

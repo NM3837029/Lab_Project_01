@@ -1,0 +1,33 @@
+﻿[
+  {
+    "id": "gim_portal",
+    "name": "Warp Portal",
+    "type_enum": 0,
+    "sprite": "img/player.png"
+  },
+  {
+    "id": "gim_bridge",
+    "name": "Rotating Bridge",
+    "type_enum": 1,
+    "sprite": "img/bridge.png"
+  },
+  {
+    "id": "gim_spikes",
+    "name": "Deadly Spikes",
+    "type_enum": 9,
+    "sprite": "img/player.png"
+  },
+  {
+    "id": "gim_breakable",
+    "name": "Breakable Block",
+    "type_enum": 3,
+    "sprite": "img/breakable_block.png"
+  },
+  {
+    "id": "gim_chikuwa",
+    "name": "Chikuwa Block",
+    "type_enum": 11,
+    "sprite": "img/tuti.png"
+  }
+]
+

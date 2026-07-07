@@ -1,0 +1,3756 @@
+#include "DxLib.h"
+#include <vector>
+#include <stdio.h>
+#include <fstream>
+#include <string>
+#include <map>
+#include "json.hpp"
+#include "Logger.h"
+#include <exception>
+
+#include "imgui.h"
+#include "imgui_impl_win32.h"
+#include "imgui_impl_dx11.h"
+#include <d3d11.h>
+
+
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+LRESULT CALLBACK CustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
+        return true;
+    return 0;
+}
+
+bool isDedicatedEditorMode = false;
+
+#pragma warning(disable: 26800)
+#include "SoundManager.h"
+#include "EventManager.h"
+#include "AnimationController.h"
+
+struct EnemyDef {
+    std::string id = "";
+    std::string name = "";
+    int type_enum = 0;
+    int hp = 0;
+    int width = 0;
+    int height = 0;
+    std::string sprite_path = "";
+    int graphHandle = -1;
+    std::string seSpawn = "";
+    std::string seAttack = "";
+    std::string seDamage = "";
+    std::string seDeath = "";
+};
+
+struct GimmickDef {
+    std::string id = "";
+    std::string name = "";
+    int type_enum = 0;
+    std::string sprite_path = "";
+    int graphHandle = -1;
+};
+
+std::vector<EnemyDef> enemyDefs;
+std::vector<GimmickDef> gimmickDefs;
+struct PlacedEnemy {
+    int def_idx;
+    float x, y;
+};
+struct PlacedGimmick {
+    int def_idx;
+    float x, y;
+    std::string stringParam = ""; // ポータルの遷移先など
+};
+std::vector<PlacedEnemy> editorPlacedEnemies;
+std::vector<PlacedGimmick> editorPlacedGimmicks;
+#include <filesystem>
+namespace fs = std::filesystem;
+std::string currentStageFileName = "stage_01.json";
+struct ItemDef {
+    std::string id = "";
+    std::string name = "";
+    int type_enum = 0;
+    std::string sprite_path = "";
+    std::string grant_ability = "";
+    int graphHandle = -1;
+};
+
+struct PlayerCapabilities {
+    bool canDoubleJump = false;
+    bool canDash = false;
+    bool canShootFireball = false;
+    bool canFly = false;
+    int baseJumpPower = -12;
+    float baseSpeed = 4.0f;
+};
+PlayerCapabilities editorPlayerCaps;
+
+std::vector<ItemDef> itemDefs;
+struct PlacedItem {
+    int def_idx;
+    float x, y;
+};
+std::vector<PlacedItem> editorPlacedItems;
+
+void LoadAssetDefinitions() {
+    {
+        std::ifstream ef("assets/enemies.json");
+        if (ef.is_open()) {
+            json ej = json::parse(ef, nullptr, false);
+            if (!ej.is_discarded() && ej.is_array()) {
+                for (const auto& e : ej) {
+                    if (!e.is_object()) continue;
+                    EnemyDef def;
+                    def.id = e.value("id", "");
+                    def.name = e.value("name", "");
+                    def.type_enum = e.value("type_enum", 0);
+                    def.hp = e.value("hp", 1);
+                    def.width = e.value("width", 32);
+                    def.height = e.value("height", 32);
+                    def.sprite_path = e.value("sprite", "");
+                    def.seSpawn = e.value("seSpawn", "");
+                    def.seAttack = e.value("seAttack", "");
+                    def.seDamage = e.value("seDamage", "");
+                    def.seDeath = e.value("seDeath", "");
+                    if (!def.sprite_path.empty()) {
+                        def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                        int gw, gh;
+                        GetGraphSize(def.graphHandle, &gw, &gh);
+                        def.width = gw;
+                        def.height = gh;
+                    }
+                    enemyDefs.push_back(def);
+                }
+            } else {
+                Logger::Error("DrawPixel", "LoadAssetDefinitions", "Failed to parse enemies.json", "assets/enemies.json");
+            }
+        }
+    }
+
+    {
+        std::ifstream itf("assets/items.json");
+        if (itf.is_open()) {
+            json ij = json::parse(itf, nullptr, false);
+            if (!ij.is_discarded() && ij.is_array()) {
+                for (const auto& i : ij) {
+                    if (!i.is_object()) continue;
+                    ItemDef def;
+                    def.id = i.value("id", "");
+                    def.name = i.value("name", "");
+                    def.type_enum = i.value("type_enum", 0);
+                    def.sprite_path = i.value("sprite", "");
+                    def.grant_ability = i.value("grant_ability", "");
+                    if (!def.sprite_path.empty()) def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                    itemDefs.push_back(def);
+                }
+            } else {
+                Logger::Error("DrawPixel", "LoadAssetDefinitions", "Failed to parse items.json", "assets/items.json");
+            }
+        }
+    }
+
+    {
+        std::ifstream gf("assets/gimmicks.json");
+        if (gf.is_open()) {
+            json gj = json::parse(gf, nullptr, false);
+            if (!gj.is_discarded() && gj.is_array()) {
+                for (const auto& g : gj) {
+                    if (!g.is_object()) continue;
+                    GimmickDef def;
+                    def.id = g.value("id", "");
+                    def.name = g.value("name", "");
+                    def.type_enum = g.value("type_enum", 0);
+                    def.sprite_path = g.value("sprite", "");
+                    if (!def.sprite_path.empty()) def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                    gimmickDefs.push_back(def);
+                }
+            } else {
+                Logger::Error("DrawPixel", "LoadAssetDefinitions", "Failed to parse gimmicks.json", "assets/gimmicks.json");
+            }
+        }
+    }
+}
+
+
+
+// 定数
+const int SCREEN_WIDTH = 640;
+const int SCREEN_HEIGHT = 480;
+const int WINDOW_WIDTH = 1280;
+const int WINDOW_HEIGHT = 720;
+const float GRAVITY = 0.5f;
+const int MAX_BULLETS = 40;
+const float BULLET_SPEED = 20.0f;
+const float JUMP_POWER = -12.0f;
+const float WALK_SPEED = 4.0f;
+const float DASH_SPEED = 8.0f;
+
+const int TILE_SIZE = 32;
+const int MAP_WIDTH_TILES = 80;  // 2560 / 32 = 80
+const int MAP_HEIGHT_TILES = 15; // 480 / 32 = 15
+
+enum TileType {
+    TILE_NONE = 0,
+    TILE_JIMEN = 1,
+    TILE_TUTI = 2,
+    TILE_TYPE_MAX
+};
+
+enum GameScene {
+    PLAY,
+    RESULT_GAMEOVER,
+    RESULT_VICTORY
+};
+
+enum EditToolMode {
+    EDIT_OBJECTS,
+    EDIT_TILES
+};
+
+struct TileDefinition {
+    TileType type;
+    int handle;
+    bool isCollidable;
+    bool deadly = false;   // 返った場合ただちゲームオーバー
+    const char* name;
+};
+
+// 履歴上限
+const size_t MAX_HISTORY_FRAMES = 600; // 60fpsで約10秒間
+
+// 個々の履歴ステート
+struct PlayerState {
+    float x, y, vx, vy;
+    int direction;
+    bool isJumping;
+    float scale, angle, speedScale;
+    bool isPaused;
+    int hp;
+};
+
+enum EnemyType {
+    ENEMY_PATROL,          // 往復パトロールする敵
+    ENEMY_JUMPER,          // 繰り返しジャンプする敵
+    ENEMY_STATIONARY,      // 固定位置から定期的に射撃する敵
+    ENEMY_PATROL_SHOOTER   // 索敵して射撃する敵（旧DrawPixel2.cpp準拠）
+};
+
+struct EnemyState {
+    float x, y, vx, vy;
+    int direction;
+    float scale, angle, speedScale;
+    bool isActive;
+    bool isPaused;
+    EnemyType type;
+    int hp;
+};
+
+struct BulletState {
+    float x, y, vx, vy;
+    bool isActive;
+    bool isPlayerOwned;
+};
+
+enum GimmickType {
+    GIMMICK_CUT_PORTAL,       // タイムラインのカット・ポータル
+    GIMMICK_ROTATING_BRIDGE,  // 自動回転する橋
+    GIMMICK_MANUAL_BRIDGE,    // 手動で回転可能な橋
+    GIMMICK_BREAKABLE_BLOCK,  // 破壊可能な石ブロック
+    GIMMICK_FALLING_LIFT,     // 乗ると落下し、巻き戻すと上昇する砂時計リフト
+    GIMMICK_REFLECT_MIRROR,   // 角度に応じてプレイヤーの弾を反射する鏡（Rキーで調整可能）
+    GIMMICK_WEIGHT_SWITCH,    // スケール変更したボックスが上に乗ると起動する重量スイッチ
+    GIMMICK_SCALABLE_BOX,     // エディター内でSキーによって横幅を変更できるボックス
+    GIMMICK_GATE_DOOR,        // 重量スイッチがアクティブなときに開く（isActive=falseになる）ゲート扉
+    GIMMICK_SPIKES,           // プレイヤーにダメージを与える即死トゲ床
+    GIMMICK_SCALABLE_GROUND,  // 自由にサイズ変更可能な地面ブロック
+    GIMMICK_CHIKUWA_BLOCK,    // 乗ると一定時間後に落下するちくわブロック
+    GIMMICK_TIME_FIELD,       // この範囲内だけポーズ中でも時間が進む反・一時停止装置
+    GIMMICK_CHOMPER           // プレイヤーが触れると即死し、敵が触れると互いに消滅する敵食らいギミック
+};
+
+struct GimmickState {
+    float x, y;
+    float angle;
+    bool isActive;
+};
+
+// 将来の拡張用のアイテムシステムテンプレート
+enum ItemType {
+    ITEM_NONE,
+    ITEM_COIN,
+    ITEM_HEAL
+};
+
+struct ItemState {
+    float x, y;
+    bool isCollected;
+};
+
+struct Item {
+    ItemType type;
+    float x, y;
+    float width, height;
+    bool isActive;
+    bool isCollected;
+
+    // 巻き戻しトラック
+    bool isRewinding;
+    std::vector<ItemState> history;
+};
+
+// 主要な構造体
+struct Platform {
+    float x1, y1;
+    float x2, y2;
+};
+
+struct Player {
+    float x, y;
+    float vx, vy;
+    int handle;
+    int direction; 
+    bool isJumping;
+    int width, height;
+    float scale;
+    float angle;
+    float speedScale;
+    bool isPaused;
+    int hp;
+    
+    // 巻き戻しトラック
+    bool isRewinding;
+    std::vector<PlayerState> history;
+
+    // Feature 2: アニメーション
+    AnimationController anim;
+};
+
+struct Enemy {
+    EnemyType type;
+    float x, y;
+    float vx, vy;
+    int handle;
+    int direction; 
+    int width, height;
+    float scale;
+    float angle;
+    float speedScale;
+    bool isActive;
+    bool isPaused;
+    int hp;
+
+    // AI用のパラメータ
+    float customTimer;
+    int aiState;
+    float patrolLeft;  // PATROL_SHOOTER用
+    float patrolRight; // PATROL_SHOOTER用
+
+    // 巻き戻しトラック
+    bool isRewinding;
+    std::vector<EnemyState> history;
+
+    // Feature 2: アニメーション
+    std::string assetId;
+    AnimationController anim;
+};
+
+struct Gimmick {
+    GimmickType type;
+    float x, y;
+    float width, height;
+    bool isActive;
+    float val1, val2; // ギミック固有の値 (例: ポータルのワープ先ターゲット比率など)
+    float angle;      // 橋の回転角度
+    float customTimer;
+    bool isPaused;    // 個別ギミックの一時停止
+
+    // 巻き戻しトラック
+    bool isRewinding;
+    std::vector<GimmickState> history;
+};
+
+struct Bullet {
+    float x = 0.0f;
+    float y = 0.0f;
+    float vx = 0.0f;
+    float vy = 0.0f;
+    bool isActive = false;
+    int handle = 0;
+    bool isPlayerOwned = true; // 弾丸の所有者の追跡用
+
+    // 巻き戻しトラック
+    bool isRewinding = false;
+    std::vector<BulletState> history;
+};
+
+struct CutPoint {
+    float timePos;
+    float targetTimePos;
+};
+
+struct ContextMenu {
+    bool isOpen;
+    int x, y, width, height;
+};
+
+struct BackgroundLayer {
+    std::string sprite;
+    int handle = -1;
+    int drawOrder = 0;
+    float scrollRate = 0.3f;
+    bool loop = true;
+    float offsetX = 0.0f;
+    float offsetY = 0.0f;
+};
+
+struct StageData {
+    int id = 0;
+    char name[64] = "";
+    std::vector<std::vector<int>> map;
+    
+    // Feature 1
+    std::vector<std::vector<int>> decoMapBack;
+    std::vector<std::vector<int>> decoMapFront;
+    std::vector<BackgroundLayer> backgrounds;
+    
+    // Feature 3
+    std::string bgmId = "";
+    
+    // Feature 4
+    bool testMode = false;
+
+    // Feature 5
+    json triggersJson = json::array();
+
+    float playerStartX = 0.0f;
+    float playerStartY = 0.0f;
+    float goalX = -1.0f;   // -1 = ゴール未設定
+    float goalY = -1.0f;
+    std::vector<Enemy> enemies;
+    std::vector<Gimmick> gimmicks;
+    std::vector<Item> items;
+    std::vector<Platform> platforms;
+};
+
+enum SelectedType {
+    SELECT_NONE,
+    SELECT_PLAYER,
+    SELECT_ENEMY,
+    SELECT_GIMMICK
+};
+
+// プラットフォームおよびアクティブな衝突ギミックへの着地衝突判定
+// 着地した場合はtrueを返し、オブジェクトのY座標をプラットフォーム上に着坐するように更新します
+bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height, float scale, const std::vector<Platform>& platforms, const std::vector<Gimmick>& gimmicks) {
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    float footY = y + objH;
+    float footX = x + objW / 2.0f; // 足元の中心点
+
+    // トンネリングを防ぐために許容誤差を設けたAABB衝突を判定するヘルパーラムダ
+    auto CheckLanded = [&](float platX1, float platY1, float platX2) {
+        // キャラクターのX方向のバウンディングボックスがプラットフォームのX範囲と重なっているか判定
+        if (vy >= 0 && x <= platX2 && x + objW >= platX1) {
+            // 許容着地判定：足元Y座標がプラットフォーム上面を越え、かつ適切な許容範囲（落下速度 + 8pxバッファ）以内である場合
+            float threshold = vy + 8.0f;
+            if (footY >= platY1 && footY <= platY1 + threshold) {
+                y = platY1 - objH;
+                vy = 0.0f;
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // 1. ステージプラットフォームの衝突判定
+    for (const auto& plat : platforms) {
+        if (CheckLanded(plat.x1, plat.y1, plat.x2)) return true;
+    }
+
+    // 2. インタラクティブギミック（橋や破壊可能ブロックなど）の衝突判定
+    for (const auto& gim : gimmicks) {
+        if (!gim.isActive) continue;
+
+        if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
+            // 回転する木製の橋の正確な線分座標を算出
+            float gcx = gim.x + gim.width / 2.0f;
+            float gcy = gim.y + gim.height / 2.0f;
+            float dx = cosf(gim.angle) * gim.width / 2.0f;
+            float dy = sinf(gim.angle) * gim.width / 2.0f;
+
+            float x1 = gcx - dx;
+            float y1 = gcy - dy;
+            float x2 = gcx + dx;
+            float y2 = gcy + dy;
+
+            // 補間計算の整合性を保つため、(x1, y1)が常に左側の終点になるようにソート
+            if (x1 > x2) {
+                float temp = x1; x1 = x2; x2 = temp;
+                temp = y1; y1 = y2; y2 = temp;
+            }
+
+            // プレイヤーの足元の中心X座標が、回転した橋のX範囲内に収まっているか判定
+            if (footX >= x1 && footX <= x2) {
+                // もし橋が完全に垂直（x1 == x2）でない場合
+                if (fabsf(x2 - x1) > 1.0f) {
+                    // 線形補間により、footXにおける傾斜した橋の正確なY座標（高さ）を算出
+                    float t = (footX - x1) / (x2 - x1);
+                    float platY = y1 + t * (y2 - y1);
+
+                    // 傾斜面に対する許容着地判定
+                    float threshold = vy + 8.0f;
+                    if (vy >= 0 && footY >= platY && footY <= platY + threshold) {
+                        y = platY - objH;
+                        vy = 0.0f;
+                        return true;
+                    }
+                }
+            }
+        }
+        else if (gim.type == GIMMICK_BREAKABLE_BLOCK || gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_GATE_DOOR) {
+            if (CheckLanded(gim.x, gim.y, gim.x + gim.width)) return true;
+        }
+    }
+
+    return false;
+}
+
+// X方向のタイルマップ衝突判定と補正
+void CheckGridCollisionX(float& x, float y, int width, float scale, int height, const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs, float vx) {
+    if (vx == 0.0f) return;
+    
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    
+    int startY = (int)(y / TILE_SIZE);
+    int endY = (int)((y + objH - 1.0f) / TILE_SIZE);
+    
+    int mapH = (int)map.size();
+    if (mapH == 0) return;
+    int mapW = (int)map[0].size();
+    
+    // 左方向への移動（左側の壁との衝突）
+    if (vx < 0.0f) {
+        int startX = (int)(x / TILE_SIZE);
+        float cellRightX = (float)(startX + 1) * TILE_SIZE;
+        if (x < cellRightX && x >= cellRightX - 8.0f) {
+            for (int ty = startY; ty <= endY; ++ty) {
+                if (ty < 0 || ty >= mapH) continue;
+                if (startX >= 0 && startX < mapW) {
+                    int tid = map[ty][startX];
+                    if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) {
+                        x = cellRightX;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // 右方向への移動（右側の壁との衝突）
+    else if (vx > 0.0f) {
+        int endX = (int)((x + objW) / TILE_SIZE);
+        float cellLeftX = (float)endX * TILE_SIZE;
+        if (x + objW > cellLeftX && x + objW <= cellLeftX + 8.0f) {
+            for (int ty = startY; ty <= endY; ++ty) {
+                if (ty < 0 || ty >= mapH) continue;
+                if (endX >= 0 && endX < mapW) {
+                    int tid = map[ty][endX];
+                    if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) {
+                        x = cellLeftX - objW;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Y方向のタイルマップ衝突判定と補正
+bool CheckGridCollisionY(float x, float& y, float& vy, int width, float scale, int height, const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs) {
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    
+    int startX = (int)(x / TILE_SIZE);
+    int endX = (int)((x + objW - 1.0f) / TILE_SIZE);
+    
+    int mapH = (int)map.size();
+    if (mapH == 0) return false;
+    int mapW = (int)map[0].size();
+    
+    bool isGrounded = false;
+    
+    // 下方向の衝突（着地）
+    if (vy >= 0) {
+        int footY = (int)((y + objH) / TILE_SIZE);
+        float cellTopY = (float)footY * TILE_SIZE;
+        float threshold = vy + 8.0f; // 落下速度に応じた適度なめり込み許容値
+        if (y + objH >= cellTopY && y + objH <= cellTopY + threshold) {
+            for (int tx = startX; tx <= endX; ++tx) {
+                if (tx < 0 || tx >= mapW) continue;
+                if (footY >= 0 && footY < mapH) {
+                    int tid = map[footY][tx];
+                    if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) {
+                        y = cellTopY - objH;
+                        vy = 0.0f;
+                        isGrounded = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    // 上方向の衝突（頭ぶつけ）
+    else if (vy < 0) {
+        int headY = (int)(y / TILE_SIZE);
+        float cellBottomY = (float)(headY + 1) * TILE_SIZE;
+        float threshold = -vy + 8.0f;
+        if (y <= cellBottomY && y >= cellBottomY - threshold) {
+            for (int tx = startX; tx <= endX; ++tx) {
+                if (tx < 0 || tx >= mapW) continue;
+                if (headY >= 0 && headY < mapH) {
+                    int tid = map[headY][tx];
+                    if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) {
+                        y = cellBottomY;
+                        vy = 0.0f;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return isGrounded;
+}
+
+void CheckGimmickCollisionX(float& x, float y, int width, float scale, int height, float vx, const std::vector<Gimmick>& gimmicks) {
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    
+    for (const auto& gim : gimmicks) {
+        if (!gim.isActive) continue;
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
+            // Y軸の重なり判定（少しの遊びを持たせる）
+            if (y + objH > gim.y + 4.0f && y < gim.y + gim.height - 4.0f) {
+                if (vx > 0.0f) { // 右方向へ移動中
+                    if (x < gim.x && x + objW > gim.x && x + objW <= gim.x + 12.0f) {
+                        x = gim.x - objW;
+                    }
+                }
+                else if (vx < 0.0f) { // 左方向へ移動中
+                    if (x > gim.x + gim.width - 12.0f && x < gim.x + gim.width) {
+                        x = gim.x + gim.width;
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int height, float& vy, const std::vector<Gimmick>& gimmicks) {
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    bool isGrounded = false;
+    
+    for (const auto& gim : gimmicks) {
+        if (!gim.isActive) continue;
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
+            // X軸の重なり判定
+            if (x + objW > gim.x + 2.0f && x < gim.x + gim.width - 2.0f) {
+                if (vy >= 0.0f) { // 下方向へ移動中（着地）
+                    float footY = y + objH;
+                    float threshold = vy + 12.0f;
+                    if (footY >= gim.y && footY <= gim.y + threshold) {
+                        y = gim.y - objH;
+                        vy = 0.0f;
+                        isGrounded = true;
+                    }
+                }
+                else if (vy < 0.0f) { // 上方向へ移動中（頭ぶつけ）
+                    float threshold = -vy + 12.0f;
+                    if (y <= gim.y + gim.height && y >= gim.y + gim.height - threshold) {
+                        y = gim.y + gim.height;
+                        vy = 0.0f;
+                    }
+                }
+            }
+        }
+    }
+    return isGrounded;
+}
+
+
+bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, int width, int height, float scale, 
+                             const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs, 
+                             const std::vector<Gimmick>& gimmicks) {
+    x += dx;
+    CheckGridCollisionX(x, y, width, scale, height, map, tileDefs, dx);
+    CheckGimmickCollisionX(x, y, width, scale, height, dx, gimmicks);
+    
+    y += dy;
+    bool gridGrounded = CheckGridCollisionY(x, y, vy, width, scale, height, map, tileDefs);
+    bool gimGrounded = CheckGimmickCollisionY(x, y, width, scale, height, vy, gimmicks);
+    
+    return gridGrounded || gimGrounded;
+}
+
+int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ int n)
+{
+    std::set_terminate([]() {
+        Logger::Error("System", "terminate_handler", "std::terminate was called! Unhandled exception.");
+        try {
+            if (std::current_exception()) {
+                std::rethrow_exception(std::current_exception());
+            }
+        } catch (const std::exception& e) {
+            Logger::Error("System", "terminate_handler", std::string("Exception what(): ") + e.what());
+        } catch (...) {
+            Logger::Error("System", "terminate_handler", "Unknown exception type");
+        }
+        std::abort();
+    });
+
+    Logger::Info("System", "WinMain", "[Init] WinMain Begin");
+
+    ChangeWindowMode(TRUE);
+    SetGraphMode(WINDOW_WIDTH, WINDOW_HEIGHT, 32);
+    if (DxLib_Init() == -1) return -1;
+    Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
+    if (l != nullptr && strlen(l) > 0) {
+        currentStageFileName = l;
+        if (currentStageFileName.find(".json") == std::string::npos) {
+            currentStageFileName += ".json";
+        }
+    }
+    SetDrawScreen(DX_SCREEN_BACK);
+
+    HWND hwnd = GetMainWindowHandle();
+    SetHookWinProc(CustomWndProc);
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // マルチビューポートを有効化（UIを独立したOSウィンドウにできる）
+    io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese());
+
+    ImGui::StyleColorsDark();
+
+    ImGui_ImplWin32_Init(hwnd);
+    ImGui_ImplDX11_Init((ID3D11Device*)GetUseDirect3D11Device(), (ID3D11DeviceContext*)GetUseDirect3D11DeviceContext());
+
+    int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
+    LoadAssetDefinitions();
+    int playerHandle = LoadGraph("img/player.png");
+    int bulletHandle = LoadGraph("img/bullet.png");
+    int jimenHandle = LoadGraph("img/jimen.png");
+    int tutiHandle = LoadGraph("img/tuti.png");
+    int portalHandle = LoadGraph("img/portal.png");
+    int bridgeHandle = LoadGraph("img/bridge.png");
+    int breakableBlockHandle = LoadGraph("img/breakable_block.png");
+    int liftHandle = LoadGraph("img/lift.png");
+    int mirrorHandle = LoadGraph("img/mirror.png");
+    int switchHandle = LoadGraph("img/switch.png");
+    int boxHandle = LoadGraph("img/box.png");
+    int doorHandle = LoadGraph("img/door.png");
+    int spikesHandle = LoadGraph("img/spikes.png");
+    int coinHandle = LoadGraph("img/coin.png");
+
+    // tileDefs: tiles.json から動的に読み込む (なければデフォルト3種)
+    std::vector<TileDefinition> tileDefs;
+    {
+        tileDefs.push_back({ TILE_NONE, -1, false, false, "None" });
+        tileDefs.push_back({ TILE_JIMEN, jimenHandle, true, false, "Jimen" });
+        tileDefs.push_back({ TILE_TUTI, tutiHandle, true, false, "Tuti" });
+
+        // tiles.json が存在すれば deadly フラグを反映
+        std::ifstream tilesFile("assets/tiles.json");
+        if (tilesFile.is_open()) {
+            json tj = json::parse(tilesFile, nullptr, false);
+            if (tj.is_discarded()) {
+                Logger::Error("DrawPixel", "WinMain", "Failed to parse tiles.json");
+            } else if (tj.is_array()) {
+                for (const auto& t : tj) {
+                    if (!t.is_object()) continue;
+                    int tid = t.value("id", -1);
+                    bool deadly = t.value("deadly", false);
+                    bool collidable = t.value("collidable", true);
+                    std::string spritePath = t.value("sprite", "");
+                    
+                    int handle = -1;
+                    if (!spritePath.empty()) {
+                        handle = LoadGraph(("assets/" + spritePath).c_str());
+                        if (handle == -1) {
+                            // Try absolute or relative from executable if not in assets/
+                            handle = LoadGraph(spritePath.c_str());
+                        }
+                    }
+
+                    if (tid >= 0 && tid < (int)tileDefs.size()) {
+                        tileDefs[tid].deadly = deadly;
+                        tileDefs[tid].isCollidable = collidable;
+                        if (handle != -1) tileDefs[tid].handle = handle;
+                    } else if (tid >= (int)tileDefs.size()) {
+                        // 新規タイルを追加
+                        TileDefinition newTile;
+                        newTile.type = (TileType)tid;
+                        newTile.handle = (handle != -1) ? handle : jimenHandle; // デフォルト画像
+                        newTile.isCollidable = collidable;
+                        newTile.deadly = deadly;
+                        newTile.name = "Custom";
+                        tileDefs.push_back(newTile);
+                    }
+                }
+            }
+        }
+    }
+
+    int pw, ph;
+    GetGraphSize(playerHandle, &pw, &ph);
+
+    // オブジェクトの仮初期化（ResetStageで正しく設定されます）
+    Player player = { 100.0f, 300.0f, 0.0f, 0.0f, playerHandle, 0, false, pw, ph, 1.0f, 0.0f, 1.0f, false, false, {} };
+    std::vector<Enemy> enemies;
+    std::vector<Platform> platforms;
+    std::vector<Gimmick> gimmicks;
+    std::vector<Item> items;
+
+    std::vector<StageData> stages;
+    
+    // =====================================================================
+    // --- ステージ 1: 草原の試練 ---
+    // 流れ: 平地スタート → 落下リフト谷 → 中間足場地帯（穴あり）→ 回転橋終盤
+    // =====================================================================
+    {
+        StageData stage1;
+        stage1.id = 0;
+        strcpy_s(stage1.name, "Stage 1: Grassland Trial");
+        stage1.playerStartX = 48.0f;
+        stage1.playerStartY = 320.0f;
+
+        stage1.map.assign(MAP_HEIGHT_TILES, std::vector<int>(MAP_WIDTH_TILES, TILE_NONE));
+
+        // -----セクション0: スタート台地 (タイルx:0-9, ピクセル:0-319) -----
+        // y=12が地面上面（ピクセルy=384）
+        for (int x = 0; x <= 9; x++) {
+            stage1.map[12][x] = TILE_JIMEN;
+            stage1.map[13][x] = TILE_TUTI;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+
+        // -----セクション1: 低地平原 (タイルx:10-24, ピクセル:320-799) -----
+        // y=13が地面上面（ピクセルy=416）。スタート台地から一段下がる
+        for (int x = 10; x <= 24; x++) {
+            stage1.map[13][x] = TILE_JIMEN;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+        // 段差の壁タイル
+        stage1.map[13][10] = TILE_TUTI;
+
+        // -----セクション2: 落下リフトの谷 (タイルx:25-38, ピクセル:800-1247) -----
+        // 谷の左端の崖壁 x=25
+        stage1.map[14][25] = TILE_TUTI;
+        // 谷の右端の台 x=37-38 (y=13)
+        for (int x = 37; x <= 38; x++) {
+            stage1.map[13][x] = TILE_JIMEN;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+
+        // -----セクション3: 中間足場地帯 (タイルx:39-54, ピクセル:1248-1759) -----
+        // 少し高め y=12
+        for (int x = 39; x <= 54; x++) {
+            stage1.map[12][x] = TILE_JIMEN;
+            stage1.map[13][x] = TILE_TUTI;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+        // 穴 (タイルx=47-48, ピクセル:1504-1567)
+        stage1.map[12][47] = TILE_NONE;
+        stage1.map[12][48] = TILE_NONE;
+        // 穴を越えるための上空足場 (タイルx=43-46, y=9行目＝ピクセルy=288)
+        for (int x = 43; x <= 46; x++) {
+            stage1.map[9][x] = TILE_JIMEN;
+            stage1.map[10][x] = TILE_TUTI;
+        }
+
+        // -----セクション4: 回転橋終盤 (タイルx:55-79, ピクセル:1760-2559) -----
+        // 左の踏み台 x=55-58
+        for (int x = 55; x <= 58; x++) {
+            stage1.map[12][x] = TILE_JIMEN;
+            stage1.map[13][x] = TILE_TUTI;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+        // 中間足場 x=60-62 (y=10行目)
+        for (int x = 60; x <= 62; x++) {
+            stage1.map[10][x] = TILE_JIMEN;
+            stage1.map[11][x] = TILE_TUTI;
+        }
+        // ゴール高台 x=65-79 (y=11行目)
+        for (int x = 65; x <= 79; x++) {
+            stage1.map[11][x] = TILE_JIMEN;
+            stage1.map[12][x] = TILE_TUTI;
+            stage1.map[13][x] = TILE_TUTI;
+            stage1.map[14][x] = TILE_TUTI;
+        }
+
+        // -----プラットフォーム（薄い足場）-----
+        stage1.platforms = {
+            // セクション2 谷の中間踏み台（左）
+            { 1216.0f, 352.0f, 1280.0f, 362.0f },
+            // セクション3 穴の上空補助足場
+            { 1504.0f, 288.0f, 1600.0f, 298.0f },
+        };
+
+        // -----ギミック配置-----
+        // セクション2: 谷底トゲ（落ちると即死）
+        stage1.gimmicks.push_back({ GIMMICK_SPIKES,         896.0f, 432.0f, 320.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        // セクション2: 落下リフト×2（タイミングよく乗り継ぐ）
+        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   832.0f, 280.0f, 80.0f,  16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,  1024.0f, 220.0f, 80.0f,  16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        // セクション3: 穴の下トゲ
+        stage1.gimmicks.push_back({ GIMMICK_SPIKES,        1472.0f, 432.0f, 96.0f,  20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        // セクション4: 自動回転橋（谷を渡る主要ルート）
+        stage1.gimmicks.push_back({ GIMMICK_ROTATING_BRIDGE, 1824.0f, 350.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+        // セクション4: 手動橋（タイミングを自分で制御）
+        stage1.gimmicks.push_back({ GIMMICK_MANUAL_BRIDGE, 1984.0f, 290.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 1.5708f, 0.0f, false, false, {} });
+        // カットポータル（ステージ通過演出）
+        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL,       0.0f,   0.0f,   0.0f,  0.0f, true, 0.15f, 0.22f, 0.0f, 0.0f, false, false, {} });
+
+        // -----敵配置-----
+        // セクション1 低地をパトロール
+        stage1.enemies.push_back({ ENEMY_PATROL_SHOOTER, 400.0f, 390.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 300.0f, 500.0f, false, {} });
+        // セクション3 中間地帯でジャンプ
+        stage1.enemies.push_back({ ENEMY_JUMPER,    1380.0f, 350.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        // セクション4 ゴール手前の砲台
+        stage1.enemies.push_back({ ENEMY_STATIONARY, 2200.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+
+        // -----コイン配置-----
+        // セクション1 平地コイン列（歩けば取れる）
+        stage1.items.push_back({ ITEM_COIN,  320.0f, 380.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN,  400.0f, 380.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション2 落下リフト上（リスクあり）
+        stage1.items.push_back({ ITEM_COIN,  840.0f, 248.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 1032.0f, 188.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション3 上空足場上
+        stage1.items.push_back({ ITEM_COIN, 1540.0f, 256.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション4 ゴール直前
+        stage1.items.push_back({ ITEM_COIN, 2350.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 2430.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+
+        stages.push_back(stage1);
+    }
+    
+    // =====================================================================
+    // --- ステージ 2: 要塞突撃 ---
+    // 流れ: 高台スタート → 下り坂 + 崖 → 反射鏡の部屋 → 登り段差 → 重量スイッチ広間
+    // =====================================================================
+    {
+        StageData stage2;
+        stage2.id = 1;
+        strcpy_s(stage2.name, "Stage 2: Fortress Assault");
+        stage2.playerStartX = 48.0f;
+        stage2.playerStartY = 200.0f;
+
+        stage2.map.assign(MAP_HEIGHT_TILES, std::vector<int>(MAP_WIDTH_TILES, TILE_NONE));
+
+        // -----セクション0: スタート高台 (タイルx:0-6) -----
+        // y=8が地面上面（ピクセルy=256）
+        for (int x = 0; x <= 6; x++) {
+            stage2.map[8][x] = TILE_JIMEN;
+            for (int y = 9; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+
+        // -----セクション1: 下り坂 + 崖 (タイルx:7-18) -----
+        // x=7-10: y=10に下がる
+        for (int x = 7; x <= 10; x++) {
+            stage2.map[10][x] = TILE_JIMEN;
+            for (int y = 11; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+        // x=11-14: y=12まで下がる
+        for (int x = 11; x <= 14; x++) {
+            stage2.map[12][x] = TILE_JIMEN;
+            for (int y = 13; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+        // x=15-18: 谷底 y=13
+        for (int x = 15; x <= 18; x++) {
+            stage2.map[13][x] = TILE_JIMEN;
+            stage2.map[14][x] = TILE_TUTI;
+        }
+
+        // -----セクション2: 反射鏡の部屋 (タイルx:19-35) -----
+        // 部屋の床 y=13
+        for (int x = 19; x <= 35; x++) {
+            stage2.map[13][x] = TILE_JIMEN;
+            stage2.map[14][x] = TILE_TUTI;
+        }
+        // 部屋の天井 y=8
+        for (int x = 19; x <= 34; x++) {
+            stage2.map[8][x] = TILE_TUTI;
+        }
+        // 部屋の左壁
+        for (int y = 9; y <= 13; y++) stage2.map[y][19] = TILE_TUTI;
+        // 部屋の右壁（破壊可能ブロックで塞がれた出口）
+        for (int y = 9; y <= 12; y++) stage2.map[y][35] = TILE_TUTI;
+
+        // -----セクション3: 登り段差 (タイルx:36-50) -----
+        // 部屋出口後の通路 x=36-40 (y=13)
+        for (int x = 36; x <= 40; x++) {
+            stage2.map[13][x] = TILE_JIMEN;
+            stage2.map[14][x] = TILE_TUTI;
+        }
+        // 一段上がる x=41-44 (y=11)
+        for (int x = 41; x <= 44; x++) {
+            stage2.map[11][x] = TILE_JIMEN;
+            for (int y = 12; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+        // さらに上がる x=45-50 (y=9)
+        for (int x = 45; x <= 50; x++) {
+            stage2.map[9][x] = TILE_JIMEN;
+            for (int y = 10; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+
+        // -----セクション4: 重量スイッチ広間 (タイルx:51-65) -----
+        for (int x = 51; x <= 65; x++) {
+            stage2.map[9][x] = TILE_JIMEN;
+            for (int y = 10; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+        // 広間の天井
+        for (int x = 52; x <= 65; x++) stage2.map[4][x] = TILE_TUTI;
+        // 広間の左壁
+        for (int y = 4; y <= 9; y++) stage2.map[y][51] = TILE_TUTI;
+
+        // -----セクション5: ゴール前廊下 (タイルx:66-79) -----
+        for (int x = 66; x <= 79; x++) {
+            stage2.map[9][x] = TILE_JIMEN;
+            for (int y = 10; y < MAP_HEIGHT_TILES; y++) stage2.map[y][x] = TILE_TUTI;
+        }
+
+        // -----プラットフォーム-----
+        stage2.platforms = {
+            // セクション2 部屋内上空足場（高い位置へ）
+            { 672.0f, 352.0f, 800.0f, 362.0f },
+            // セクション3 段差補助足場
+            { 1344.0f, 288.0f, 1440.0f, 298.0f },
+        };
+
+        // -----ギミック配置-----
+        // セクション1 崖下のトゲ（転落死）
+        stage2.gimmicks.push_back({ GIMMICK_SPIKES,         480.0f, 432.0f,  96.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        // セクション2 反射鏡（弾を反射させてブロックを壊す）
+        stage2.gimmicks.push_back({ GIMMICK_REFLECT_MIRROR,  800.0f, 380.0f,  80.0f, 16.0f, true, 0.0f, 0.0f, 0.7854f, 0.0f, false, false, {} });
+        // セクション2 破壊可能ブロック（出口を塞ぐ壁）
+        stage2.gimmicks.push_back({ GIMMICK_BREAKABLE_BLOCK, 1120.0f, 288.0f, 32.0f, 144.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        // セクション4 拡大可能ボックス（スイッチを踏むための踏み台）
+        stage2.gimmicks.push_back({ GIMMICK_SCALABLE_BOX,   1620.0f, 228.0f, 50.0f, 50.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
+        // セクション4 重量スイッチ（ゲート解錠トリガー）
+        stage2.gimmicks.push_back({ GIMMICK_WEIGHT_SWITCH,  1760.0f, 278.0f, 120.0f, 10.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        // セクション4 ゲート扉（スイッチで開く）
+        stage2.gimmicks.push_back({ GIMMICK_GATE_DOOR,      2080.0f, 128.0f, 32.0f, 160.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        // セクション5 ゴール前の落下リフト
+        stage2.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   2240.0f, 150.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
+
+        // -----敵配置-----
+        // セクション1 崖をパトロール
+        enemies.push_back({ ENEMY_PATROL_SHOOTER, 360.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 200.0f, 500.0f, false, {} });
+        // セクション2 部屋内でジャンプ
+        enemies.push_back({ ENEMY_JUMPER,      960.0f, 380.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        // セクション4 広間をパトロール
+        enemies.push_back({ ENEMY_PATROL_SHOOTER, 1700.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 1500.0f, 1900.0f, false, {} });
+        // セクション5 ゴール前砲台（最難関）
+        enemies.push_back({ ENEMY_STATIONARY, 2400.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.2f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+
+        // -----コイン配置-----
+        // セクション1 下り坂
+        stage2.items.push_back({ ITEM_COIN,  280.0f, 290.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN,  380.0f, 350.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション2 部屋内（危険）
+        stage2.items.push_back({ ITEM_COIN,  820.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション3 段差登り中
+        stage2.items.push_back({ ITEM_COIN, 1380.0f, 260.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション4 広間
+        stage2.items.push_back({ ITEM_COIN, 1680.0f, 200.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN, 1800.0f, 200.0f, 20.0f, 20.0f, true, false, false, {} });
+        // セクション5 ゴール直前
+            stage2.items.push_back({ ITEM_COIN, 2460.0f, 240.0f, 20.0f, 20.0f, true, false, false, {} });
+
+        stages.push_back(stage2);
+    }
+
+    Logger::Info("System", "WinMain", "[Init] StageLoader Success");
+    std::set_terminate([]() {
+        Logger::Error("System", "Terminate", "Unhandled exception occurred");
+        exit(1);
+    });
+    
+    
+    float cameraX = 0.0f;
+    const float STAGE_WIDTH = 2560.0f;
+    std::vector<Bullet> bullets(MAX_BULLETS);
+    for (int i = 0; i < MAX_BULLETS; i++) { 
+        bullets[i].isActive = false; 
+        bullets[i].handle = bulletHandle; 
+        bullets[i].isRewinding = false;
+    }
+
+    float groundY = 400.0f;
+    bool isPaused = false, isEditMode = true, isFastForward = false, isStepFrame = false, isDebugDrawMode = false;
+    bool lastF3 = false;
+    bool isDragging = false, isScaling = false, isScalingHeight = false, isRotating = false;
+    bool isInspScale = false, isInspAngle = false, isInspSpeed = false;
+    
+    float dragOffsetX = 0, dragOffsetY = 0, baseScale = 1.0f, baseAngle = 0.0f, baseSpeed = 1.0f;
+    int lastMouseX = 0, lastMouseY = 0;
+    float tempCutStart = -1.0f, globalTimeScale = 1.0f;
+
+    // 複数選択用コンテナとドラッグ用変数
+    std::vector<Player*> selectedPlayers;
+    std::vector<Enemy*> selectedEnemies;
+    std::vector<Gimmick*> selectedGimmicks;
+    bool isAreaSelecting = false;
+    int areaSelectStartX = 0, areaSelectStartY = 0;
+    int areaSelectEndX = 0, areaSelectEndY = 0;
+    
+    ContextMenu menu = { false, 0, 0, 160, 160 }; // 6つのオプション用のコンテキストメニューサイズ (高さ 160)
+    SetMouseDispFlag(TRUE);
+
+    SelectedType selectedType = SELECT_NONE;
+    float* targetScale = nullptr;
+    float* targetAngle = nullptr;
+    float* targetSpeedScale = nullptr;
+    bool* targetPaused = nullptr;
+    bool* targetRewind = nullptr;
+    int* targetDirection = nullptr;
+    EnemyType* targetEnemyType = nullptr;
+    Gimmick* targetGimmick = nullptr;
+    Enemy* targetEnemy = nullptr;
+
+    int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
+    int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
+
+    int currentStageIdx = 0;
+    EditToolMode toolMode = EDIT_OBJECTS;
+    TileType activePaintTile = TILE_JIMEN;
+
+    GameScene currentScene = PLAY;
+
+    // ===== JSON ステージ読み込み =====
+    // エディタからコマンドライン引数でステージファイル名が渡された場合、
+    // そのJSONを読み込んでstagesに追加し、それを初期ステージとして使用する
+    {
+        std::string stageJsonPath = "assets/stages/" + currentStageFileName;
+        std::ifstream stageFile(stageJsonPath);
+        if (stageFile.is_open()) {
+            try {
+                json sj = json::parse(stageFile, nullptr, false);
+                if (sj.is_discarded()) {
+                    Logger::Error("DrawPixel", "WinMain", "Failed to parse stage json", stageJsonPath);
+                } else {
+
+                    StageData jsonStage;
+                    jsonStage.id = (int)stages.size();
+                    strcpy_s(jsonStage.name, "JSON Stage");
+
+                    // プレイヤー開始位置
+                    if (sj.contains("player_start")) {
+                        jsonStage.playerStartX = sj["player_start"]["x"];
+                        jsonStage.playerStartY = sj["player_start"]["y"];
+                    } else {
+                        jsonStage.playerStartX = 48.0f;
+                        jsonStage.playerStartY = 320.0f;
+                    }
+
+                    // ゴール位置
+                    if (sj.contains("goal")) {
+                        jsonStage.goalX = sj["goal"].value("x", -1.0f);
+                        jsonStage.goalY = sj["goal"].value("y", -1.0f);
+                    }
+
+                    // プレイヤー能力
+                    if (sj.contains("player_capabilities")) {
+                        auto caps = sj["player_capabilities"];
+                        editorPlayerCaps.canDoubleJump = caps.value("canDoubleJump", false);
+                        editorPlayerCaps.canDash = caps.value("canDash", false);
+                        editorPlayerCaps.canShootFireball = caps.value("canShootFireball", false);
+                        editorPlayerCaps.canFly = caps.value("canFly", false);
+                        editorPlayerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
+                        editorPlayerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
+                    }
+
+                    // サウンド・フラグ
+                    jsonStage.testMode = sj.value("test_mode", false);
+                    jsonStage.bgmId = sj.value("bgm_id", "");
+                    if (sj.contains("triggers") && sj["triggers"].is_array()) {
+                        jsonStage.triggersJson = sj["triggers"];
+                    }
+
+                    // タイルマップ
+                    jsonStage.map.assign(MAP_HEIGHT_TILES, std::vector<int>(MAP_WIDTH_TILES, TILE_NONE));
+                    jsonStage.decoMapBack.assign(MAP_HEIGHT_TILES, std::vector<int>(MAP_WIDTH_TILES, TILE_NONE));
+                    jsonStage.decoMapFront.assign(MAP_HEIGHT_TILES, std::vector<int>(MAP_WIDTH_TILES, TILE_NONE));
+                    
+                    auto loadLayer = [](const json& j, const std::string& key, std::vector<std::vector<int>>& target) {
+                        if (j.contains(key) && j[key].is_array()) {
+                            for (int row = 0; row < (int)j[key].size() && row < MAP_HEIGHT_TILES; row++) {
+                                auto& rowArr = j[key][row];
+                                for (int col = 0; col < (int)rowArr.size() && col < MAP_WIDTH_TILES; col++) {
+                                    target[row][col] = rowArr[col];
+                                }
+                            }
+                        }
+                    };
+                    loadLayer(sj, "map", jsonStage.map);
+                    loadLayer(sj, "deco_back", jsonStage.decoMapBack);
+                    loadLayer(sj, "deco_front", jsonStage.decoMapFront);
+
+                    // 背景
+                    if (sj.contains("backgrounds") && sj["backgrounds"].is_array()) {
+                        for (auto& bj : sj["backgrounds"]) {
+                            BackgroundLayer bl;
+                            bl.sprite = bj.value("sprite", "");
+                            bl.drawOrder = bj.value("drawOrder", 0);
+                            bl.scrollRate = bj.value("scrollRate", 0.3f);
+                            bl.loop = bj.value("loop", true);
+                            bl.offsetX = bj.value("offsetX", 0.0f);
+                            bl.offsetY = bj.value("offsetY", 0.0f);
+                            if (!bl.sprite.empty()) {
+                                std::string path = "assets/" + bl.sprite; // C++側からのパス
+                                bl.handle = LoadGraph(path.c_str());
+                                if (bl.handle == -1) bl.handle = LoadGraph(bl.sprite.c_str()); // 失敗したらルートで再試行
+                            }
+                            jsonStage.backgrounds.push_back(bl);
+                        }
+                    }
+
+                    // 敵の配置
+                    if (sj.contains("enemies") && sj["enemies"].is_array()) {
+                        for (auto& ej : sj["enemies"]) {
+                            std::string eid = ej.value("id", "");
+                            float ex = ej.value("x", 0.0f);
+                            float ey = ej.value("y", 0.0f);
+                            float pl = ej.value("patrol_left", ex - 200.0f);
+                            float pr = ej.value("patrol_right", ex + 200.0f);
+
+                            // enemyDefsから定義を検索
+                            int t_enum = 0; int ew = 32, eh = 32; int ehp = 3;
+                            int eHandle = playerHandle; // デフォルトはプレイヤースプライト
+                            for (auto& d : enemyDefs) {
+                                if (d.id == eid) {
+                                    t_enum = d.type_enum;
+                                    ew = d.width; eh = d.height;
+                                    ehp = d.hp;
+                                    if (d.graphHandle >= 0) eHandle = d.graphHandle;
+                                    break;
+                                }
+                            }
+                            Enemy enemy = {};
+                            enemy.type = (EnemyType)t_enum;
+                            enemy.x = ex; enemy.y = ey;
+                            enemy.vx = 0; enemy.vy = 0;
+                            enemy.handle = eHandle;  // ★ 正しいスプライトハンドルを使用
+                            enemy.direction = 0;
+                            enemy.width = ew; enemy.height = eh;
+                            enemy.scale = 1.0f; enemy.angle = 0;
+                            enemy.speedScale = 1.0f;
+                            enemy.isActive = true; enemy.isPaused = false;
+                            enemy.hp = ehp;
+                            enemy.customTimer = 0; enemy.aiState = 0;
+                            enemy.patrolLeft = pl; enemy.patrolRight = pr;
+                            enemy.isRewinding = false;
+                            jsonStage.enemies.push_back(enemy);
+                        }
+                    }
+
+                    // ギミックの配置
+                    if (sj.contains("gimmicks") && sj["gimmicks"].is_array()) {
+                        for (auto& gj : sj["gimmicks"]) {
+                            std::string gid = gj.value("id", "");
+                            float gx = gj.value("x", 0.0f);
+                            float gy = gj.value("y", 0.0f);
+
+                            int g_enum = 0;
+                            for (auto& d : gimmickDefs) {
+                                if (d.id == gid) { g_enum = d.type_enum; break; }
+                            }
+                            Gimmick gim = {};
+                            gim.type = (GimmickType)g_enum;
+                            gim.x = gx; gim.y = gy;
+                            gim.width = 32; gim.height = 32;
+                            gim.isActive = true;
+                            gim.val1 = 0; gim.val2 = 0;
+                            gim.angle = 0; gim.customTimer = 0;
+                            gim.isPaused = false; gim.isRewinding = false;
+                            jsonStage.gimmicks.push_back(gim);
+                        }
+                    }
+
+                    // アイテムの配置
+                    if (sj.contains("items") && sj["items"].is_array()) {
+                        for (auto& ij : sj["items"]) {
+                            std::string iid = ij.value("id", "");
+                            float ix = ij.value("x", 0.0f);
+                            float iy = ij.value("y", 0.0f);
+
+                            int i_enum = 0;
+                            for (auto& d : itemDefs) {
+                                if (d.id == iid) { i_enum = d.type_enum; break; }
+                            }
+                            Item item = {};
+                            item.type = (ItemType)i_enum;
+                            item.x = ix; item.y = iy;
+                            item.width = 20; item.height = 20;
+                            item.isActive = true; item.isCollected = false;
+                            item.isRewinding = false;
+                            jsonStage.items.push_back(item);
+                        }
+                    }
+
+                    // プラットフォーム
+                    if (sj.contains("platforms") && sj["platforms"].is_array()) {
+                        for (auto& pj : sj["platforms"]) {
+                            Platform plat;
+                            plat.x1 = pj.value("x1", 0.0f);
+                            plat.y1 = pj.value("y1", 0.0f);
+                            plat.x2 = pj.value("x2", 0.0f);
+                            plat.y2 = pj.value("y2", 0.0f);
+                            jsonStage.platforms.push_back(plat);
+                        }
+                    }
+
+                    stages.push_back(jsonStage);
+                    currentStageIdx = (int)stages.size() - 1;
+
+                }
+            } catch (...) {
+                // JSON読み込み失敗時はハードコードステージを使用
+            }
+        }
+    }
+    Logger::Info("System", "WinMain", "[Init] stages.json parsing finished");
+    if (stages.empty()) {
+        Logger::Info("System", "WinMain", "No stages loaded, creating default stage");
+    }
+
+    // 死亡時にステージ全体を初期化し、ゲームの整合性を保証するラムダヘルパー
+    auto ResetStage = [&]() {
+        Logger::Info("System", "ResetStage", "Begin ResetStage");
+        const auto& stage = stages[currentStageIdx];
+        player.x = stage.playerStartX;
+        player.y = stage.playerStartY;
+        player.vx = 0.0f;
+        player.vy = 0.0f;
+        player.isJumping = false;
+        player.history.clear();
+        cameraX = 0.0f;
+        
+        player.anim.LoadForAsset("player", "assets");
+        
+        enemies = stage.enemies;
+        for (auto& enemy : enemies) {
+            // enemyDefsから正しいgraphHandleを検索して適用
+            enemy.handle = playerHandle; // デフォルト（見つからない場合）
+            enemy.assetId = "enemy_" + std::to_string((int)enemy.type);
+            for (auto& d : enemyDefs) {
+                if (d.type_enum == (int)enemy.type) {
+                    if (d.graphHandle >= 0) enemy.handle = d.graphHandle;
+                    if (!d.id.empty()) enemy.assetId = d.id;
+                    break;
+                }
+            }
+            enemy.anim.LoadForAsset(enemy.assetId, "assets");
+            // HPもenemyDefsの定義に従ってリセット
+            bool hpSet = false;
+            for (auto& d : enemyDefs) {
+                if (d.type_enum == (int)enemy.type) {
+                    enemy.hp = d.hp;
+                    enemy.width = d.width;
+                    enemy.height = d.height;
+                    hpSet = true;
+                    break;
+                }
+            }
+            if (!hpSet) enemy.hp = 3;
+            enemy.history.clear();
+        }
+
+        items = stage.items;
+        for (auto& item : items) {
+            item.history.clear();
+        }
+
+        gimmicks = stage.gimmicks;
+        for (auto& gim : gimmicks) {
+            gim.history.clear();
+        }
+
+        platforms = stage.platforms;
+
+        selectedPlayers.clear();
+        selectedEnemies.clear();
+        selectedGimmicks.clear();
+        isAreaSelecting = false;
+
+        selectedType = SELECT_NONE;
+        targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+        targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+        targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            bullets[i].isActive = false;
+            bullets[i].history.clear();
+        }
+        player.hp = 3;
+        currentScene = PLAY;
+
+        // Feature 3: BGM再生
+        if (!stage.bgmId.empty()) {
+            SoundManager::Get().PlayBgm(stage.bgmId);
+        } else {
+            SoundManager::Get().StopBgm();
+        }
+        
+        // Feature 5: イベントトリガー初期化
+        EventManager::Get().LoadFromJson(stage.triggersJson);
+        EventManager::Get().Reset();
+    };
+
+    // 音声マネージャー初期化
+    SoundManager::Get().LoadFromJson("assets");
+
+    // イベントマネージャーのアクションコールバック登録
+    EventManager::Get().SetActionCallback([&](const std::string& action, const std::string& p1, const std::string& p2) {
+        if (action == "ShowMessage") {
+            // TODO: メッセージウィンドウ表示
+        } else if (action == "ChangeBgm") {
+            SoundManager::Get().PlayBgm(p1);
+        } else if (action == "PlaySe") {
+            SoundManager::Get().PlaySe(p1);
+        }
+    });
+
+    // 最初のステージ初期化
+    ResetStage();
+
+    while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
+    {
+        // 十字キー全押しでゲームを閉じる（エディタへ戻る）
+        if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN) && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) {
+            break;
+        }
+        int mx, my;
+        GetMousePoint(&mx, &my);
+        float gx = (float)mx, gy = (float)my;
+        if (isEditMode) { gx = (float)(mx - monitorX) + cameraX; gy = (float)(my - monitorY); }
+
+        static bool lastMiddleClick = false;
+        bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
+        if (currentMiddleClick && !lastMiddleClick) { isPaused = !isPaused; menu.isOpen = false; }
+        lastMiddleClick = currentMiddleClick;
+
+        static bool lastPauseKey = false;
+        if (CheckHitKey(KEY_INPUT_B) && !lastPauseKey) isPaused = !isPaused;
+        lastPauseKey = (CheckHitKey(KEY_INPUT_B) != 0);
+
+        static bool lastFFKey = false;
+        if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) isFastForward = !isFastForward;
+        lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
+
+        static bool lastStepKey = false;
+        bool currF3 = CheckHitKey(KEY_INPUT_F3);
+        if (currF3 && !lastF3) isDebugDrawMode = !isDebugDrawMode;
+        lastF3 = currF3;
+
+        isStepFrame = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
+        lastStepKey = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
+
+        static bool lastLeftClick = false;
+        bool currentLeftClick = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+        static bool lastRightClick = false;
+        bool currentRightClick = (GetMouseInput() & MOUSE_INPUT_RIGHT) != 0;
+
+        globalTimeScale = isFastForward ? 2.0f : 1.0f;
+        float rangeSpeed = (player.x > SCREEN_WIDTH / 2) ? 1.5f : 1.0f;
+        float finalTimeScale = globalTimeScale * rangeSpeed;
+
+        // 選択状態とRキーに基づくアクティブな巻き戻しフラグ
+        bool isRKeyPressed = (CheckHitKey(KEY_INPUT_R) && isEditMode);
+        bool isPlayerRewinding = player.isRewinding || (isRKeyPressed && (selectedType == SELECT_PLAYER || selectedType == SELECT_NONE));
+
+        if (isEditMode) {
+            // コンテキストメニューの有効化
+            if (currentRightClick && !lastRightClick) { 
+                // コンテキストメニューの当たり判定・選択のトリガー
+                if (gx >= player.x && gx <= player.x + player.width * player.scale &&
+                    gy >= player.y && gy <= player.y + player.height * player.scale) {
+                    selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                    selectedPlayers.push_back(&player);
+                    selectedType = SELECT_PLAYER;
+                    targetScale = &player.scale;
+                    targetAngle = &player.angle;
+                    targetSpeedScale = &player.speedScale;
+                    targetPaused = &player.isPaused;
+                    targetRewind = &player.isRewinding;
+                    targetDirection = &player.direction;
+                    targetEnemyType = nullptr;
+                    targetGimmick = nullptr;
+                    targetEnemy = nullptr;
+                }
+                else {
+                    // 敵の選択状態をチェック
+                    bool enemySelected = false;
+                    for (auto& enemy : enemies) {
+                        if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.width * enemy.scale &&
+                            gy >= enemy.y && gy <= enemy.y + enemy.height * enemy.scale) {
+                            selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                            selectedEnemies.push_back(&enemy);
+                            selectedType = SELECT_ENEMY;
+                            targetScale = &enemy.scale;
+                            targetAngle = &enemy.angle;
+                            targetSpeedScale = &enemy.speedScale;
+                            targetPaused = &enemy.isPaused;
+                            targetRewind = &enemy.isRewinding;
+                            targetDirection = &enemy.direction;
+                            targetEnemyType = &enemy.type;
+                            targetGimmick = nullptr;
+                            targetEnemy = &enemy;
+                            enemySelected = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!enemySelected) {
+                        // ギミックの選択状態をチェック
+                        bool gimSelected = false;
+                        for (auto& gim : gimmicks) {
+                            if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
+                                gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
+                                gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
+                                if (gx >= gim.x && gx <= gim.x + gim.width &&
+                                    gy >= gim.y && gy <= gim.y + gim.height) {
+                                    selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                    selectedGimmicks.push_back(&gim);
+                                    selectedType = SELECT_GIMMICK;
+                                    targetScale = &gim.width; // スケールを幅にマッピング！
+                                    targetAngle = &gim.angle;
+                                    targetSpeedScale = &gim.customTimer;
+                                    targetPaused = &gim.isPaused;
+                                    targetRewind = &gim.isRewinding;
+                                    targetDirection = nullptr;
+                                    targetEnemyType = nullptr;
+                                    targetGimmick = &gim;
+                                    targetEnemy = nullptr;
+                                    gimSelected = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!gimSelected) {
+                            // タイムラインカットの選択状態をチェック（右クリックで選択して削除）
+                            if (my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                                float ct = (float)(mx - 50) / (WINDOW_WIDTH - 100);
+                                for (auto& gim : gimmicks) {
+                                    if (gim.type == GIMMICK_CUT_PORTAL && gim.isActive) {
+                                        if (ct >= gim.val1 && ct <= gim.val2) {
+                                            selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                            selectedGimmicks.push_back(&gim);
+                                            selectedType = SELECT_GIMMICK;
+                                            targetScale = nullptr;
+                                            targetAngle = nullptr;
+                                            targetSpeedScale = nullptr;
+                                            targetPaused = nullptr;
+                                            targetRewind = nullptr;
+                                            targetDirection = nullptr;
+                                            targetEnemyType = nullptr;
+                                            targetGimmick = &gim;
+                                            targetEnemy = nullptr;
+                                            gimSelected = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+ 
+                        if (!gimSelected) {
+                            selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                            selectedType = SELECT_NONE;
+                            targetScale = nullptr;
+                            targetAngle = nullptr;
+                            targetSpeedScale = nullptr;
+                            targetPaused = nullptr;
+                            targetRewind = nullptr;
+                            targetDirection = nullptr;
+                            targetEnemyType = nullptr;
+                            targetGimmick = nullptr;
+                            targetEnemy = nullptr;
+                        }
+                    }
+                }
+                
+                if (selectedType == SELECT_NONE) {
+                    menu.isOpen = false;
+                } else {
+                    // コンテキストメニューの高さを動的に調整
+                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
+                        menu.height = 40;
+                    } else {
+                        menu.height = 160;
+                    }
+                    menu.isOpen = true; 
+                    menu.x = mx; 
+                    menu.y = my; 
+                }
+            }
+
+            // コンテキストメニューのアクショントリガー
+            if (currentLeftClick && !lastLeftClick && menu.isOpen) {
+                if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
+                    // 特殊ケース：タイムラインカットギミックの削除
+                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
+                        if (my >= menu.y + 5 && my <= menu.y + 30) {
+                            // Find and erase the portal gimmick from vector to completely destroy its existence and history
+                            for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
+                                if (&(*it) == targetGimmick) {
+                                    gimmicks.erase(it);
+                                    break;
+                                }
+                            }
+                            selectedPlayers.clear();
+                            selectedEnemies.clear();
+                            selectedGimmicks.clear();
+                            selectedType = SELECT_NONE;
+                            targetGimmick = nullptr;
+                            menu.isOpen = false;
+                        } else { menu.isOpen = false; }
+                    } else {
+                        // 巻き戻しの切り替え
+                        if (my >= menu.y + 5 && my <= menu.y + 30) {
+                            *targetRewind = !(*targetRewind);
+                            menu.isOpen = false;
+                        } 
+                        // 一時停止の切り替え
+                        else if (my >= menu.y + 31 && my <= menu.y + 55) {
+                            *targetPaused = !(*targetPaused);
+                            menu.isOpen = false;
+                        }
+                        // 速度 +0.5
+                        else if (my >= menu.y + 56 && my <= menu.y + 80) {
+                            if (selectedType != SELECT_GIMMICK) *targetSpeedScale += 0.5f;
+                            menu.isOpen = false;
+                        } 
+                        // 速度 -0.5
+                        else if (my >= menu.y + 81 && my <= menu.y + 105) {
+                            if (selectedType != SELECT_GIMMICK) {
+                                *targetSpeedScale -= 0.5f; 
+                                if (*targetSpeedScale < 0) *targetSpeedScale = 0;
+                            }
+                            menu.isOpen = false;
+                        } 
+                        // オブジェクトの向きを反転
+                        else if (my >= menu.y + 106 && my <= menu.y + 130) {
+                            if (targetDirection != nullptr) *targetDirection = (*targetDirection == 0 ? 1 : 0);
+                            menu.isOpen = false;
+                        } 
+                        // すべてリセット
+                        else if (my >= menu.y + 131 && my <= menu.y + 155) {
+                            if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
+                                targetGimmick->width = 120.0f;
+                                targetGimmick->angle = (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) ? 1.57079f : 0.0f;
+                                targetGimmick->isPaused = false;
+                                targetGimmick->isRewinding = false;
+                            } else {
+                                *targetScale = 1.0f; *targetAngle = 0.0f; *targetSpeedScale = 1.0f; *targetPaused = false; *targetRewind = false;
+                            }
+                            menu.isOpen = false;
+                        }
+                    }
+                } else { menu.isOpen = false; }
+            }
+
+            // エディタの範囲選択ドラッグ終了
+            if (!currentLeftClick && lastLeftClick && isAreaSelecting) {
+                isAreaSelecting = false;
+                
+                float selX1 = (float)(min(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
+                float selX2 = (float)(max(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
+                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY);
+                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY);
+
+                selectedPlayers.clear();
+                selectedEnemies.clear();
+                selectedGimmicks.clear();
+
+                // 重複している場合にプレイヤーを選択
+                float pw = (float)player.width * player.scale;
+                float ph = (float)player.height * player.scale;
+                if (player.x + pw >= selX1 && player.x <= selX2 && player.y + ph >= selY1 && player.y <= selY2) {
+                    selectedPlayers.push_back(&player);
+                }
+
+                // 重複している場合に敵を選択
+                for (auto& enemy : enemies) {
+                    if (enemy.isActive) {
+                        float ew = (float)enemy.width * enemy.scale;
+                        float eh = (float)enemy.height * enemy.scale;
+                        if (enemy.x + ew >= selX1 && enemy.x <= selX2 && enemy.y + eh >= selY1 && enemy.y <= selY2) {
+                            selectedEnemies.push_back(&enemy);
+                        }
+                    }
+                }
+
+                // 重複している場合にギミックを選択
+                for (auto& gim : gimmicks) {
+                    if (gim.isActive && (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
+                                         gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
+                                         gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND)) {
+                        if (gim.x + gim.width >= selX1 && gim.x <= selX2 && gim.y + gim.height >= selY1 && gim.y <= selY2) {
+                            selectedGimmicks.push_back(&gim);
+                        }
+                    }
+                }
+
+                // 単一ターゲット用の便利なポインタを最初に選択された要素にバインド
+                if (!selectedPlayers.empty()) {
+                    selectedType = SELECT_PLAYER;
+                    targetScale = &player.scale;
+                    targetAngle = &player.angle;
+                    targetSpeedScale = &player.speedScale;
+                    targetPaused = &player.isPaused;
+                    targetRewind = &player.isRewinding;
+                    targetDirection = &player.direction;
+                    targetEnemyType = nullptr;
+                    targetGimmick = nullptr;
+                    targetEnemy = nullptr;
+                }
+                else if (!selectedEnemies.empty()) {
+                    selectedType = SELECT_ENEMY;
+                    targetScale = &selectedEnemies[0]->scale;
+                    targetAngle = &selectedEnemies[0]->angle;
+                    targetSpeedScale = &selectedEnemies[0]->speedScale;
+                    targetPaused = &selectedEnemies[0]->isPaused;
+                    targetRewind = &selectedEnemies[0]->isRewinding;
+                    targetDirection = &selectedEnemies[0]->direction;
+                    targetEnemyType = &selectedEnemies[0]->type;
+                    targetGimmick = nullptr;
+                    targetEnemy = selectedEnemies[0];
+                }
+                else if (!selectedGimmicks.empty()) {
+                    selectedType = SELECT_GIMMICK;
+                    targetScale = &selectedGimmicks[0]->width;
+                    targetAngle = &selectedGimmicks[0]->angle;
+                    targetSpeedScale = &selectedGimmicks[0]->customTimer;
+                    targetPaused = &selectedGimmicks[0]->isPaused;
+                    targetRewind = &selectedGimmicks[0]->isRewinding;
+                    targetDirection = nullptr;
+                    targetEnemyType = nullptr;
+                    targetGimmick = selectedGimmicks[0];
+                    targetEnemy = nullptr;
+                }
+                else {
+                    selectedType = SELECT_NONE;
+                    targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+                    targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+                    targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+                }
+            }
+
+            // エディタUI / ドラッグ操作
+            if (currentLeftClick && !menu.isOpen) {
+                // 一時停止ボタンのチェック
+                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) isPaused = !isPaused;
+                
+                // 左パネル (UI領域) のクリック処理
+                if (!lastLeftClick && mx < 250) {
+                    // モード切り替えボタン
+                    if (my >= 60 && my <= 90) {
+                        toolMode = EDIT_OBJECTS;
+                    }
+                    else if (my >= 100 && my <= 130) {
+                        toolMode = EDIT_TILES;
+                    }
+                    
+                    // ステージ選択ボタン
+                    if (my >= 350 && my <= 380) {
+                        currentStageIdx = 0;
+                        ResetStage();
+                    }
+                    else if (my >= 390 && my <= 420) {
+                        currentStageIdx = 1;
+                        ResetStage();
+                    }
+                    
+                    // タイルパレット選択 (EDIT_TILESモードのみ)
+                    if (toolMode == EDIT_TILES) {
+                        if (my >= 180 && my <= 210) {
+                            activePaintTile = TILE_NONE; // 消しゴム
+                        }
+                        else if (my >= 220 && my <= 250) {
+                            activePaintTile = TILE_JIMEN;
+                        }
+                        else if (my >= 260 && my <= 290) {
+                            activePaintTile = TILE_TUTI;
+                        }
+                    }
+                }
+
+                // タイルペイント処理 (EDIT_TILESモード時、モニター画面内をクリックドラッグしたとき)
+                bool isClickInUI = (mx < 250) || (mx >= WINDOW_WIDTH - 250) || (my >= WINDOW_HEIGHT - 100);
+                if (!isClickInUI && toolMode == EDIT_TILES && !isDragging && !isScaling && !isRotating && !isAreaSelecting) {
+                    int tx = (int)(gx / TILE_SIZE);
+                    int ty = (int)(gy / TILE_SIZE);
+                    if (ty >= 0 && ty < MAP_HEIGHT_TILES && tx >= 0 && tx < MAP_WIDTH_TILES) {
+                        stages[currentStageIdx].map[ty][tx] = activePaintTile;
+                    }
+                }
+
+                // タイムラインカット
+                if (!lastLeftClick && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                    if (CheckHitKey(KEY_INPUT_LCONTROL)) {
+                        float ct = (float)(mx - 50) / (WINDOW_WIDTH - 100);
+                        if (ct < 0.0f) ct = 0.0f;
+                        if (ct > 1.0f) ct = 1.0f;
+                        if (tempCutStart < 0) tempCutStart = ct;
+                        else {
+                            float start = (ct > tempCutStart ? tempCutStart : ct);
+                            float end = (ct > tempCutStart ? ct : tempCutStart);
+                            gimmicks.push_back({ GIMMICK_CUT_PORTAL, 0.0f, 0.0f, 0.0f, 0.0f, true, start, end, 0.0f, false, {} });
+                            tempCutStart = -1.0f;
+                        }
+                    }
+                }
+
+                // インスペクターのドラッグと切り替え（選択されたすべてに適用）
+                if (!lastLeftClick && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
+                    if (my >= 80 && my <= 95) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
+                    else if (my >= 100 && my <= 115) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
+                    else if (my >= 120 && my <= 135) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
+                    else if (my >= 140 && my <= 155) { 
+                        bool nextPaused = !(*targetPaused);
+                        for (auto* p : selectedPlayers) p->isPaused = nextPaused;
+                        for (auto* e : selectedEnemies) e->isPaused = nextPaused;
+                        for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
+                    }
+                    else if (my >= 160 && my <= 175) { 
+                        bool nextRewind = !(*targetRewind);
+                        for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
+                        for (auto* e : selectedEnemies) e->isRewinding = nextRewind;
+                        for (auto* g : selectedGimmicks) g->isRewinding = nextRewind;
+                    }
+                    else if (my >= 180 && my <= 195 && targetEnemyType != nullptr) {
+                        EnemyType nextType = (EnemyType)((*targetEnemyType + 1) % 3);
+                        for (auto* e : selectedEnemies) e->type = nextType;
+                    }
+                }
+
+                // ドラッグ中の範囲更新
+                if (isAreaSelecting) {
+                    areaSelectEndX = mx;
+                    areaSelectEndY = my;
+                }
+
+                // Gキーで可変地面を追加
+                static bool lastGKey = false;
+                bool currentGKey = CheckHitKey(KEY_INPUT_G) != 0;
+                if (currentGKey && !lastGKey) {
+                    int imgW, imgH;
+                    GetGraphSize(jimenHandle, &imgW, &imgH);
+                    float h = 32.0f;
+                    float tileW = h * ((float)imgW / imgH);
+                    float w = tileW * 3.0f; // 初期は3タイル分
+                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+                }
+                lastGKey = currentGKey;
+
+                // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
+                if (!lastLeftClick && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
+                    mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
+                    
+                    // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
+                    bool blockClicked = false;
+                    for (auto& gim : gimmicks) {
+                        if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
+                            if (gx >= gim.x && gx <= gim.x + gim.width &&
+                                gy >= gim.y && gy <= gim.y + gim.height) {
+                                gim.isActive = false;
+                                blockClicked = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!blockClicked) {
+                        // グループドラッグを開始するため、まず現在選択されているオブジェクトをクリックしたかどうかをチェック
+                        bool clickedOnSelected = false;
+                        if (selectedType != SELECT_NONE) {
+                            for (auto* p : selectedPlayers) {
+                                if (gx >= p->x && gx <= p->x + p->width * p->scale && gy >= p->y && gy <= p->y + p->height * p->scale) {
+                                    clickedOnSelected = true; break;
+                                }
+                            }
+                            for (auto* e : selectedEnemies) {
+                                if (e->isActive && gx >= e->x && gx <= e->x + e->width * e->scale && gy >= e->y && gy <= e->y + e->height * e->scale) {
+                                    clickedOnSelected = true; break;
+                                }
+                            }
+                            for (auto* g : selectedGimmicks) {
+                                if (g->isActive && gx >= g->x && gx <= g->x + g->width && gy >= g->y && gy <= g->y + g->height) {
+                                    clickedOnSelected = true; break;
+                                }
+                            }
+                        }
+
+                        if (clickedOnSelected) {
+                            // グループドラッグを開始
+                            isDragging = true;
+                            lastMouseX = mx;
+                            lastMouseY = my;
+                        }
+                        else {
+                            // 新しいオブジェクトをクリックした場合、そのオブジェクトのみを選択
+                            bool objectClicked = false;
+                            
+                            // プレイヤーのチェック
+                            if (gx >= player.x && gx <= player.x + player.width * player.scale &&
+                                gy >= player.y && gy <= player.y + player.height * player.scale) {
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedPlayers.push_back(&player);
+                                selectedType = SELECT_PLAYER;
+                                targetScale = &player.scale;
+                                targetAngle = &player.angle;
+                                targetSpeedScale = &player.speedScale;
+                                targetPaused = &player.isPaused;
+                                targetRewind = &player.isRewinding;
+                                targetDirection = &player.direction;
+                                targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+                                
+                                if (CheckHitKey(KEY_INPUT_S)) { isScaling = true; lastMouseY = my; baseScale = player.scale; }
+                                else if (CheckHitKey(KEY_INPUT_R)) { isRotating = true; lastMouseX = mx; baseAngle = player.angle; }
+                                else { isDragging = true; lastMouseX = mx; lastMouseY = my; }
+                                objectClicked = true;
+                            }
+                            // 敵のチェック
+                            if (!objectClicked) {
+                                for (auto& enemy : enemies) {
+                                    if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.width * enemy.scale &&
+                                        gy >= enemy.y && gy <= enemy.y + enemy.height * enemy.scale) {
+                                        selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                        selectedEnemies.push_back(&enemy);
+                                        selectedType = SELECT_ENEMY;
+                                        targetScale = &enemy.scale;
+                                        targetAngle = &enemy.angle;
+                                        targetSpeedScale = &enemy.speedScale;
+                                        targetPaused = &enemy.isPaused;
+                                        targetRewind = &enemy.isRewinding;
+                                        targetDirection = &enemy.direction;
+                                        targetEnemyType = &enemy.type;
+                                        targetGimmick = nullptr;
+                                        targetEnemy = &enemy;
+                                        
+                                        if (CheckHitKey(KEY_INPUT_S)) { isScaling = true; lastMouseY = my; baseScale = enemy.scale; }
+                                        else if (CheckHitKey(KEY_INPUT_R)) { isRotating = true; lastMouseX = mx; baseAngle = enemy.angle; }
+                                        else { isDragging = true; lastMouseX = mx; lastMouseY = my; }
+                                        objectClicked = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            // ギミックのチェック
+                            if (!objectClicked) {
+                                for (auto& gim : gimmicks) {
+                                    if (gim.isActive && (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
+                                                         gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
+                                                         gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND)) {
+                                        if (gx >= gim.x && gx <= gim.x + gim.width &&
+                                            gy >= gim.y && gy <= gim.y + gim.height) {
+                                            selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                            selectedGimmicks.push_back(&gim);
+                                            selectedType = SELECT_GIMMICK;
+                                            targetScale = &gim.width;
+                                            targetAngle = &gim.angle;
+                                            targetSpeedScale = &gim.customTimer;
+                                            targetPaused = &gim.isPaused;
+                                            targetRewind = &gim.isRewinding;
+                                            targetDirection = nullptr;
+                                            targetEnemyType = nullptr;
+                                            targetGimmick = &gim;
+                                            targetEnemy = nullptr;
+                                            
+                                            if (CheckHitKey(KEY_INPUT_S)) { isScaling = true; lastMouseY = my; baseScale = gim.width; }
+                                            else if (CheckHitKey(KEY_INPUT_W)) { isScalingHeight = true; lastMouseY = my; baseScale = gim.height; }
+                                            else if (CheckHitKey(KEY_INPUT_R)) { isRotating = true; lastMouseX = mx; baseAngle = gim.angle; }
+                                            else { isDragging = true; lastMouseX = mx; lastMouseY = my; }
+                                            objectClicked = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 何もクリックしなかった場合、範囲選択を開始
+                            if (!objectClicked) {
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedType = SELECT_NONE;
+                                targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+                                targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+                                targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+                                
+                                isAreaSelecting = true;
+                                areaSelectStartX = mx;
+                                areaSelectStartY = my;
+                                areaSelectEndX = mx;
+                                areaSelectEndY = my;
+                            }
+                        }
+                    }
+                }
+
+                // 選択されたすべてのオブジェクトに一斉に変形を適用
+                if (isDragging && selectedType != SELECT_NONE) {
+                    float prevGx = (float)(lastMouseX - monitorX) + cameraX;
+                    float prevGy = (float)(lastMouseY - monitorY);
+                    float dx = gx - prevGx;
+                    float dy = gy - prevGy;
+
+                    for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
+                    for (auto* e : selectedEnemies) { e->x += dx; e->y += dy; e->vx = 0; e->vy = 0; }
+                    for (auto* g : selectedGimmicks) { g->x += dx; g->y += dy; }
+                    
+                    lastMouseX = mx;
+                    lastMouseY = my;
+                }
+                if (isScaling && selectedType != SELECT_NONE) {
+                    float ds = (float)(lastMouseY - my) * 0.01f;
+                    float dw = (float)(lastMouseY - my) * 1.0f;
+                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
+                    for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
+                    for (auto* g : selectedGimmicks) { 
+                        g->width += dw; 
+                        if (g->width < 10.0f) g->width = 10.0f; 
+                        if (g->type == GIMMICK_SCALABLE_GROUND) {
+                            int imgW, imgH;
+                            GetGraphSize(jimenHandle, &imgW, &imgH);
+                            float tileW = g->height * ((float)imgW / imgH);
+                            g->width = roundf(g->width / tileW) * tileW;
+                            if (g->width < tileW) g->width = tileW;
+                        }
+                    }
+                    lastMouseY = my;
+                }
+                if (isScalingHeight && selectedType != SELECT_NONE) {
+                    float dh = (float)(lastMouseY - my) * 1.0f;
+                    for (auto* g : selectedGimmicks) { 
+                        g->height += dh; 
+                        if (g->height < 10.0f) g->height = 10.0f; 
+                        if (g->type == GIMMICK_SCALABLE_GROUND) {
+                            int imgW, imgH;
+                            GetGraphSize(jimenHandle, &imgW, &imgH);
+                            float tileW = g->height * ((float)imgW / imgH);
+                            g->width = roundf(g->width / tileW) * tileW;
+                            if (g->width < tileW) g->width = tileW;
+                        }
+                    }
+                    lastMouseY = my;
+                }
+                if (isRotating && selectedType != SELECT_NONE) {
+                    float da = (float)(mx - lastMouseX) * 0.02f;
+                    for (auto* p : selectedPlayers) { p->angle += da; }
+                    for (auto* e : selectedEnemies) { e->angle += da; }
+                    for (auto* g : selectedGimmicks) { g->angle += da; }
+                    lastMouseX = mx;
+                }
+                if (isInspScale && selectedType != SELECT_NONE) {
+                    float ds = (float)(mx - lastMouseX) * 0.01f;
+                    float dw = (float)(mx - lastMouseX) * 1.0f;
+                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
+                    for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
+                    for (auto* g : selectedGimmicks) { g->width += dw; if (g->width < 10.0f) g->width = 10.0f; }
+                    lastMouseX = mx;
+                }
+                if (isInspAngle && selectedType != SELECT_NONE) {
+                    float da = (float)(mx - lastMouseX) * 0.02f;
+                    for (auto* p : selectedPlayers) { p->angle += da; }
+                    for (auto* e : selectedEnemies) { e->angle += da; }
+                    for (auto* g : selectedGimmicks) { g->angle += da; }
+                    lastMouseX = mx;
+                }
+                if (isInspSpeed && selectedType != SELECT_NONE) {
+                    float dsp = (float)(mx - lastMouseX) * 0.05f;
+                    for (auto* p : selectedPlayers) { p->speedScale += dsp; if (p->speedScale < 0) p->speedScale = 0; }
+                    for (auto* e : selectedEnemies) { e->speedScale += dsp; if (e->speedScale < 0) e->speedScale = 0; }
+                    lastMouseX = mx;
+                }
+            } else { 
+                isDragging = isScaling = isScalingHeight = isRotating = false; 
+                isInspScale = isInspAngle = isInspSpeed = false;
+            }
+        }
+
+        // --- 装置等による更新可否判定 ---
+        auto CanUpdate = [&](float ox, float oy, float ow, float oh, float scale, bool isObjPaused) {
+            if (currentScene != PLAY || isDragging || isScaling || isScalingHeight || isRotating) return false;
+            if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
+            if (isStepFrame) return true;
+            
+            // TIME_FIELD ギミックの影響範囲内ならポーズ中でも動ける
+            float cx = ox + (ow * scale) / 2.0f;
+            float cy = oy + (oh * scale) / 2.0f;
+            for (const auto& gim : gimmicks) {
+                if (gim.type == GIMMICK_TIME_FIELD && gim.isActive) {
+                    float dx = cx - gim.x;
+                    float dy = cy - gim.y;
+                    // val1 を半径(radius)として扱う。ここでは仮に100.0fとするか、後で配置時にval1=100等にする
+                    float radius = gim.val1 > 0 ? gim.val1 : 100.0f;
+                    if (dx * dx + dy * dy <= radius * radius) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        bool canPlayerAct = CanUpdate(player.x, player.y, (float)player.width, (float)player.height, player.scale, player.isPaused);
+
+        // 射撃（通常モードまたはEnterキー）
+        static bool lastShot = false;
+        bool isClickInScreen = (mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT);
+        bool currentShot = (CheckHitKey(KEY_INPUT_RETURN) != 0) || (currentLeftClick && isClickInScreen && selectedType == SELECT_NONE);
+        if (currentShot && !lastShot && canPlayerAct) {
+            for (int i = 0; i < MAX_BULLETS; i++) {
+                if (!bullets[i].isActive) {
+                    bullets[i].isActive = true;
+                    bullets[i].x = player.x + (player.direction == 0 ? (float)player.width * player.scale : -10.0f);
+                    bullets[i].y = player.y + (float)player.height * player.scale / 4.0f;
+                    bullets[i].vx = (player.direction == 0 ? BULLET_SPEED : -BULLET_SPEED);
+                    bullets[i].vy = 0.0f; // Initialize vertical velocity to 0
+                    bullets[i].isPlayerOwned = true; // プレイヤーの弾
+                    bullets[i].isRewinding = false;
+                    bullets[i].history.clear();
+                    break;
+                }
+            }
+        }
+        lastShot = currentShot;
+        bool prevLeftClick = lastLeftClick; // RETRY判定用：lastLeftClick更新前の値を保存
+        lastLeftClick = currentLeftClick; lastRightClick = currentRightClick;
+
+        // キーボード移動（通常モード、または一時停止していないエディットモード）
+        // editorPlayerCapsのbaseSpeed/baseJumpPowerをステージ設定として使用
+        if (currentScene == PLAY && canPlayerAct) {
+            float baseSpd = editorPlayerCaps.baseSpeed;
+            float baseJmp = (float)editorPlayerCaps.baseJumpPower;
+            bool isShift = (CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT));
+            // ダッシュ能力があればShiftでダッシュ、なければ通常速度のみ
+            float speed = (isShift && editorPlayerCaps.canDash) ? baseSpd * 2.0f : baseSpd;
+            player.vx = 0;
+            if (CheckHitKey(KEY_INPUT_A)) { player.vx = -speed; player.direction = 1; }
+            if (CheckHitKey(KEY_INPUT_D)) { player.vx = speed; player.direction = 0; }
+            if (CheckHitKey(KEY_INPUT_SPACE) && !player.isJumping) {
+                player.vy = baseJmp;
+                player.isJumping = true;
+            }
+        } else {
+            player.vx = 0;
+        }
+
+        // --- バッファへの描画 / 物理更新 ---
+        SetDrawScreen(gameScreen);
+        ClearDrawScreen();
+
+        auto CheckCollision = [](float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
+            return (x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2);
+        };
+
+        float ts = isStepFrame ? 1.0f : finalTimeScale;
+
+        // Feature 3 & 5: 各種マネージャーの更新
+        if (!isPaused || isStepFrame) {
+            float dt = 1.0f / 60.0f * ts;
+            SoundManager::Get().Update();
+            
+            // Feature 2: アニメーションの更新
+            player.anim.Update(dt);
+            for (auto& enemy : enemies) {
+                enemy.anim.Update(dt);
+            }
+            
+            int activeEnemies = 0;
+            for (auto& e : enemies) if (e.isActive && e.hp > 0) activeEnemies++;
+            
+            bool stageClear = false;
+            std::string gotoStage = "";
+            EventManager::Get().Update(dt, player.x, player.y, activeEnemies, stageClear, gotoStage);
+            
+            if (stageClear) {
+                currentScene = RESULT_VICTORY;
+            } else if (!gotoStage.empty()) {
+                currentStageFileName = gotoStage;
+                // 注意: ここで直接ロードすると他と干渉する可能性があるため、後ほど安全な場所でロード処理を行う
+            }
+        }
+
+        // 1. プレイヤーの更新（巻き戻し vs 通常物理）
+        if (isPlayerRewinding) {
+            if (!player.history.empty()) {
+                PlayerState s = player.history.back();
+                player.history.pop_back();
+                player.x = s.x; player.y = s.y; player.vx = s.vx; player.vy = s.vy;
+                player.direction = s.direction; player.isJumping = s.isJumping;
+                player.scale = s.scale; player.angle = s.angle; player.speedScale = s.speedScale;
+                player.isPaused = s.isPaused;
+            }
+        } else {
+            if (canPlayerAct) {
+                float pts = ts * player.speedScale;
+                float prevPlayerX = player.x; // Keep track of previous X to detect precise boundary crossing
+
+                player.vy += GRAVITY * pts; 
+                
+                // X/Y方向の移動と衝突判定を共通化
+                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, player.vy * pts, player.vy, 
+                                                          player.width, player.height, player.scale, 
+                                                          stages[currentStageIdx].map, tileDefs, gimmicks);
+
+                // 従来の足場との着地衝突判定
+                bool platGrounded = CheckPlatformCollision(player.x, player.y, player.vy, player.width, player.height, player.scale, platforms, gimmicks);
+                
+                if (isGrounded || platGrounded) {
+                    player.isJumping = false;
+                }
+
+                float tp = player.x / STAGE_WIDTH;
+                float prev_tp = prevPlayerX / STAGE_WIDTH; // 前フレームのタイムライン位置
+                float pw_scaled = (float)player.width * player.scale;
+                for (auto& gim : gimmicks) {
+                    if (gim.type == GIMMICK_CUT_PORTAL && gim.isActive) {
+                        float timePos = gim.val1;
+                        float targetTimePos = gim.val2;
+                        
+                        // 左の境界（timePos）を左から右に越えたときのみ前方にワープ
+                        if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
+                            player.x = targetTimePos * STAGE_WIDTH + 8.0f;
+                        }
+                        // 右の境界（targetTimePos）を右から左に越えたときのみ後方にワープ
+                        else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
+                            player.x = timePos * STAGE_WIDTH - pw_scaled - 8.0f;
+                        }
+                    }
+                }
+
+                // ステージ境界の制限
+                if (player.x < 0.0f) player.x = 0.0f;
+                if (player.x > STAGE_WIDTH - (float)player.width * player.scale) {
+                    player.x = STAGE_WIDTH - (float)player.width * player.scale;
+                }
+
+                // 1. 砂時計リフトの更新（プレイヤーが乗っているとゆっくり降下）
+                for (auto& gim : gimmicks) {
+                    if (gim.type == GIMMICK_FALLING_LIFT && gim.isActive) {
+                        float objW = (float)player.width * player.scale;
+                        float objH = (float)player.height * player.scale;
+                        float footY = player.y + objH;
+                        // プレイヤーがこのリフトに乗っているかチェック
+                        if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.width) {
+                            float threshold = player.vy + 8.0f;
+                            if (footY >= gim.y && footY <= gim.y + threshold) {
+                                gim.y += 1.5f * pts; // ゆっくり降下
+                                if (gim.y > groundY - 20.0f) gim.y = groundY - 20.0f; // 地面を限界とする
+                            }
+                        }
+                    }
+                }
+
+                // 2. 重量スイッチとドアの開閉ロジック
+                bool switchActive = false;
+                float switchX = 0.0f;
+                float switchWidth = 0.0f;
+                for (const auto& gim : gimmicks) {
+                    if (gim.type == GIMMICK_WEIGHT_SWITCH && gim.isActive) {
+                        switchX = gim.x;
+                        switchWidth = gim.width;
+                        break;
+                    }
+                }
+
+                if (switchWidth > 0.0f) {
+                    for (const auto& gim : gimmicks) {
+                        if (gim.type == GIMMICK_SCALABLE_BOX && gim.isActive) {
+                            // 拡大可能ボックスがスイッチの上にあるかチェック
+                            if (gim.x + gim.width >= switchX && gim.x <= switchX + switchWidth) {
+                                // 横幅が140以上に拡大されている必要がある
+                                if (gim.width >= 140.0f) {
+                                    switchActive = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // スイッチの状態をゲートドアのロックに適用
+                for (auto& gim : gimmicks) {
+                    if (gim.type == GIMMICK_GATE_DOOR) {
+                        gim.isActive = !switchActive; // スイッチがアクティブでない場合はドアを閉じる（isActive=true）
+                    }
+                }
+            }
+            if (!isPaused || isStepFrame) {
+                player.history.push_back({ player.x, player.y, player.vx, player.vy, player.direction, player.isJumping, player.scale, player.angle, player.speedScale, player.isPaused });
+                if (player.history.size() > MAX_HISTORY_FRAMES) player.history.erase(player.history.begin());
+            }
+        }
+
+        // 2. 敵の更新（巻き戻し vs 通常AI）
+        for (auto& enemy : enemies) {
+            if (!enemy.isActive && enemy.history.empty()) continue;
+
+            bool isThisEnemyRew = enemy.isRewinding || (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
+            if (isThisEnemyRew) {
+                if (!enemy.history.empty()) {
+                    EnemyState s = enemy.history.back();
+                    enemy.history.pop_back();
+                    enemy.x = s.x; enemy.y = s.y; enemy.vx = s.vx; enemy.vy = s.vy;
+                    enemy.direction = s.direction; enemy.scale = s.scale; enemy.angle = s.angle;
+                    enemy.speedScale = s.speedScale; enemy.isActive = s.isActive;
+                    enemy.isPaused = s.isPaused;
+                    enemy.type = s.type;
+                }
+            } else {
+                if (enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.width, (float)enemy.height, enemy.scale, enemy.isPaused)) {
+                    float ets = ts * enemy.speedScale;
+                    
+                    // Apply Gravity first
+                    enemy.vy += GRAVITY * ets;
+
+                    // Switch behavior based on EnemyType
+                    switch (enemy.type) {
+                        case ENEMY_PATROL: {
+                            // シンプルAI：patrolLeft ～ patrolRight の範囲でパトロール
+                            float enemySpeed = editorPlayerCaps.baseSpeed * ets * 0.4f;
+                            // 巡回範囲が未設定なら ±200px で初期化
+                            if (enemy.patrolLeft < 0 && enemy.patrolRight < 0) {
+                                enemy.patrolLeft = std::max<float>(0.0f, enemy.x - 200.0f);
+                                enemy.patrolRight = enemy.x + 200.0f;
+                            }
+                            if (enemy.direction == 0) {
+                                enemy.vx = enemySpeed;
+                                if (enemy.patrolRight > 0 && enemy.x + enemy.vx >= enemy.patrolRight) {
+                                    enemy.direction = 1;
+                                }
+                            } else {
+                                enemy.vx = -enemySpeed;
+                                if (enemy.x + enemy.vx <= enemy.patrolLeft) {
+                                    enemy.direction = 0;
+                                }
+                            }
+                            break;
+                        }
+                        case ENEMY_JUMPER: {
+                            // ジャンプAI：定期的にジャンプ（タイルマップ＋足場両方で着地チェック）
+                            enemy.customTimer += ets;
+                            enemy.vx = 0.0f;
+
+                            // 着地チェック: vyが0かつ少し下にタイル/足場があるか
+                            bool isGrounded = false;
+                            {
+                                float testY = enemy.y + 2.0f; // 1px下
+                                float testVY = 1.0f;
+                                bool tileGround = CheckGridCollisionY(enemy.x, testY, testVY,
+                                    enemy.width, enemy.scale, enemy.height,
+                                    stages[currentStageIdx].map, tileDefs);
+                                bool platGround = CheckPlatformCollision(enemy.x, testY, testVY,
+                                    enemy.width, enemy.height, enemy.scale, platforms, gimmicks);
+                                isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
+                            }
+
+                            if (isGrounded && enemy.customTimer >= 90.0f) { // 約1.5秒ごとにジャンプ
+                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * 0.7f;
+                                enemy.customTimer = 0.0f;
+                            }
+                            break;
+                        }
+                        case ENEMY_STATIONARY: {
+                            // 固定AI：定期的な射撃、プレイヤーの方向を向く
+                            enemy.vx = 0.0f;
+                            if (player.x < enemy.x) enemy.direction = 1;
+                            else enemy.direction = 0;
+
+                            enemy.customTimer += ets;
+                            if (enemy.customTimer >= 120.0f) { // 2秒ごとに射撃
+                                for (int i = 0; i < MAX_BULLETS; i++) {
+                                    if (!bullets[i].isActive) {
+                                        bullets[i].isActive = true;
+                                        bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
+                                        bullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
+                                        bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.6f : -BULLET_SPEED * 0.6f);
+                                        bullets[i].vy = 0.0f;
+                                        bullets[i].isPlayerOwned = false; // 敵の弾
+                                        bullets[i].isRewinding = false;
+                                        bullets[i].history.clear();
+                                        break;
+                                    }
+                                }
+                                enemy.customTimer = 0.0f;
+                            }
+                            break;
+                        }
+                        case ENEMY_PATROL_SHOOTER: {
+                            // 索敵＆射撃AI（DrawPixel2.cpp準拠）
+                            float pCenterX = player.x + (player.width * player.scale) / 2.0f;
+                            float pCenterY = player.y + (player.height * player.scale) / 2.0f;
+                            float eCenterX = enemy.x + (enemy.width * enemy.scale) / 2.0f;
+                            float eCenterY = enemy.y + (enemy.height * enemy.scale) / 2.0f;
+                            float distX = std::abs(pCenterX - eCenterX);
+                            float distY = std::abs(pCenterY - eCenterY);
+
+                            // aiState: 0=PATROL, 1=ATTACK
+                            if (distX <= 300.0f && distY <= 100.0f) enemy.aiState = 1; // ATTACK
+                            else enemy.aiState = 0; // PATROL
+
+                            if (enemy.aiState == 0) {
+                                if (enemy.direction == 1) {
+                                    enemy.vx = -WALK_SPEED * ets * 0.5f;
+                                    if (enemy.x <= enemy.patrolLeft) enemy.direction = 0;
+                                } else {
+                                    enemy.vx = WALK_SPEED * ets * 0.5f;
+                                    if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
+                                }
+                            } else if (enemy.aiState == 1) {
+                                enemy.vx = 0.0f;
+                                enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                                if (enemy.customTimer > 0) enemy.customTimer -= 1.0f * ets;
+
+                                if (enemy.customTimer <= 0) {
+                                    for (int i = 0; i < MAX_BULLETS; i++) {
+                                        if (!bullets[i].isActive) {
+                                            bullets[i].isActive = true;
+                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
+                                            bullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
+                                            bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.5f : -BULLET_SPEED * 0.5f);
+                                            bullets[i].vy = 0.0f;
+                                            bullets[i].isPlayerOwned = false;
+                                            bullets[i].isRewinding = false;
+                                            bullets[i].history.clear();
+                                            break;
+                                        }
+                                    }
+                                    enemy.customTimer = 60.0f; // クールダウン60フレーム
+                                }
+                            }
+                            break;
+                        }
+                    }
+
+                    // X/Y方向の移動と衝突判定を共通化
+                    bool enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy, 
+                                                                 enemy.width, enemy.height, enemy.scale, 
+                                                                 stages[currentStageIdx].map, tileDefs, gimmicks);
+
+                    // 足場との着地衝突判定
+                    CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.width, enemy.height, enemy.scale, platforms, gimmicks);
+
+                    // 地面との衝突によりvy=0になった場合はisJumping相当をリセット
+                    if (enemyGrounded) { enemy.vy = 0.0f; }
+
+                    // マップ下端に落ちた場合も止める（フォールスルー防止）
+                    float mapBottom = (float)(stages[currentStageIdx].map.size()) * TILE_SIZE;
+                    if (enemy.y > mapBottom) { enemy.y = mapBottom - (float)enemy.height * enemy.scale; enemy.vy = 0.0f; }
+
+                    // 敵のステージ境界制限
+                    if (enemy.x < 0.0f) enemy.x = 0.0f;
+                    float mapRight = (float)(stages[currentStageIdx].map.empty() ? 0 : stages[currentStageIdx].map[0].size()) * TILE_SIZE;
+                    if (enemy.x > mapRight - (float)enemy.width * enemy.scale) {
+                        enemy.x = mapRight - (float)enemy.width * enemy.scale;
+                    }
+                }
+                if (!isPaused || isStepFrame) {
+                    enemy.history.push_back({ enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.direction, enemy.scale, enemy.angle, enemy.speedScale, enemy.isActive, enemy.isPaused, enemy.type });
+                    if (enemy.history.size() > MAX_HISTORY_FRAMES) enemy.history.erase(enemy.history.begin());
+                }
+            }
+        }
+
+        // アイテムシステムの更新（巻き戻しの統合を含む）
+        for (auto& item : items) {
+            bool isItemRew = isRKeyPressed && (selectedType == SELECT_NONE); // アイテムのグローバル巻き戻しサポート
+            if (isItemRew) {
+                if (!item.history.empty()) {
+                    ItemState s = item.history.back();
+                    item.history.pop_back();
+                    item.x = s.x; item.y = s.y;
+                    item.isCollected = s.isCollected;
+                    if (!item.isCollected) item.isActive = true;
+                }
+            } else {
+                if (!isPaused || isStepFrame) {
+                    // アイテムの通常衝突検出
+                    if (item.isActive && !item.isCollected) {
+                        float pw_scaled = (float)player.width * player.scale;
+                        float ph_scaled = (float)player.height * player.scale;
+                        // 衝突チェック
+                        if (player.x < item.x + item.width && player.x + pw_scaled > item.x &&
+                            player.y < item.y + item.height && player.y + ph_scaled > item.y) {
+                            item.isCollected = true;
+                            item.isActive = false;
+                        }
+                    }
+                    item.history.push_back({ item.x, item.y, item.isCollected });
+                    if (item.history.size() > MAX_HISTORY_FRAMES) item.history.erase(item.history.begin());
+                }
+            }
+        }
+
+        // 3. 弾の更新（巻き戻し vs 通常物理）
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            if (bullets[i].isActive || !bullets[i].history.empty()) {
+                bool isBltRew = bullets[i].isRewinding || (isRKeyPressed && selectedType == SELECT_NONE);
+                if (isBltRew) {
+                    if (!bullets[i].history.empty()) {
+                        BulletState s = bullets[i].history.back();
+                        bullets[i].history.pop_back();
+                        bullets[i].x = s.x; bullets[i].y = s.y; bullets[i].vx = s.vx; bullets[i].vy = s.vy;
+                        bullets[i].isActive = s.isActive;
+                        bullets[i].isPlayerOwned = s.isPlayerOwned;
+                    }
+                } else {
+                    if (CanUpdate(bullets[i].x, bullets[i].y, 16.0f, 16.0f, 1.0f, false)) {
+                        if (bullets[i].isActive) {
+                            bullets[i].x += bullets[i].vx * ts;
+                            bullets[i].y += bullets[i].vy * ts; // 垂直方向の弾の物理挙動をサポート
+                            
+                            // タイルマップとの衝突判定
+                            int tx = (int)(bullets[i].x / TILE_SIZE);
+                            int ty = (int)(bullets[i].y / TILE_SIZE);
+                            if (ty >= 0 && ty < MAP_HEIGHT_TILES && tx >= 0 && tx < MAP_WIDTH_TILES) {
+                                TileType t = (TileType)stages[currentStageIdx].map[ty][tx];
+                                if (tileDefs[t].isCollidable) {
+                                    bullets[i].isActive = false; // 壁に衝突して消滅
+                                }
+                            }
+
+                            // 画面外チェック（Y方向も拡張）
+                            if (bullets[i].isActive && (bullets[i].x < -50 || bullets[i].x > STAGE_WIDTH + 50 || bullets[i].y < -50 || bullets[i].y > SCREEN_HEIGHT + 50)) {
+                                bullets[i].isActive = false;
+                            }
+
+                            // 反射ミラー（GIMMICK_REFLECT_MIRROR）での弾の反射チェック
+                            for (const auto& gim : gimmicks) {
+                                if (gim.type == GIMMICK_REFLECT_MIRROR && gim.isActive) {
+                                    // 反射のバウンディングボックス交差チェック
+                                    if (bullets[i].x >= gim.x && bullets[i].x <= gim.x + gim.width &&
+                                        bullets[i].y >= gim.y && bullets[i].y <= gim.y + gim.height) {
+                                        
+                                        // 反射物理：角度 gim.angle は板の回転を表す
+                                        // 面の法線ベクトル N は ( -sin(angle), cos(angle) )
+                                        float nx = -sinf(gim.angle);
+                                        float ny = cosf(gim.angle);
+                                        
+                                        // 反射速度ベクトル：R = V - 2 * (V . N) * N
+                                        float dot = bullets[i].vx * nx + bullets[i].vy * ny;
+                                        bullets[i].vx = bullets[i].vx - 2.0f * dot * nx;
+                                        bullets[i].vy = bullets[i].vy - 2.0f * dot * ny;
+                                        
+                                        // 無限反射ループを避けるため、弾をミラーから少し押し出す
+                                        bullets[i].x += bullets[i].vx * 1.5f;
+                                        bullets[i].y += bullets[i].vy * 1.5f;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (!isPaused || isStepFrame) {
+                        bullets[i].history.push_back({ bullets[i].x, bullets[i].y, bullets[i].vx, bullets[i].vy, bullets[i].isActive, bullets[i].isPlayerOwned });
+                        if (bullets[i].history.size() > MAX_HISTORY_FRAMES) bullets[i].history.erase(bullets[i].history.begin());
+                    }
+                }
+            }
+        }
+
+        // 4. ギミックの更新（物理挙動、回転、および巻き戻し履歴）
+        for (auto& gim : gimmicks) {
+            bool isGimRew = gim.isRewinding || (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_GIMMICK && targetGimmick == &gim)));
+            if (isGimRew) {
+                if (!gim.history.empty()) {
+                    GimmickState s = gim.history.back();
+                    gim.history.pop_back();
+                    gim.x = s.x; gim.y = s.y;
+                    gim.angle = s.angle;
+                    gim.isActive = s.isActive;
+                }
+            } else {
+                if (CanUpdate(gim.x, gim.y, gim.width, gim.height, 1.0f, gim.isPaused)) {
+                    float gts = ts;
+                    if (gim.type == GIMMICK_ROTATING_BRIDGE) {
+                        // 橋を自動回転（1フレームあたり約0.85度）
+                        gim.angle += 0.015f * gts;
+                    }
+                    else if (gim.type == GIMMICK_CHIKUWA_BLOCK) {
+                        // ちくわブロックロジック（gim.customTimerをrideTimer、gim.val1を元のY座標、gim.val2をfallDelay、gim.angleをisFallingフラグとして使用）
+                        // gim.val1 が未初期化(0)なら現在Yを記録し、fallDelayを45にセット
+                        if (gim.val1 == 0.0f) {
+                            gim.val1 = gim.y;
+                            gim.val2 = 45.0f;
+                        }
+
+                        // プレイヤーが上に乗っているか判定
+                        float pw_scaled = (float)player.width * player.scale;
+                        float ph_scaled = (float)player.height * player.scale;
+                        float footY = player.y + ph_scaled;
+                        bool isPlayerOn = false;
+                        if (player.vy >= 0 && player.x + pw_scaled > gim.x && player.x < gim.x + gim.width) {
+                            if (footY >= gim.y && footY <= gim.y + 10.0f) {
+                                isPlayerOn = true;
+                            }
+                        }
+
+                        if (isPlayerOn && gim.angle == 0.0f) {
+                            gim.customTimer += 1.0f * gts;
+                            if (gim.customTimer >= gim.val2) gim.angle = 1.0f; // isFalling = true
+                        } else if (gim.angle == 0.0f) {
+                            gim.customTimer = 0.0f;
+                            gim.y = gim.val1;
+                        }
+
+                        if (gim.angle != 0.0f) {
+                            // 落下中。gim.val2 は本来fallDelayだが、vyの管理に使いたいが別の変数がない。
+                            // 代わりに val2 を少しずつ増やして擬似vyにする
+                            gim.val2 += GRAVITY * gts;
+                            gim.y += gim.val2 * gts;
+                            if (gim.y > SCREEN_HEIGHT + 100) {
+                                gim.customTimer += 1.0f * gts;
+                                if (gim.customTimer > 180.0f) {
+                                    gim.angle = 0.0f;
+                                    gim.y = gim.val1;
+                                    gim.val2 = 45.0f;
+                                    gim.customTimer = 0.0f;
+                                }
+                            }
+                        }
+                    }
+                    else if (gim.type == GIMMICK_CHOMPER) {
+                        // 敵食いギミック
+                        // 対プレイヤー
+                        float pw_scaled = (float)player.width * player.scale;
+                        float ph_scaled = (float)player.height * player.scale;
+                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.width, gim.height)) {
+                            player.hp = 0;
+                        }
+                        // 対敵
+                        for (auto& enemy : enemies) {
+                            if (enemy.isActive && CheckCollision(enemy.x, enemy.y, (float)enemy.width * enemy.scale, (float)enemy.height * enemy.scale, gim.x, gim.y, gim.width, gim.height)) {
+                                enemy.hp = 0;
+                                enemy.isActive = false;
+                                gim.isActive = false; // 互いに消滅
+                            }
+                        }
+                    }
+                }
+                if (!isPaused || isStepFrame) {
+                    gim.history.push_back({ gim.x, gim.y, gim.angle, gim.isActive });
+                    if (gim.history.size() > MAX_HISTORY_FRAMES) gim.history.erase(gim.history.begin());
+                }
+            }
+        }
+
+        // --- カメラスクロールシステム ---
+        if (!isPaused) {
+            float targetCamX = player.x - 300.0f;
+            if (targetCamX < 0.0f) targetCamX = 0.0f;
+            if (targetCamX > STAGE_WIDTH - 640.0f) targetCamX = STAGE_WIDTH - 640.0f;
+            cameraX += (targetCamX - cameraX) * 0.1f;
+        }
+
+        // --- 戦闘衝突判定 ＆ ヒット検出 ---
+        if (!isPaused || isStepFrame) {
+
+            float pw_scaled = (float)player.width * player.scale;
+            float ph_scaled = (float)player.height * player.scale;
+
+            // プレイヤーの落下死判定
+            if (player.y > SCREEN_HEIGHT + 50.0f) {
+                ResetStage();
+            }
+
+            // 1. プレイヤー vs トゲ（即死）
+            for (const auto& gim : gimmicks) {
+                if (gim.type == GIMMICK_SPIKES && gim.isActive) {
+                    if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.width, gim.height)) {
+                        ResetStage();
+                        break;
+                    }
+                }
+            }
+
+            // 2. プレイヤー vs 敵の衝突判定
+            if (!isPlayerRewinding) {
+                for (const auto& enemy : enemies) {
+                    if (enemy.isActive && !isPlayerRewinding) {
+                        // この敵が現在巻き戻し中の場合はスキップ
+                        bool isThisEnemyRew = (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
+                        if (isThisEnemyRew) continue;
+
+                        float ew_scaled = (float)enemy.width * enemy.scale;
+                        float eh_scaled = (float)enemy.height * enemy.scale;
+                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
+                            player.hp--;
+                            // 無敵時間を設けていないので連続ダメージが入る可能性があるが簡易実装
+                            if (player.hp <= 0) {
+                                currentScene = RESULT_GAMEOVER;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. 弾 vs キャラクター/トゲ/ブロックの衝突判定
+            for (int i = 0; i < MAX_BULLETS; i++) {
+                if (bullets[i].isActive) {
+                    if (bullets[i].isPlayerOwned) {
+                        // プレイヤーの弾が敵にヒット
+                        for (auto& enemy : enemies) {
+                            if (enemy.isActive) {
+                                bool isThisEnemyRew = (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
+                                if (isThisEnemyRew) continue;
+
+                                float ew_scaled = (float)enemy.width * enemy.scale;
+                                float eh_scaled = (float)enemy.height * enemy.scale;
+                                if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
+                                    enemy.hp--;
+                                    if (enemy.hp <= 0) enemy.isActive = false;      // 敵を倒す
+                                    bullets[i].isActive = false; // 弾を消滅
+                                    break;
+                                }
+                            }
+                        }
+
+                        // プレイヤーの弾が破壊可能なブロックにヒット
+                        if (bullets[i].isActive) {
+                            for (auto& gim : gimmicks) {
+                                if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
+                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, gim.x, gim.y, gim.width, gim.height)) {
+                                        gim.isActive = false;
+                                        bullets[i].isActive = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // 敵の弾がプレイヤーにヒット
+                        if (!isPlayerRewinding) {
+                            if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, player.x, player.y, pw_scaled, ph_scaled)) {
+                                player.hp--;
+                                if (player.hp <= 0) {
+                                    currentScene = RESULT_GAMEOVER;
+                                }
+                                bullets[i].isActive = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ===== ゴール判定 =====
+        {
+            const auto& curStage = stages[currentStageIdx];
+            if (curStage.goalX >= 0 && currentScene == PLAY && !isPlayerRewinding) {
+                float _pw = (float)player.width * player.scale;
+                float _ph = (float)player.height * player.scale;
+                float gx = curStage.goalX, gy = curStage.goalY;
+                float gw = (float)TILE_SIZE, gh = (float)TILE_SIZE;
+                if (CheckCollision(player.x, player.y, _pw, _ph, gx, gy, gw, gh)) {
+                    currentScene = RESULT_VICTORY;
+                }
+            }
+        }
+
+        // ===== deadly タイル判定 =====
+        if (currentScene == PLAY && !isPlayerRewinding) {
+            float _pw = (float)player.width * player.scale;
+            float _ph = (float)player.height * player.scale;
+            int tileRow = (int)((player.y + _ph * 0.9f) / TILE_SIZE);
+            int tileCol = (int)((player.x + _pw * 0.5f) / TILE_SIZE);
+            const auto& curStageMap = stages[currentStageIdx].map;
+            if (tileRow >= 0 && tileRow < (int)curStageMap.size() &&
+                tileCol >= 0 && tileCol < (int)curStageMap[0].size()) {
+                int tid = curStageMap[tileRow][tileCol];
+                if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].deadly) {
+                    currentScene = RESULT_GAMEOVER;
+                }
+            }
+        }
+
+        // 空中足場の描画
+        for (const auto& plat : platforms) {
+            DrawBox((int)(plat.x1 - cameraX), (int)plat.y1, (int)(plat.x2 - cameraX), (int)plat.y2, GetColor(100, 80, 60), TRUE);
+            DrawBox((int)(plat.x1 - cameraX), (int)plat.y1, (int)(plat.x2 - cameraX), (int)plat.y2, GetColor(160, 130, 90), FALSE);
+        }
+
+        // ステージギミックの描画
+        for (const auto& gim : gimmicks) {
+            if (!gim.isActive) continue;
+
+            if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
+                // 橋を画像で描画 (回転とスケーリング)
+                int imgW, imgH;
+                GetGraphSize(bridgeHandle, &imgW, &imgH);
+                float gcx = gim.x + gim.width / 2.0f;
+                float gcy = gim.y + gim.height / 2.0f;
+                double extRateX = (double)gim.width / imgW;
+                double extRateY = (double)gim.height / imgH;
+                if (extRateY < 1.0) extRateY = 20.0 / imgH; // 薄すぎる場合は最低限の厚みを持たせる
+                
+                // DrawRotaGraph3 を使用して縦横別スケールで中心回転描画
+                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, bridgeHandle, TRUE, FALSE);
+
+                // 回転軸を描画
+                DrawCircle((int)(gcx - cameraX), (int)gcy, 5, GetColor(255, 255, 255), TRUE);
+
+                // 一時停止/巻き戻し中の橋の頭上インジケータ
+                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)gim.y - 20, "|| PAUSE", GetColor(255, 255, 100));
+                else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)gim.y - 20, "<< REW", GetColor(255, 100, 100));
+            }
+            else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
+                // ヒビの入った石ブロック画像をスケーリングして描画
+                int bx1 = (int)(gim.x - cameraX);
+                int by1 = (int)gim.y;
+                int bx2 = (int)(gim.x + gim.width - cameraX);
+                int by2 = (int)(gim.y + gim.height);
+                DrawExtendGraph(bx1, by1, bx2, by2, breakableBlockHandle, TRUE);
+            }
+            else if (gim.type == GIMMICK_FALLING_LIFT) {
+                // リフト画像を描画
+                int x1 = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int x2 = (int)(gim.x + gim.width - cameraX);
+                int y2 = (int)(gim.y + gim.height);
+                DrawExtendGraph(x1, y1, x2, y2, liftHandle, TRUE);
+                if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
+                else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
+            }
+            else if (gim.type == GIMMICK_REFLECT_MIRROR) {
+                // 反射ミラー画像を描画 (回転とスケーリング)
+                int imgW, imgH;
+                GetGraphSize(mirrorHandle, &imgW, &imgH);
+                float gcx = gim.x + gim.width / 2.0f;
+                float gcy = gim.y + gim.height / 2.0f;
+                double extRateX = (double)gim.width / imgW;
+                double extRateY = 24.0 / imgH; // ミラーの厚み
+                
+                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, mirrorHandle, TRUE, FALSE);
+                DrawCircle((int)(gcx - cameraX), (int)gcy, 4, GetColor(255, 255, 0), TRUE);
+                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)gim.y - 35, "|| PAUSE", GetColor(255, 255, 100));
+            }
+            else if (gim.type == GIMMICK_WEIGHT_SWITCH) {
+                // 重量スイッチ画像を描画
+                int x1 = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int x2 = (int)(gim.x + gim.width - cameraX);
+                int y2 = (int)(gim.y + gim.height);
+                
+                bool isActiveState = false;
+                for (const auto& other : gimmicks) {
+                    if (other.type == GIMMICK_GATE_DOOR) {
+                        isActiveState = !other.isActive;
+                        break;
+                    }
+                }
+                
+                if (isActiveState) SetDrawBright(100, 255, 100); // 起動時は緑っぽく
+                DrawExtendGraph(x1, y1, x2, y2, switchHandle, TRUE);
+                SetDrawBright(255, 255, 255);
+            }
+            else if (gim.type == GIMMICK_SCALABLE_BOX) {
+                // 拡大可能ブロック画像を描画
+                int x1 = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int x2 = (int)(gim.x + gim.width - cameraX);
+                int y2 = (int)(gim.y + gim.height);
+                DrawExtendGraph(x1, y1, x2, y2, boxHandle, TRUE);
+                if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
+                else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
+            }
+            else if (gim.type == GIMMICK_GATE_DOOR) {
+                // ゲートドア画像を描画
+                int x1 = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int x2 = (int)(gim.x + gim.width - cameraX);
+                int y2 = (int)(gim.y + gim.height);
+                DrawExtendGraph(x1, y1, x2, y2, doorHandle, TRUE);
+            }
+            else if (gim.type == GIMMICK_CUT_PORTAL) {
+                // ポータル画像を描画
+                int px1 = (int)(gim.val1 * STAGE_WIDTH - cameraX);
+                int px2 = (int)(gim.val2 * STAGE_WIDTH - cameraX);
+                int py = (int)groundY - 80;
+                
+                // 円形の領域に合わせて画像を描画
+                DrawExtendGraph(px1 - 20, py - 20, px1 + 20, py + 20, portalHandle, TRUE);
+                DrawExtendGraph(px2 - 20, py - 20, px2 + 20, py + 20, portalHandle, TRUE);
+            }
+            else if (gim.type == GIMMICK_SPIKES) {
+                // トゲトゲ画像を描画
+                int sx1 = (int)(gim.x - cameraX);
+                int sy1 = (int)gim.y;
+                int sx2 = (int)(gim.x + gim.width - cameraX);
+                int sy2 = (int)(gim.y + gim.height);
+                DrawExtendGraph(sx1, sy1, sx2, sy2, spikesHandle, TRUE);
+            }
+            else if (gim.type == GIMMICK_SCALABLE_GROUND) {
+                // 画像サイズに合わせてタイリング描画する
+                int imgW, imgH;
+                GetGraphSize(jimenHandle, &imgW, &imgH);
+                float tileW = gim.height * ((float)imgW / imgH);
+                
+                int startX = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int y2 = (int)(gim.y + gim.height);
+                
+                for (float x = 0; x < gim.width; x += tileW) {
+                    float drawW = tileW;
+                    if (x + tileW > gim.width) drawW = gim.width - x;
+                    if (drawW <= 0.0f) break;
+                    
+                    int x1 = startX + (int)x;
+                    int x2 = startX + (int)(x + drawW);
+                    int srcW = (int)((drawW / tileW) * imgW);
+                    
+                    DrawRectExtendGraph(x1, y1, x2, y2, 0, 0, srcW, imgH, jimenHandle, TRUE);
+                }
+            }
+            else if (gim.type == GIMMICK_CHIKUWA_BLOCK) {
+                // ちくわブロックの描画
+                float shakeX = 0.0f;
+                // 乗られていて、まだ落ちていない時はカタカタ揺らす
+                if (gim.customTimer > 0 && gim.angle == 0.0f) shakeX = sinf(gim.customTimer * 1.0f) * 3.0f;
+                
+                int cx1 = (int)(gim.x + shakeX - cameraX);
+                int cy1 = (int)gim.y;
+                int cx2 = (int)(gim.x + gim.width + shakeX - cameraX);
+                int cy2 = (int)(gim.y + gim.height);
+                DrawBox(cx1, cy1, cx2, cy2, GetColor(222, 184, 135), TRUE);
+                DrawBox(cx1, cy1, cx2, cy2, GetColor(139, 69, 19), FALSE);
+            }
+            else if (gim.type == GIMMICK_TIME_FIELD) {
+                // 反・一時停止装置の描画
+                float radius = gim.val1 > 0 ? gim.val1 : 100.0f;
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                DrawCircle((int)(gim.x - cameraX), (int)gim.y, (int)radius, GetColor(0, 255, 255), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawCircle((int)(gim.x - cameraX), (int)gim.y, (int)radius, GetColor(0, 255, 255), FALSE);
+            }
+            else if (gim.type == GIMMICK_CHOMPER) {
+                // 敵食いギミックの描画（紫色のボックス）
+                int cx1 = (int)(gim.x - cameraX);
+                int cy1 = (int)gim.y;
+                int cx2 = (int)(gim.x + gim.width - cameraX);
+                int cy2 = (int)(gim.y + gim.height);
+                DrawBox(cx1, cy1, cx2, cy2, GetColor(128, 0, 128), TRUE);
+            }
+        }
+
+        // 共通レイヤー描画ラムダ
+        auto DrawLayer = [&](const std::vector<std::vector<int>>& mapToDraw) {
+            int mapRowCount = (int)mapToDraw.size();
+            int mapColCount = mapRowCount > 0 ? (int)mapToDraw[0].size() : 0;
+            for (int ty = 0; ty < mapRowCount; ty++) {
+                for (int tx = 0; tx < mapColCount; tx++) {
+                    int tid = mapToDraw[ty][tx];
+                    if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
+                    if (tileDefs[tid].handle < 0) continue;
+                    int drawX = tx * TILE_SIZE - (int)cameraX;
+                    int drawY = ty * TILE_SIZE;
+                    if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH) {
+                        DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
+                    }
+                }
+            }
+        };
+
+        // Feature 1: 背景レイヤー（遠景）の描画
+        for (const auto& bl : stages[currentStageIdx].backgrounds) {
+            if (bl.handle >= 0) {
+                int imgW, imgH;
+                GetGraphSize(bl.handle, &imgW, &imgH);
+                if (imgW > 0 && imgH > 0) {
+                    float parallaxCamX = cameraX * bl.scrollRate;
+                    float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
+                    float drawY = bl.offsetY;
+                    DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
+                    if (bl.loop) {
+                        DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
+                    }
+                }
+            }
+        }
+
+        // Feature 1: 装飾レイヤー (背面) の描画
+        DrawLayer(stages[currentStageIdx].decoMapBack);
+
+        // タイルマップの描画（可変サイズ対応）
+        const auto& currentMap = stages[currentStageIdx].map;
+        int mapRowCount = (int)currentMap.size();
+        int mapColCount = mapRowCount > 0 ? (int)currentMap[0].size() : 0;
+        for (int ty = 0; ty < mapRowCount; ty++) {
+            for (int tx = 0; tx < mapColCount; tx++) {
+                int tid = currentMap[ty][tx];
+                if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
+                if (tileDefs[tid].handle < 0) continue;
+                int drawX = tx * TILE_SIZE - (int)cameraX;
+                int drawY = ty * TILE_SIZE;
+                if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH) {
+                    DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
+                    if (isDebugDrawMode && tileDefs[tid].isCollidable) {
+                        DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
+                    }
+                }
+            }
+        }
+
+        // Feature 1: 装飾レイヤー (前面) の描画
+        DrawLayer(stages[currentStageIdx].decoMapFront);
+
+        // 前の床の描画は完全に削除されました
+
+        // 収集用コインの描画
+        for (const auto& item : items) {
+            if (item.isActive && !item.isCollected) {
+                int icx = (int)(item.x - cameraX);
+                int icy = (int)item.y;
+                DrawExtendGraph(icx, icy, icx + (int)item.width, icy + (int)item.height, coinHandle, TRUE);
+            }
+        }
+
+        // 敵の描画
+        for (const auto& enemy : enemies) {
+            if (enemy.isActive) {
+                int imgW, imgH;
+                GetGraphSize(enemy.handle, &imgW, &imgH);
+                int ecx = (int)(enemy.x + (enemy.width * enemy.scale) / 2.0f - cameraX);
+                int ecy = (int)(enemy.y + (enemy.height * enemy.scale) / 2.0f);
+                SetDrawBright(255, 120, 120);
+                if (enemy.direction == 0) DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
+                else DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                SetDrawBright(255, 255, 255); // 輝度リセット
+                
+                if (isDebugDrawMode) {
+                    DrawBox((int)(enemy.x - cameraX), (int)enemy.y, (int)(enemy.x + enemy.width * enemy.scale - cameraX), (int)(enemy.y + enemy.height * enemy.scale), GetColor(0, 255, 0), FALSE); // 当たり判定
+                    DrawBox((int)(ecx - (imgW * enemy.scale) / 2.0f), (int)(ecy - (imgH * enemy.scale) / 2.0f), (int)(ecx + (imgW * enemy.scale) / 2.0f), (int)(ecy + (imgH * enemy.scale) / 2.0f), GetColor(255, 0, 0), FALSE); // 描画枠
+                }
+
+                bool isThisEnemyRew = enemy.isRewinding || (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
+                if (isThisEnemyRew) DrawString((int)(enemy.x - cameraX), (int)enemy.y - 20, "<< REW", GetColor(255, 100, 100));
+                else if (enemy.isPaused) DrawString((int)(enemy.x - cameraX), (int)enemy.y - 20, "|| PAUSE", GetColor(255, 255, 100));
+                
+                // 敵HP表示
+                if (enemy.hp > 0) {
+                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
+                }
+            }
+        }
+
+        // プレイヤーの描画
+        int cx = (int)(player.x + (player.width * player.scale) / 2.0f - cameraX);
+        int cy = (int)(player.y + (player.height * player.scale));
+        
+        int pImgW = 0, pImgH = 0;
+        if (player.anim.HasClip(player.anim.currentClip)) {
+            pImgH = player.anim.GetCurrentFrameHeight();
+            int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
+            player.anim.DrawAt(cx, drawCy, player.scale, player.angle, player.direction == 1);
+        } else {
+            GetGraphSize(player.handle, &pImgW, &pImgH);
+            int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
+            if (player.direction == 0) DrawRotaGraph(cx, drawCy, player.scale, player.angle, player.handle, TRUE);
+            else DrawRotaGraph(cx, drawCy, player.scale, player.angle, player.handle, TRUE, TRUE);
+        }
+        
+        if (isDebugDrawMode) {
+            DrawBox((int)(player.x - cameraX), (int)player.y, (int)(player.x + player.width * player.scale - cameraX), (int)(player.y + player.height * player.scale), GetColor(0, 255, 0), FALSE);
+            if (pImgH > 0) {
+                int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
+                DrawBox((int)(cx - (pImgW > 0 ? pImgW : pImgH) * player.scale / 2.0f), (int)(drawCy - (pImgH * player.scale) / 2.0f), 
+                        (int)(cx + (pImgW > 0 ? pImgW : pImgH) * player.scale / 2.0f), (int)(drawCy + (pImgH * player.scale) / 2.0f), GetColor(255, 0, 0), FALSE);
+            }
+        }
+        if (isPlayerRewinding) DrawString((int)(player.x - cameraX), (int)player.y - 20, "<< REW", GetColor(100, 255, 100));
+        else if (player.isPaused) DrawString((int)(player.x - cameraX), (int)player.y - 20, "|| PAUSE", GetColor(255, 255, 100));
+        
+        // プレイヤーHP表示
+        if (player.hp > 0) {
+            DrawFormatString((int)(player.x - cameraX), (int)player.y - 40, GetColor(0, 255, 0), "HP:%d", player.hp);
+        }
+
+        // 選択枠の描画
+        if (isEditMode) {
+            for (auto* p : selectedPlayers) {
+                DrawBox((int)(p->x - cameraX), (int)p->y, (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale), GetColor(255, 255, 0), FALSE);
+            }
+            for (auto* e : selectedEnemies) {
+                if (e->isActive) {
+                    DrawBox((int)(e->x - cameraX), (int)e->y, (int)(e->x + e->width * e->scale - cameraX), (int)(e->y + e->height * e->scale), GetColor(255, 255, 0), FALSE);
+                }
+            }
+            for (auto* g : selectedGimmicks) {
+                if (g->isActive) {
+                    DrawBox((int)(g->x - cameraX), (int)g->y, (int)(g->x + g->width - cameraX), (int)(g->y + g->height), GetColor(255, 255, 0), FALSE);
+                }
+            }
+        }
+
+        // 弾の描画
+        for (int i = 0; i < MAX_BULLETS; i++) {
+            if (bullets[i].isActive) DrawGraph((int)(bullets[i].x - cameraX), (int)bullets[i].y, bullets[i].handle, TRUE);
+        }
+
+        // OSD：コインカウント（正しくプレビューされるようにgameScreen内に描画）
+        int collectedCoins = 0;
+        for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
+        char coinStr[32];
+        sprintf_s(coinStr, sizeof(coinStr), "COINS: %d / %d", collectedCoins, (int)items.size());
+        
+        // OSDボックスの描画
+        DrawBox(10, 10, 150, 40, GetColor(30, 30, 30), TRUE);
+        DrawBox(10, 10, 150, 40, GetColor(255, 215, 0), FALSE);
+        DrawString(20, 18, coinStr, GetColor(255, 215, 0));
+
+        // ヘルプガイドのOSDオーバーレイ
+        if (isPaused) {
+            DrawString(10, SCREEN_HEIGHT - 25, "PAUSED (EDITING): Drag, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, [MiddleClick] to Resume", GetColor(200, 200, 200));
+        } else {
+            DrawString(10, SCREEN_HEIGHT - 25, "PLAYING: [A][D]: Move  [SPACE]: Jump  [ENTER]/Click Screen: Shot  [MiddleClick] to Pause", GetColor(50, 255, 50));
+        }
+
+        // リザルト画面
+        if (currentScene != PLAY) {
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 180);
+            DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GetColor(0, 0, 0), TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            int btnW = 160, btnH = 50;
+            int btnX = SCREEN_WIDTH / 2 - btnW / 2;
+            int btnY = SCREEN_HEIGHT / 2 + 30;
+
+            int relX = isEditMode ? (mx - monitorX) : mx;
+            int relY = isEditMode ? (my - monitorY) : my;
+            bool isHover = (relX >= btnX && relX <= btnX + btnW && relY >= btnY && relY <= btnY + btnH);
+
+            if (currentLeftClick && !prevLeftClick && isHover) {
+                ResetStage();
+            }
+
+            SetFontSize(48);
+            if (currentScene == RESULT_GAMEOVER) {
+                DrawString(SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 - 50, "GAME OVER", GetColor(255, 50, 50));
+            }
+            else {
+                DrawString(SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 - 50, "VICTORY!", GetColor(255, 255, 50));
+            }
+            SetFontSize(16);
+
+            DrawBox(btnX, btnY, btnX + btnW, btnY + btnH, isHover ? GetColor(150, 150, 150) : GetColor(80, 80, 80), TRUE);
+            DrawBox(btnX, btnY, btnX + btnW, btnY + btnH, GetColor(255, 255, 255), FALSE);
+            DrawString(btnX + 55, btnY + 17, "RETRY", GetColor(255, 255, 255));
+        }
+
+        // --- 最終ワークスペースレイアウト出力 ---
+        SetDrawScreen(DX_SCREEN_BACK);
+        ClearDrawScreen();
+        if (isEditMode) {
+            DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
+            DrawBox(0, 0, 250, WINDOW_HEIGHT - 100, GetColor(45, 45, 45), TRUE); // 左パネル
+            
+            // パネルタイトル
+            DrawString(20, 20, "STAGE EDITOR", GetColor(200, 200, 200));
+            
+            // --- モード選択ボタン ---
+            DrawString(20, 45, "EDIT MODE", GetColor(150, 150, 150));
+            
+            int btnObjColor = (toolMode == EDIT_OBJECTS) ? GetColor(100, 150, 255) : GetColor(60, 60, 60);
+            DrawBox(20, 60, 230, 90, btnObjColor, TRUE);
+            DrawBox(20, 60, 230, 90, GetColor(150, 150, 150), FALSE);
+            DrawString(35, 68, "1. Edit Objects", GetColor(255, 255, 255));
+            
+            int btnTileColor = (toolMode == EDIT_TILES) ? GetColor(100, 150, 255) : GetColor(60, 60, 60);
+            DrawBox(20, 100, 230, 130, btnTileColor, TRUE);
+            DrawBox(20, 100, 230, 130, GetColor(150, 150, 150), FALSE);
+            DrawString(35, 108, "2. Paint Tiles", GetColor(255, 255, 255));
+            
+            // --- タイルパレット (EDIT_TILESモードのみ) ---
+            if (toolMode == EDIT_TILES) {
+                DrawString(20, 155, "TILE PALETTE", GetColor(150, 150, 150));
+                
+                int colEraser = (activePaintTile == TILE_NONE) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
+                DrawBox(20, 180, 230, 210, colEraser, FALSE);
+                DrawBox(22, 182, 228, 208, GetColor(80, 80, 80), TRUE);
+                DrawString(35, 188, "[Eraser] (None)", GetColor(255, 255, 255));
+                
+                int colJimen = (activePaintTile == TILE_JIMEN) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
+                DrawBox(20, 220, 230, 250, colJimen, FALSE);
+                DrawExtendGraph(25, 223, 47, 247, jimenHandle, TRUE);
+                DrawString(55, 228, "Jimen (Grass)", GetColor(255, 255, 255));
+                
+                int colTuti = (activePaintTile == TILE_TUTI) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
+                DrawBox(20, 260, 230, 290, colTuti, FALSE);
+                DrawExtendGraph(25, 263, 47, 287, tutiHandle, TRUE);
+                DrawString(55, 268, "Tuti (Dirt)", GetColor(255, 255, 255));
+            } else {
+                DrawString(20, 155, "TILE PALETTE", GetColor(100, 100, 100));
+                DrawString(20, 180, "(Select 'Paint Tiles' to edit)", GetColor(120, 120, 120));
+            }
+            
+            // --- ステージ選択 ---
+            DrawString(20, 325, "SELECT STAGE", GetColor(150, 150, 150));
+            
+            int btnStg1Color = (currentStageIdx == 0) ? GetColor(50, 180, 50) : GetColor(60, 60, 60);
+            DrawBox(20, 350, 230, 380, btnStg1Color, TRUE);
+            DrawBox(20, 350, 230, 380, GetColor(150, 150, 150), FALSE);
+            DrawString(35, 358, "Stage 1: Grass Fields", GetColor(255, 255, 255));
+            
+            int btnStg2Color = (currentStageIdx == 1) ? GetColor(50, 180, 50) : GetColor(60, 60, 60);
+            DrawBox(20, 390, 230, 420, btnStg2Color, TRUE);
+            DrawBox(20, 390, 230, 420, GetColor(150, 150, 150), FALSE);
+            DrawString(35, 398, "Stage 2: Rugged Valley", GetColor(255, 255, 255));
+
+            DrawBox(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, GetColor(45, 45, 45), TRUE); // 右パネル（インスペクター）
+            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(40, 40, 40), TRUE); // 下部パネル（タイムライン）
+
+            // モニタープレビューウィンドウ
+            DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
+            DrawGraph(monitorX, monitorY, gameScreen, TRUE);
+
+            // 範囲選択矩形の描画
+            if (isAreaSelecting) {
+                int x1 = min(areaSelectStartX, areaSelectEndX);
+                int y1 = min(areaSelectStartY, areaSelectEndY);
+                int x2 = max(areaSelectStartX, areaSelectEndX);
+                int y2 = max(areaSelectStartY, areaSelectEndY);
+                
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                DrawBox(x1, y1, x2, y2, GetColor(100, 150, 255), TRUE); // 半透明の青い塗りつぶし
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawBox(x1, y1, x2, y2, GetColor(100, 150, 255), FALSE); // 不透明の青い輪郭線
+            }
+
+            // タイムラインのトラックと現在の再生ヘッド
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(60, 60, 60), TRUE);
+            float mxp = 50 + (player.x / (float)STAGE_WIDTH) * (WINDOW_WIDTH - 100);
+            DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
+            
+            // タイムラインカットの描画
+            for (auto& gim : gimmicks) {
+                if (gim.type == GIMMICK_CUT_PORTAL) {
+                    int x1 = 50 + (int)(gim.val1 * (float)(WINDOW_WIDTH - 100));
+                    int x2 = 50 + (int)(gim.val2 * (float)(WINDOW_WIDTH - 100));
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 80); DrawBox(x1, WINDOW_HEIGHT - 60, x2, WINDOW_HEIGHT - 40, GetColor(200, 50, 50), TRUE); SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    DrawLine(x1, WINDOW_HEIGHT - 60, x1, WINDOW_HEIGHT - 40, GetColor(255, 255, 0)); DrawLine(x2, WINDOW_HEIGHT - 60, x2, WINDOW_HEIGHT - 40, GetColor(255, 255, 0));
+                }
+            }
+            if (tempCutStart >= 0) { int px = 50 + (int)(tempCutStart * (float)(WINDOW_WIDTH - 100)); DrawLine(px, WINDOW_HEIGHT - 75, px, WINDOW_HEIGHT - 25, GetColor(0, 255, 255)); }
+            
+            // 動的インスペクターパネルの描画
+            DrawString(WINDOW_WIDTH - 240, 20, "[INSPECTOR]", GetColor(200, 200, 200));
+            if (selectedType == SELECT_NONE) {
+                DrawString(WINDOW_WIDTH - 240, 50, "No Object Selected", GetColor(150, 150, 150));
+            } else {
+                char objName[64] = "Selected: UNKNOWN";
+                size_t totalSelected = selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size();
+                if (totalSelected > 1) {
+                    sprintf_s(objName, sizeof(objName), "Selected: MULTI (%d objs)", (int)totalSelected);
+                } else {
+                    if (selectedType == SELECT_PLAYER) sprintf_s(objName, sizeof(objName), "Selected: PLAYER");
+                    else if (selectedType == SELECT_ENEMY) sprintf_s(objName, sizeof(objName), "Selected: ENEMY");
+                    else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
+                        if (targetGimmick->type == GIMMICK_ROTATING_BRIDGE) sprintf_s(objName, sizeof(objName), "Selected: AUTO BRIDGE");
+                        else if (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) sprintf_s(objName, sizeof(objName), "Selected: MANUAL BRIDGE");
+                        else if (targetGimmick->type == GIMMICK_FALLING_LIFT) sprintf_s(objName, sizeof(objName), "Selected: FALLING LIFT");
+                        else if (targetGimmick->type == GIMMICK_REFLECT_MIRROR) sprintf_s(objName, sizeof(objName), "Selected: REFLECT MIRROR");
+                        else if (targetGimmick->type == GIMMICK_SCALABLE_BOX) sprintf_s(objName, sizeof(objName), "Selected: SCALABLE BOX");
+                        else if (targetGimmick->type == GIMMICK_WEIGHT_SWITCH) sprintf_s(objName, sizeof(objName), "Selected: WEIGHT SWITCH");
+                        else if (targetGimmick->type == GIMMICK_GATE_DOOR) sprintf_s(objName, sizeof(objName), "Selected: GATE DOOR");
+                        else if (targetGimmick->type == GIMMICK_CUT_PORTAL) sprintf_s(objName, sizeof(objName), "Selected: TIMELINE CUT");
+                    }
+                }
+                DrawString(WINDOW_WIDTH - 240, 50, objName, GetColor(0, 255, 255));
+                
+                if (targetScale != nullptr) {
+                    if (selectedType == SELECT_GIMMICK) {
+                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Width: %.0f", *targetScale);
+                    } else {
+                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Scale: %.2f", *targetScale);
+                    }
+                } else {
+                    DrawFormatString(WINDOW_WIDTH - 240, 80, GetColor(150, 150, 150), "Scale: N/A");
+                }
+
+                if (targetAngle != nullptr) {
+                    DrawFormatString(WINDOW_WIDTH - 240, 100, isInspAngle ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Angle: %.2f", *targetAngle);
+                } else {
+                    DrawFormatString(WINDOW_WIDTH - 240, 100, GetColor(150, 150, 150), "Angle: N/A");
+                }
+                
+                if (selectedType == SELECT_GIMMICK) {
+                    DrawFormatString(WINDOW_WIDTH - 240, 120, GetColor(150, 150, 150), "Speed: N/A");
+                } else {
+                    if (targetSpeedScale != nullptr) {
+                        DrawFormatString(WINDOW_WIDTH - 240, 120, isInspSpeed ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Speed: %.1f", *targetSpeedScale);
+                    } else {
+                        DrawFormatString(WINDOW_WIDTH - 240, 120, GetColor(150, 150, 150), "Speed: N/A");
+                    }
+                }
+
+                if (targetPaused != nullptr) {
+                    DrawFormatString(WINDOW_WIDTH - 240, 140, *targetPaused ? GetColor(255, 255, 100) : GetColor(200, 200, 200), "Pause: %s", *targetPaused ? "TRUE (||)" : "FALSE");
+                } else {
+                    DrawFormatString(WINDOW_WIDTH - 240, 140, GetColor(150, 150, 150), "Pause: N/A");
+                }
+
+                if (targetRewind != nullptr) {
+                    DrawFormatString(WINDOW_WIDTH - 240, 160, *targetRewind ? GetColor(255, 80, 80) : GetColor(200, 200, 200), "Rewind: %s", *targetRewind ? "TRUE (<<)" : "FALSE");
+                } else {
+                    DrawFormatString(WINDOW_WIDTH - 240, 160, GetColor(150, 150, 150), "Rewind: N/A");
+                }
+                
+                if (selectedType == SELECT_ENEMY && targetEnemyType != nullptr) {
+                    const char* typeName = "UNKNOWN";
+                    if (*targetEnemyType == ENEMY_PATROL) typeName = "PATROL";
+                    else if (*targetEnemyType == ENEMY_JUMPER) typeName = "JUMPER";
+                    else if (*targetEnemyType == ENEMY_STATIONARY) typeName = "STATIONARY";
+                    DrawFormatString(WINDOW_WIDTH - 240, 180, GetColor(0, 255, 0), "Type: %s", typeName);
+                }
+
+                DrawString(WINDOW_WIDTH - 240, 210, "(Drag values / click to toggle)", GetColor(150, 150, 150));
+            }
+
+            // 下部一時停止ボタン
+            DrawBox(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT - 90, WINDOW_WIDTH / 2 + 50, WINDOW_HEIGHT - 70, GetColor(80, 80, 80), TRUE);
+            DrawString(WINDOW_WIDTH / 2 - 25, WINDOW_HEIGHT - 85, isPaused ? "RESUME" : "PAUSE", GetColor(255, 255, 255));
+
+            // コンテキストメニューポップアップの描画
+            if (menu.isOpen) {
+                DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(50, 50, 50), TRUE);
+                DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(180, 180, 180), FALSE);
+
+                if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
+                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", GetColor(255, 100, 100)); // 目立つ赤色で "Delete Cut" を描画
+                } else {
+                    char rewindStr[32];
+                    sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
+                    char pausedStr[32];
+                    sprintf_s(pausedStr, sizeof(pausedStr), "Pause: %s", (targetPaused && *targetPaused) ? "ON" : "OFF");
+
+                    DrawString(menu.x + 10, menu.y + 10, rewindStr, GetColor(255, 255, 255));
+                    DrawString(menu.x + 10, menu.y + 35, pausedStr, GetColor(255, 255, 255));
+
+                    if (selectedType == SELECT_GIMMICK) {
+                        DrawString(menu.x + 10, menu.y + 60, "Speed: N/A", GetColor(120, 120, 120));
+                        DrawString(menu.x + 10, menu.y + 85, "Speed: N/A", GetColor(120, 120, 120));
+                        DrawString(menu.x + 10, menu.y + 110, "Flip: N/A", GetColor(120, 120, 120));
+                    } else {
+                        DrawString(menu.x + 10, menu.y + 60, "Speed +0.5", GetColor(255, 255, 255));
+                        DrawString(menu.x + 10, menu.y + 85, "Speed -0.5", GetColor(255, 255, 255));
+                        DrawString(menu.x + 10, menu.y + 110, "Flip Object", GetColor(255, 255, 255));
+                    }
+                    DrawString(menu.x + 10, menu.y + 135, "Reset All", GetColor(255, 255, 255));
+                }
+            }
+
+            // グローバル巻き戻しの視覚的フィードバックインジケータ
+            if (isRKeyPressed && selectedType == SELECT_NONE) {
+                static int blinkTimer = 0;
+                blinkTimer = (blinkTimer + 1) % 30;
+                if (blinkTimer < 15) {
+                    DrawString(WINDOW_WIDTH / 2 - 80, 20, "<< GLOBAL REWINDING", GetColor(255, 100, 100));
+                }
+            }
+
+            if (isPaused) {
+                DrawString(10, 10, "PROFESSIONAL EDIT MODE (PAUSED)", GetColor(255, 255, 0));
+            } else {
+                DrawString(10, 10, "PROFESSIONAL PLAY MODE (RUNNING)", GetColor(50, 255, 50));
+            }
+        } else {
+            DrawExtendGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen, TRUE);
+            if (isPaused) DrawString(WINDOW_WIDTH / 2 - 40, WINDOW_HEIGHT / 2, "PAUSED", GetColor(255, 255, 255));
+        }
+        // ImGuiのフレーム開始
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        if (isDedicatedEditorMode) {
+            // Stage Manager ウィンドウ
+            ImGui::Begin("Stage Manager");
+            ImGui::Text("Current: %s", currentStageFileName.c_str());
+            ImGui::Separator();
+            static char newStageName[128] = "new_stage";
+            ImGui::InputText("##newstg", newStageName, 128);
+            ImGui::SameLine();
+            if (ImGui::Button("Create New")) {
+                currentStageFileName = std::string(newStageName) + ".json";
+                editorPlacedEnemies.clear();
+                editorPlacedGimmicks.clear();
+                editorPlacedItems.clear();
+            }
+            ImGui::Separator();
+            ImGui::Text("Stage List:");
+            if (fs::exists("assets/stages")) {
+                for (const auto& entry : fs::directory_iterator("assets/stages")) {
+                    if (entry.path().extension() == ".json") {
+                        std::string fname = entry.path().filename().string();
+                        if (ImGui::Selectable(fname.c_str(), currentStageFileName == fname)) {
+                            currentStageFileName = fname;
+                            editorPlacedEnemies.clear(); editorPlacedGimmicks.clear(); editorPlacedItems.clear();
+                            std::ifstream sf("assets/stages/" + currentStageFileName);
+                            if (sf.is_open()) {
+                                json j = json::parse(sf, nullptr, false);
+                                if (j.is_discarded()) {
+                                    Logger::Error("DrawPixel", "EditorMode", "Failed to parse stage json", currentStageFileName);
+                                    continue;
+                                }
+                                if (j.contains("enemies")) {
+                                    for (auto& e : j["enemies"]) {
+                                        std::string id = e["id"];
+                                        int def_idx = -1;
+                                        for(int k=0; k<enemyDefs.size(); k++) { if(enemyDefs[k].id == id) { def_idx=k; break; } }
+                                        if (def_idx >= 0) editorPlacedEnemies.push_back({def_idx, e["x"], e["y"]});
+                                    }
+                                }
+                                if (j.contains("gimmicks")) {
+                                    for (auto& e : j["gimmicks"]) {
+                                        std::string id = e["id"];
+                                        int def_idx = -1;
+                                        for(int k=0; k<gimmickDefs.size(); k++) { if(gimmickDefs[k].id == id) { def_idx=k; break; } }
+                                        if (def_idx >= 0) {
+                                            PlacedGimmick pg = {def_idx, e["x"], e["y"], ""};
+                                            if (e.contains("param")) pg.stringParam = e["param"];
+                                            editorPlacedGimmicks.push_back(pg);
+                                        }
+                                    }
+                                }
+                                if (j.contains("items")) {
+                                    for (auto& e : j["items"]) {
+                                        std::string id = e["id"];
+                                        int def_idx = -1;
+                                        for(int k=0; k<itemDefs.size(); k++) { if(itemDefs[k].id == id) { def_idx=k; break; } }
+                                        if (def_idx >= 0) editorPlacedItems.push_back({def_idx, e["x"], e["y"]});
+                                    }
+                                }
+                                if (j.contains("player_capabilities")) {
+                                    auto caps = j["player_capabilities"];
+                                    editorPlayerCaps.canDoubleJump = caps["canDoubleJump"];
+                                    editorPlayerCaps.canDash = caps["canDash"];
+                                    editorPlayerCaps.canShootFireball = caps["canShootFireball"];
+                                    editorPlayerCaps.canFly = caps["canFly"];
+                                    editorPlayerCaps.baseJumpPower = caps["baseJumpPower"];
+                                    editorPlayerCaps.baseSpeed = caps["baseSpeed"];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ImGui::End();
+
+            // Tool Palette ウィンドウ
+            ImGui::Begin("Tool Palette");
+            static int selectedEnemyIdx = -1;
+            static int selectedGimmickIdx = -1;
+            static int selectedItemIdx = -1;
+            if (ImGui::CollapsingHeader("Enemies", ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (int i = 0; i < enemyDefs.size(); i++) {
+                    if (ImGui::Selectable(enemyDefs[i].name.c_str(), selectedEnemyIdx == i)) {
+                        selectedEnemyIdx = i; selectedGimmickIdx = -1; selectedItemIdx = -1;
+                    }
+                }
+            }
+            if (ImGui::CollapsingHeader("Gimmicks", ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (int i = 0; i < gimmickDefs.size(); i++) {
+                    if (ImGui::Selectable(gimmickDefs[i].name.c_str(), selectedGimmickIdx == i)) {
+                        selectedGimmickIdx = i; selectedEnemyIdx = -1; selectedItemIdx = -1;
+                    }
+                }
+            }
+            if (ImGui::CollapsingHeader("Items", ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (int i = 0; i < itemDefs.size(); i++) {
+                    if (ImGui::Selectable(itemDefs[i].name.c_str(), selectedItemIdx == i)) {
+                        selectedItemIdx = i; selectedEnemyIdx = -1; selectedGimmickIdx = -1;
+                    }
+                }
+            }
+            ImGui::Separator();
+            if (ImGui::Button(u8"ステージを保存 (Save)")) {
+                json stageData;
+                stageData["enemies"] = json::array();
+                for (auto& e : editorPlacedEnemies) {
+                    json j = { {"id", enemyDefs[e.def_idx].id}, {"x", e.x}, {"y", e.y} };
+                    stageData["enemies"].push_back(j);
+                }
+                stageData["gimmicks"] = json::array();
+                for (auto& g : editorPlacedGimmicks) {
+                    json j = { {"id", gimmickDefs[g.def_idx].id}, {"x", g.x}, {"y", g.y} };
+                    if (g.stringParam != "") j["param"] = g.stringParam;
+                    stageData["gimmicks"].push_back(j);
+                }
+                stageData["items"] = json::array();
+                for (auto& i : editorPlacedItems) {
+                    json j = { {"id", itemDefs[i.def_idx].id}, {"x", i.x}, {"y", i.y} };
+                    stageData["items"].push_back(j);
+                }
+                stageData["player_capabilities"] = {
+                    {"canDoubleJump", editorPlayerCaps.canDoubleJump},
+                    {"canDash", editorPlayerCaps.canDash},
+                    {"canShootFireball", editorPlayerCaps.canShootFireball},
+                    {"canFly", editorPlayerCaps.canFly},
+                    {"baseJumpPower", editorPlayerCaps.baseJumpPower},
+                    {"baseSpeed", editorPlayerCaps.baseSpeed}
+                };
+                std::ofstream ofs("assets/stages/" + currentStageFileName);
+                ofs << stageData.dump(4);
+            }
+            ImGui::Separator();
+            if (ImGui::Button(u8"プレイテスト開始 (Play Test)", ImVec2(-1, 30))) {
+                isDedicatedEditorMode = false;
+                try {
+                    std::ifstream sf("assets/stages/" + currentStageFileName);
+                    if (sf.is_open()) {
+                        json stageData = json::parse(sf, nullptr, false);
+                        if (stageData.is_discarded()) {
+                            Logger::Error("DrawPixel", "TestPlay", "Failed to parse stage json", currentStageFileName);
+                            continue;
+                        }
+                        player.x = 100.0f; player.y = 100.0f; player.vx = 0.0f; player.vy = 0.0f;
+                        if (stageData.contains("player_capabilities")) {
+                            auto caps = stageData["player_capabilities"];
+                            editorPlayerCaps.canDoubleJump = caps["canDoubleJump"];
+                            editorPlayerCaps.canDash = caps["canDash"];
+                            editorPlayerCaps.canShootFireball = caps["canShootFireball"];
+                            editorPlayerCaps.canFly = caps["canFly"];
+                            editorPlayerCaps.baseJumpPower = caps["baseJumpPower"];
+                            editorPlayerCaps.baseSpeed = caps["baseSpeed"];
+                        }
+                        enemies.clear();
+                        if (stageData.contains("enemies")) {
+                            for (auto& e : stageData["enemies"]) {
+                                std::string id = e["id"]; float x = e["x"]; float y = e["y"];
+                                int t_enum = 0; int pw = 32, ph = 32;
+                                for (auto& d : enemyDefs) { if (d.id == id) { t_enum = d.type_enum; pw = d.width; ph = d.height; break; } }
+                                enemies.push_back({ (EnemyType)t_enum, x, y, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, x - 200.0f, x + 200.0f, false, {} });
+                            }
+                        }
+                    }
+                } catch (...) {}
+            }
+            ImGui::End();
+
+            // Player Settings ウィンドウ
+            ImGui::Begin("Player Settings");
+            ImGui::Text("Initial Player Capabilities");
+            ImGui::Checkbox("Can Double Jump", &editorPlayerCaps.canDoubleJump);
+            ImGui::Checkbox("Can Dash", &editorPlayerCaps.canDash);
+            ImGui::Checkbox("Can Shoot Fireball", &editorPlayerCaps.canShootFireball);
+            ImGui::Checkbox("Can Fly", &editorPlayerCaps.canFly);
+            ImGui::SliderInt("Base Jump Power", &editorPlayerCaps.baseJumpPower, -20, -5);
+            ImGui::SliderFloat("Base Speed", &editorPlayerCaps.baseSpeed, 1.0f, 10.0f);
+            ImGui::End();
+
+            // Properties ウィンドウ
+            ImGui::Begin("Properties");
+            if (selectedEnemyIdx >= 0 && selectedEnemyIdx < enemyDefs.size()) {
+                ImGui::Text("Selected Enemy: %s", enemyDefs[selectedEnemyIdx].name.c_str());
+                ImGui::Image((void*)(intptr_t)enemyDefs[selectedEnemyIdx].graphHandle, ImVec2(64, 64));
+            } else if (selectedGimmickIdx >= 0 && selectedGimmickIdx < gimmickDefs.size()) {
+                ImGui::Text("Selected Gimmick: %s", gimmickDefs[selectedGimmickIdx].name.c_str());
+                ImGui::Image((void*)(intptr_t)gimmickDefs[selectedGimmickIdx].graphHandle, ImVec2(64, 64));
+                static char portalTarget[128] = "stage_02.json";
+                if (gimmickDefs[selectedGimmickIdx].id == "gim_portal") {
+                    ImGui::InputText("Target Stage", portalTarget, 128);
+                }
+            } else if (selectedItemIdx >= 0 && selectedItemIdx < itemDefs.size()) {
+                ImGui::Text("Selected Item: %s", itemDefs[selectedItemIdx].name.c_str());
+                ImGui::Image((void*)(intptr_t)itemDefs[selectedItemIdx].graphHandle, ImVec2(64, 64));
+                ImGui::Text("Grants: %s", itemDefs[selectedItemIdx].grant_ability.c_str());
+            }
+            ImGui::End();
+
+            // 配置処理
+            // 十字キー全押しでゲームを閉じる（エディタへ戻る）
+        if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN) && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) {
+            break;
+        }
+        int mx, my; GetMousePoint(&mx, &my);
+            static bool wasClick = false;
+            if ((GetMouseInput() & MOUSE_INPUT_LEFT) && !ImGui::GetIO().WantCaptureMouse) {
+                if (!wasClick) {
+                    if (selectedEnemyIdx >= 0) {
+                        editorPlacedEnemies.push_back({selectedEnemyIdx, (float)mx, (float)my});
+                    } else if (selectedGimmickIdx >= 0) {
+                        std::string prm = "";
+                        if (gimmickDefs[selectedGimmickIdx].id == "gim_portal") prm = "stage_02.json";
+                        editorPlacedGimmicks.push_back({selectedGimmickIdx, (float)mx, (float)my, prm});
+                    } else if (selectedItemIdx >= 0) {
+                        editorPlacedItems.push_back({selectedItemIdx, (float)mx, (float)my});
+                    }
+                }
+                wasClick = true;
+            } else {
+                wasClick = false;
+            }
+
+            // プレビュー描画（配置済みのものを描画）
+            for (auto& e : editorPlacedEnemies) DrawGraph((int)e.x, (int)e.y, enemyDefs[e.def_idx].graphHandle, TRUE);
+            for (auto& g : editorPlacedGimmicks) DrawGraph((int)g.x, (int)g.y, gimmickDefs[g.def_idx].graphHandle, TRUE);
+            for (auto& i : editorPlacedItems) DrawGraph((int)i.x, (int)i.y, itemDefs[i.def_idx].graphHandle, TRUE);
+        }
+
+        // F5キーでエディタに戻る
+        
+
+        ImGui::Render();
+        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+        
+        ImGuiIO& iof = ImGui::GetIO();
+        if (iof.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+            ImGui::UpdatePlatformWindows();
+            ImGui::RenderPlatformWindowsDefault();
+        }
+
+        ScreenFlip();
+    }
+
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    SoundManager::Get().Release();
+    DxLib_End();
+    return 0;
+}
+
+/*
+================================================================================
+【新規要素追加用 拡張テンプレート ＆ 実装ガイド】
+================================================================================
+今後、新しい敵(Enemy)、ステージギミック(Gimmick)、アイテム(Item)を追加する際は、
+以下の手順とテンプレートに従ってコードを追加してください。
+すべての要素はデータ指向で管理されているため、巻き戻し機能や一時停止と自動で同期します。
+
+--------------------------------------------------------------------------------
+1. 新しい「敵 (Enemy)」の追加手順
+--------------------------------------------------------------------------------
+[Step 1] `EnemyType` 列挙型に新しいタイプを追加します。
+    (例: `ENEMY_FLYING` を enum EnemyType に追加)
+
+[Step 2] 物理・更新ループ の `switch (enemy.type)` に新しいAI挙動を追加します。
+    【テンプレート】
+    case ENEMY_FLYING: {
+        // 空を飛ぶAIの処理
+        enemy.customTimer += ets;
+        enemy.vx = cosf(enemy.customTimer * 0.05f) * WALK_SPEED * 0.5f; // 波打つように動く
+        enemy.vy = 0.0f; // 重力を無視して空中浮遊
+        enemy.x += enemy.vx;
+        break;
+    }
+
+[Step 3] `WinMain` の初期化で、`enemy.type = ENEMY_FLYING` のようにタイプを指定して配置します。
+
+--------------------------------------------------------------------------------
+2. 新しい「ステージギミック (Gimmick)」の追加手順
+--------------------------------------------------------------------------------
+[Step 1] `GimmickType` 列挙型に新しいタイプを追加します。
+    (例: `GIMMICK_MOVING_FLOOR` (動く足場) を追加)
+
+[Step 2] 物理更新でのギミック更新処理を追加します。
+    【テンプレート】
+    case GIMMICK_MOVING_FLOOR: {
+        // 左右に自動で動く足場の処理
+        gim.customTimer += ts;
+        gim.x = gim.val1 + sinf(gim.customTimer * 0.03f) * gim.val2; // 初期位置 val1 から範囲 val2 で往復
+        break;
+    }
+
+[Step 3] 衝突判定（`CheckPlatformCollision`）や戦闘処理への適用：
+    ギミックがダメージ床なら、「Player vs Gimmick」の衝突判定を `Combat Collisions` に追加して、
+    プレイヤーをスタート地点へ戻す処理を記述します。
+
+[Step 4] 描画ループ内のギミック描画処理に新しい描画コードを追加します。
+
+--------------------------------------------------------------------------------
+3. 新しい「アイテム (Item)」の追加手順
+--------------------------------------------------------------------------------
+アイテムのベースデータ構造（Item, ItemState, ItemType）はすでに定義済みです。
+今後、マップ内に配置して回収できるようにするための手順です。
+
+[Step 1] `ItemType` 列挙型に新しいタイプを追加します。
+    (例: `ITEM_KEY` (鍵) を追加)
+
+[Step 2] `WinMain` に `std::vector<Item> items;` コンテナへの初期配置を追加します。
+    【テンプレート】
+    items.push_back({ ITEM_COIN, 800.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+
+[Step 3] 物理更新ループに「アイテムの更新・巻き戻し」を追加します。
+    【テンプレート】
+    for (auto& item : items) {
+        if (item.isRewinding) {
+            // アイテム回収状態の逆再生
+            if (!item.history.empty()) {
+                ItemState s = item.history.back();
+                item.history.pop_back();
+                item.x = s.x; item.y = s.y;
+                item.isCollected = s.isCollected;
+                if (!item.isCollected) item.isActive = true; // 回収前なら再出現
+            }
+        } else {
+            if (!isPaused || isStepFrame) {
+                // プレイヤーとの回収判定
+                if (item.isActive && !item.isCollected) {
+                    if (CheckCollision(player.x, player.y, pw, ph, item.x, item.y, item.width, item.height)) {
+                        item.isCollected = true;
+                        item.isActive = false; // 画面から消す
+                        // コイン獲得数増加などの処理
+                    }
+                }
+                item.history.push_back({ item.x, item.y, item.isCollected });
+            }
+        }
+    }
+
+[Step 4] 描画処理で `DrawCircle` や金色の矩形としてアイテムを描画します。
+    【テンプレート】
+    for (const auto& item : items) {
+        if (item.isActive && !item.isCollected) {
+            DrawCircle((int)(item.x - cameraX), (int)item.y, 8, GetColor(255, 215, 0), TRUE); // 金色のコイン
+        }
+    }
+================================================================================
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
