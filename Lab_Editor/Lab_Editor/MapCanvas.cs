@@ -26,7 +26,8 @@ public class MapCanvas : Panel
         PlayerStart,
         Goal,
         Trigger,         // Feature 5: トリガー矩形配置
-        TestPlay         // Feature 4: ここからプレイ（クリック位置取得）
+        TestPlay,        // Feature 4: ここからプレイ（クリック位置取得）
+        Eraser           // Eraser mode
     }
 
     // 現在の編集モード
@@ -53,6 +54,7 @@ public class MapCanvas : Panel
     // イベント
     public event EventHandler? ObjectSelected;
     public event EventHandler? StageModified;
+    public event EventHandler? EditCompleted;
 
     /// <summary>Feature 4: ここからプレイのクリック座標（ワールド座標）</summary>
     public event EventHandler<(float wx, float wy)>? TestPlayClicked;
@@ -76,6 +78,9 @@ public class MapCanvas : Panel
     // タイル画像マップ（Tile ID → Image）
     private Dictionary<int, Image> _tileImages = new();
 
+    // タイル通行設定（Tile ID → (当たり判定あり, 即死)）MZ風の通行設定可視化用
+    private Dictionary<int, (bool collidable, bool deadly)> _tileMeta = new();
+
     public string AssetsPath { get; set; } = "";
 
     // 装飾レイヤー用のやや暗い色変換（視覚的区別のため半透明表示）
@@ -88,6 +93,7 @@ public class MapCanvas : Panel
         _tileColors.Clear();
         foreach (var img in _tileImages.Values) { img.Dispose(); }
         _tileImages.Clear();
+        _tileMeta.Clear();
 
         foreach (var t in Assets.Tiles)
         {
@@ -100,6 +106,8 @@ public class MapCanvas : Panel
             {
                 _tileColors[t.id] = Color.Gray;
             }
+
+            _tileMeta[t.id] = (t.collidable, t.deadly);
 
             // 画像の読み込み
             if (!string.IsNullOrEmpty(t.sprite) && !string.IsNullOrEmpty(AssetsPath))
@@ -144,11 +152,17 @@ public class MapCanvas : Panel
 
         // ==== レイヤー描画順: 装飾後景 → メイン → 装飾前景 ====
 
+        bool isL1 = CurrentMode == EditMode.DecoLayerBack;
+        bool isL2 = CurrentMode == EditMode.Tile;
+        bool isL3 = CurrentMode == EditMode.DecoLayerFront;
+        bool isL4 = CurrentMode == EditMode.Trigger || CurrentMode == EditMode.PlayerStart || CurrentMode == EditMode.Goal || CurrentMode == EditMode.Enemy || CurrentMode == EditMode.Gimmick || CurrentMode == EditMode.Item;
+        bool isNeutral = CurrentMode == EditMode.Select || CurrentMode == EditMode.TestPlay || CurrentMode == EditMode.Eraser;
+
         // 1. 装飾レイヤー（後景）
-        DrawLayer(g, Stage.DecoLayerBack, startRow, endRow, startCol, endCol, isDecoBefore: true);
+        DrawLayer(g, Stage.DecoLayerBack, startRow, endRow, startCol, endCol, isDecoBefore: true, isActive: isL1 || isNeutral);
 
         // 2. メインタイルレイヤー
-        DrawLayer(g, Stage.Map, startRow, endRow, startCol, endCol, isDecoBefore: false);
+        DrawLayer(g, Stage.Map, startRow, endRow, startCol, endCol, isDecoBefore: false, isActive: isL2 || isNeutral);
 
         // 3. グリッド線
         using var gridPen = new Pen(Color.FromArgb(40, 0, 0, 0), 1);
@@ -158,7 +172,7 @@ public class MapCanvas : Panel
             g.DrawLine(gridPen, col * TILE_SIZE - ScrollX, 0, col * TILE_SIZE - ScrollX, Height);
 
         // 4. 装飾レイヤー（前景）
-        DrawLayer(g, Stage.DecoLayerFront, startRow, endRow, startCol, endCol, isDecoBefore: true);
+        DrawLayer(g, Stage.DecoLayerFront, startRow, endRow, startCol, endCol, isDecoBefore: true, isActive: isL3 || isNeutral);
 
         // 5. マップ外境界線
         int mapRight = Stage.MapW * TILE_SIZE - ScrollX;
@@ -172,6 +186,9 @@ public class MapCanvas : Panel
         // 7. ゴール (G)
         if (Stage.GoalX >= 0)
             DrawMarker(g, Stage.GoalX, Stage.GoalY, "G", Color.FromArgb(255, 215, 0));
+
+        // 7.5. 敵の巡回範囲プレビュー（MZ の移動ルートプレビュー風）
+        DrawPatrolRanges(g);
 
         // 8. 敵
         foreach (var en in Stage.Enemies)
@@ -202,7 +219,7 @@ public class MapCanvas : Panel
         DrawLayerIndicator(g);
     }
 
-    private void DrawLayer(Graphics g, int[,] layer, int startRow, int endRow, int startCol, int endCol, bool isDecoBefore)
+    private void DrawLayer(Graphics g, int[,] layer, int startRow, int endRow, int startCol, int endCol, bool isDecoBefore, bool isActive)
     {
         for (int row = startRow; row < endRow; row++)
         {
@@ -217,20 +234,20 @@ public class MapCanvas : Panel
                 {
                     // スプライト描画
                     g.DrawImage(img, px, py, TILE_SIZE, TILE_SIZE);
-                    // 装飾レイヤーの場合、少し暗くする（半透明黒を重ねる）
-                    if (isDecoBefore)
-                    {
-                        using var shade = new SolidBrush(Color.FromArgb(100, 0, 0, 0));
-                        g.FillRectangle(shade, px, py, TILE_SIZE, TILE_SIZE);
-                    }
                 }
                 else
                 {
                     // 画像がない場合は従来の色塗りつぶし
                     var baseColor = _tileColors.TryGetValue(tileId, out var c) ? c : Color.Gray;
-                    var drawColor = isDecoBefore ? DecoColor(baseColor) : baseColor;
-                    using var brush = new SolidBrush(drawColor);
+                    using var brush = new SolidBrush(baseColor);
                     g.FillRectangle(brush, px, py, TILE_SIZE, TILE_SIZE);
+                }
+
+                // 非アクティブレイヤーは暗くする（MZ風）
+                if (!isActive)
+                {
+                    using var shade = new SolidBrush(Color.FromArgb(120, 0, 0, 0));
+                    g.FillRectangle(shade, px, py, TILE_SIZE, TILE_SIZE);
                 }
 
                 // 装飾レイヤーには斜線ハッチング
@@ -239,7 +256,43 @@ public class MapCanvas : Panel
                     using var hatch = new HatchBrush(HatchStyle.ForwardDiagonal, Color.FromArgb(30, 255, 255, 255), Color.Transparent);
                     g.FillRectangle(hatch, px, py, TILE_SIZE, TILE_SIZE);
                 }
+
+                // メインレイヤーのみ：通行設定を可視化（MZ風）
+                if (!isDecoBefore && _tileMeta.TryGetValue(tileId, out var meta))
+                {
+                    if (meta.deadly)
+                    {
+                        using var deadlyPen = new Pen(Color.FromArgb(220, 255, 0, 0), 2);
+                        g.DrawLine(deadlyPen, px + 2, py + 2, px + TILE_SIZE - 2, py + TILE_SIZE - 2);
+                        g.DrawLine(deadlyPen, px + TILE_SIZE - 2, py + 2, px + 2, py + TILE_SIZE - 2);
+                    }
+                    else if (!meta.collidable)
+                    {
+                        using var passPen = new Pen(Color.FromArgb(200, 0, 220, 220), 1) { DashStyle = DashStyle.Dot };
+                        g.DrawRectangle(passPen, px + 1, py + 1, TILE_SIZE - 2, TILE_SIZE - 2);
+                    }
+                }
             }
+        }
+    }
+
+    private void DrawPatrolRanges(Graphics g)
+    {
+        float scale = (float)TILE_SIZE / GAME_TILE;
+        foreach (var en in Stage!.Enemies)
+        {
+            if (en.PatrolLeft < 0 || en.PatrolRight <= en.PatrolLeft) continue;
+
+            int lx = (int)(en.PatrolLeft * scale) - ScrollX;
+            int rx = (int)(en.PatrolRight * scale) - ScrollX;
+            int ly = (int)((en.Y + GAME_TILE / 2f) * scale) - ScrollY;
+            bool selected = SelectedObject == en;
+
+            using var patrolPen = new Pen(selected ? Color.Magenta : Color.FromArgb(170, 220, 60, 60), selected ? 2.5f : 1.5f)
+            { DashStyle = DashStyle.Dash };
+            g.DrawLine(patrolPen, lx, ly, rx, ly);
+            g.DrawLine(patrolPen, lx, ly - 5, lx, ly + 5);
+            g.DrawLine(patrolPen, rx, ly - 5, rx, ly + 5);
         }
     }
 
@@ -405,7 +458,13 @@ public class MapCanvas : Panel
             return;
         }
 
+        bool wasEditing = isDragging || isRightDrag;
         isDragging = isRightDrag = false;
+        
+        if (wasEditing)
+        {
+            EditCompleted?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private void HandleLeft(int cx, int cy)
@@ -417,6 +476,16 @@ public class MapCanvas : Panel
                 var (col, row) = ToTile(cx, cy);
                 if (Stage.Map[row, col] != SelectedTileId)
                 { Stage.Map[row, col] = SelectedTileId; Fire(); }
+                break;
+
+            case EditMode.Eraser:
+                var (colE, rowE) = ToTile(cx, cy);
+                bool deletedTile = false;
+                if (Stage.Map[rowE, colE] != 0) { Stage.Map[rowE, colE] = 0; deletedTile = true; }
+                if (Stage.DecoLayerBack[rowE, colE] != 0) { Stage.DecoLayerBack[rowE, colE] = 0; deletedTile = true; }
+                if (Stage.DecoLayerFront[rowE, colE] != 0) { Stage.DecoLayerFront[rowE, colE] = 0; deletedTile = true; }
+                if (deletedTile) { Fire(); }
+                DoDelete(cx, cy);
                 break;
 
             case EditMode.DecoLayerBack: // Feature 1
@@ -519,7 +588,6 @@ public class MapCanvas : Panel
         // トリガーも選択対象
         if (found == null) foreach (var t in Stage.Triggers)
             {
-                float scale = (float)TILE_SIZE / GAME_TILE;
                 if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) { found = t; break; }
             }
         SelectedObject = found;

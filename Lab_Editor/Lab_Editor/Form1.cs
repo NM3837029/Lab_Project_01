@@ -14,12 +14,16 @@ public partial class Form1 : Form
     private StageData? currentStage;
     private string currentStageFile = "";
     private bool _loading = false;
+    private HistoryManager historyMgr = new HistoryManager();
 
     private HashSet<Keys> pressedKeys = new();
 
+    // イベントリスト(Layer 4)の各行 ↔ 実オブジェクトの対応。"START"/"GOAL" は特別扱い。
+    private List<object?> _placedEventRefs = new();
+
     public Form1()
     {
-        projectRoot = FindProjectRoot();
+        projectRoot = AppPaths.ProjectRoot;
         assetsPath = Path.Combine(projectRoot, "assets");
         stagesPath = Path.Combine(assetsPath, "stages");
         exePath = Path.Combine(projectRoot, "x64", "Debug", "Lab_Project_01.exe");
@@ -29,18 +33,6 @@ public partial class Form1 : Form
         KeyPreview = true;
     }
 
-    private string FindProjectRoot()
-    {
-        string? dir = AppDomain.CurrentDomain.BaseDirectory;
-        while (!string.IsNullOrEmpty(dir))
-        {
-            if (File.Exists(Path.Combine(dir, "Lab_Project_01.vcxproj")))
-                return dir;
-            dir = Path.GetDirectoryName(dir);
-        }
-        return AppDomain.CurrentDomain.BaseDirectory;
-    }
-
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -48,6 +40,9 @@ public partial class Form1 : Form
         if (pressedKeys.Contains(Keys.Up) && pressedKeys.Contains(Keys.Down) &&
             pressedKeys.Contains(Keys.Left) && pressedKeys.Contains(Keys.Right))
         { pressedKeys.Clear(); LaunchGame(); }
+        
+        if (e.Control && e.KeyCode == Keys.Z) Undo();
+        if (e.Control && e.KeyCode == Keys.Y) Redo();
     }
     protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); pressedKeys.Remove(e.KeyCode); }
 
@@ -93,6 +88,8 @@ public partial class Form1 : Form
         try
         {
             currentStage = StageData.LoadFromFile(Path.Combine(stagesPath, currentStageFile));
+            historyMgr.Clear();
+            historyMgr.Push(currentStage);
 
             mapCanvas.Stage = currentStage;
             mapCanvas.Assets = assets;
@@ -117,6 +114,7 @@ public partial class Form1 : Form
             numMapH.Value = currentStage.MapH;
 
             lblCurrentStage.Text = $"編集中: {currentStageFile}  ({currentStage.MapW}×{currentStage.MapH}) | 敵:{currentStage.Enemies.Count} ギミック:{currentStage.Gimmicks.Count} トリガー:{currentStage.Triggers.Count}";
+            RefreshPlacedEvents();
         }
         finally { _loading = false; }
     }
@@ -219,35 +217,182 @@ public partial class Form1 : Form
         }
     }
 
-    // ===== ツールバー =====
-    private void rbTool_CheckedChanged(object? sender, EventArgs e)
+    // ===== Undo / Redo =====
+    private void Undo()
     {
-        if (rbTileMode.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
-        else if (rbErase.Checked)
+        if (historyMgr.CanUndo)
         {
-            // 消去モード: 現在のレイヤーに合わせて消去
-            if (mapCanvas.CurrentMode == MapCanvas.EditMode.DecoLayerBack) { mapCanvas.SelectedTileId = 0; }
-            else if (mapCanvas.CurrentMode == MapCanvas.EditMode.DecoLayerFront) { mapCanvas.SelectedTileId = 0; }
-            else { mapCanvas.CurrentMode = MapCanvas.EditMode.Tile; mapCanvas.SelectedTileId = 0; }
+            currentStage = historyMgr.Undo();
+            mapCanvas.Stage = currentStage;
+            mapCanvas.Invalidate();
+            SaveCurrentStage();
+            RefreshPlacedEvents();
         }
-        else if (rbDecoBack.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerBack; }   // Feature 1
-        else if (rbDecoFront.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerFront; } // Feature 1
-        else if (rbSelect.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Select;
+    }
+
+    private void Redo()
+    {
+        if (historyMgr.CanRedo)
+        {
+            currentStage = historyMgr.Redo();
+            mapCanvas.Stage = currentStage;
+            mapCanvas.Invalidate();
+            SaveCurrentStage();
+            RefreshPlacedEvents();
+        }
+    }
+
+    // ===== ツールバー・レイヤー =====
+    private void TsbLayer_Click(object? sender, EventArgs e)
+    {
+        tsbLayer1.Checked = sender == tsbLayer1;
+        tsbLayer2.Checked = sender == tsbLayer2;
+        tsbLayer3.Checked = sender == tsbLayer3;
+        tsbLayer4.Checked = sender == tsbLayer4;
+
+        if (tsbLayer1.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerBack; tabRight.SelectedTab = tabTilePalette; }
+        else if (tsbLayer2.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.Tile; tabRight.SelectedTab = tabTilePalette; }
+        else if (tsbLayer3.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerFront; tabRight.SelectedTab = tabTilePalette; }
+        else if (tsbLayer4.Checked) 
+        { 
+            // イベントモード時はイベント配置パレットを表示
+            tabRight.SelectedTab = tabEventPalette; 
+            UpdateEventModeSubTool();
+        }
+        UpdateLayerInfo();
+        mapCanvas.Invalidate();
+    }
+
+    private void TsbTool_Click(object? sender, EventArgs e)
+    {
+        tsbPen.Checked = sender == tsbPen;
+        tsbEraser.Checked = sender == tsbEraser;
+        tsbSelect.Checked = sender == tsbSelect;
+
+        if (tsbEraser.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Eraser;
+        else if (tsbSelect.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Select;
+        else if (tsbPen.Checked) 
+        {
+            // ペンに戻す際、現在のレイヤーに合わせたモードに戻す
+            TsbLayer_Click(tsbLayer1.Checked ? tsbLayer1 : (tsbLayer2.Checked ? tsbLayer2 : (tsbLayer3.Checked ? tsbLayer3 : tsbLayer4)), EventArgs.Empty);
+        }
+        UpdateLayerInfo();
+    }
+
+    private void EventModeItem_CheckedChanged(object? sender, EventArgs e)
+    {
+        if (tsbLayer4.Checked)
+            UpdateEventModeSubTool();
+    }
+
+    private void UpdateEventModeSubTool()
+    {
+        if (rbTrigger.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Trigger;
         else if (rbPlayerStart.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.PlayerStart;
         else if (rbGoal.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Goal;
-        else if (rbTrigger.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.Trigger; }           // Feature 5
+        else if (lstEnemies.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
+        else if (lstGimmicks.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Gimmick;
+        else if (lstItems.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Item;
+        else mapCanvas.CurrentMode = MapCanvas.EditMode.Select; // デフォルト
         UpdateLayerInfo();
+    }
+
+    // ===== 配置済みイベントリスト (Layer 4) =====
+    private void RefreshPlacedEvents()
+    {
+        lstPlacedEvents.Items.Clear();
+        _placedEventRefs.Clear();
+        if (currentStage == null) return;
+
+        lstPlacedEvents.Items.Add($"🚶 Start ({currentStage.PlayerStartX}, {currentStage.PlayerStartY})");
+        _placedEventRefs.Add("START");
+
+        if (currentStage.GoalX >= 0)
+        {
+            lstPlacedEvents.Items.Add($"🏁 Goal ({currentStage.GoalX}, {currentStage.GoalY})");
+            _placedEventRefs.Add("GOAL");
+        }
+
+        foreach (var t in currentStage.Triggers) { lstPlacedEvents.Items.Add($"⚡ {t.id} ({t.x},{t.y})"); _placedEventRefs.Add(t); }
+        foreach (var e in currentStage.Enemies) { lstPlacedEvents.Items.Add($"👾 {e.Id} ({e.X},{e.Y})"); _placedEventRefs.Add(e); }
+        foreach (var g in currentStage.Gimmicks) { lstPlacedEvents.Items.Add($"🔧 {g.Id} ({g.X},{g.Y})"); _placedEventRefs.Add(g); }
+        foreach (var i in currentStage.Items) { lstPlacedEvents.Items.Add($"💎 {i.Id} ({i.X},{i.Y})"); _placedEventRefs.Add(i); }
+    }
+
+    private void LstPlacedEvents_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        // リストで選択したらキャンバス上でも選択状態にする処理をここに入れる（拡張用）
+    }
+
+    // イベントリスト(Layer 4)をダブルクリックすると、該当オブジェクトへキャンバスをジャンプさせて選択する
+    // (MZの「リスト選択で該当イベントの編集画面に直接ジャンプ」に相当)。トリガーは編集ダイアログも開く。
+    private void LstPlacedEvents_DoubleClick(object? sender, EventArgs e)
+    {
+        int idx = lstPlacedEvents.SelectedIndex;
+        if (currentStage == null || idx < 0 || idx >= _placedEventRefs.Count) return;
+
+        switch (_placedEventRefs[idx])
+        {
+            case "START":
+                SelectAndScrollTo(null, currentStage.PlayerStartX, currentStage.PlayerStartY);
+                break;
+            case "GOAL":
+                if (currentStage.GoalX >= 0) SelectAndScrollTo(null, currentStage.GoalX, currentStage.GoalY);
+                break;
+            case EventTrigger t:
+                SelectAndScrollTo(t, t.x, t.y);
+                OpenTriggerEditor(t);
+                break;
+            case PlacedEnemy en:
+                SelectAndScrollTo(en, en.X, en.Y);
+                break;
+            case PlacedGimmick g:
+                SelectAndScrollTo(g, g.X, g.Y);
+                break;
+            case PlacedItem it:
+                SelectAndScrollTo(it, it.X, it.Y);
+                break;
+        }
+    }
+
+    // キャンバス上の指定オブジェクトへスクロールして選択状態にする
+    private void SelectAndScrollTo(object? target, float worldX, float worldY)
+    {
+        if (currentStage == null) return;
+        float scale = (float)MapCanvas.TILE_SIZE / MapCanvas.GAME_TILE;
+        int px = (int)(worldX * scale);
+        int py = (int)(worldY * scale);
+
+        int maxX = Math.Max(0, currentStage.MapW * MapCanvas.TILE_SIZE - mapCanvas.Width + 50);
+        int maxY = Math.Max(0, currentStage.MapH * MapCanvas.TILE_SIZE - mapCanvas.Height + 50);
+        int scrollX = Math.Clamp(px - mapCanvas.Width / 2, 0, maxX);
+        int scrollY = Math.Clamp(py - mapCanvas.Height / 2, 0, maxY);
+
+        mapCanvas.SelectedObject = target;
+        mapCanvas.ScrollX = scrollX;
+        mapCanvas.ScrollY = scrollY;
+        UpdateScrollBars();
+        hScrollMap.Value = Math.Min(scrollX, hScrollMap.Maximum);
+        vScrollMap.Value = Math.Min(scrollY, vScrollMap.Maximum);
+        propertyGrid.SelectedObject = target;
+        mapCanvas.Invalidate();
     }
 
     private void UpdateLayerInfo()
     {
         lblLayerInfo.Text = mapCanvas.CurrentMode switch
         {
-            MapCanvas.EditMode.DecoLayerBack => "🌿 後景装飾レイヤー編集中",
-            MapCanvas.EditMode.DecoLayerFront => "🌸 前景装飾レイヤー編集中",
-            MapCanvas.EditMode.Trigger => "⚡ トリガー配置（ドラッグで矩形）",
+            MapCanvas.EditMode.DecoLayerBack => "Layer 1: 遠景レイヤー編集中",
+            MapCanvas.EditMode.Tile => "Layer 2: メイン（地形）編集中",
+            MapCanvas.EditMode.DecoLayerFront => "Layer 3: 近景レイヤー編集中",
+            MapCanvas.EditMode.Trigger => "Layer 4: トリガー配置（ドラッグで矩形）",
+            MapCanvas.EditMode.PlayerStart => "Layer 4: 開始位置設定",
+            MapCanvas.EditMode.Goal => "Layer 4: ゴール設定",
+            MapCanvas.EditMode.Enemy => "Layer 4: 敵の配置",
+            MapCanvas.EditMode.Gimmick => "Layer 4: ギミックの配置",
+            MapCanvas.EditMode.Item => "Layer 4: アイテムの配置",
             MapCanvas.EditMode.TestPlay => "📍 クリックでテストプレイ開始位置を指定",
-            _ => ""
+            _ => "選択 / 消去 モード"
         };
     }
 
@@ -262,17 +407,26 @@ public partial class Form1 : Form
         }
     }
 
-    private void mapCanvas_StageModified(object? sender, EventArgs e)
-        => SaveCurrentStage();
+    // StageModified はドラッグ中のタイル1マスごとに何度も発火するため、
+    // ここでは即時保存せずキャンバスの再描画のみ行う（保存はストローク完了時の EditCompleted にまとめる）。
+    private void mapCanvas_StageModified(object? sender, EventArgs e) { }
 
-    // Feature 4: ここからプレイ — マップクリックでテストプレイ開始位置確定
+    private void mapCanvas_EditCompleted(object? sender, EventArgs e)
+    {
+        if (currentStage != null)
+        {
+            SaveCurrentStage();
+            historyMgr.Push(currentStage);
+        }
+    }
+
+    // Feature 4: ここからプレイ （マップクリックでテストプレイ開始位置確定）
     private void mapCanvas_TestPlayClicked(object? sender, (float wx, float wy) pos)
     {
         if (currentStage == null) return;
         // テストプレイモードを解除して通常モードへ戻す
-        rbTileMode.Checked = true;
-        mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
-        UpdateLayerInfo();
+        tsbLayer2.Checked = true;
+        TsbLayer_Click(tsbLayer2, EventArgs.Empty);
 
         // 一時JSONを生成して起動
         try
@@ -294,9 +448,19 @@ public partial class Form1 : Form
         OpenTriggerEditor(trigger, isNew: true);
     }
 
+    private List<string> GetStageFileNames()
+    {
+        if (!Directory.Exists(stagesPath)) return new List<string>();
+        return Directory.GetFiles(stagesPath, "*.json")
+            .Select(Path.GetFileName)
+            .Where(n => n != null && n != "_test_play.json")
+            .Select(n => n!)
+            .ToList();
+    }
+
     private void OpenTriggerEditor(EventTrigger trigger, bool isNew = false)
     {
-        var form = new EventEditorForm(trigger);
+        var form = new EventEditorForm(trigger, assets, GetStageFileNames());
         if (form.ShowDialog() == DialogResult.OK)
         {
             if (isNew && currentStage != null)
@@ -450,11 +614,12 @@ public partial class Form1 : Form
     // Feature 3: サウンド管理
     private void btnSoundMgr_Click(object? sender, EventArgs e)
     {
-        var form = new SoundManagerForm(projectRoot, assets.Bgm, assets.Se);
+        var form = new SoundManagerForm(projectRoot, assets.Bgm, assets.Se, assets.UiSe);
         if (form.ShowDialog() == DialogResult.OK)
         {
             assets.Bgm = form.ResultBgm;
             assets.Se = form.ResultSe;
+            assets.UiSe = form.ResultUiSe;
             assets.SaveToFolder(assetsPath);
             // ステージのBGM選択UIを更新（必要に応じて）
         }

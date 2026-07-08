@@ -7,25 +7,18 @@ namespace Lab_Editor;
 
 // ───────────────────────────────────────────────
 //  EventEditorForm
-//  EventTrigger の条件とアクションを編集するフォーム
+//  EventTrigger の条件とアクションを編集するフォーム (MZ風UI)
 // ───────────────────────────────────────────────
 public class EventEditorForm : Form
 {
     // ── 公開プロパティ ──────────────────────────
     public EventTrigger ResultTrigger { get; private set; } = null!;
 
-    // ── 条件型・アクション型 ─────────────────────
+    // ── 条件型 ──────────────────────────────────
     private static readonly string[] ConditionTypes =
     {
         "PlayerEnter", "PlayerExit", "AllEnemiesDefeated",
         "SwitchOn", "ItemCollected", "TimerExpired"
-    };
-
-    private static readonly string[] ActionTypes =
-    {
-        "ShowMessage", "ChangeBgm", "PlaySe", "ActivateGimmick",
-        "OpenDoor", "SpawnEnemy", "SpawnItem",
-        "MoveCamera", "StageClear", "GoToStage"
     };
 
     // ── コントロール ────────────────────────────
@@ -39,21 +32,16 @@ public class EventEditorForm : Form
     private TextBox           _txtCondParam   = null!;
     private CheckBox          _chkOneShot     = null!;
 
-    private DataGridView      _gridActions    = null!;
+    private ActionEditorControl _actionEditor = null!;
 
-    private Button            _btnAddAction   = null!;
-    private Button            _btnDelAction   = null!;
     private Button            _btnOk          = null!;
     private Button            _btnCancel      = null!;
 
-    private readonly EventTrigger _original;
-
     // ── コンストラクタ ─────────────────────────
-    public EventEditorForm(EventTrigger trigger)
+    public EventEditorForm(EventTrigger trigger, AssetDefinitions assets, List<string> stageFiles)
     {
-        // コピーを編集する
-        _original = trigger;
         InitializeComponent();
+        _actionEditor.SetContext(assets, stageFiles);
         LoadTrigger(trigger);
     }
 
@@ -61,7 +49,7 @@ public class EventEditorForm : Form
     private void InitializeComponent()
     {
         Text            = "イベント・トリガー編集";
-        Size            = new Size(720, 560);
+        Size            = new Size(720, 600);
         Font            = new Font("Meiryo UI", 9f);
         StartPosition   = FormStartPosition.CenterParent;
         MinimizeBox     = false;
@@ -96,7 +84,7 @@ public class EventEditorForm : Form
         AddSeparator(y); y += 14;
 
         // ── 条件セクション ───────────────────────
-        AddLabel("■ 条件", 10, y, bold: true); y += 24;
+        AddLabel("■ 実行条件", 10, y, bold: true); y += 24;
 
         AddLabel("条件タイプ:", 10, y);
         _cmbCondition = new ComboBox
@@ -125,21 +113,13 @@ public class EventEditorForm : Form
         // ── 仕切り線 ────────────────────────────
         AddSeparator(y); y += 14;
 
-        // ── アクションセクション ──────────────────
-        AddLabel("■ アクション", 10, y, bold: true); y += 24;
+        // ── アクションセクション (MZ風コマンドリスト) ────
+        AddLabel("■ 実行内容", 10, y, bold: true); y += 24;
 
-        _gridActions = BuildActionGrid();
-        _gridActions.Location = new Point(10, y);
-        _gridActions.Size     = new Size(688, 200);
-        Controls.Add(_gridActions);
-        y += 210;
+        _actionEditor = new ActionEditorControl { Location = new Point(10, y) };
+        Controls.Add(_actionEditor);
 
-        _btnAddAction = MakeButton("＋アクション追加", 10,  y, 150);
-        _btnDelAction = MakeButton("🗑 選択行削除",   168, y, 130);
-        _btnAddAction.Click += (_, _) => AddActionRow();
-        _btnDelAction.Click += BtnDelAction_Click;
-        Controls.AddRange(new Control[] { _btnAddAction, _btnDelAction });
-        y += 38;
+        y += _actionEditor.Height + 14;
 
         // ── 下部ボタン ──────────────────────────
         AddSeparator(y); y += 10;
@@ -157,53 +137,7 @@ public class EventEditorForm : Form
         Controls.AddRange(new Control[] { _btnOk, _btnCancel });
     }
 
-    // ── アクション DataGridView 生成 ─────────────
-    private DataGridView BuildActionGrid()
-    {
-        var grid = new DataGridView
-        {
-            AutoSizeColumnsMode   = DataGridViewAutoSizeColumnsMode.None,
-            AllowUserToAddRows    = false,
-            AllowUserToDeleteRows = false,
-            RowHeadersWidth       = 30,
-            SelectionMode         = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect           = false,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-            ColumnHeadersHeight   = 28,
-        };
-        grid.DataError += Grid_DataError;
-
-        // action 列（ComboBox）
-        var colAction = new DataGridViewComboBoxColumn
-        {
-            Name = "colAction", HeaderText = "action", Width = 140
-        };
-        colAction.Items.AddRange(ActionTypes);
-        grid.Columns.Add(colAction);
-
-        // param1 列
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colParam1", HeaderText = "param1", Width = 160
-        });
-
-        // param2 列
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colParam2", HeaderText = "param2", Width = 160
-        });
-
-        // delay 列
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colDelay", HeaderText = "delay", Width = 70,
-            ValueType = typeof(float)
-        });
-
-        return grid;
-    }
-
-    // ── トリガー読み込み ──────────────────────
+    // ── データ連携 ──────────────────────
     private void LoadTrigger(EventTrigger t)
     {
         _txtId.Text     = t.id ?? "";
@@ -217,90 +151,12 @@ public class EventEditorForm : Form
         int condIdx = Array.IndexOf(ConditionTypes, t.condition ?? "");
         _cmbCondition.SelectedIndex = condIdx >= 0 ? condIdx : 0;
 
-        _gridActions.Rows.Clear();
-        foreach (var act in t.actions ?? new List<EventActionEntry>())
-            AddActionRow(act);
-    }
-
-    private void AddActionRow(EventActionEntry? act = null)
-    {
-        int idx = _gridActions.Rows.Add();
-        var row  = _gridActions.Rows[idx];
-
-        string actionVal = act?.action ?? ActionTypes[0];
-        if (!ActionTypes.Contains(actionVal)) 
-        {
-            System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\warning_log.txt", $"[WARNING] EventEditorForm: Action '{actionVal}' is not valid. Auto-converted to default.\n");
-            actionVal = ActionTypes[0];
-        }
-        row.Cells["colAction"].Value = actionVal;
-        row.Cells["colParam1"].Value = act?.param1 ?? "";
-        row.Cells["colParam2"].Value = act?.param2 ?? "";
-        row.Cells["colDelay"].Value  = act?.delay  ?? 0f;
-    }
-
-    private void Grid_DataError(object? sender, DataGridViewDataErrorEventArgs e)
-    {
-        string colName = _gridActions.Columns[e.ColumnIndex].Name;
-        object val = _gridActions.Rows[e.RowIndex].Cells[e.ColumnIndex].Value;
-        string items = "";
-        int dsCount = 0;
-        if (_gridActions.Columns[e.ColumnIndex] is DataGridViewComboBoxColumn cb)
-        {
-            var ds = cb.Items;
-            if (ds != null && ds.Count > 0) {
-                var list = new List<string>();
-                foreach(var item in ds) list.Add(item.ToString() ?? "");
-                items = string.Join(", ", list);
-                dsCount = ds.Count;
-            }
-        }
-        string msg = $@"[DataGridViewComboBoxCell Error]
-Form: {this.Name}
-DataGridView: {_gridActions.Name}
-Row: {e.RowIndex}
-Col: {e.ColumnIndex}
-Column.Name: {colName}
-Column.HeaderText: {_gridActions.Columns[e.ColumnIndex].HeaderText}
-Cell.Value: '{val}'
-Cell.FormattedValue: '{_gridActions.Rows[e.RowIndex].Cells[e.ColumnIndex].FormattedValue}'
-Cell.ValueType: {_gridActions.Rows[e.RowIndex].Cells[e.ColumnIndex].ValueType}
-ComboBox.Items: [{items}]
-ComboBox.DataSourceCount: {dsCount}
-ValueMember: {(_gridActions.Columns[e.ColumnIndex] as DataGridViewComboBoxColumn)?.ValueMember}
-DisplayMember: {(_gridActions.Columns[e.ColumnIndex] as DataGridViewComboBoxColumn)?.DisplayMember}
-Exception.Message: {e.Exception.Message}
-Exception.StackTrace: {e.Exception.StackTrace}";
-
-        System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\error_detail.log", msg + "\n\n");
-        throw new Exception(msg, e.Exception);
-    }
-
-    // ── アクション削除 ────────────────────────
-    private void BtnDelAction_Click(object? sender, EventArgs e)
-    {
-        if (_gridActions.SelectedRows.Count == 0) return;
-        int idx = _gridActions.SelectedRows[0].Index;
-        if (idx >= 0) _gridActions.Rows.RemoveAt(idx);
+        _actionEditor.LoadActions(t.actions);
     }
 
     // ── 保存 ──────────────────────────────────
     private void BtnOk_Click(object? sender, EventArgs e)
     {
-        var actions = new List<EventActionEntry>();
-        foreach (DataGridViewRow row in _gridActions.Rows)
-        {
-            if (row.IsNewRow) continue;
-            float delay = float.TryParse(row.Cells["colDelay"].Value?.ToString(), out float d) ? d : 0f;
-            actions.Add(new EventActionEntry
-            {
-                action = row.Cells["colAction"].Value?.ToString() ?? "",
-                param1 = row.Cells["colParam1"].Value?.ToString() ?? "",
-                param2 = row.Cells["colParam2"].Value?.ToString() ?? "",
-                delay  = delay,
-            });
-        }
-
         ResultTrigger = new EventTrigger
         {
             id             = _txtId.Text,
@@ -311,7 +167,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             condition      = _cmbCondition.SelectedItem?.ToString() ?? "",
             conditionParam = _txtCondParam.Text,
             oneShot        = _chkOneShot.Checked,
-            actions        = actions,
+            actions        = _actionEditor.GetActions(),
         };
 
         DialogResult = DialogResult.OK;

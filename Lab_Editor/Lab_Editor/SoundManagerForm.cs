@@ -16,6 +16,7 @@ public class SoundManagerForm : Form
     // ── 公開プロパティ ──────────────────────────
     public List<SoundDef> ResultBgm { get; private set; } = new();
     public List<SoundDef> ResultSe  { get; private set; } = new();
+    public List<SoundDef> ResultUiSe { get; private set; } = new();
 
     // ── フィールド ─────────────────────────────
     private readonly string _projectRoot;
@@ -24,18 +25,21 @@ public class SoundManagerForm : Form
     private TabControl    _tabControl  = null!;
     private TabPage       _tabBgm      = null!;
     private TabPage       _tabSe       = null!;
+    private TabPage       _tabUi       = null!;
     private DataGridView  _gridBgm     = null!;
     private DataGridView  _gridSe      = null!;
+    private DataGridView  _gridUi      = null!;
 
     private Button _btnAddBgm    = null!;
     private Button _btnAddSe     = null!;
+    private Button _btnAddUi     = null!;
     private Button _btnSave      = null!;
     private Button _btnCancel    = null!;
 
     private SoundPlayer? _currentPlayer;
 
     // ── コンストラクタ ─────────────────────────
-    public SoundManagerForm(string projectRoot, List<SoundDef> bgm, List<SoundDef> se)
+    public SoundManagerForm(string projectRoot, List<SoundDef> bgm, List<SoundDef> se, List<SoundDef> uiSe)
     {
         _projectRoot = projectRoot;
         _soundsDir   = Path.Combine(projectRoot, "sound");
@@ -43,6 +47,7 @@ public class SoundManagerForm : Form
         InitializeComponent();
         PopulateGrid(_gridBgm, bgm, isBgm: true);
         PopulateGrid(_gridSe,  se,  isBgm: false);
+        PopulateGrid(_gridUi,  uiSe, isBgm: false);
     }
 
     // ── UI 構築 ────────────────────────────────
@@ -60,14 +65,18 @@ public class SoundManagerForm : Form
         _tabControl = new TabControl { Dock = DockStyle.Fill };
         _tabBgm     = new TabPage("🎵 BGM");
         _tabSe      = new TabPage("🔊 SE (効果音)");
+        _tabUi      = new TabPage("🔔 UI音");
 
         _gridBgm = BuildGrid(isBgm: true);
         _gridSe  = BuildGrid(isBgm: false);
+        _gridUi  = BuildGrid(isBgm: false);
 
         _tabBgm.Controls.Add(_gridBgm);
         _tabSe.Controls.Add(_gridSe);
+        _tabUi.Controls.Add(_gridUi);
         _tabControl.TabPages.Add(_tabBgm);
         _tabControl.TabPages.Add(_tabSe);
+        _tabControl.TabPages.Add(_tabUi);
 
         // ── Bottom Panel ────────────────────────
         var pnlBottom = new Panel
@@ -76,8 +85,9 @@ public class SoundManagerForm : Form
             Height = 44,
         };
 
-        _btnAddBgm = MakeButton("＋追加 (BGM)", 12,  6, 120);
-        _btnAddSe  = MakeButton("＋追加 (SE)",  144, 6, 120);
+        _btnAddBgm = MakeButton("＋追加 (BGM)", 12,  6, 110);
+        _btnAddSe  = MakeButton("＋追加 (SE)",  132, 6, 110);
+        _btnAddUi  = MakeButton("＋追加 (UI音)", 252, 6, 110);
         _btnSave   = MakeButton("💾 保存して閉じる", 480, 6, 160);
         _btnCancel = MakeButton("キャンセル",    648, 6, 100);
 
@@ -88,11 +98,12 @@ public class SoundManagerForm : Form
 
         _btnAddBgm.Click += (_, _) => AddRow(_gridBgm, isBgm: true);
         _btnAddSe.Click  += (_, _) => AddRow(_gridSe,  isBgm: false);
+        _btnAddUi.Click  += (_, _) => AddRow(_gridUi,  isBgm: false);
         _btnSave.Click   += BtnSave_Click;
         _btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
 
         pnlBottom.Controls.AddRange(new Control[]
-            { _btnAddBgm, _btnAddSe, _btnSave, _btnCancel });
+            { _btnAddBgm, _btnAddSe, _btnAddUi, _btnSave, _btnCancel });
 
         Controls.Add(_tabControl);
         Controls.Add(pnlBottom);
@@ -285,6 +296,7 @@ public class SoundManagerForm : Form
     {
         ResultBgm = ExtractSoundDefs(_gridBgm, isBgm: true);
         ResultSe  = ExtractSoundDefs(_gridSe,  isBgm: false);
+        ResultUiSe = ExtractSoundDefs(_gridUi, isBgm: false);
         DialogResult = DialogResult.OK;
         Close();
     }

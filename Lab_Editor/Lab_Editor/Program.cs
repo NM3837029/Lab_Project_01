@@ -8,18 +8,19 @@ static class Program
     [STAThread]
     static void Main()
     {
-        Application.ThreadException += (s, e) => 
+        string logPath = Path.Combine(AppPaths.LogsDir, "error_log.txt");
+        Application.ThreadException += (s, e) =>
         {
-            System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\error_log.txt", e.Exception.ToString() + "\n");
-            MessageBox.Show("Error logged to error_log.txt");
+            System.IO.File.AppendAllText(logPath, e.Exception.ToString() + "\n");
+            MessageBox.Show("Error logged to " + logPath);
         };
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
         AppDomain.CurrentDomain.UnhandledException += (s, e) =>
         {
-            System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\error_log.txt", e.ExceptionObject.ToString() + "\n");
+            System.IO.File.AppendAllText(logPath, e.ExceptionObject.ToString() + "\n");
         };
 
         ApplicationConfiguration.Initialize();
         Application.Run(new Form1());
-    }    
+    }
 }

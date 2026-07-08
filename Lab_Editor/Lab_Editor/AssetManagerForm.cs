@@ -18,6 +18,10 @@ public partial class AssetManagerForm : Form
 
     private TabControl tabControl = null!;
     private DataGridView dgvEnemies = null!, dgvGimmicks = null!, dgvItems = null!;
+    private ListBox lstCommonEvents = null!;
+    private List<CommonEventDef> _commonEvents = new();
+    private TextBox txtSearch = null!;
+    private Button btnDuplicate = null!;
     private PictureBox pbPreview = null!;
     private Label lblPreviewPath = null!;
     private Button btnSave = null!, btnClose = null!;
@@ -30,6 +34,22 @@ public partial class AssetManagerForm : Form
         (1, "1 = ジャンプ (Jumper)", "その場で定期的にジャンプします。重力が適用されます。"),
         (2, "2 = 固定砲台 (Stationary)", "プレイヤーに向いて定期的に弾を撃ちます。移動しません。"),
         (3, "3 = 巡回砲台 (Patrol+Shoot)", "近づいたプレイヤーを攻撃し、それ以外は巡回します。"),
+        (4, "4 = 歩いてくる (Walker)", "常にプレイヤー方向へ地上を歩きます。崖のふちで自動的に止まります。"),
+        (5, "5 = 追っかけてくる (Chaser)", "Walkerより速く追跡し、壁に当たると自動でジャンプします。"),
+        (6, "6 = 突進 (Dash Charger)", "射程内に入ると溜めてから高速直進で突進し、その後クールダウンします。"),
+        (7, "7 = 落ちてくる敵 (Faller)", "上空で待機し、プレイヤーが真下を通過すると落下してきます。"),
+        (8, "8 = 拡散弾 (Spread Shooter)", "固定位置から3方向に弾を拡散射撃します。"),
+        (9, "9 = 照準弾 (Aimed Shooter)", "発射時のプレイヤー位置へ正確に狙い撃ちます。"),
+        (10, "10 = 浮遊敵 (Floater)", "重力を受けず、サインカーブで上下に浮遊しながらゆっくり接近します。"),
+        (11, "11 = テレポーター (Teleporter)", "一定間隔でプレイヤー付近へ瞬間移動します。"),
+        (12, "12 = 分裂もどき (Shrinker)", "致死ダメージを受けると一度だけ縮小・高速化して復活します（2回目で死亡）。"),
+        (13, "13 = シールド (Shield)", "一定間隔で無敵状態（金色に発光）になり、弾によるダメージを無効化します。"),
+        (14, "14 = 幽霊敵 (Mimic Ghost)", "プレイヤーの巻き戻し履歴を約1.5秒遅延して再生し、過去の動きをなぞります。"),
+        (15, "15 = 大きさが変わる敵 (Size Shifter)", "scaleが周期的に変化し、当たり判定の大きさも連動して変わります。"),
+        (16, "16 = 速さ操作敵 (Tempo Warper)", "speedScaleが周期的に激しく変化し、接近速度が乱れます。"),
+        (17, "17 = 明るさ操作敵 (Brightness Phantom)", "射程内で画面を暗転させます（新画面エフェクト機能と連携）。"),
+        (18, "18 = 色調整敵 (Color Shifter)", "射程内で画面の色調を変化させます（新画面エフェクト機能と連携）。"),
+        (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
     };
     private static readonly (int type, string desc)[] GimmickTypes =
     {
@@ -47,6 +67,16 @@ public partial class AssetManagerForm : Form
         (11, "11 = ちくわブロック"),
         (12, "12 = 時間フィールド"),
         (13, "13 = 食らいギミック"),
+        (14, "14 = 動く足場 (Moving Platform)"),
+        (15, "15 = 岩 (Pushable Rock)"),
+        (16, "16 = 早送りゲート (Fastforward Gate)"),
+        (17, "17 = コマ送りリフト (Framestep Lift)"),
+        (18, "18 = 明暗ゾーン (Brightness Zone)"),
+        (19, "19 = 色調ゾーン (Color Zone)"),
+        (20, "20 = ズームレンズ (Zoom Lens)"),
+        (21, "21 = スローフィールド (Slowmo Field)"),
+        (22, "22 = 色ロック足場 (Color Lock Platform)"),
+        (23, "23 = 明暗ロック足場 (Brightness Lock Platform)"),
     };
     private static readonly (int type, string desc)[] ItemTypes =
     {
@@ -60,8 +90,22 @@ public partial class AssetManagerForm : Form
         this.assetsPath = assetsPath;
         this.projectRoot = Path.GetDirectoryName(assetsPath)!;
         this.assets = assets;
+        _commonEvents = assets.CommonEvents
+            .Select(ce => new CommonEventDef { id = ce.id, name = ce.name, actions = new List<EventActionEntry>(ce.actions) })
+            .ToList();
         InitUI();
         LoadData();
+    }
+
+    private List<string> GetStageFileNames()
+    {
+        string stagesPath = Path.Combine(assetsPath, "stages");
+        if (!Directory.Exists(stagesPath)) return new List<string>();
+        return Directory.GetFiles(stagesPath, "*.json")
+            .Select(Path.GetFileName)
+            .Where(n => n != null && n != "_test_play.json")
+            .Select(n => n!)
+            .ToList();
     }
 
     private void InitUI()
@@ -71,7 +115,16 @@ public partial class AssetManagerForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
-        tabControl = new TabControl { Location = new Point(5, 5), Size = new Size(820, 550) };
+        // ===== 検索・複製ツールバー (MZ風: ID/名前検索 + 選択行の複製) =====
+        var pnlToolbar = new Panel { Location = new Point(5, 5), Size = new Size(820, 30) };
+        var lblSearch = new Label { Text = "🔍", Location = new Point(0, 6), Size = new Size(20, 20) };
+        txtSearch = new TextBox { Location = new Point(20, 3), Size = new Size(260, 23), PlaceholderText = "ID・名前で検索..." };
+        txtSearch.TextChanged += (s, e) => ApplySearchFilter();
+        btnDuplicate = new Button { Text = "⧉ 選択行を複製", Location = new Point(290, 2), Size = new Size(130, 25) };
+        btnDuplicate.Click += BtnDuplicate_Click;
+        pnlToolbar.Controls.AddRange(new Control[] { lblSearch, txtSearch, btnDuplicate });
+
+        tabControl = new TabControl { Location = new Point(5, 38), Size = new Size(820, 517) };
 
         // ===== 右サイドパネル =====
         var pnlRight = new Panel { Location = new Point(835, 5), Size = new Size(250, 550), BorderStyle = BorderStyle.FixedSingle };
@@ -109,8 +162,18 @@ public partial class AssetManagerForm : Form
         dgvItems = CreateItemGrid();
         tabItems.Controls.Add(dgvItems);
 
-        tabControl.TabPages.AddRange(new TabPage[] { tabEnemies, tabGimmicks, tabItems });
-        tabControl.SelectedIndexChanged += (s, e) => UpdateTypeHint();
+        // ===== コモンイベントタブ (RPGツクールMZ風: 複数トリガーから呼び出せる共通処理) =====
+        var tabCommonEvents = new TabPage("🔔 コモンイベント");
+        lstCommonEvents = new ListBox { Location = new Point(5, 5), Size = new Size(790, 470), Font = new Font("Meiryo UI", 9) };
+        lstCommonEvents.DoubleClick += (s, e) => EditSelectedCommonEvent();
+        var btnCeEdit = new Button { Text = "✎ 編集", Location = new Point(5, 480), Size = new Size(100, 26) };
+        btnCeEdit.Click += (s, e) => EditSelectedCommonEvent();
+        var btnCeDelete = new Button { Text = "🗑 削除", Location = new Point(110, 480), Size = new Size(100, 26) };
+        btnCeDelete.Click += (s, e) => DeleteSelectedCommonEvent();
+        tabCommonEvents.Controls.AddRange(new Control[] { lstCommonEvents, btnCeEdit, btnCeDelete });
+
+        tabControl.TabPages.AddRange(new TabPage[] { tabEnemies, tabGimmicks, tabItems, tabCommonEvents });
+        tabControl.SelectedIndexChanged += (s, e) => { txtSearch.Text = ""; UpdateTypeHint(); };
 
         // ===== 下部ボタン =====
         var pnlBottom = new Panel { Location = new Point(5, 558), Size = new Size(1082, 40) };
@@ -136,9 +199,13 @@ public partial class AssetManagerForm : Form
         var btnAddItem = new Button { Text = "＋ アイテム追加", Location = new Point(235, 5), Size = new Size(120, 30) };
         btnAddItem.Click += (s, e) => AddRow(dgvItems, GetDefaultItemRow());
 
-        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnClose, btnSave });
+        var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", Location = new Point(360, 5), Size = new Size(150, 30) };
+        btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
 
-        Controls.AddRange(new Control[] { tabControl, pnlRight, pnlBottom });
+        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnClose, btnSave });
+
+        Controls.AddRange(new Control[] { pnlToolbar, tabControl, pnlRight, pnlBottom });
+        RefreshCommonEventsList();
         UpdateTypeHint();
     }
 
@@ -168,7 +235,14 @@ public partial class AssetManagerForm : Form
             new DataGridViewTextBoxColumn { Name="hp",     HeaderText="HP",        FillWeight=40 },
             new DataGridViewTextBoxColumn { Name="width",  HeaderText="幅px",       FillWeight=40 },
             new DataGridViewTextBoxColumn { Name="height", HeaderText="高さpx",     FillWeight=40 },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetX", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetY", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxWidth", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxHeight", Visible=false },
+            new DataGridViewTextBoxColumn { Name="scale", Visible=false },
             new DataGridViewTextBoxColumn { Name="sprite", HeaderText="画像パス",   FillWeight=160, ReadOnly=true },
+            new DataGridViewButtonColumn  { Name="btnHitbox", HeaderText="Hitbox", Text="🎯", UseColumnTextForButtonValue=true, FillWeight=35 },
+            new DataGridViewButtonColumn  { Name="btnSize",   HeaderText="Size",   Text="📏", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnSprite", HeaderText="📁選択",  Text="📁", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",   Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30 },
         });
@@ -202,7 +276,12 @@ public partial class AssetManagerForm : Form
                 DataSource = GimmickTypes.Select(t => t.desc).ToArray(),
                 DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton
             },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetX", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetY", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxWidth", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxHeight", Visible=false },
             new DataGridViewTextBoxColumn { Name="sprite", HeaderText="画像パス", FillWeight=200, ReadOnly=true },
+            new DataGridViewButtonColumn  { Name="btnHitbox", HeaderText="Hitbox", Text="🎯", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnSprite", HeaderText="📁選択", Text="📁", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30 },
         });
@@ -237,8 +316,13 @@ public partial class AssetManagerForm : Form
                 DataSource = ItemTypes.Select(t => t.desc).ToArray(),
                 DisplayStyle = DataGridViewComboBoxDisplayStyle.DropDownButton
             },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetX", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxOffsetY", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxWidth", Visible=false },
+            new DataGridViewTextBoxColumn { Name="hitboxHeight", Visible=false },
             new DataGridViewTextBoxColumn { Name="sprite",        HeaderText="画像パス",  FillWeight=180, ReadOnly=true },
             new DataGridViewTextBoxColumn { Name="grant_ability", HeaderText="付与能力",  FillWeight=100 },
+            new DataGridViewButtonColumn  { Name="btnHitbox", HeaderText="Hitbox", Text="🎯", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnSprite", HeaderText="📁選択", Text="📁", UseColumnTextForButtonValue=true, FillWeight=35 },
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30 },
         });
@@ -273,6 +357,35 @@ public partial class AssetManagerForm : Form
             dgv.Rows[e.RowIndex].Cells["sprite"].Value = relPath;
             ShowPreview(destPath);
             lblPreviewPath.Text = relPath;
+        }
+        else if (colName == "btnHitbox")
+        {
+            string spritePath = dgv.Rows[e.RowIndex].Cells["sprite"].Value?.ToString() ?? "";
+            string fullPath = string.IsNullOrEmpty(spritePath) ? "" : Path.Combine(projectRoot, spritePath);
+            int ox = IntCell(dgv.Rows[e.RowIndex], "hitboxOffsetX", 0);
+            int oy = IntCell(dgv.Rows[e.RowIndex], "hitboxOffsetY", 0);
+            int w = IntCell(dgv.Rows[e.RowIndex], "hitboxWidth", 32);
+            int h = IntCell(dgv.Rows[e.RowIndex], "hitboxHeight", 32);
+
+            using var form = new HitboxEditorForm(fullPath, ox, oy, w, h);
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                dgv.Rows[e.RowIndex].Cells["hitboxOffsetX"].Value = form.HitboxOffsetX;
+                dgv.Rows[e.RowIndex].Cells["hitboxOffsetY"].Value = form.HitboxOffsetY;
+                dgv.Rows[e.RowIndex].Cells["hitboxWidth"].Value = form.HitboxWidth;
+                dgv.Rows[e.RowIndex].Cells["hitboxHeight"].Value = form.HitboxHeight;
+            }
+        }
+        else if (colName == "btnSize")
+        {
+            string spritePath = dgv.Rows[e.RowIndex].Cells["sprite"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(spritePath)) { MessageBox.Show("先に画像を選択してください。", "サイズ調整", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            string fullPath = Path.Combine(projectRoot, spritePath);
+            float curScale = FloatCell(dgv.Rows[e.RowIndex], "scale", 1.0f);
+
+            using var form = new SizeEditorForm(fullPath, curScale);
+            if (form.ShowDialog() == DialogResult.OK)
+                dgv.Rows[e.RowIndex].Cells["scale"].Value = form.ResultScale;
         }
         else if (colName == "btnDel")
         {
@@ -319,7 +432,7 @@ DisplayMember: {(dgv.Columns[e.ColumnIndex] as DataGridViewComboBoxColumn)?.Disp
 Exception.Message: {e.Exception.Message}
 Exception.StackTrace: {e.Exception.StackTrace}";
 
-        System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\error_detail.log", msg + "\n\n");
+        System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "error_detail.log"), msg + "\n\n");
         throw new Exception(msg, e.Exception);
     }
 
@@ -398,6 +511,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                     rtbTypeHint.SelectionColor = Color.DarkGreen;
                     rtbTypeHint.AppendText(desc + "\n");
                 }
+                rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
+                rtbTypeHint.SelectionColor = Color.DarkGray;
+                rtbTypeHint.AppendText(
+                    "\n【param欄の使い方（マップ上に配置後、プロパティグリッドで編集）】\n" +
+                    "・色ロック足場: \"1\"=赤 / \"2\"=緑 / \"3\"=青（プレイヤーがTキーで切替する色フィルタと一致した時だけ実体化）\n" +
+                    "・明暗ロック足場: \"dark\"(既定)=画面が暗い時だけ実体化 / \"bright\"=明るい時だけ実体化\n" +
+                    "（プレイヤー側の操作: T=色フィルタ切替, Z=ズーム, X=暗転, C=明転, M=SEミュート）");
                 break;
             case 2:
                 rtbTypeHint.AppendText("【アイテムタイプ一覧】\n\n");
@@ -409,6 +529,12 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
                 rtbTypeHint.AppendText("\n【grant_ability フィールド】\n");
                 rtbTypeHint.AppendText("取得時にプレイヤーに付与する能力名を入力。\n例: canDoubleJump, canDash, canShootFireball\n");
+                break;
+            case 3:
+                rtbTypeHint.AppendText("【コモンイベントとは】\n\n");
+                rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
+                rtbTypeHint.SelectionColor = Color.DarkGray;
+                rtbTypeHint.AppendText("複数のトリガーから共通で呼び出せる一連のアクションです。\n\nトリガー編集画面のアクションで「CallCommonEvent」を選び、ここで定義したIDを指定すると呼び出せます。\n\n例: 「SE再生 → メッセージ表示 → アイテム付与」をまとめて1つのコモンイベントにし、複数の宝箱トリガーから使い回す。");
                 break;
         }
     }
@@ -422,10 +548,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             string typeLabel = EnemyTypes.FirstOrDefault(t => t.type == e.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !EnemyTypes.Any(t => t.desc == typeLabel)) 
             {
-                System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\warning_log.txt", $"[WARNING] AssetManagerForm: Enemy ID '{e.id}' has invalid type_enum '{e.type_enum}'. Auto-converted to default.\n");
+                System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Enemy ID '{e.id}' has invalid type_enum '{e.type_enum}'. Auto-converted to default.\n");
                 typeLabel = EnemyTypes[0].desc;
             }
-            dgvEnemies.Rows.Add(e.id, e.name, typeLabel, e.hp, e.width, e.height, e.sprite, "📁", "🗑");
+            dgvEnemies.Rows.Add(e.id, e.name, typeLabel, e.hp, e.width, e.height, e.hitboxOffsetX, e.hitboxOffsetY, e.hitboxWidth, e.hitboxHeight, e.scale, e.sprite, "🎯", "📏", "📁", "🗑");
         }
 
         dgvGimmicks.Rows.Clear();
@@ -434,10 +560,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             string typeLabel = GimmickTypes.FirstOrDefault(t => t.type == g.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !GimmickTypes.Any(t => t.desc == typeLabel)) 
             {
-                System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\warning_log.txt", $"[WARNING] AssetManagerForm: Gimmick ID '{g.id}' has invalid type_enum '{g.type_enum}'. Auto-converted to default.\n");
+                System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Gimmick ID '{g.id}' has invalid type_enum '{g.type_enum}'. Auto-converted to default.\n");
                 typeLabel = GimmickTypes[0].desc;
             }
-            dgvGimmicks.Rows.Add(g.id, g.name, typeLabel, g.sprite, "📁", "🗑");
+            dgvGimmicks.Rows.Add(g.id, g.name, typeLabel, g.hitboxOffsetX, g.hitboxOffsetY, g.hitboxWidth, g.hitboxHeight, g.sprite, "🎯", "📁", "🗑");
         }
 
         dgvItems.Rows.Clear();
@@ -446,10 +572,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             string typeLabel = ItemTypes.FirstOrDefault(t => t.type == i.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !ItemTypes.Any(t => t.desc == typeLabel)) 
             {
-                System.IO.File.AppendAllText("C:\\Users\\naots\\Documents\\OriginalGame\\warning_log.txt", $"[WARNING] AssetManagerForm: Item ID '{i.id}' has invalid type_enum '{i.type_enum}'. Auto-converted to default.\n");
+                System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Item ID '{i.id}' has invalid type_enum '{i.type_enum}'. Auto-converted to default.\n");
                 typeLabel = ItemTypes[0].desc;
             }
-            dgvItems.Rows.Add(i.id, i.name, typeLabel, i.sprite, i.grant_ability, "📁", "🗑");
+            dgvItems.Rows.Add(i.id, i.name, typeLabel, i.hitboxOffsetX, i.hitboxOffsetY, i.hitboxWidth, i.hitboxHeight, i.sprite, i.grant_ability, "🎯", "📁", "🗑");
         }
     }
 
@@ -459,6 +585,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         assets.Enemies = ReadEnemies();
         assets.Gimmicks = ReadGimmicks();
         assets.Items = ReadItems();
+        assets.CommonEvents = _commonEvents;
         assets.SaveToFolder(assetsPath);
         MessageBox.Show("アセット定義を保存しました！\n\n※画像はimgフォルダへコピー済みです。\nゲームを再ビルドすると新しいスプライトが反映されます。",
             "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -500,6 +627,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 hp = IntCell(row, "hp", 3),
                 width = IntCell(row, "width", 32),
                 height = IntCell(row, "height", 32),
+                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
+                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
+                hitboxWidth = IntCell(row, "hitboxWidth", 32),
+                hitboxHeight = IntCell(row, "hitboxHeight", 32),
+                scale = FloatCell(row, "scale", 1.0f),
                 sprite = row.Cells["sprite"].Value?.ToString() ?? ""
             });
         }
@@ -531,6 +663,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 id = id,
                 name = row.Cells["name"].Value?.ToString() ?? "",
                 type_enum = typeIdx,
+                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
+                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
+                hitboxWidth = IntCell(row, "hitboxWidth", 32),
+                hitboxHeight = IntCell(row, "hitboxHeight", 32),
                 sprite = row.Cells["sprite"].Value?.ToString() ?? ""
             });
         }
@@ -562,6 +698,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 id = id,
                 name = row.Cells["name"].Value?.ToString() ?? "",
                 type_enum = typeIdx,
+                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
+                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
+                hitboxWidth = IntCell(row, "hitboxWidth", 32),
+                hitboxHeight = IntCell(row, "hitboxHeight", 32),
                 sprite = row.Cells["sprite"].Value?.ToString() ?? "",
                 grant_ability = row.Cells["grant_ability"].Value?.ToString() ?? ""
             });
@@ -571,4 +711,174 @@ Exception.StackTrace: {e.Exception.StackTrace}";
 
     private static int IntCell(DataGridViewRow row, string col, int def = 0)
         => int.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
+
+    private static float FloatCell(DataGridViewRow row, string col, float def = 0f)
+        => float.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
+
+    // ===== コモンイベント =====
+    private void RefreshCommonEventsList()
+    {
+        lstCommonEvents.Items.Clear();
+        foreach (var ce in _commonEvents)
+            lstCommonEvents.Items.Add($"{ce.id} : {ce.name} ({ce.actions.Count}件)");
+    }
+
+    private void AddCommonEvent()
+    {
+        int n = _commonEvents.Count + 1;
+        string newId = $"common_event_{n}";
+        while (_commonEvents.Any(c => c.id == newId)) { n++; newId = $"common_event_{n}"; }
+
+        var form = new CommonEventEditorForm(new CommonEventDef { id = newId, name = "新しいコモンイベント" }, assets, GetStageFileNames());
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            _commonEvents.Add(form.ResultEvent);
+            RefreshCommonEventsList();
+        }
+    }
+
+    private void EditSelectedCommonEvent()
+    {
+        int idx = lstCommonEvents.SelectedIndex;
+        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("編集するコモンイベントを選択してください。"); return; }
+
+        var form = new CommonEventEditorForm(_commonEvents[idx], assets, GetStageFileNames());
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            _commonEvents[idx] = form.ResultEvent;
+            RefreshCommonEventsList();
+            lstCommonEvents.SelectedIndex = idx;
+        }
+    }
+
+    private void DeleteSelectedCommonEvent()
+    {
+        int idx = lstCommonEvents.SelectedIndex;
+        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("削除するコモンイベントを選択してください。"); return; }
+        if (MessageBox.Show($"コモンイベント「{_commonEvents[idx].id}」を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        _commonEvents.RemoveAt(idx);
+        RefreshCommonEventsList();
+    }
+
+    // ===== 検索フィルタ (MZ風 ID/名前検索) =====
+    private void ApplySearchFilter()
+    {
+        string q = txtSearch.Text.Trim();
+        switch (tabControl.SelectedIndex)
+        {
+            case 0: FilterGrid(dgvEnemies, q); break;
+            case 1: FilterGrid(dgvGimmicks, q); break;
+            case 2: FilterGrid(dgvItems, q); break;
+            case 3: FilterCommonEventsList(q); break;
+        }
+    }
+
+    private static void FilterGrid(DataGridView dgv, string query)
+    {
+        foreach (DataGridViewRow row in dgv.Rows)
+        {
+            if (row.IsNewRow) continue;
+            if (string.IsNullOrEmpty(query)) { row.Visible = true; continue; }
+            string id = row.Cells["id"].Value?.ToString() ?? "";
+            string name = dgv.Columns.Contains("name") ? row.Cells["name"].Value?.ToString() ?? "" : "";
+            row.Visible = id.Contains(query, StringComparison.OrdinalIgnoreCase) || name.Contains(query, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void FilterCommonEventsList(string query)
+    {
+        lstCommonEvents.Items.Clear();
+        var filtered = string.IsNullOrEmpty(query)
+            ? _commonEvents
+            : _commonEvents.Where(c => c.id.Contains(query, StringComparison.OrdinalIgnoreCase) || c.name.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        foreach (var ce in filtered)
+            lstCommonEvents.Items.Add($"{ce.id} : {ce.name} ({ce.actions.Count}件)");
+    }
+
+    // ===== 選択行の複製 (MZ風: 似た定義を素早く量産) =====
+    private void BtnDuplicate_Click(object? sender, EventArgs e)
+    {
+        switch (tabControl.SelectedIndex)
+        {
+            case 0: DuplicateEnemyRow(); break;
+            case 1: DuplicateGimmickRow(); break;
+            case 2: DuplicateItemRow(); break;
+            case 3: DuplicateCommonEvent(); break;
+        }
+    }
+
+    private static string MakeUniqueId(DataGridView dgv, string baseId)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataGridViewRow row in dgv.Rows)
+            if (!row.IsNewRow) existing.Add(row.Cells["id"].Value?.ToString() ?? "");
+
+        string candidate = baseId + "_copy";
+        int n = 2;
+        while (existing.Contains(candidate)) { candidate = $"{baseId}_copy{n}"; n++; }
+        return candidate;
+    }
+
+    private void DuplicateEnemyRow()
+    {
+        if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = dgvEnemies.SelectedRows[0];
+        string newId = MakeUniqueId(dgvEnemies, r.Cells["id"].Value?.ToString() ?? "enemy");
+        AddRow(dgvEnemies, new object[]
+        {
+            newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? EnemyTypes[0].desc,
+            r.Cells["hp"].Value ?? 3, r.Cells["width"].Value ?? 32, r.Cells["height"].Value ?? 32,
+            r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
+            r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
+            r.Cells["scale"].Value ?? 1.0f,
+            r.Cells["sprite"].Value ?? "", "🎯", "📏", "📁", "🗑"
+        });
+    }
+
+    private void DuplicateGimmickRow()
+    {
+        if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = dgvGimmicks.SelectedRows[0];
+        string newId = MakeUniqueId(dgvGimmicks, r.Cells["id"].Value?.ToString() ?? "gimmick");
+        AddRow(dgvGimmicks, new object[]
+        {
+            newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? GimmickTypes[0].desc,
+            r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
+            r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
+            r.Cells["sprite"].Value ?? "", "🎯", "📁", "🗑"
+        });
+    }
+
+    private void DuplicateItemRow()
+    {
+        if (dgvItems.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = dgvItems.SelectedRows[0];
+        string newId = MakeUniqueId(dgvItems, r.Cells["id"].Value?.ToString() ?? "item");
+        AddRow(dgvItems, new object[]
+        {
+            newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? ItemTypes[0].desc,
+            r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
+            r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
+            r.Cells["sprite"].Value ?? "", r.Cells["grant_ability"].Value ?? "", "🎯", "📁", "🗑"
+        });
+    }
+
+    private void DuplicateCommonEvent()
+    {
+        int idx = lstCommonEvents.SelectedIndex;
+        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("複製するコモンイベントを選択してください。"); return; }
+        var src = _commonEvents[idx];
+        var existing = new HashSet<string>(_commonEvents.Select(c => c.id), StringComparer.OrdinalIgnoreCase);
+        string newId = src.id + "_copy";
+        int n = 2;
+        while (existing.Contains(newId)) { newId = $"{src.id}_copy{n}"; n++; }
+
+        _commonEvents.Add(new CommonEventDef
+        {
+            id = newId,
+            name = src.name + "のコピー",
+            actions = src.actions.Select(a => new EventActionEntry { action = a.action, param1 = a.param1, param2 = a.param2, delay = a.delay }).ToList()
+        });
+        RefreshCommonEventsList();
+    }
 }

@@ -62,6 +62,15 @@ public class EventActionEntry
     public float delay { get; set; } = 0;
 }
 
+// ===== コモンイベント定義 (RPGツクールMZ の「コモンイベント」相当) =====
+// 複数のトリガーから CallCommonEvent アクションで共通処理を呼び出せる。
+public class CommonEventDef
+{
+    public string id { get; set; } = "";
+    public string name { get; set; } = "";
+    public List<EventActionEntry> actions { get; set; } = new();
+}
+
 public class EventTrigger
 {
     public string id { get; set; } = "";
@@ -483,6 +492,13 @@ public class EnemyDef
     public string seAttack { get; set; } = "";
     public string seDamage { get; set; } = "";
     public string seDeath { get; set; } = "";
+    // Hitbox (Feature: Visual Hitbox Editor)
+    public int hitboxOffsetX { get; set; } = 0;
+    public int hitboxOffsetY { get; set; } = 0;
+    public int hitboxWidth { get; set; } = 32;
+    public int hitboxHeight { get; set; } = 32;
+    // 表示スケール（Feature: Visual Size Editor）ゲーム内での表示サイズ倍率
+    public float scale { get; set; } = 1.0f;
 }
 
 public class GimmickDef
@@ -493,6 +509,11 @@ public class GimmickDef
     public string sprite { get; set; } = "";
     // サウンド SE (Feature 3)
     public string seActivate { get; set; } = "";
+    // Hitbox (Feature: Visual Hitbox Editor)
+    public int hitboxOffsetX { get; set; } = 0;
+    public int hitboxOffsetY { get; set; } = 0;
+    public int hitboxWidth { get; set; } = 32;
+    public int hitboxHeight { get; set; } = 32;
 }
 
 public class ItemDef
@@ -504,6 +525,11 @@ public class ItemDef
     public string grant_ability { get; set; } = "";
     // サウンド SE (Feature 3)
     public string seCollect { get; set; } = "";
+    // Hitbox (Feature: Visual Hitbox Editor)
+    public int hitboxOffsetX { get; set; } = 0;
+    public int hitboxOffsetY { get; set; } = 0;
+    public int hitboxWidth { get; set; } = 32;
+    public int hitboxHeight { get; set; } = 32;
 }
 
 public class AssetDefinitions
@@ -515,8 +541,13 @@ public class AssetDefinitions
     // サウンド定義 (Feature 3)
     public List<SoundDef> Bgm { get; set; } = new();
     public List<SoundDef> Se { get; set; } = new();
+    // UI音（ポーズ・早送り切替など）。再生時はSEと同じ名前空間で PlaySe(id) される。
+    public List<SoundDef> UiSe { get; set; } = new();
     // アニメーション定義 (Feature 2)
     public List<AnimationSet> Animations { get; set; } = new();
+
+    // コモンイベント定義 (RPGツクールMZ風)
+    public List<CommonEventDef> CommonEvents { get; set; } = new();
 
     public static AssetDefinitions LoadFromFolder(string assetsPath)
     {
@@ -527,7 +558,9 @@ public class AssetDefinitions
         defs.Tiles = LoadJson<TileDef>(Path.Combine(assetsPath, "tiles.json")) ?? defs.Tiles;
         defs.Bgm = LoadJson<SoundDef>(Path.Combine(assetsPath, "bgm.json")) ?? defs.Bgm;
         defs.Se = LoadJson<SoundDef>(Path.Combine(assetsPath, "se.json")) ?? defs.Se;
+        defs.UiSe = LoadJson<SoundDef>(Path.Combine(assetsPath, "ui_se.json")) ?? defs.UiSe;
         defs.Animations = LoadJson<AnimationSet>(Path.Combine(assetsPath, "animations.json")) ?? defs.Animations;
+        defs.CommonEvents = LoadJson<CommonEventDef>(Path.Combine(assetsPath, "common_events.json")) ?? defs.CommonEvents;
         return defs;
     }
 
@@ -545,6 +578,8 @@ public class AssetDefinitions
         File.WriteAllText(Path.Combine(assetsPath, "tiles.json"), JsonConvert.SerializeObject(Tiles, Formatting.Indented));
         File.WriteAllText(Path.Combine(assetsPath, "bgm.json"), JsonConvert.SerializeObject(Bgm, Formatting.Indented));
         File.WriteAllText(Path.Combine(assetsPath, "se.json"), JsonConvert.SerializeObject(Se, Formatting.Indented));
+        File.WriteAllText(Path.Combine(assetsPath, "ui_se.json"), JsonConvert.SerializeObject(UiSe, Formatting.Indented));
         File.WriteAllText(Path.Combine(assetsPath, "animations.json"), JsonConvert.SerializeObject(Animations, Formatting.Indented));
+        File.WriteAllText(Path.Combine(assetsPath, "common_events.json"), JsonConvert.SerializeObject(CommonEvents, Formatting.Indented));
     }
 }

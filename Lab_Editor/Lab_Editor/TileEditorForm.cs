@@ -13,6 +13,7 @@ public class TileEditorForm : Form
     private DataGridView dgv = null!;
     private Button btnAdd, btnSave, btnClose;
     private Panel pnlPreview;
+    private TextBox txtSearch = null!;
 
     public List<TileDef> ResultTiles => tiles;
 
@@ -36,11 +37,16 @@ public class TileEditorForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
+        // 検索ボックス (MZ風 ID/名前検索)
+        var lblSearch = new Label { Text = "🔍", Location = new Point(5, 6), Size = new Size(20, 20) };
+        txtSearch = new TextBox { Location = new Point(25, 3), Size = new Size(220, 23), PlaceholderText = "ID・名前で検索..." };
+        txtSearch.TextChanged += (s, e) => ApplySearchFilter();
+
         // DataGridView
         dgv = new DataGridView
         {
-            Location = new Point(5, 5),
-            Size = new Size(680, 440),
+            Location = new Point(5, 35),
+            Size = new Size(680, 410),
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -80,13 +86,16 @@ public class TileEditorForm : Form
         var btnDel = new Button { Text = "🗑 削除", Location = new Point(135, 455), Size = new Size(90, 30) };
         btnDel.Click += BtnDel_Click;
 
+        var btnDuplicate = new Button { Text = "⧉ 複製", Location = new Point(235, 455), Size = new Size(90, 30) };
+        btnDuplicate.Click += BtnDuplicate_Click;
+
         btnSave = new Button { Text = "💾 保存して閉じる", Location = new Point(570, 455), Size = new Size(150, 30), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnSave.Click += BtnSave_Click;
 
         btnClose = new Button { Text = "キャンセル", Location = new Point(460, 455), Size = new Size(100, 30) };
         btnClose.Click += (s, e) => Close();
 
-        Controls.AddRange(new Control[] { dgv, pnlPreview, btnAdd, btnDel, btnSave, btnClose });
+        Controls.AddRange(new Control[] { lblSearch, txtSearch, dgv, pnlPreview, btnAdd, btnDel, btnDuplicate, btnSave, btnClose });
     }
 
     private void LoadGrid()
@@ -160,6 +169,37 @@ public class TileEditorForm : Form
         if (id == 0) { MessageBox.Show("ID=0 のタイルは削除できません", "エラー"); return; }
         tiles.RemoveAll(t => t.id == id);
         LoadGrid();
+    }
+
+    private void ApplySearchFilter()
+    {
+        string q = txtSearch.Text.Trim();
+        foreach (DataGridViewRow row in dgv.Rows)
+        {
+            if (string.IsNullOrEmpty(q)) { row.Visible = true; continue; }
+            string id = row.Cells["id"].Value?.ToString() ?? "";
+            string name = row.Cells["name"].Value?.ToString() ?? "";
+            row.Visible = id.Contains(q, StringComparison.OrdinalIgnoreCase) || name.Contains(q, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void BtnDuplicate_Click(object? sender, EventArgs e)
+    {
+        if (dgv.SelectedRows.Count == 0) { MessageBox.Show("複製するタイルを選択してください。"); return; }
+        var row = dgv.SelectedRows[0];
+        int newId = tiles.Count > 0 ? tiles.Max(t => t.id) + 1 : 1;
+        var src = new TileDef
+        {
+            id = newId,
+            name = (row.Cells["name"].Value?.ToString() ?? "") + "のコピー",
+            color = row.Cells["color"].Value?.ToString() ?? "#CCCCCC",
+            collidable = row.Cells["collidable"].Value is true,
+            deadly = row.Cells["deadly"].Value is true,
+            sprite = row.Cells["sprite"].Value?.ToString() ?? ""
+        };
+        tiles.Add(src);
+        LoadGrid();
+        dgv.Rows[dgv.Rows.Count - 1].Selected = true;
     }
 
     private void BtnSave_Click(object? sender, EventArgs e)

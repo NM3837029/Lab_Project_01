@@ -4,20 +4,35 @@
     "name": "Double Jump Boots",
     "type_enum": 1,
     "sprite": "img/player.png",
-    "grant_ability": "DoubleJump"
+    "grant_ability": "DoubleJump",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32
   },
   {
     "id": "item_dash",
     "name": "Dash Ring",
     "type_enum": 2,
     "sprite": "img/player.png",
-    "grant_ability": "Dash"
+    "grant_ability": "Dash",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32
   },
   {
     "id": "item_fireball",
     "name": "Fire Flower",
-    "type_enum": 3,
+    "type_enum": 0,
     "sprite": "img/bullet.png",
-    "grant_ability": "ShootFireball"
+    "grant_ability": "ShootFireball",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32
   }
 ]

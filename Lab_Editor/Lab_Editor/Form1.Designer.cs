@@ -5,228 +5,279 @@ partial class Form1
     private System.ComponentModel.IContainer components = null;
     protected override void Dispose(bool disposing) { if (disposing && components != null) components.Dispose(); base.Dispose(disposing); }
 
+    // ===== メニュー・ツールバー =====
+    private System.Windows.Forms.MenuStrip menuStrip1 = null!;
+    private System.Windows.Forms.ToolStrip toolStrip1 = null!;
+    
     // ===== コントロール宣言 =====
     private MapCanvas mapCanvas = null!;
-    private HScrollBar hScrollMap = null!;
-    private VScrollBar vScrollMap = null!;
+    private System.Windows.Forms.HScrollBar hScrollMap = null!;
+    private System.Windows.Forms.VScrollBar vScrollMap = null!;
 
-    // 左パネル
-    private ListBox lstStages = null!;
-    private TextBox txtNewStage = null!;
-    private Button btnCreateStage = null!, btnDeleteStage = null!;
-    private NumericUpDown numStartX = null!, numStartY = null!;
-    private CheckBox chkDoubleJump = null!, chkDash = null!, chkFireball = null!, chkFly = null!;
-    private NumericUpDown numJumpPower = null!, numSpeed = null!;
-    private NumericUpDown numMapW = null!, numMapH = null!;
-    private Button btnResize = null!;
+    // 左パネル (TabControlで整理)
+    private System.Windows.Forms.TabControl tabLeft = null!;
+    private System.Windows.Forms.TabPage tabStages = null!;
+    private System.Windows.Forms.TabPage tabMapProps = null!;
 
-    // ツールバー
-    private RadioButton rbTileMode = null!, rbErase = null!, rbSelect = null!, rbPlayerStart = null!, rbGoal = null!;
-    private RadioButton rbDecoBack = null!, rbDecoFront = null!, rbTrigger = null!; // Feature 1,5
-    private Label lblCurrentStage = null!, lblStatus = null!, lblLayerInfo = null!;
+    private System.Windows.Forms.ListBox lstStages = null!;
+    private System.Windows.Forms.TextBox txtNewStage = null!;
+    private System.Windows.Forms.Button btnCreateStage = null!, btnDeleteStage = null!;
+    private System.Windows.Forms.Button btnImportCsv = null!;
 
-    // タイルパレット
-    private FlowLayoutPanel flpTiles = null!;
+    private System.Windows.Forms.NumericUpDown numStartX = null!, numStartY = null!;
+    private System.Windows.Forms.CheckBox chkDoubleJump = null!, chkDash = null!, chkFireball = null!, chkFly = null!;
+    private System.Windows.Forms.NumericUpDown numJumpPower = null!, numSpeed = null!;
+    private System.Windows.Forms.NumericUpDown numMapW = null!, numMapH = null!;
+    private System.Windows.Forms.Button btnResize = null!;
 
-    // 右パネル（敵・ギミック・アイテム）
-    private ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;
-    private PropertyGrid propertyGrid = null!;
+    // ツールバー用ボタン等
+    private System.Windows.Forms.ToolStripButton tsbLayer1 = null!;
+    private System.Windows.Forms.ToolStripButton tsbLayer2 = null!;
+    private System.Windows.Forms.ToolStripButton tsbLayer3 = null!;
+    private System.Windows.Forms.ToolStripButton tsbLayer4 = null!; // イベントモード
+    private System.Windows.Forms.ToolStripSeparator toolStripSeparator1 = null!;
+    private System.Windows.Forms.ToolStripButton tsbPen = null!;
+    private System.Windows.Forms.ToolStripButton tsbEraser = null!;
+    private System.Windows.Forms.ToolStripButton tsbSelect = null!;
+    private System.Windows.Forms.ToolStripSeparator toolStripSeparator2 = null!;
+    private System.Windows.Forms.ToolStripButton tsbPlay = null!;
+    private System.Windows.Forms.ToolStripButton tsbTestPlayHere = null!;
 
-    // ボタン
-    private Button btnPlay = null!, btnSave = null!, btnAssetManager = null!;
-    private Button btnTileEditor = null!, btnImportCsv = null!;
-    private Button btnTestPlay = null!;     // Feature 4
-    private Button btnBgSettings = null!;   // Feature 1
-    private Button btnSoundMgr = null!;     // Feature 3
-    private Button btnAnimEditor = null!;   // Feature 2
+    private System.Windows.Forms.Label lblCurrentStage = null!, lblStatus = null!, lblLayerInfo = null!;
+
+    // 右パネル (TabControl)
+    private System.Windows.Forms.TabControl tabRight = null!;
+    private System.Windows.Forms.TabPage tabTilePalette = null!;
+    private System.Windows.Forms.TabPage tabEventPalette = null!;
+    private System.Windows.Forms.TabPage tabEventList = null!;
+
+    private System.Windows.Forms.FlowLayoutPanel flpTiles = null!;
+
+    // イベントパレット（敵・ギミック・アイテム）
+    private System.Windows.Forms.ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;
+    private System.Windows.Forms.RadioButton rbTrigger = null!, rbPlayerStart = null!, rbGoal = null!;
+    
+    // イベントリスト (配置済み)
+    private System.Windows.Forms.ListBox lstPlacedEvents = null!;
+
+    // プロパティ
+    private System.Windows.Forms.PropertyGrid propertyGrid = null!;
 
     private void InitializeComponent()
     {
-        SuspendLayout();
+        this.SuspendLayout();
         var F = new System.Drawing.Font("Meiryo UI", 9);
         var FB = new System.Drawing.Font("Meiryo UI", 9, System.Drawing.FontStyle.Bold);
 
-        // ===== 左パネル (0,0) 180×680 =====
-        var panelLeft = new Panel { Location = new System.Drawing.Point(0, 0), Size = new System.Drawing.Size(180, 680), BorderStyle = BorderStyle.FixedSingle };
+        // ===== メニューバー =====
+        menuStrip1 = new System.Windows.Forms.MenuStrip();
+        var menuFile = new System.Windows.Forms.ToolStripMenuItem("ファイル(&F)");
+        var miSave = new System.Windows.Forms.ToolStripMenuItem("保存(&S)", null, btnSave_Click) { ShortcutKeys = System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.S };
+        var miExit = new System.Windows.Forms.ToolStripMenuItem("終了(&X)", null, (_,_) => this.Close());
+        menuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miSave, miExit });
 
-        var lblStages = new Label { Text = "📁 ステージ一覧", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(170, 20) };
-        lstStages = new ListBox { Font = F, Location = new System.Drawing.Point(5, 28), Size = new System.Drawing.Size(165, 160) };
+        var menuEdit = new System.Windows.Forms.ToolStripMenuItem("編集(&E)");
+        var miUndo = new System.Windows.Forms.ToolStripMenuItem("元に戻す(&U)", null, (_,_) => Undo()) { ShortcutKeys = System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Z };
+        var miRedo = new System.Windows.Forms.ToolStripMenuItem("やり直し(&R)", null, (_,_) => Redo()) { ShortcutKeys = System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Y };
+        menuEdit.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miUndo, miRedo });
+
+        var menuData = new System.Windows.Forms.ToolStripMenuItem("データベース(&D)");
+        var miAsset = new System.Windows.Forms.ToolStripMenuItem("アセット管理", null, btnAssetManager_Click);
+        var miTile = new System.Windows.Forms.ToolStripMenuItem("タイルエディタ", null, btnTileEditor_Click);
+        var miAnim = new System.Windows.Forms.ToolStripMenuItem("アニメーションエディタ", null, btnAnimEditor_Click);
+        var miSound = new System.Windows.Forms.ToolStripMenuItem("サウンド管理", null, btnSoundMgr_Click);
+        var miBg = new System.Windows.Forms.ToolStripMenuItem("背景設定", null, btnBgSettings_Click);
+        menuData.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miAsset, miTile, miAnim, miSound, miBg });
+
+        var menuPlay = new System.Windows.Forms.ToolStripMenuItem("プレイ(&P)");
+        var miPlay = new System.Windows.Forms.ToolStripMenuItem("テストプレイ", null, btnPlay_Click) { ShortcutKeys = System.Windows.Forms.Keys.F5 };
+        menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay });
+
+        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuPlay });
+
+        // ===== ツールバー =====
+        toolStrip1 = new System.Windows.Forms.ToolStrip();
+        
+        tsbLayer1 = new System.Windows.Forms.ToolStripButton("Layer 1 (遠景)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbLayer2 = new System.Windows.Forms.ToolStripButton("Layer 2 (メイン)") { CheckOnClick = true, Checked = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbLayer3 = new System.Windows.Forms.ToolStripButton("Layer 3 (近景)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbLayer4 = new System.Windows.Forms.ToolStripButton("Layer 4 (イベント)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        
+        tsbLayer1.Click += TsbLayer_Click;
+        tsbLayer2.Click += TsbLayer_Click;
+        tsbLayer3.Click += TsbLayer_Click;
+        tsbLayer4.Click += TsbLayer_Click;
+
+        toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
+
+        tsbPen = new System.Windows.Forms.ToolStripButton("🖊ペン") { CheckOnClick = true, Checked = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbEraser = new System.Windows.Forms.ToolStripButton("⬜消しゴム") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbSelect = new System.Windows.Forms.ToolStripButton("🔍選択") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        
+        tsbPen.Click += TsbTool_Click;
+        tsbEraser.Click += TsbTool_Click;
+        tsbSelect.Click += TsbTool_Click;
+
+        toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
+        tsbPlay = new System.Windows.Forms.ToolStripButton("▶ プレイ") { DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbPlay.Click += btnPlay_Click;
+        tsbTestPlayHere = new System.Windows.Forms.ToolStripButton("📍 ここから") { DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbTestPlayHere.Click += btnTestPlay_Click;
+
+        toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            tsbLayer1, tsbLayer2, tsbLayer3, tsbLayer4,
+            toolStripSeparator1,
+            tsbPen, tsbEraser, tsbSelect,
+            toolStripSeparator2,
+            tsbPlay, tsbTestPlayHere
+        });
+
+        // ===== 左パネル (TabControl) =====
+        tabLeft = new System.Windows.Forms.TabControl { Location = new System.Drawing.Point(0, 50), Size = new System.Drawing.Size(200, 630), Font = F };
+        tabStages = new System.Windows.Forms.TabPage("ステージ");
+        tabMapProps = new System.Windows.Forms.TabPage("マップ設定");
+
+        // ステージタブ
+        lstStages = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(180, 200) };
         lstStages.SelectedIndexChanged += lstStages_SelectedIndexChanged;
-
-        txtNewStage = new TextBox { Font = F, Location = new System.Drawing.Point(5, 193), Size = new System.Drawing.Size(165, 23), PlaceholderText = "新ステージ名..." };
-        btnCreateStage = new Button { Font = F, Text = "＋新規", Location = new System.Drawing.Point(5, 220), Size = new System.Drawing.Size(78, 26) };
+        txtNewStage = new System.Windows.Forms.TextBox { Location = new System.Drawing.Point(5, 210), Size = new System.Drawing.Size(180, 23), PlaceholderText = "新ステージ名..." };
+        btnCreateStage = new System.Windows.Forms.Button { Text = "＋新規", Location = new System.Drawing.Point(5, 240), Size = new System.Drawing.Size(85, 26) };
         btnCreateStage.Click += btnCreateStage_Click;
-        btnDeleteStage = new Button { Font = F, Text = "🗑削除", Location = new System.Drawing.Point(90, 220), Size = new System.Drawing.Size(78, 26) };
+        btnDeleteStage = new System.Windows.Forms.Button { Text = "🗑削除", Location = new System.Drawing.Point(100, 240), Size = new System.Drawing.Size(85, 26) };
         btnDeleteStage.Click += btnDeleteStage_Click;
+        btnImportCsv = new System.Windows.Forms.Button { Text = "CSVインポート", Location = new System.Drawing.Point(5, 275), Size = new System.Drawing.Size(180, 26) };
+        btnImportCsv.Click += btnImportCsv_Click;
+        
+        tabStages.Controls.AddRange(new System.Windows.Forms.Control[] { lstStages, txtNewStage, btnCreateStage, btnDeleteStage, btnImportCsv });
 
-        // マップサイズ
-        var lblSize = new Label { Text = "📐 マップサイズ", Font = FB, Location = new System.Drawing.Point(5, 255), Size = new System.Drawing.Size(170, 20) };
-        var lblW = new Label { Font = F, Text = "W:", Location = new System.Drawing.Point(5, 278), Size = new System.Drawing.Size(20, 18) };
-        numMapW = new NumericUpDown { Font = F, Location = new System.Drawing.Point(27, 276), Size = new System.Drawing.Size(55, 23), Minimum = 10, Maximum = 500, Value = 80 };
-        var lblH = new Label { Font = F, Text = "H:", Location = new System.Drawing.Point(87, 278), Size = new System.Drawing.Size(20, 18) };
-        numMapH = new NumericUpDown { Font = F, Location = new System.Drawing.Point(108, 276), Size = new System.Drawing.Size(45, 23), Minimum = 5, Maximum = 100, Value = 15 };
-        btnResize = new Button { Font = F, Text = "リサイズ", Location = new System.Drawing.Point(5, 303), Size = new System.Drawing.Size(165, 26) };
+        // マップ設定タブ
+        var lblSize = new System.Windows.Forms.Label { Text = "📐 マップサイズ", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(170, 20) };
+        var lblW = new System.Windows.Forms.Label { Text = "W:", Location = new System.Drawing.Point(5, 27), Size = new System.Drawing.Size(20, 18) };
+        numMapW = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(27, 25), Size = new System.Drawing.Size(55, 23), Minimum = 10, Maximum = 500, Value = 80 };
+        var lblH = new System.Windows.Forms.Label { Text = "H:", Location = new System.Drawing.Point(87, 27), Size = new System.Drawing.Size(20, 18) };
+        numMapH = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(108, 25), Size = new System.Drawing.Size(45, 23), Minimum = 5, Maximum = 100, Value = 15 };
+        btnResize = new System.Windows.Forms.Button { Text = "リサイズ", Location = new System.Drawing.Point(5, 50), Size = new System.Drawing.Size(150, 26) };
         btnResize.Click += btnResize_Click;
 
-        // プレイヤー設定
-        var lblPlayer = new Label { Text = "⚙ プレイヤー設定", Font = FB, Location = new System.Drawing.Point(5, 340), Size = new System.Drawing.Size(170, 20) };
-        var lblSX = new Label { Font = F, Text = "開始X:", Location = new System.Drawing.Point(5, 364), Size = new System.Drawing.Size(42, 18) };
-        numStartX = new NumericUpDown { Font = F, Location = new System.Drawing.Point(48, 362), Size = new System.Drawing.Size(65, 23), Maximum = 9999, Value = 48 };
+        var lblPlayer = new System.Windows.Forms.Label { Text = "⚙ プレイヤー設定", Font = FB, Location = new System.Drawing.Point(5, 85), Size = new System.Drawing.Size(170, 20) };
+        var lblSX = new System.Windows.Forms.Label { Text = "開始X:", Location = new System.Drawing.Point(5, 110), Size = new System.Drawing.Size(42, 18) };
+        numStartX = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(48, 108), Size = new System.Drawing.Size(65, 23), Maximum = 9999, Value = 48 };
         numStartX.ValueChanged += PlayerSetting_Changed;
-        var lblSY = new Label { Font = F, Text = "Y:", Location = new System.Drawing.Point(118, 364), Size = new System.Drawing.Size(18, 18) };
-        numStartY = new NumericUpDown { Font = F, Location = new System.Drawing.Point(132, 362), Size = new System.Drawing.Size(38, 23), Maximum = 9999, Value = 320 };
+        var lblSY = new System.Windows.Forms.Label { Text = "Y:", Location = new System.Drawing.Point(118, 110), Size = new System.Drawing.Size(18, 18) };
+        numStartY = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(135, 108), Size = new System.Drawing.Size(55, 23), Maximum = 9999, Value = 320 };
         numStartY.ValueChanged += PlayerSetting_Changed;
 
-        chkDoubleJump = new CheckBox { Font = F, Text = "2段ジャンプ", Location = new System.Drawing.Point(5, 390), Size = new System.Drawing.Size(168, 20) };
+        chkDoubleJump = new System.Windows.Forms.CheckBox { Text = "2段ジャンプ", Location = new System.Drawing.Point(5, 140), Size = new System.Drawing.Size(168, 20) };
         chkDoubleJump.CheckedChanged += PlayerSetting_Changed;
-        chkDash = new CheckBox { Font = F, Text = "ダッシュ", Location = new System.Drawing.Point(5, 412), Size = new System.Drawing.Size(168, 20) };
+        chkDash = new System.Windows.Forms.CheckBox { Text = "ダッシュ", Location = new System.Drawing.Point(5, 165), Size = new System.Drawing.Size(168, 20) };
         chkDash.CheckedChanged += PlayerSetting_Changed;
-        chkFireball = new CheckBox { Font = F, Text = "火の玉", Location = new System.Drawing.Point(5, 434), Size = new System.Drawing.Size(168, 20) };
+        chkFireball = new System.Windows.Forms.CheckBox { Text = "火の玉", Location = new System.Drawing.Point(5, 190), Size = new System.Drawing.Size(168, 20) };
         chkFireball.CheckedChanged += PlayerSetting_Changed;
-        chkFly = new CheckBox { Font = F, Text = "飛行", Location = new System.Drawing.Point(5, 456), Size = new System.Drawing.Size(168, 20) };
+        chkFly = new System.Windows.Forms.CheckBox { Text = "飛行", Location = new System.Drawing.Point(5, 215), Size = new System.Drawing.Size(168, 20) };
         chkFly.CheckedChanged += PlayerSetting_Changed;
 
-        var lblJP = new Label { Font = F, Text = "ジャンプ力:", Location = new System.Drawing.Point(5, 482), Size = new System.Drawing.Size(68, 18) };
-        numJumpPower = new NumericUpDown { Font = F, Location = new System.Drawing.Point(78, 480), Size = new System.Drawing.Size(50, 23), Minimum = -30, Maximum = 0, Value = -12 };
+        var lblJP = new System.Windows.Forms.Label { Text = "ジャンプ力:", Location = new System.Drawing.Point(5, 245), Size = new System.Drawing.Size(75, 18) };
+        numJumpPower = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(85, 243), Size = new System.Drawing.Size(50, 23), Minimum = -30, Maximum = 0, Value = -12 };
         numJumpPower.ValueChanged += PlayerSetting_Changed;
-        var lblSp = new Label { Font = F, Text = "移動速度:", Location = new System.Drawing.Point(5, 508), Size = new System.Drawing.Size(68, 18) };
-        numSpeed = new NumericUpDown { Font = F, Location = new System.Drawing.Point(78, 506), Size = new System.Drawing.Size(50, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 20, Value = 4 };
+        var lblSp = new System.Windows.Forms.Label { Text = "移動速度:", Location = new System.Drawing.Point(5, 275), Size = new System.Drawing.Size(75, 18) };
+        numSpeed = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(85, 273), Size = new System.Drawing.Size(50, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 20, Value = 4 };
         numSpeed.ValueChanged += PlayerSetting_Changed;
 
-        panelLeft.Controls.AddRange(new Control[] {
-            lblStages, lstStages, txtNewStage, btnCreateStage, btnDeleteStage,
+        tabMapProps.Controls.AddRange(new System.Windows.Forms.Control[] {
             lblSize, lblW, numMapW, lblH, numMapH, btnResize,
             lblPlayer, lblSX, numStartX, lblSY, numStartY,
             chkDoubleJump, chkDash, chkFireball, chkFly,
             lblJP, numJumpPower, lblSp, numSpeed
         });
 
-        // ===== ツールバー (180,0) 700×52 (2行に拡張) =====
-        var panelTools = new Panel { Location = new System.Drawing.Point(180, 0), Size = new System.Drawing.Size(700, 50), BackColor = System.Drawing.Color.FromArgb(240, 240, 245), BorderStyle = BorderStyle.FixedSingle };
+        tabLeft.Controls.Add(tabStages);
+        tabLeft.Controls.Add(tabMapProps);
 
-        // 1行目: 基本編集ツール
-        rbTileMode = new RadioButton { Font = F, Text = "🖊メイン", Location = new System.Drawing.Point(5, 4), Size = new System.Drawing.Size(72, 20), Checked = true };
-        rbTileMode.CheckedChanged += rbTool_CheckedChanged;
-        rbErase = new RadioButton { Font = F, Text = "⬜消去", Location = new System.Drawing.Point(80, 4), Size = new System.Drawing.Size(65, 20) };
-        rbErase.CheckedChanged += rbTool_CheckedChanged;
-        rbDecoBack = new RadioButton { Font = F, Text = "🌿後景Deco", Location = new System.Drawing.Point(148, 4), Size = new System.Drawing.Size(88, 20) };
-        rbDecoBack.CheckedChanged += rbTool_CheckedChanged;
-        rbDecoFront = new RadioButton { Font = F, Text = "🌸前景Deco", Location = new System.Drawing.Point(239, 4), Size = new System.Drawing.Size(88, 20) };
-        rbDecoFront.CheckedChanged += rbTool_CheckedChanged;
-        rbSelect = new RadioButton { Font = F, Text = "🔍選択", Location = new System.Drawing.Point(330, 4), Size = new System.Drawing.Size(65, 20) };
-        rbSelect.CheckedChanged += rbTool_CheckedChanged;
-        rbPlayerStart = new RadioButton { Font = F, Text = "🚶開始", Location = new System.Drawing.Point(398, 4), Size = new System.Drawing.Size(65, 20) };
-        rbPlayerStart.CheckedChanged += rbTool_CheckedChanged;
-        rbGoal = new RadioButton { Font = F, Text = "🏁ゴール", Location = new System.Drawing.Point(466, 4), Size = new System.Drawing.Size(72, 20) };
-        rbGoal.CheckedChanged += rbTool_CheckedChanged;
-        rbTrigger = new RadioButton { Font = F, Text = "⚡トリガー", Location = new System.Drawing.Point(541, 4), Size = new System.Drawing.Size(80, 20) };
-        rbTrigger.CheckedChanged += rbTool_CheckedChanged;
+        // ===== 右パネル (TabControl) =====
+        tabRight = new System.Windows.Forms.TabControl { Location = new System.Drawing.Point(890, 50), Size = new System.Drawing.Size(220, 630), Font = F };
+        tabTilePalette = new System.Windows.Forms.TabPage("タイル");
+        tabEventPalette = new System.Windows.Forms.TabPage("配置対象");
+        tabEventList = new System.Windows.Forms.TabPage("イベントリスト");
 
-        // 2行目: ラベル
-        lblCurrentStage = new Label { Font = new System.Drawing.Font("Meiryo UI", 7, System.Drawing.FontStyle.Bold), Text = "編集中: ---", Location = new System.Drawing.Point(5, 30), Size = new System.Drawing.Size(480, 16), ForeColor = System.Drawing.Color.DarkBlue };
-        lblLayerInfo = new Label { Font = new System.Drawing.Font("Meiryo UI", 7), Text = "", Location = new System.Drawing.Point(490, 30), Size = new System.Drawing.Size(200, 16), ForeColor = System.Drawing.Color.DarkGreen };
+        flpTiles = new System.Windows.Forms.FlowLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight, AutoScroll = true };
+        tabTilePalette.Controls.Add(flpTiles);
 
-        panelTools.Controls.AddRange(new Control[] {
-            rbTileMode, rbErase, rbDecoBack, rbDecoFront, rbSelect, rbPlayerStart, rbGoal, rbTrigger,
-            lblCurrentStage, lblLayerInfo
-        });
-
-        // ===== タイルパレット (180,50) 700×60 =====
-        var panelTiles = new Panel { Location = new System.Drawing.Point(180, 50), Size = new System.Drawing.Size(700, 55), BorderStyle = BorderStyle.FixedSingle, BackColor = System.Drawing.Color.FromArgb(250, 250, 250) };
-        var lblTilePal = new Label { Text = "🧱タイル:", Font = FB, Location = new System.Drawing.Point(4, 4), Size = new System.Drawing.Size(55, 18) };
-        flpTiles = new FlowLayoutPanel { Location = new System.Drawing.Point(60, 2), Size = new System.Drawing.Size(635, 50), FlowDirection = FlowDirection.LeftToRight, AutoScroll = true };
-        panelTiles.Controls.AddRange(new Control[] { lblTilePal, flpTiles });
-
-        // ===== マップキャンバス (180,105) 682×475 =====
-        mapCanvas = new MapCanvas { Location = new System.Drawing.Point(180, 105), Size = new System.Drawing.Size(682, 475), BorderStyle = BorderStyle.FixedSingle };
-        mapCanvas.ObjectSelected += mapCanvas_ObjectSelected;
-        mapCanvas.StageModified += mapCanvas_StageModified;
-        mapCanvas.TestPlayClicked += mapCanvas_TestPlayClicked;         // Feature 4
-        mapCanvas.TriggerPlaced += mapCanvas_TriggerPlaced;            // Feature 5
-
-        hScrollMap = new HScrollBar { Location = new System.Drawing.Point(180, 580), Size = new System.Drawing.Size(682, 18), Minimum = 0, Maximum = 1800, LargeChange = 200 };
-        hScrollMap.Scroll += hScrollMap_Scroll;
-
-        vScrollMap = new VScrollBar { Location = new System.Drawing.Point(862, 105), Size = new System.Drawing.Size(18, 475), Minimum = 0, Maximum = 500, LargeChange = 100 };
-        vScrollMap.Scroll += vScrollMap_Scroll;
-
-        // ===== 右パネル (880,0) 200×680 =====
-        var panelRight = new Panel { Location = new System.Drawing.Point(880, 0), Size = new System.Drawing.Size(200, 680), BorderStyle = BorderStyle.FixedSingle };
-
-        var lblEn = new Label { Text = "👾 敵", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(185, 18) };
-        lstEnemies = new ListBox { Font = F, Location = new System.Drawing.Point(5, 25), Size = new System.Drawing.Size(185, 70) };
+        // イベント配置パレット
+        var lblEn = new System.Windows.Forms.Label { Text = "👾 敵", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(185, 18) };
+        lstEnemies = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 25), Size = new System.Drawing.Size(200, 70) };
         lstEnemies.SelectedIndexChanged += lstEnemies_SelectedIndexChanged;
 
-        var lblGi = new Label { Text = "🔧 ギミック", Font = FB, Location = new System.Drawing.Point(5, 100), Size = new System.Drawing.Size(185, 18) };
-        lstGimmicks = new ListBox { Font = F, Location = new System.Drawing.Point(5, 120), Size = new System.Drawing.Size(185, 80) };
+        var lblGi = new System.Windows.Forms.Label { Text = "🔧 ギミック", Font = FB, Location = new System.Drawing.Point(5, 100), Size = new System.Drawing.Size(185, 18) };
+        lstGimmicks = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 120), Size = new System.Drawing.Size(200, 70) };
         lstGimmicks.SelectedIndexChanged += lstGimmicks_SelectedIndexChanged;
 
-        var lblIt = new Label { Text = "💎 アイテム", Font = FB, Location = new System.Drawing.Point(5, 206), Size = new System.Drawing.Size(185, 18) };
-        lstItems = new ListBox { Font = F, Location = new System.Drawing.Point(5, 226), Size = new System.Drawing.Size(185, 60) };
+        var lblIt = new System.Windows.Forms.Label { Text = "💎 アイテム", Font = FB, Location = new System.Drawing.Point(5, 195), Size = new System.Drawing.Size(185, 18) };
+        lstItems = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 215), Size = new System.Drawing.Size(200, 60) };
         lstItems.SelectedIndexChanged += lstItems_SelectedIndexChanged;
 
-        var lblProp = new Label { Text = "📋 プロパティ", Font = FB, Location = new System.Drawing.Point(5, 292), Size = new System.Drawing.Size(185, 18) };
-        propertyGrid = new PropertyGrid { Font = F, Location = new System.Drawing.Point(5, 312), Size = new System.Drawing.Size(185, 310), HelpVisible = false, ToolbarVisible = false };
+        rbTrigger = new System.Windows.Forms.RadioButton { Text = "⚡汎用トリガー", Location = new System.Drawing.Point(5, 285), Size = new System.Drawing.Size(120, 20), Checked = true };
+        rbPlayerStart = new System.Windows.Forms.RadioButton { Text = "🚶プレイヤー開始位置", Location = new System.Drawing.Point(5, 310), Size = new System.Drawing.Size(200, 20) };
+        rbGoal = new System.Windows.Forms.RadioButton { Text = "🏁ゴール位置", Location = new System.Drawing.Point(5, 335), Size = new System.Drawing.Size(200, 20) };
+        rbTrigger.CheckedChanged += EventModeItem_CheckedChanged;
+        rbPlayerStart.CheckedChanged += EventModeItem_CheckedChanged;
+        rbGoal.CheckedChanged += EventModeItem_CheckedChanged;
 
-        panelRight.Controls.AddRange(new Control[] { lblEn, lstEnemies, lblGi, lstGimmicks, lblIt, lstItems, lblProp, propertyGrid });
+        tabEventPalette.Controls.AddRange(new System.Windows.Forms.Control[] { lblEn, lstEnemies, lblGi, lstGimmicks, lblIt, lstItems, rbTrigger, rbPlayerStart, rbGoal });
 
-        // ===== 下部ボタンバー (180,598) 700×78 =====
-        var panelBottom = new Panel { Location = new System.Drawing.Point(180, 598), Size = new System.Drawing.Size(700, 78), BackColor = System.Drawing.Color.FromArgb(245, 245, 245), BorderStyle = BorderStyle.FixedSingle };
+        // イベントリスト (配置済み)
+        lstPlacedEvents = new System.Windows.Forms.ListBox { Dock = System.Windows.Forms.DockStyle.Fill };
+        lstPlacedEvents.SelectedIndexChanged += LstPlacedEvents_SelectedIndexChanged;
+        lstPlacedEvents.DoubleClick += LstPlacedEvents_DoubleClick;
+        tabEventList.Controls.Add(lstPlacedEvents);
 
-        // 行1: プレイ系
-        btnPlay = new Button {
-            Text = "▶ プレイテスト", Font = new System.Drawing.Font("Meiryo UI", 10, System.Drawing.FontStyle.Bold),
-            BackColor = System.Drawing.Color.FromArgb(40, 167, 69), ForeColor = System.Drawing.Color.White, FlatStyle = FlatStyle.Flat,
-            Location = new System.Drawing.Point(5, 6), Size = new System.Drawing.Size(140, 30)
-        };
-        btnPlay.Click += btnPlay_Click;
+        tabRight.Controls.Add(tabTilePalette);
+        tabRight.Controls.Add(tabEventPalette);
+        tabRight.Controls.Add(tabEventList);
 
-        btnTestPlay = new Button {  // Feature 4
-            Text = "📍 ここからプレイ", Font = F,
-            BackColor = System.Drawing.Color.FromArgb(0, 150, 136), ForeColor = System.Drawing.Color.White, FlatStyle = FlatStyle.Flat,
-            Location = new System.Drawing.Point(150, 6), Size = new System.Drawing.Size(130, 30)
-        };
-        btnTestPlay.Click += btnTestPlay_Click;
+        // ===== 共通プロパティグリッド (右パネルの下部) =====
+        propertyGrid = new System.Windows.Forms.PropertyGrid { Location = new System.Drawing.Point(890, 480), Size = new System.Drawing.Size(220, 200), HelpVisible = false, ToolbarVisible = false, Font = F };
 
-        btnSave = new Button { Text = "💾 保存", Font = F, Location = new System.Drawing.Point(285, 6), Size = new System.Drawing.Size(80, 30) };
-        btnSave.Click += btnSave_Click;
+        // ===== 情報ラベル =====
+        lblCurrentStage = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9, System.Drawing.FontStyle.Bold), Text = "編集中: ---", Location = new System.Drawing.Point(210, 50), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkBlue };
+        lblLayerInfo = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9), Text = "", Location = new System.Drawing.Point(520, 50), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkGreen };
+        lblStatus = new System.Windows.Forms.Label { Location = new System.Drawing.Point(210, 660), Size = new System.Drawing.Size(300, 20) };
 
-        // 行2: エディタ系
-        btnAssetManager = new Button { Text = "📦アセット管理", Font = F, Location = new System.Drawing.Point(5, 42), Size = new System.Drawing.Size(105, 28) };
-        btnAssetManager.Click += btnAssetManager_Click;
+        // ===== マップキャンバス =====
+        mapCanvas = new MapCanvas { Location = new System.Drawing.Point(210, 70), Size = new System.Drawing.Size(650, 580), BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle };
+        mapCanvas.ObjectSelected += mapCanvas_ObjectSelected;
+        mapCanvas.StageModified += mapCanvas_StageModified;
+        mapCanvas.EditCompleted += mapCanvas_EditCompleted;
+        mapCanvas.TestPlayClicked += mapCanvas_TestPlayClicked;
+        mapCanvas.TriggerPlaced += mapCanvas_TriggerPlaced;
 
-        btnTileEditor = new Button { Text = "🧱タイルエディタ", Font = F, Location = new System.Drawing.Point(115, 42), Size = new System.Drawing.Size(115, 28) };
-        btnTileEditor.Click += btnTileEditor_Click;
+        hScrollMap = new System.Windows.Forms.HScrollBar { Location = new System.Drawing.Point(210, 650), Size = new System.Drawing.Size(650, 18), Minimum = 0, Maximum = 1800, LargeChange = 200 };
+        hScrollMap.Scroll += hScrollMap_Scroll;
+        vScrollMap = new System.Windows.Forms.VScrollBar { Location = new System.Drawing.Point(860, 70), Size = new System.Drawing.Size(18, 580), Minimum = 0, Maximum = 500, LargeChange = 100 };
+        vScrollMap.Scroll += vScrollMap_Scroll;
 
-        btnSoundMgr = new Button { Text = "🎵サウンド管理", Font = F, Location = new System.Drawing.Point(235, 42), Size = new System.Drawing.Size(110, 28) };  // Feature 3
-        btnSoundMgr.Click += btnSoundMgr_Click;
-
-        btnBgSettings = new Button { Text = "🌅背景設定", Font = F, Location = new System.Drawing.Point(350, 42), Size = new System.Drawing.Size(90, 28) };  // Feature 1
-        btnBgSettings.Click += btnBgSettings_Click;
-
-        btnAnimEditor = new Button { Text = "🎬アニメ", Font = F, Location = new System.Drawing.Point(445, 42), Size = new System.Drawing.Size(80, 28) };  // Feature 2
-        btnAnimEditor.Click += btnAnimEditor_Click;
-
-        btnImportCsv = new Button { Text = "📄CSVから生成", Font = F, Location = new System.Drawing.Point(530, 42), Size = new System.Drawing.Size(110, 28) };
-        btnImportCsv.Click += btnImportCsv_Click;
-
-        lblStatus = new Label { Font = new System.Drawing.Font("Meiryo UI", 8), Text = "...", Location = new System.Drawing.Point(370, 10), Size = new System.Drawing.Size(320, 20) };
-
-        panelBottom.Controls.AddRange(new Control[] {
-            btnPlay, btnTestPlay, btnSave,
-            btnAssetManager, btnTileEditor, btnSoundMgr, btnBgSettings, btnAnimEditor, btnImportCsv,
-            lblStatus
-        });
-
-        // ===== フォーム =====
-        AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
-        AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new System.Drawing.Size(1082, 678);
-        MinimumSize = new System.Drawing.Size(1000, 640);
-        Controls.AddRange(new Control[] { panelLeft, panelTools, panelTiles, mapCanvas, hScrollMap, vScrollMap, panelRight, panelBottom });
-        Text = "Lab Engine - ステージエディタ";
-        StartPosition = FormStartPosition.CenterScreen;
-        Load += Form1_Load;
-        ResumeLayout(false);
+        // Form 設定
+        this.ClientSize = new System.Drawing.Size(1120, 690);
+        this.Controls.Add(menuStrip1);
+        this.Controls.Add(toolStrip1);
+        this.Controls.Add(tabLeft);
+        this.Controls.Add(tabRight);
+        this.Controls.Add(propertyGrid);
+        this.Controls.Add(lblCurrentStage);
+        this.Controls.Add(lblLayerInfo);
+        this.Controls.Add(lblStatus);
+        this.Controls.Add(mapCanvas);
+        this.Controls.Add(hScrollMap);
+        this.Controls.Add(vScrollMap);
+        this.MainMenuStrip = menuStrip1;
+        this.Name = "Form1";
+        this.Text = "Lab Editor (RPG Maker MZ Style)";
+        this.Load += new System.EventHandler(this.Form1_Load);
+        
+        // 修正：プロパティグリッドの表示順を調整（タブの裏に隠れないように）
+        propertyGrid.BringToFront();
+        tabRight.Height = 420; // プロパティグリッドのスペースを空ける
+        
+        this.ResumeLayout(false);
+        this.PerformLayout();
     }
 }

@@ -38,5 +38,21 @@
     "collidable": true,
     "deadly": false,
     "sprite": "img/tuti.png"
+  },
+  {
+    "id": 5,
+    "name": "hari",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": true,
+    "sprite": "img/block/376_20260616193402.png"
+  },
+  {
+    "id": 6,
+    "name": "simple",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/block/376_20260621172247.png"
   }
 ]

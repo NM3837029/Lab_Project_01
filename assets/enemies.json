@@ -1,38 +1,56 @@
 [
   {
-    "id": "enemy_patrol",
-    "name": "Patrol Slime",
-    "type_enum": 0,
-    "hp": 3,
-    "width": 64,
-    "height": 64,
-    "sprite": "img/player.png"
-  },
-  {
-    "id": "enemy_jumper",
-    "name": "Jumping Frog",
-    "type_enum": 1,
-    "hp": 2,
-    "width": 64,
-    "height": 64,
-    "sprite": "img/player.png"
-  },
-  {
-    "id": "enemy_stationary",
-    "name": "Stationary Cannon",
-    "type_enum": 2,
-    "hp": 5,
-    "width": 64,
-    "height": 64,
-    "sprite": "img/player.png"
-  },
-  {
-    "id": "enemy_patrol_shooter",
-    "name": "Patrol Shooter",
+    "id": "enemy_5",
+    "name": "発射する敵",
     "type_enum": 3,
     "hp": 3,
     "width": 64,
     "height": 64,
-    "sprite": "img/player.png"
+    "sprite": "img/enemy.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 63,
+    "hitboxHeight": 62,
+    "scale": 1.0
+  },
+  {
+    "id": "enemy_5",
+    "name": "dossun",
+    "type_enum": 7,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/378_20260604153122.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "scale": 1.0
+  },
+  {
+    "id": "enemy_5",
+    "name": "新敵",
+    "type_enum": 3,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/373_20260529143754.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 174,
+    "hitboxOffsetY": 176,
+    "hitboxWidth": 301,
+    "hitboxHeight": 280,
+    "scale": 0.11500001
   }
 ]

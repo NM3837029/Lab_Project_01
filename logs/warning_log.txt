@@ -1,0 +1,5 @@
+[WARNING] AssetManagerForm: Item ID 'item_fireball' has invalid type_enum '3'. Auto-converted to default.
+[WARNING] AssetManagerForm: Item ID 'item_fireball' has invalid type_enum '3'. Auto-converted to default.
+[WARNING] AssetManagerForm: Item ID 'item_fireball' has invalid type_enum '3'. Auto-converted to default.
+[WARNING] AssetManagerForm: Item ID 'item_fireball' has invalid type_enum '3'. Auto-converted to default.
+[WARNING] AssetManagerForm: Item ID 'item_fireball' has invalid type_enum '3'. Auto-converted to default.

@@ -30,6 +30,9 @@ public:
     void LoadFromJson(const std::string& assetsPath) {
         LoadEntries(assetsPath + "/bgm.json", bgmMap);
         LoadEntries(assetsPath + "/se.json",  seMap);
+        // UI音（メニュー選択・決定・キャンセル等）はseMapに統合し、PlaySe(id)でそのまま再生可能にする。
+        // カテゴリ分けはエディタ側の整理用の概念であり、再生側はSE/UI音を区別しない。
+        LoadEntries(assetsPath + "/ui_se.json", seMap);
     }
 
     void PlayBgm(const std::string& id, bool forceRestart = false) {
@@ -52,8 +55,12 @@ public:
         currentBgmId = "";
     }
 
+    // Mute toggle for the player's stealth tool (M key). Only suppresses newly-triggered SE, not BGM.
+    void SetMuted(bool muted) { isMuted = muted; }
+    bool IsMuted() const { return isMuted; }
+
     void PlaySe(const std::string& id) {
-        if (id.empty()) return;
+        if (id.empty() || isMuted) return;
         auto it = seMap.find(id);
         if (it == seMap.end() || it->second.handle < 0) return;
         int dup = DuplicateSoundMem(it->second.handle);
@@ -103,6 +110,7 @@ private:
     std::map<std::string, SoundEntry> seMap;
     std::vector<int> tempHandles;
     std::string currentBgmId;
+    bool isMuted = false;
 
     SoundManager() = default;
     ~SoundManager() { Release(); }

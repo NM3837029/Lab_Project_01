@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <map>
+#include <cstdlib>
 #include "json.hpp"
 #include "Logger.h"
 #include <exception>
@@ -43,6 +44,11 @@ struct EnemyDef {
     std::string seAttack = "";
     std::string seDamage = "";
     std::string seDeath = "";
+    int hitboxOffsetX = 0;
+    int hitboxOffsetY = 0;
+    int hitboxWidth = 32;
+    int hitboxHeight = 32;
+    float scale = 1.0f; // Visual Size Editor で設定される表示スケール倍率
 };
 
 struct GimmickDef {
@@ -51,6 +57,11 @@ struct GimmickDef {
     int type_enum = 0;
     std::string sprite_path = "";
     int graphHandle = -1;
+    int hitboxOffsetX = 0;
+    int hitboxOffsetY = 0;
+    int hitboxWidth = 32;
+    int hitboxHeight = 32;
+    std::string seActivate = "";
 };
 
 std::vector<EnemyDef> enemyDefs;
@@ -76,6 +87,11 @@ struct ItemDef {
     std::string sprite_path = "";
     std::string grant_ability = "";
     int graphHandle = -1;
+    int hitboxOffsetX = 0;
+    int hitboxOffsetY = 0;
+    int hitboxWidth = 32;
+    int hitboxHeight = 32;
+    std::string seCollect = "";
 };
 
 struct PlayerCapabilities {
@@ -115,12 +131,19 @@ void LoadAssetDefinitions() {
                     def.seAttack = e.value("seAttack", "");
                     def.seDamage = e.value("seDamage", "");
                     def.seDeath = e.value("seDeath", "");
+                    def.hitboxOffsetX = e.value("hitboxOffsetX", 0);
+                    def.hitboxOffsetY = e.value("hitboxOffsetY", 0);
+                    def.hitboxWidth = e.value("hitboxWidth", def.width);
+                    def.hitboxHeight = e.value("hitboxHeight", def.height);
+                    def.scale = e.value("scale", 1.0f);
                     if (!def.sprite_path.empty()) {
                         def.graphHandle = LoadGraph(def.sprite_path.c_str());
                         int gw, gh;
                         GetGraphSize(def.graphHandle, &gw, &gh);
                         def.width = gw;
                         def.height = gh;
+                        if (def.hitboxWidth == 0) def.hitboxWidth = gw;
+                        if (def.hitboxHeight == 0) def.hitboxHeight = gh;
                     }
                     enemyDefs.push_back(def);
                 }
@@ -143,7 +166,18 @@ void LoadAssetDefinitions() {
                     def.type_enum = i.value("type_enum", 0);
                     def.sprite_path = i.value("sprite", "");
                     def.grant_ability = i.value("grant_ability", "");
-                    if (!def.sprite_path.empty()) def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                    def.seCollect = i.value("seCollect", "");
+                    def.hitboxOffsetX = i.value("hitboxOffsetX", 0);
+                    def.hitboxOffsetY = i.value("hitboxOffsetY", 0);
+                    def.hitboxWidth = i.value("hitboxWidth", 32);
+                    def.hitboxHeight = i.value("hitboxHeight", 32);
+                    if (!def.sprite_path.empty()) {
+                        def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                        if (def.hitboxWidth == 0) {
+                            int w, h; GetGraphSize(def.graphHandle, &w, &h);
+                            def.hitboxWidth = w; def.hitboxHeight = h;
+                        }
+                    }
                     itemDefs.push_back(def);
                 }
             } else {
@@ -164,7 +198,18 @@ void LoadAssetDefinitions() {
                     def.name = g.value("name", "");
                     def.type_enum = g.value("type_enum", 0);
                     def.sprite_path = g.value("sprite", "");
-                    if (!def.sprite_path.empty()) def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                    def.seActivate = g.value("seActivate", "");
+                    def.hitboxOffsetX = g.value("hitboxOffsetX", 0);
+                    def.hitboxOffsetY = g.value("hitboxOffsetY", 0);
+                    def.hitboxWidth = g.value("hitboxWidth", 32);
+                    def.hitboxHeight = g.value("hitboxHeight", 32);
+                    if (!def.sprite_path.empty()) {
+                        def.graphHandle = LoadGraph(def.sprite_path.c_str());
+                        if (def.hitboxWidth == 0) {
+                            int w, h; GetGraphSize(def.graphHandle, &w, &h);
+                            def.hitboxWidth = w; def.hitboxHeight = h;
+                        }
+                    }
                     gimmickDefs.push_back(def);
                 }
             } else {
@@ -172,6 +217,20 @@ void LoadAssetDefinitions() {
             }
         }
     }
+}
+
+// ===== SE検索ヘルパー (assetId → 各種 Def の効果音IDを引く) =====
+const EnemyDef* FindEnemyDef(const std::string& assetId) {
+    for (const auto& d : enemyDefs) if (d.id == assetId) return &d;
+    return nullptr;
+}
+const GimmickDef* FindGimmickDef(const std::string& assetId) {
+    for (const auto& d : gimmickDefs) if (d.id == assetId) return &d;
+    return nullptr;
+}
+const ItemDef* FindItemDef(const std::string& assetId) {
+    for (const auto& d : itemDefs) if (d.id == assetId) return &d;
+    return nullptr;
 }
 
 
@@ -205,11 +264,6 @@ enum GameScene {
     RESULT_VICTORY
 };
 
-enum EditToolMode {
-    EDIT_OBJECTS,
-    EDIT_TILES
-};
-
 struct TileDefinition {
     TileType type;
     int handle;
@@ -232,10 +286,28 @@ struct PlayerState {
 };
 
 enum EnemyType {
-    ENEMY_PATROL,          // 往復パトロールする敵
-    ENEMY_JUMPER,          // 繰り返しジャンプする敵
-    ENEMY_STATIONARY,      // 固定位置から定期的に射撃する敵
-    ENEMY_PATROL_SHOOTER   // 索敵して射撃する敵（旧DrawPixel2.cpp準拠）
+    ENEMY_PATROL,             // 往復パトロールする敵
+    ENEMY_JUMPER,             // 繰り返しジャンプする敵
+    ENEMY_STATIONARY,         // 固定位置から定期的に射撃する敵
+    ENEMY_PATROL_SHOOTER,     // 索敵して射撃する敵（旧DrawPixel2.cpp準拠）
+
+    // ===== ここから追加タイプ（シンプル→トリッキー→複雑）=====
+    ENEMY_WALKER,             // 歩いてくる：常にプレイヤー方向へ地上を歩く（崖・壁で反転）
+    ENEMY_CHASER,             // 追っかけてくる：WALKERに加え、進路を塞がれると自動ジャンプする
+    ENEMY_DASH_CHARGER,       // 突進：射程内に入ると溜めてから高速直進突進、その後クールダウン
+    ENEMY_FALLER,             // 落ちてくる敵：待機し、プレイヤーが真下を通ると落下してくる
+    ENEMY_SPREAD_SHOOTER,     // 拡散弾：固定位置から3方向に弾を拡散射撃
+    ENEMY_AIMED_SHOOTER,      // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ
+    ENEMY_FLOATER,            // 浮遊敵：重力を受けずサインカーブで浮遊しながら接近
+    ENEMY_TELEPORTER,         // テレポーター：一定間隔でプレイヤー付近へ瞬間移動する
+    ENEMY_SHRINKER,           // 分裂もどき：致死ダメージを受けると一度だけ縮小・高速化して復活する
+    ENEMY_SHIELD,             // シールド：一定間隔で無敵状態になり弾を無効化する（無敵中は金色に発光）
+    ENEMY_MIMIC_GHOST,        // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生し、過去の動きをなぞる
+    ENEMY_SIZE_SHIFTER,       // 大きさが変わる敵：scaleが周期的に変化し当たり判定も連動して変化
+    ENEMY_TEMPO_WARPER,       // 速さ操作敵：speedScaleが周期的に激しく変化し接近速度が乱れる
+    ENEMY_BRIGHTNESS_PHANTOM, // 明るさ操作敵：射程内で画面を暗転させる（新画面エフェクト連携）
+    ENEMY_COLOR_SHIFTER,      // 色調整敵：射程内で画面を色調変化させる（新画面エフェクト連携）
+    ENEMY_ZOOM_DISRUPTOR      // ズーム撹乱敵：射程内で画面ズームを揺さぶる（新画面エフェクト連携）
 };
 
 struct EnemyState {
@@ -268,7 +340,21 @@ enum GimmickType {
     GIMMICK_SCALABLE_GROUND,  // 自由にサイズ変更可能な地面ブロック
     GIMMICK_CHIKUWA_BLOCK,    // 乗ると一定時間後に落下するちくわブロック
     GIMMICK_TIME_FIELD,       // この範囲内だけポーズ中でも時間が進む反・一時停止装置
-    GIMMICK_CHOMPER           // プレイヤーが触れると即死し、敵が触れると互いに消滅する敵食らいギミック
+    GIMMICK_CHOMPER,          // プレイヤーが触れると即死し、敵が触れると互いに消滅する敵食らいギミック
+
+    // ===== ここから追加テンプレート（地形ギミック）=====
+    GIMMICK_MOVING_PLATFORM,  // 動く足場：val1(上端)～val2(下端)を自動で往復する足場
+    GIMMICK_PUSHABLE_ROCK,    // 岩：プレイヤー・敵の進行を塞ぐ固定障害物
+    GIMMICK_FASTFORWARD_GATE, // 早送りゲート：早送りモード中(Fキー)だけ通過できる壁
+    GIMMICK_FRAMESTEP_LIFT,   // コマ送りリフト：コマ送り操作（一時停止中の→キー）で一歩ずつ動くリフト
+    GIMMICK_BRIGHTNESS_ZONE,  // 明暗ゾーン：範囲内にいる間、画面が暗転/明転する
+    GIMMICK_COLOR_ZONE,       // 色調ゾーン：範囲内にいる間、画面の色調が変化する
+    GIMMICK_ZOOM_LENS,        // ズームレンズ：範囲内にいる間、画面がズームする
+    GIMMICK_SLOWMO_FIELD,     // スローフィールド：範囲内でスローモーション演出（視覚効果）がかかる
+
+    // ===== プレイヤーが能動的に使う編集ツール（T/Z/X/C）と連動する地形 =====
+    GIMMICK_COLOR_LOCK_PLATFORM,     // 色ロック足場：param("1"/"2"/"3"=赤/緑/青)とプレイヤーの色フィルタが一致する時だけ実体化する
+    GIMMICK_BRIGHTNESS_LOCK_PLATFORM // 明暗ロック足場：param("dark"/"bright")と現在の画面の明るさが一致する時だけ実体化する
 };
 
 struct GimmickState {
@@ -293,12 +379,17 @@ struct Item {
     ItemType type;
     float x, y;
     float width, height;
+    float spriteWidth, spriteHeight;
+    float hitboxOffsetX, hitboxOffsetY;
+    float hitboxWidth, hitboxHeight;
     bool isActive;
     bool isCollected;
 
     // 巻き戻しトラック
     bool isRewinding;
     std::vector<ItemState> history;
+
+    std::string assetId = ""; // ItemDef.id への参照（SE検索用）
 };
 
 // 主要な構造体
@@ -335,6 +426,9 @@ struct Enemy {
     int handle;
     int direction; 
     int width, height;
+    int spriteWidth, spriteHeight;
+    int hitboxOffsetX, hitboxOffsetY;
+    int hitboxWidth, hitboxHeight;
     float scale;
     float angle;
     float speedScale;
@@ -355,12 +449,21 @@ struct Enemy {
     // Feature 2: アニメーション
     std::string assetId;
     AnimationController anim;
+
+    // 新規敵タイプ用の汎用スクラッチ領域（末尾追加・デフォルト値ありなので既存の集成初期化を壊さない）
+    float auxF1 = 0.0f;   // 例: ダッシュ突進の残り距離、フェイザーの位相
+    float auxF2 = 0.0f;   // 例: テレポート先候補、分裂済みフラグ用の残りHP比
+    int   auxState = 0;   // 例: シールドON/OFF、テレポートのクールダウン段階
+    bool  auxFlag = false; // 例: 分裂済みかどうか
 };
 
 struct Gimmick {
     GimmickType type;
     float x, y;
     float width, height;
+    float spriteWidth, spriteHeight;
+    float hitboxOffsetX, hitboxOffsetY;
+    float hitboxWidth, hitboxHeight;
     bool isActive;
     float val1, val2; // ギミック固有の値 (例: ポータルのワープ先ターゲット比率など)
     float angle;      // 橋の回転角度
@@ -370,6 +473,11 @@ struct Gimmick {
     // 巻き戻しトラック
     bool isRewinding;
     std::vector<GimmickState> history;
+
+    // 末尾に追加（既存の集成初期化リストを壊さないようデフォルト値を持たせる）
+    std::string assetId = "";  // GimmickDef.id への参照（SE検索・タイプ判定補助用）
+    std::string param = "";    // ステージJSONの "param" フィールド（ポータル遷移先など）
+    int handle = -1;           // GimmickDef.graphHandle（カスタムスプライト）。-1なら種別ごとの既定画像を使う
 };
 
 struct Bullet {
@@ -510,7 +618,9 @@ bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height
                 }
             }
         }
-        else if (gim.type == GIMMICK_BREAKABLE_BLOCK || gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_GATE_DOOR) {
+        else if (gim.type == GIMMICK_BREAKABLE_BLOCK || gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_GATE_DOOR
+                 || gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT || gim.type == GIMMICK_PUSHABLE_ROCK
+                 || gim.type == GIMMICK_COLOR_LOCK_PLATFORM || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
             if (CheckLanded(gim.x, gim.y, gim.x + gim.width)) return true;
         }
     }
@@ -630,7 +740,7 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE) {
             // Y軸の重なり判定（少しの遊びを持たせる）
             if (y + objH > gim.y + 4.0f && y < gim.y + gim.height - 4.0f) {
                 if (vx > 0.0f) { // 右方向へ移動中
@@ -655,7 +765,7 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE) {
             // X軸の重なり判定
             if (x + objW > gim.x + 2.0f && x < gim.x + gim.width - 2.0f) {
                 if (vy >= 0.0f) { // 下方向へ移動中（着地）
@@ -903,39 +1013,39 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // -----ギミック配置-----
         // セクション2: 谷底トゲ（落ちると即死）
-        stage1.gimmicks.push_back({ GIMMICK_SPIKES,         896.0f, 432.0f, 320.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_SPIKES,         896.0f, 432.0f, 320.0f, 20.0f, 320.0f, 20.0f, 0.0f, 0.0f, 320.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
         // セクション2: 落下リフト×2（タイミングよく乗り継ぐ）
-        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   832.0f, 280.0f, 80.0f,  16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
-        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,  1024.0f, 220.0f, 80.0f,  16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   832.0f, 280.0f, 80.0f,  16.0f, 80.0f, 16.0f, 0.0f, 0.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_FALLING_LIFT,  1024.0f, 220.0f, 80.0f,  16.0f, 80.0f, 16.0f, 0.0f, 0.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
         // セクション3: 穴の下トゲ
-        stage1.gimmicks.push_back({ GIMMICK_SPIKES,        1472.0f, 432.0f, 96.0f,  20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_SPIKES,        1472.0f, 432.0f, 96.0f,  20.0f, 96.0f, 20.0f, 0.0f, 0.0f, 96.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
         // セクション4: 自動回転橋（谷を渡る主要ルート）
-        stage1.gimmicks.push_back({ GIMMICK_ROTATING_BRIDGE, 1824.0f, 350.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_ROTATING_BRIDGE, 1824.0f, 350.0f, 120.0f, 16.0f, 120.0f, 16.0f, 0.0f, 0.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
         // セクション4: 手動橋（タイミングを自分で制御）
-        stage1.gimmicks.push_back({ GIMMICK_MANUAL_BRIDGE, 1984.0f, 290.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 1.5708f, 0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_MANUAL_BRIDGE, 1984.0f, 290.0f, 120.0f, 16.0f, 120.0f, 16.0f, 0.0f, 0.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 1.5708f, 0.0f, false, false, {} });
         // カットポータル（ステージ通過演出）
-        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL,       0.0f,   0.0f,   0.0f,  0.0f, true, 0.15f, 0.22f, 0.0f, 0.0f, false, false, {} });
+        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL,       0.0f,   0.0f,   0.0f,  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, true, 0.15f, 0.22f, 0.0f, 0.0f, false, false, {} });
 
         // -----敵配置-----
         // セクション1 低地をパトロール
-        stage1.enemies.push_back({ ENEMY_PATROL_SHOOTER, 400.0f, 390.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 300.0f, 500.0f, false, {} });
+        stage1.enemies.push_back({ ENEMY_PATROL_SHOOTER, 400.0f, 390.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 300.0f, 500.0f, false, {} });
         // セクション3 中間地帯でジャンプ
-        stage1.enemies.push_back({ ENEMY_JUMPER,    1380.0f, 350.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        stage1.enemies.push_back({ ENEMY_JUMPER,    1380.0f, 350.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
         // セクション4 ゴール手前の砲台
-        stage1.enemies.push_back({ ENEMY_STATIONARY, 2200.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        stage1.enemies.push_back({ ENEMY_STATIONARY, 2200.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
 
         // -----コイン配置-----
         // セクション1 平地コイン列（歩けば取れる）
-        stage1.items.push_back({ ITEM_COIN,  320.0f, 380.0f, 20.0f, 20.0f, true, false, false, {} });
-        stage1.items.push_back({ ITEM_COIN,  400.0f, 380.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN,  320.0f, 380.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN,  400.0f, 380.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション2 落下リフト上（リスクあり）
-        stage1.items.push_back({ ITEM_COIN,  840.0f, 248.0f, 20.0f, 20.0f, true, false, false, {} });
-        stage1.items.push_back({ ITEM_COIN, 1032.0f, 188.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN,  840.0f, 248.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 1032.0f, 188.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション3 上空足場上
-        stage1.items.push_back({ ITEM_COIN, 1540.0f, 256.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 1540.0f, 256.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション4 ゴール直前
-        stage1.items.push_back({ ITEM_COIN, 2350.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
-        stage1.items.push_back({ ITEM_COIN, 2430.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 2350.0f, 320.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage1.items.push_back({ ITEM_COIN, 2430.0f, 320.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
 
         stages.push_back(stage1);
     }
@@ -1035,43 +1145,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // -----ギミック配置-----
         // セクション1 崖下のトゲ（転落死）
-        stage2.gimmicks.push_back({ GIMMICK_SPIKES,         480.0f, 432.0f,  96.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_SPIKES,         480.0f, 432.0f,  96.0f, 20.0f, 96.0f, 20.0f, 0.0f, 0.0f, 96.0f, 20.0f, true, 0.0f, 0.0f, 0.0f,    0.0f, false, false, {} });
         // セクション2 反射鏡（弾を反射させてブロックを壊す）
-        stage2.gimmicks.push_back({ GIMMICK_REFLECT_MIRROR,  800.0f, 380.0f,  80.0f, 16.0f, true, 0.0f, 0.0f, 0.7854f, 0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_REFLECT_MIRROR,  800.0f, 380.0f,  80.0f, 16.0f, 80.0f, 16.0f, 0.0f, 0.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.7854f, 0.0f, false, false, {} });
         // セクション2 破壊可能ブロック（出口を塞ぐ壁）
-        stage2.gimmicks.push_back({ GIMMICK_BREAKABLE_BLOCK, 1120.0f, 288.0f, 32.0f, 144.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_BREAKABLE_BLOCK, 1120.0f, 288.0f, 32.0f, 144.0f, 32.0f, 144.0f, 0.0f, 0.0f, 32.0f, 144.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
         // セクション4 拡大可能ボックス（スイッチを踏むための踏み台）
-        stage2.gimmicks.push_back({ GIMMICK_SCALABLE_BOX,   1620.0f, 228.0f, 50.0f, 50.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_SCALABLE_BOX,   1620.0f, 228.0f, 50.0f, 50.0f, 50.0f, 50.0f, 0.0f, 0.0f, 50.0f, 50.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
         // セクション4 重量スイッチ（ゲート解錠トリガー）
-        stage2.gimmicks.push_back({ GIMMICK_WEIGHT_SWITCH,  1760.0f, 278.0f, 120.0f, 10.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_WEIGHT_SWITCH,  1760.0f, 278.0f, 120.0f, 10.0f, 120.0f, 10.0f, 0.0f, 0.0f, 120.0f, 10.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
         // セクション4 ゲート扉（スイッチで開く）
-        stage2.gimmicks.push_back({ GIMMICK_GATE_DOOR,      2080.0f, 128.0f, 32.0f, 160.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_GATE_DOOR,      2080.0f, 128.0f, 32.0f, 160.0f, 32.0f, 160.0f, 0.0f, 0.0f, 32.0f, 160.0f, true, 0.0f, 0.0f, 0.0f,  0.0f, false, false, {} });
         // セクション5 ゴール前の落下リフト
-        stage2.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   2240.0f, 150.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
+        stage2.gimmicks.push_back({ GIMMICK_FALLING_LIFT,   2240.0f, 150.0f, 80.0f, 16.0f, 80.0f, 16.0f, 0.0f, 0.0f, 80.0f, 16.0f, true, 0.0f, 0.0f, 0.0f,   0.0f, false, false, {} });
 
         // -----敵配置-----
         // セクション1 崖をパトロール
-        enemies.push_back({ ENEMY_PATROL_SHOOTER, 360.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 200.0f, 500.0f, false, {} });
+        enemies.push_back({ ENEMY_PATROL_SHOOTER, 360.0f, 320.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 200.0f, 500.0f, false, {} });
         // セクション2 部屋内でジャンプ
-        enemies.push_back({ ENEMY_JUMPER,      960.0f, 380.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        enemies.push_back({ ENEMY_JUMPER,      960.0f, 380.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
         // セクション4 広間をパトロール
-        enemies.push_back({ ENEMY_PATROL_SHOOTER, 1700.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 1500.0f, 1900.0f, false, {} });
+        enemies.push_back({ ENEMY_PATROL_SHOOTER, 1700.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 0.9f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 1500.0f, 1900.0f, false, {} });
         // セクション5 ゴール前砲台（最難関）
-        enemies.push_back({ ENEMY_STATIONARY, 2400.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.2f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
+        enemies.push_back({ ENEMY_STATIONARY, 2400.0f, 250.0f, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 1.2f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, 0.0f, 0.0f, false, {} });
 
         // -----コイン配置-----
         // セクション1 下り坂
-        stage2.items.push_back({ ITEM_COIN,  280.0f, 290.0f, 20.0f, 20.0f, true, false, false, {} });
-        stage2.items.push_back({ ITEM_COIN,  380.0f, 350.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN,  280.0f, 290.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN,  380.0f, 350.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション2 部屋内（危険）
-        stage2.items.push_back({ ITEM_COIN,  820.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN,  820.0f, 320.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション3 段差登り中
-        stage2.items.push_back({ ITEM_COIN, 1380.0f, 260.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN, 1380.0f, 260.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション4 広間
-        stage2.items.push_back({ ITEM_COIN, 1680.0f, 200.0f, 20.0f, 20.0f, true, false, false, {} });
-        stage2.items.push_back({ ITEM_COIN, 1800.0f, 200.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN, 1680.0f, 200.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
+        stage2.items.push_back({ ITEM_COIN, 1800.0f, 200.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
         // セクション5 ゴール直前
-            stage2.items.push_back({ ITEM_COIN, 2460.0f, 240.0f, 20.0f, 20.0f, true, false, false, {} });
+            stage2.items.push_back({ ITEM_COIN, 2460.0f, 240.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
 
         stages.push_back(stage2);
     }
@@ -1085,6 +1195,54 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     
     float cameraX = 0.0f;
     const float STAGE_WIDTH = 2560.0f;
+
+    // プレイヤーが能動的に使う「編集ツール」の状態
+    int playerColorFilter = 0; // 0=なし, 1=赤, 2=緑, 3=青（Tキーで巡回）
+
+    // ===== 画面全体エフェクト（明るさ・色調・ズーム）=====
+    // 「動画編集」コンセプトのコアシステム。敵やギミックが毎フレーム Screen_SetXxx() で
+    // 目標値を上書きすることでパルス的な演出になり、何も上書きしなければ自動的にニュートラルへ戻る。
+    float fxTargetBright = 1.0f, fxCurBright = 1.0f;
+    float fxTargetTintR = 1.0f, fxTargetTintG = 1.0f, fxTargetTintB = 1.0f;
+    float fxCurTintR = 1.0f, fxCurTintG = 1.0f, fxCurTintB = 1.0f;
+    float fxTargetZoom = 1.0f, fxCurZoom = 1.0f;
+
+    auto Screen_SetBrightness = [&](float b) { fxTargetBright = b; };
+    auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
+    auto Screen_SetZoom = [&](float z) { fxTargetZoom = z; };
+
+    auto Screen_BeginFrame = [&]() {
+        fxTargetBright = 1.0f;
+        fxTargetTintR = fxTargetTintG = fxTargetTintB = 1.0f;
+        fxTargetZoom = 1.0f;
+    };
+    auto Screen_UpdateFrame = [&](float dts) {
+        float lerp = std::min<float>(1.0f, 0.08f * dts);
+        fxCurBright += (fxTargetBright - fxCurBright) * lerp;
+        fxCurTintR  += (fxTargetTintR  - fxCurTintR)  * lerp;
+        fxCurTintG  += (fxTargetTintG  - fxCurTintG)  * lerp;
+        fxCurTintB  += (fxTargetTintB  - fxCurTintB)  * lerp;
+        fxCurZoom   += (fxTargetZoom   - fxCurZoom)   * lerp;
+    };
+    // gameScreen（オフスクリーン合成済みバッファ）を明るさ・色調・ズームを適用して転送する共通ヘルパー。
+    // モニタープレビュー・フルスクリーン再生の両方の最終ブリット地点から呼ばれる、この機能の唯一の統合ポイント。
+    auto Screen_DrawComposited = [&](int destX, int destY, int destW, int destH, int screenHandle) {
+        int br = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintR * fxCurBright * 255.0f));
+        int bg = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintG * fxCurBright * 255.0f));
+        int bb = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintB * fxCurBright * 255.0f));
+        SetDrawBright(br, bg, bb);
+
+        float zoom = fxCurZoom < 0.1f ? 0.1f : fxCurZoom;
+        int srcW = (int)(SCREEN_WIDTH / zoom);
+        int srcH = (int)(SCREEN_HEIGHT / zoom);
+        if (srcW > SCREEN_WIDTH) srcW = SCREEN_WIDTH;
+        if (srcH > SCREEN_HEIGHT) srcH = SCREEN_HEIGHT;
+        int srcX = (SCREEN_WIDTH - srcW) / 2;
+        int srcY = (SCREEN_HEIGHT - srcH) / 2;
+        DrawRectExtendGraph(destX, destY, destX + destW, destY + destH, srcX, srcY, srcX + srcW, srcY + srcH, screenHandle, TRUE);
+
+        SetDrawBright(255, 255, 255);
+    };
     std::vector<Bullet> bullets(MAX_BULLETS);
     for (int i = 0; i < MAX_BULLETS; i++) { 
         bullets[i].isActive = false; 
@@ -1128,8 +1286,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
 
     int currentStageIdx = 0;
-    EditToolMode toolMode = EDIT_OBJECTS;
-    TileType activePaintTile = TILE_JIMEN;
 
     GameScene currentScene = PLAY;
 
@@ -1224,83 +1380,81 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 敵の配置
                     if (sj.contains("enemies") && sj["enemies"].is_array()) {
                         for (auto& ej : sj["enemies"]) {
-                            std::string eid = ej.value("id", "");
-                            float ex = ej.value("x", 0.0f);
-                            float ey = ej.value("y", 0.0f);
-                            float pl = ej.value("patrol_left", ex - 200.0f);
-                            float pr = ej.value("patrol_right", ex + 200.0f);
-
-                            // enemyDefsから定義を検索
-                            int t_enum = 0; int ew = 32, eh = 32; int ehp = 3;
-                            int eHandle = playerHandle; // デフォルトはプレイヤースプライト
+                            std::string id = ej.value("id", "");
+                            float x = ej.value("x", 0.0f);
+                            float y = ej.value("y", 0.0f);
+                            // 巡回範囲（未指定なら従来通り x±200 にフォールバック）
+                            float patrolLeft = ej.value("patrol_left", x - 200.0f);
+                            float patrolRight = ej.value("patrol_right", x + 200.0f);
+                            int t_enum = 0; int pw = 32, ph = 32;
+                            int sw = 32, sh = 32; int hx = 0, hy = 0;
+                            int handle = playerHandle;
+                            float defScale = 1.0f;
                             for (auto& d : enemyDefs) {
-                                if (d.id == eid) {
+                                if (d.id == id) {
                                     t_enum = d.type_enum;
-                                    ew = d.width; eh = d.height;
-                                    ehp = d.hp;
-                                    if (d.graphHandle >= 0) eHandle = d.graphHandle;
+                                    pw = d.hitboxWidth; ph = d.hitboxHeight;
+                                    sw = d.width; sh = d.height;
+                                    hx = d.hitboxOffsetX; hy = d.hitboxOffsetY;
+                                    handle = d.graphHandle;
+                                    defScale = d.scale;
                                     break;
                                 }
                             }
-                            Enemy enemy = {};
-                            enemy.type = (EnemyType)t_enum;
-                            enemy.x = ex; enemy.y = ey;
-                            enemy.vx = 0; enemy.vy = 0;
-                            enemy.handle = eHandle;  // ★ 正しいスプライトハンドルを使用
-                            enemy.direction = 0;
-                            enemy.width = ew; enemy.height = eh;
-                            enemy.scale = 1.0f; enemy.angle = 0;
-                            enemy.speedScale = 1.0f;
-                            enemy.isActive = true; enemy.isPaused = false;
-                            enemy.hp = ehp;
-                            enemy.customTimer = 0; enemy.aiState = 0;
-                            enemy.patrolLeft = pl; enemy.patrolRight = pr;
-                            enemy.isRewinding = false;
-                            jsonStage.enemies.push_back(enemy);
+                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx, y + hy, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, 3, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
                         }
                     }
 
                     // ギミックの配置
                     if (sj.contains("gimmicks") && sj["gimmicks"].is_array()) {
                         for (auto& gj : sj["gimmicks"]) {
-                            std::string gid = gj.value("id", "");
-                            float gx = gj.value("x", 0.0f);
-                            float gy = gj.value("y", 0.0f);
+                            std::string id = gj.value("id", "");
+                            float x = gj.value("x", 0.0f);
+                            float y = gj.value("y", 0.0f);
+                            std::string param = gj.value("param", "");
 
-                            int g_enum = 0;
+                            int t_enum = 0;
+                            int pw = 32, ph = 32, sw = 32, sh = 32, hx = 0, hy = 0;
+                            int gHandle = -1;
                             for (auto& d : gimmickDefs) {
-                                if (d.id == gid) { g_enum = d.type_enum; break; }
+                                if (d.id == id) {
+                                    t_enum = d.type_enum;
+                                    pw = d.hitboxWidth; ph = d.hitboxHeight;
+                                    sw = d.hitboxWidth; sh = d.hitboxHeight;
+                                    hx = d.hitboxOffsetX; hy = d.hitboxOffsetY;
+                                    gHandle = d.graphHandle;
+                                    break;
+                                }
                             }
-                            Gimmick gim = {};
-                            gim.type = (GimmickType)g_enum;
-                            gim.x = gx; gim.y = gy;
-                            gim.width = 32; gim.height = 32;
-                            gim.isActive = true;
-                            gim.val1 = 0; gim.val2 = 0;
-                            gim.angle = 0; gim.customTimer = 0;
-                            gim.isPaused = false; gim.isRewinding = false;
-                            jsonStage.gimmicks.push_back(gim);
+                            Gimmick newGim{ (GimmickType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} };
+                            newGim.assetId = id;
+                            newGim.param = param;
+                            newGim.handle = gHandle;
+                            jsonStage.gimmicks.push_back(newGim);
                         }
                     }
 
                     // アイテムの配置
                     if (sj.contains("items") && sj["items"].is_array()) {
                         for (auto& ij : sj["items"]) {
-                            std::string iid = ij.value("id", "");
-                            float ix = ij.value("x", 0.0f);
-                            float iy = ij.value("y", 0.0f);
+                            std::string id = ij.value("id", "");
+                            float x = ij.value("x", 0.0f);
+                            float y = ij.value("y", 0.0f);
 
-                            int i_enum = 0;
-                            for (auto& d : itemDefs) {
-                                if (d.id == iid) { i_enum = d.type_enum; break; }
+                            int t_enum = 0;
+                            int pw = 32, ph = 32, sw = 32, sh = 32, hx = 0, hy = 0;
+                            for (auto& d : itemDefs) { 
+                                if (d.id == id) { 
+                                    t_enum = d.type_enum; 
+                                    pw = d.hitboxWidth; ph = d.hitboxHeight;
+                                    sw = d.hitboxWidth; sh = d.hitboxHeight;
+                                    hx = d.hitboxOffsetX; hy = d.hitboxOffsetY;
+                                    break; 
+                                } 
                             }
-                            Item item = {};
-                            item.type = (ItemType)i_enum;
-                            item.x = ix; item.y = iy;
-                            item.width = 20; item.height = 20;
-                            item.isActive = true; item.isCollected = false;
-                            item.isRewinding = false;
-                            jsonStage.items.push_back(item);
+                            Item newItem{ (ItemType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, false, false, {} };
+                            newItem.assetId = id;
+                            jsonStage.items.push_back(newItem);
                         }
                     }
 
@@ -1362,8 +1516,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             for (auto& d : enemyDefs) {
                 if (d.type_enum == (int)enemy.type) {
                     enemy.hp = d.hp;
-                    enemy.width = d.width;
-                    enemy.height = d.height;
+                    enemy.width = d.hitboxWidth;
+                    enemy.height = d.hitboxHeight;
                     hpSet = true;
                     break;
                 }
@@ -1443,16 +1597,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
-        if (currentMiddleClick && !lastMiddleClick) { isPaused = !isPaused; menu.isOpen = false; }
+        if (currentMiddleClick && !lastMiddleClick) { isPaused = !isPaused; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
         lastMiddleClick = currentMiddleClick;
 
         static bool lastPauseKey = false;
-        if (CheckHitKey(KEY_INPUT_B) && !lastPauseKey) isPaused = !isPaused;
+        if (CheckHitKey(KEY_INPUT_B) && !lastPauseKey) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
         lastPauseKey = (CheckHitKey(KEY_INPUT_B) != 0);
 
         static bool lastFFKey = false;
-        if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) isFastForward = !isFastForward;
+        if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) { isFastForward = !isFastForward; SoundManager::Get().PlaySe("ui_fastforward"); }
         lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
+
+        // Tキー：色フィルタを巡回（なし→赤→緑→青→なし）。クロマキー地形と連動する。
+        static bool lastColorKey = false;
+        bool currentColorKey = CheckHitKey(KEY_INPUT_T) != 0;
+        if (currentColorKey && !lastColorKey) {
+            playerColorFilter = (playerColorFilter + 1) % 4;
+            SoundManager::Get().PlaySe("ui_color_cycle");
+        }
+        lastColorKey = currentColorKey;
+
+        // Mキー：SEのミュート切り替え（ステルス用途）
+        static bool lastMuteKey = false;
+        bool currentMuteKey = CheckHitKey(KEY_INPUT_M) != 0;
+        if (currentMuteKey && !lastMuteKey) {
+            SoundManager::Get().SetMuted(!SoundManager::Get().IsMuted());
+        }
+        lastMuteKey = currentMuteKey;
 
         static bool lastStepKey = false;
         bool currF3 = CheckHitKey(KEY_INPUT_F3);
@@ -1524,8 +1695,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
                                 gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
                                 gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND) {
-                                if (gx >= gim.x && gx <= gim.x + gim.width &&
-                                    gy >= gim.y && gy <= gim.y + gim.height) {
+                                if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                                    gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
                                     selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                     selectedGimmicks.push_back(&gim);
                                     selectedType = SELECT_GIMMICK;
@@ -1690,8 +1861,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 重複している場合に敵を選択
                 for (auto& enemy : enemies) {
                     if (enemy.isActive) {
-                        float ew = (float)enemy.width * enemy.scale;
-                        float eh = (float)enemy.height * enemy.scale;
+                        float ew = (float)enemy.hitboxWidth * enemy.scale;
+                        float eh = (float)enemy.hitboxHeight * enemy.scale;
                         if (enemy.x + ew >= selX1 && enemy.x <= selX2 && enemy.y + eh >= selY1 && enemy.y <= selY2) {
                             selectedEnemies.push_back(&enemy);
                         }
@@ -1703,7 +1874,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (gim.isActive && (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
                                          gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
                                          gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND)) {
-                        if (gim.x + gim.width >= selX1 && gim.x <= selX2 && gim.y + gim.height >= selY1 && gim.y <= selY2) {
+                        if (gim.x + gim.spriteWidth >= selX1 && gim.x <= selX2 && gim.y + gim.spriteHeight >= selY1 && gim.y <= selY2) {
                             selectedGimmicks.push_back(&gim);
                         }
                     }
@@ -1757,51 +1928,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // エディタUI / ドラッグ操作
             if (currentLeftClick && !menu.isOpen) {
                 // 一時停止ボタンのチェック
-                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) isPaused = !isPaused;
-                
-                // 左パネル (UI領域) のクリック処理
-                if (!lastLeftClick && mx < 250) {
-                    // モード切り替えボタン
-                    if (my >= 60 && my <= 90) {
-                        toolMode = EDIT_OBJECTS;
-                    }
-                    else if (my >= 100 && my <= 130) {
-                        toolMode = EDIT_TILES;
-                    }
-                    
-                    // ステージ選択ボタン
-                    if (my >= 350 && my <= 380) {
-                        currentStageIdx = 0;
-                        ResetStage();
-                    }
-                    else if (my >= 390 && my <= 420) {
-                        currentStageIdx = 1;
-                        ResetStage();
-                    }
-                    
-                    // タイルパレット選択 (EDIT_TILESモードのみ)
-                    if (toolMode == EDIT_TILES) {
-                        if (my >= 180 && my <= 210) {
-                            activePaintTile = TILE_NONE; // 消しゴム
-                        }
-                        else if (my >= 220 && my <= 250) {
-                            activePaintTile = TILE_JIMEN;
-                        }
-                        else if (my >= 260 && my <= 290) {
-                            activePaintTile = TILE_TUTI;
-                        }
-                    }
-                }
-
-                // タイルペイント処理 (EDIT_TILESモード時、モニター画面内をクリックドラッグしたとき)
-                bool isClickInUI = (mx < 250) || (mx >= WINDOW_WIDTH - 250) || (my >= WINDOW_HEIGHT - 100);
-                if (!isClickInUI && toolMode == EDIT_TILES && !isDragging && !isScaling && !isRotating && !isAreaSelecting) {
-                    int tx = (int)(gx / TILE_SIZE);
-                    int ty = (int)(gy / TILE_SIZE);
-                    if (ty >= 0 && ty < MAP_HEIGHT_TILES && tx >= 0 && tx < MAP_WIDTH_TILES) {
-                        stages[currentStageIdx].map[ty][tx] = activePaintTile;
-                    }
-                }
+                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
 
                 // タイムラインカット
                 if (!lastLeftClick && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
@@ -1813,7 +1940,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else {
                             float start = (ct > tempCutStart ? tempCutStart : ct);
                             float end = (ct > tempCutStart ? ct : tempCutStart);
-                            gimmicks.push_back({ GIMMICK_CUT_PORTAL, 0.0f, 0.0f, 0.0f, 0.0f, true, start, end, 0.0f, false, {} });
+                            gimmicks.push_back({ GIMMICK_CUT_PORTAL, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, true, start, end, 0.0f, 0.0f, false, false, {} });
                             tempCutStart = -1.0f;
                         }
                     }
@@ -1857,7 +1984,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float h = 32.0f;
                     float tileW = h * ((float)imgW / imgH);
                     float w = tileW * 3.0f; // 初期は3タイル分
-                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, w, h, 0.0f, 0.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
                 }
                 lastGKey = currentGKey;
 
@@ -1869,8 +1996,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bool blockClicked = false;
                     for (auto& gim : gimmicks) {
                         if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                            if (gx >= gim.x && gx <= gim.x + gim.width &&
-                                gy >= gim.y && gy <= gim.y + gim.height) {
+                            if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                                gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
                                 gim.isActive = false;
                                 blockClicked = true;
                                 break;
@@ -1888,12 +2015,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                             }
                             for (auto* e : selectedEnemies) {
-                                if (e->isActive && gx >= e->x && gx <= e->x + e->width * e->scale && gy >= e->y && gy <= e->y + e->height * e->scale) {
+                                if (e->isActive && gx >= e->x && gx <= e->x + e->hitboxWidth * e->scale &&
+                                    gy >= e->y && gy <= e->y + e->hitboxHeight * e->scale) {
                                     clickedOnSelected = true; break;
                                 }
                             }
                             for (auto* g : selectedGimmicks) {
-                                if (g->isActive && gx >= g->x && gx <= g->x + g->width && gy >= g->y && gy <= g->y + g->height) {
+                                if (g->isActive && gx >= g->x && gx <= g->x + g->spriteWidth && gy >= g->y && gy <= g->y + g->spriteHeight) {
                                     clickedOnSelected = true; break;
                                 }
                             }
@@ -1931,8 +2059,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 敵のチェック
                             if (!objectClicked) {
                                 for (auto& enemy : enemies) {
-                                    if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.width * enemy.scale &&
-                                        gy >= enemy.y && gy <= enemy.y + enemy.height * enemy.scale) {
+                                    if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.hitboxWidth * enemy.scale &&
+                                        gy >= enemy.y && gy <= enemy.y + enemy.hitboxHeight * enemy.scale) {
                                         selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                         selectedEnemies.push_back(&enemy);
                                         selectedType = SELECT_ENEMY;
@@ -1960,8 +2088,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     if (gim.isActive && (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE ||
                                                          gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_REFLECT_MIRROR ||
                                                          gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND)) {
-                                        if (gx >= gim.x && gx <= gim.x + gim.width &&
-                                            gy >= gim.y && gy <= gim.y + gim.height) {
+                                        if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                                            gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
                                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                             selectedGimmicks.push_back(&gim);
                                             selectedType = SELECT_GIMMICK;
@@ -1976,7 +2104,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             targetEnemy = nullptr;
                                             
                                             if (CheckHitKey(KEY_INPUT_S)) { isScaling = true; lastMouseY = my; baseScale = gim.width; }
-                                            else if (CheckHitKey(KEY_INPUT_W)) { isScalingHeight = true; lastMouseY = my; baseScale = gim.height; }
+                                            else if (CheckHitKey(KEY_INPUT_W)) { isScalingHeight = true; lastMouseY = my; baseScale = gim.spriteHeight; }
                                             else if (CheckHitKey(KEY_INPUT_R)) { isRotating = true; lastMouseX = mx; baseAngle = gim.angle; }
                                             else { isDragging = true; lastMouseX = mx; lastMouseY = my; }
                                             objectClicked = true;
@@ -2029,7 +2157,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
-                            float tileW = g->height * ((float)imgW / imgH);
+                            float tileW = g->spriteHeight * ((float)imgW / imgH);
                             g->width = roundf(g->width / tileW) * tileW;
                             if (g->width < tileW) g->width = tileW;
                         }
@@ -2039,12 +2167,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (isScalingHeight && selectedType != SELECT_NONE) {
                     float dh = (float)(lastMouseY - my) * 1.0f;
                     for (auto* g : selectedGimmicks) { 
-                        g->height += dh; 
-                        if (g->height < 10.0f) g->height = 10.0f; 
+                        g->spriteHeight += dh; 
+                        if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f; 
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
-                            float tileW = g->height * ((float)imgW / imgH);
+                            float tileW = g->spriteHeight * ((float)imgW / imgH);
                             g->width = roundf(g->width / tileW) * tileW;
                             if (g->width < tileW) g->width = tileW;
                         }
@@ -2161,6 +2289,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         };
 
         float ts = isStepFrame ? 1.0f : finalTimeScale;
+        Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
 
         // Feature 3 & 5: 各種マネージャーの更新
         if (!isPaused || isStepFrame) {
@@ -2228,10 +2357,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 左の境界（timePos）を左から右に越えたときのみ前方にワープ
                         if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
                             player.x = targetTimePos * STAGE_WIDTH + 8.0f;
+                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                         // 右の境界（targetTimePos）を右から左に越えたときのみ後方にワープ
                         else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
                             player.x = timePos * STAGE_WIDTH - pw_scaled - 8.0f;
+                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                     }
                 }
@@ -2249,7 +2382,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float objH = (float)player.height * player.scale;
                         float footY = player.y + objH;
                         // プレイヤーがこのリフトに乗っているかチェック
-                        if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.width) {
+                        if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.spriteWidth) {
                             float threshold = player.vy + 8.0f;
                             if (footY >= gim.y && footY <= gim.y + threshold) {
                                 gim.y += 1.5f * pts; // ゆっくり降下
@@ -2266,7 +2399,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (const auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_WEIGHT_SWITCH && gim.isActive) {
                         switchX = gim.x;
-                        switchWidth = gim.width;
+                        switchWidth = gim.spriteWidth;
                         break;
                     }
                 }
@@ -2275,9 +2408,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     for (const auto& gim : gimmicks) {
                         if (gim.type == GIMMICK_SCALABLE_BOX && gim.isActive) {
                             // 拡大可能ボックスがスイッチの上にあるかチェック
-                            if (gim.x + gim.width >= switchX && gim.x <= switchX + switchWidth) {
+                            if (gim.x + gim.spriteWidth >= switchX && gim.x <= switchX + switchWidth) {
                                 // 横幅が140以上に拡大されている必要がある
-                                if (gim.width >= 140.0f) {
+                                if (gim.spriteWidth >= 140.0f) {
                                     switchActive = true;
                                 }
                             }
@@ -2288,7 +2421,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // スイッチの状態をゲートドアのロックに適用
                 for (auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_GATE_DOOR) {
+                        bool wasOpen = !gim.isActive;
                         gim.isActive = !switchActive; // スイッチがアクティブでない場合はドアを閉じる（isActive=true）
+                        bool isOpenNow = !gim.isActive;
+                        if (isOpenNow && !wasOpen) { // 開いた瞬間だけSE再生
+                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
+                        }
                     }
                 }
             }
@@ -2314,7 +2453,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     enemy.type = s.type;
                 }
             } else {
-                if (enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.width, (float)enemy.height, enemy.scale, enemy.isPaused)) {
+                if (enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.hitboxWidth, (float)enemy.hitboxHeight, enemy.scale, enemy.isPaused)) {
                     float ets = ts * enemy.speedScale;
                     
                     // Apply Gravity first
@@ -2354,10 +2493,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float testY = enemy.y + 2.0f; // 1px下
                                 float testVY = 1.0f;
                                 bool tileGround = CheckGridCollisionY(enemy.x, testY, testVY,
-                                    enemy.width, enemy.scale, enemy.height,
+                                    enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                     stages[currentStageIdx].map, tileDefs);
                                 bool platGround = CheckPlatformCollision(enemy.x, testY, testVY,
-                                    enemy.width, enemy.height, enemy.scale, platforms, gimmicks);
+                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
                                 isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
                             }
 
@@ -2378,8 +2517,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
-                                        bullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
+                                        bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
+                                        bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
                                         bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.6f : -BULLET_SPEED * 0.6f);
                                         bullets[i].vy = 0.0f;
                                         bullets[i].isPlayerOwned = false; // 敵の弾
@@ -2396,8 +2535,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 索敵＆射撃AI（DrawPixel2.cpp準拠）
                             float pCenterX = player.x + (player.width * player.scale) / 2.0f;
                             float pCenterY = player.y + (player.height * player.scale) / 2.0f;
-                            float eCenterX = enemy.x + (enemy.width * enemy.scale) / 2.0f;
-                            float eCenterY = enemy.y + (enemy.height * enemy.scale) / 2.0f;
+                            float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                            float eCenterY = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
                             float distX = std::abs(pCenterX - eCenterX);
                             float distY = std::abs(pCenterY - eCenterY);
 
@@ -2422,8 +2561,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
-                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.width * enemy.scale : -10.0f);
-                                            bullets[i].y = enemy.y + (float)enemy.height * enemy.scale / 4.0f;
+                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
+                                            bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
                                             bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.5f : -BULLET_SPEED * 0.5f);
                                             bullets[i].vy = 0.0f;
                                             bullets[i].isPlayerOwned = false;
@@ -2437,28 +2576,289 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                             break;
                         }
+
+                        // ===== ここから追加タイプ =====
+                        case ENEMY_WALKER: {
+                            // 歩いてくる：常にプレイヤー方向へ歩く。崖のふちで止まる。
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.35f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            float aheadX = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale + 8.0f);
+                            float footY = enemy.y + (float)enemy.hitboxHeight * enemy.scale + 4.0f;
+                            auto& mpW = stages[currentStageIdx].map;
+                            int tColW = (int)(aheadX / TILE_SIZE);
+                            int tRowW = (int)(footY / TILE_SIZE);
+                            bool groundAhead = false;
+                            if (!mpW.empty() && tRowW >= 0 && tRowW < (int)mpW.size() && tColW >= 0 && tColW < (int)mpW[0].size()) {
+                                int tid = mpW[tRowW][tColW];
+                                groundAhead = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                            }
+                            if (!groundAhead) enemy.vx = 0.0f;
+                            break;
+                        }
+                        case ENEMY_CHASER: {
+                            // 追っかけてくる：WALKERに加え、壁に当たると自動でジャンプする
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.55f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            float aheadX = enemy.x + (enemy.direction == 1 ? -4.0f : (float)enemy.hitboxWidth * enemy.scale + 4.0f);
+                            float midY = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                            auto& mpC = stages[currentStageIdx].map;
+                            int tColC = (int)(aheadX / TILE_SIZE);
+                            int tRowC = (int)(midY / TILE_SIZE);
+                            bool wallAhead = false;
+                            if (!mpC.empty() && tRowC >= 0 && tRowC < (int)mpC.size() && tColC >= 0 && tColC < (int)mpC[0].size()) {
+                                int tid = mpC[tRowC][tColC];
+                                wallAhead = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                            }
+                            if (wallAhead && std::abs(enemy.vy) < 1.0f) {
+                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * 0.8f;
+                            }
+                            break;
+                        }
+                        case ENEMY_DASH_CHARGER: {
+                            // 突進：射程内に入ると溜め→高速直進→クールダウン。auxState: 0待機/1溜め/2突進/3クールダウン
+                            float distXd = player.x - enemy.x;
+                            if (enemy.auxState == 0) {
+                                enemy.vx = 0.0f;
+                                if (std::abs(distXd) < 260.0f) { enemy.auxState = 1; enemy.customTimer = 30.0f; enemy.direction = (distXd < 0) ? 1 : 0; }
+                            } else if (enemy.auxState == 1) {
+                                enemy.vx = 0.0f;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0) { enemy.auxState = 2; enemy.customTimer = 40.0f; }
+                            } else if (enemy.auxState == 2) {
+                                float dashSpeed = DASH_SPEED * ets * 1.5f;
+                                enemy.vx = (enemy.direction == 1) ? -dashSpeed : dashSpeed;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0) { enemy.auxState = 3; enemy.customTimer = 70.0f; }
+                            } else {
+                                enemy.vx = 0.0f;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0) enemy.auxState = 0;
+                            }
+                            break;
+                        }
+                        case ENEMY_FALLER: {
+                            // 待機(0)：静止 → プレイヤーが真下を通ると落下(1) → 着地後クールダウン(2) → 元の高さへ復帰
+                            if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
+                            if (enemy.auxState == 0) {
+                                enemy.vx = 0.0f; enemy.vy = 0.0f;
+                                if (std::abs(player.x - enemy.x) < 24.0f && player.y > enemy.y) {
+                                    enemy.auxState = 1;
+                                    enemy.customTimer = 10.0f;
+                                }
+                            } else if (enemy.auxState == 1) {
+                                enemy.vx = 0.0f;
+                                if (enemy.customTimer > 0) enemy.customTimer -= ets;
+                                else if (std::abs(enemy.vy) < 0.5f) {
+                                    enemy.auxState = 2;
+                                    enemy.customTimer = 120.0f;
+                                }
+                            } else {
+                                enemy.vx = 0.0f; enemy.vy = 0.0f;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0) {
+                                    enemy.y = enemy.auxF2;
+                                    enemy.auxState = 0;
+                                }
+                            }
+                            break;
+                        }
+                        case ENEMY_SPREAD_SHOOTER: {
+                            // 拡散弾：固定位置から3方向へ拡散射撃
+                            enemy.vx = 0.0f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.customTimer += ets;
+                            if (enemy.customTimer >= 150.0f) {
+                                float baseDir = (enemy.direction == 0) ? 1.0f : -1.0f;
+                                float angles[3] = { -0.35f, 0.0f, 0.35f };
+                                for (int a = 0; a < 3; a++) {
+                                    for (int i = 0; i < MAX_BULLETS; i++) {
+                                        if (!bullets[i].isActive) {
+                                            bullets[i].isActive = true;
+                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
+                                            bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
+                                            float spd = BULLET_SPEED * 0.5f;
+                                            bullets[i].vx = baseDir * spd * cosf(angles[a]);
+                                            bullets[i].vy = spd * sinf(angles[a]);
+                                            bullets[i].isPlayerOwned = false;
+                                            bullets[i].isRewinding = false;
+                                            bullets[i].history.clear();
+                                            break;
+                                        }
+                                    }
+                                }
+                                enemy.customTimer = 0.0f;
+                            }
+                            break;
+                        }
+                        case ENEMY_AIMED_SHOOTER: {
+                            // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ
+                            enemy.vx = 0.0f;
+                            enemy.customTimer += ets;
+                            if (enemy.customTimer >= 130.0f) {
+                                float pCenterX = player.x + (player.width * player.scale) / 2.0f;
+                                float pCenterY = player.y + (player.height * player.scale) / 2.0f;
+                                float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                                float eCenterY = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
+                                float dxA = pCenterX - eCenterX;
+                                float dyA = pCenterY - eCenterY;
+                                float distA = sqrtf(dxA * dxA + dyA * dyA);
+                                if (distA < 1.0f) distA = 1.0f;
+                                enemy.direction = (dxA < 0) ? 1 : 0;
+                                for (int i = 0; i < MAX_BULLETS; i++) {
+                                    if (!bullets[i].isActive) {
+                                        bullets[i].isActive = true;
+                                        bullets[i].x = eCenterX;
+                                        bullets[i].y = eCenterY;
+                                        float spd = BULLET_SPEED * 0.55f;
+                                        bullets[i].vx = dxA / distA * spd;
+                                        bullets[i].vy = dyA / distA * spd;
+                                        bullets[i].isPlayerOwned = false;
+                                        bullets[i].isRewinding = false;
+                                        bullets[i].history.clear();
+                                        break;
+                                    }
+                                }
+                                enemy.customTimer = 0.0f;
+                            }
+                            break;
+                        }
+                        case ENEMY_FLOATER: {
+                            // 浮遊敵：重力を打ち消してサインカーブで浮遊しながらゆっくり接近
+                            if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
+                            enemy.vy = 0.0f;
+                            enemy.customTimer += ets;
+                            enemy.y = enemy.auxF2 + sinf(enemy.customTimer * 0.05f) * 40.0f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.2f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                            break;
+                        }
+                        case ENEMY_TELEPORTER: {
+                            // テレポーター：一定間隔でプレイヤー付近へ瞬間移動する
+                            enemy.vx = 0.0f;
+                            enemy.customTimer += ets;
+                            if (enemy.customTimer >= 180.0f) {
+                                float side = (rand() % 2 == 0) ? 1.0f : -1.0f;
+                                float offset = 120.0f + (float)(rand() % 100);
+                                enemy.x = player.x + side * offset;
+                                if (enemy.x < 0.0f) enemy.x = 0.0f;
+                                enemy.customTimer = 0.0f;
+                            }
+                            break;
+                        }
+                        case ENEMY_SHRINKER: {
+                            // 分裂もどき：通常時はゆっくり接近。被弾で縮小・高速化した後(auxFlag)は素早く接近する。
+                            float mult = enemy.auxFlag ? 0.9f : 0.35f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * mult;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                            break;
+                        }
+                        case ENEMY_SHIELD: {
+                            // シールド：ゆっくり接近しつつ、一定間隔で無敵状態(auxFlag)を切り替える（無敵中は描画側で発光）
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            enemy.customTimer += ets;
+                            if (!enemy.auxFlag && enemy.customTimer >= 150.0f) { enemy.auxFlag = true; enemy.customTimer = 0.0f; }
+                            else if (enemy.auxFlag && enemy.customTimer >= 90.0f) { enemy.auxFlag = false; enemy.customTimer = 0.0f; }
+                            break;
+                        }
+                        case ENEMY_MIMIC_GHOST: {
+                            // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生して過去の動きをなぞる
+                            enemy.vx = 0.0f; enemy.vy = 0.0f;
+                            if (enemy.auxF1 <= 0.0f) enemy.auxF1 = 90.0f; // 遅延フレーム数（約1.5秒）
+                            size_t delay = (size_t)enemy.auxF1;
+                            if (player.history.size() > delay) {
+                                const PlayerState& past = player.history[player.history.size() - 1 - delay];
+                                enemy.x = past.x;
+                                enemy.y = past.y;
+                            }
+                            break;
+                        }
+                        case ENEMY_SIZE_SHIFTER: {
+                            // 大きさが変わる敵：scaleが周期的に変化（当たり判定も連動）
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.25f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            enemy.customTimer += ets;
+                            enemy.scale = 1.0f + sinf(enemy.customTimer * 0.04f) * 0.5f;
+                            if (enemy.scale < 0.4f) enemy.scale = 0.4f;
+                            break;
+                        }
+                        case ENEMY_TEMPO_WARPER: {
+                            // 速さ操作敵：speedScaleが周期的に激しく変化し接近速度が乱れる
+                            enemy.customTimer += ets;
+                            enemy.speedScale = 0.3f + 1.3f * (0.5f + 0.5f * sinf(enemy.customTimer * 0.05f));
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.4f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                            break;
+                        }
+                        case ENEMY_BRIGHTNESS_PHANTOM: {
+                            // 明るさ操作敵：射程内で画面を暗転させる
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            float distB = std::abs(player.x - enemy.x);
+                            if (distB < 320.0f) {
+                                float t = 1.0f - (distB / 320.0f);
+                                Screen_SetBrightness(1.0f - t * 0.65f);
+                            }
+                            break;
+                        }
+                        case ENEMY_COLOR_SHIFTER: {
+                            // 色調整敵：射程内で画面を赤みがかった色調へシフトさせる
+                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                            enemy.vx = (enemy.direction == 1) ? -speed : speed;
+
+                            float distCol = std::abs(player.x - enemy.x);
+                            if (distCol < 320.0f) {
+                                float t = 1.0f - (distCol / 320.0f);
+                                Screen_SetTint(1.0f, 1.0f - t * 0.6f, 1.0f - t * 0.6f);
+                            }
+                            break;
+                        }
+                        case ENEMY_ZOOM_DISRUPTOR: {
+                            // ズーム撹乱敵：射程内で画面ズームを周期的に揺さぶる
+                            enemy.vx = 0.0f;
+                            enemy.customTimer += ets;
+                            float distZ = std::abs(player.x - enemy.x);
+                            if (distZ < 280.0f) {
+                                Screen_SetZoom(1.0f + sinf(enemy.customTimer * 0.08f) * 0.25f);
+                            }
+                            break;
+                        }
                     }
 
                     // X/Y方向の移動と衝突判定を共通化
                     bool enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy, 
-                                                                 enemy.width, enemy.height, enemy.scale, 
+                                                                 enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, 
                                                                  stages[currentStageIdx].map, tileDefs, gimmicks);
 
                     // 足場との着地衝突判定
-                    CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.width, enemy.height, enemy.scale, platforms, gimmicks);
+                    CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
 
                     // 地面との衝突によりvy=0になった場合はisJumping相当をリセット
                     if (enemyGrounded) { enemy.vy = 0.0f; }
 
                     // マップ下端に落ちた場合も止める（フォールスルー防止）
                     float mapBottom = (float)(stages[currentStageIdx].map.size()) * TILE_SIZE;
-                    if (enemy.y > mapBottom) { enemy.y = mapBottom - (float)enemy.height * enemy.scale; enemy.vy = 0.0f; }
+                    if (enemy.y > mapBottom) { enemy.y = mapBottom - (float)enemy.hitboxHeight * enemy.scale; enemy.vy = 0.0f; }
 
                     // 敵のステージ境界制限
                     if (enemy.x < 0.0f) enemy.x = 0.0f;
                     float mapRight = (float)(stages[currentStageIdx].map.empty() ? 0 : stages[currentStageIdx].map[0].size()) * TILE_SIZE;
-                    if (enemy.x > mapRight - (float)enemy.width * enemy.scale) {
-                        enemy.x = mapRight - (float)enemy.width * enemy.scale;
+                    if (enemy.x > mapRight - (float)enemy.hitboxWidth * enemy.scale) {
+                        enemy.x = mapRight - (float)enemy.hitboxWidth * enemy.scale;
                     }
                 }
                 if (!isPaused || isStepFrame) {
@@ -2486,10 +2886,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
                         // 衝突チェック
-                        if (player.x < item.x + item.width && player.x + pw_scaled > item.x &&
-                            player.y < item.y + item.height && player.y + ph_scaled > item.y) {
+                        if (player.x < item.x + item.hitboxWidth && player.x + pw_scaled > item.x &&
+                            player.y < item.y + item.hitboxHeight && player.y + ph_scaled > item.y) {
                             item.isCollected = true;
                             item.isActive = false;
+                            const ItemDef* idef = FindItemDef(item.assetId);
+                            if (idef) SoundManager::Get().PlaySe(idef->seCollect);
                         }
                     }
                     item.history.push_back({ item.x, item.y, item.isCollected });
@@ -2535,8 +2937,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             for (const auto& gim : gimmicks) {
                                 if (gim.type == GIMMICK_REFLECT_MIRROR && gim.isActive) {
                                     // 反射のバウンディングボックス交差チェック
-                                    if (bullets[i].x >= gim.x && bullets[i].x <= gim.x + gim.width &&
-                                        bullets[i].y >= gim.y && bullets[i].y <= gim.y + gim.height) {
+                                    if (bullets[i].x >= gim.x && bullets[i].x <= gim.x + gim.spriteWidth &&
+                                        bullets[i].y >= gim.y && bullets[i].y <= gim.y + gim.spriteHeight) {
                                         
                                         // 反射物理：角度 gim.angle は板の回転を表す
                                         // 面の法線ベクトル N は ( -sin(angle), cos(angle) )
@@ -2577,7 +2979,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     gim.isActive = s.isActive;
                 }
             } else {
-                if (CanUpdate(gim.x, gim.y, gim.width, gim.height, 1.0f, gim.isPaused)) {
+                if (CanUpdate(gim.x, gim.y, gim.spriteWidth, gim.spriteHeight, 1.0f, gim.isPaused)) {
                     float gts = ts;
                     if (gim.type == GIMMICK_ROTATING_BRIDGE) {
                         // 橋を自動回転（1フレームあたり約0.85度）
@@ -2596,7 +2998,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float ph_scaled = (float)player.height * player.scale;
                         float footY = player.y + ph_scaled;
                         bool isPlayerOn = false;
-                        if (player.vy >= 0 && player.x + pw_scaled > gim.x && player.x < gim.x + gim.width) {
+                        if (player.vy >= 0 && player.x + pw_scaled > gim.x && player.x < gim.x + gim.spriteWidth) {
                             if (footY >= gim.y && footY <= gim.y + 10.0f) {
                                 isPlayerOn = true;
                             }
@@ -2631,17 +3033,70 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 対プレイヤー
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
-                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.width, gim.height)) {
+                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             player.hp = 0;
+                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                         // 対敵
                         for (auto& enemy : enemies) {
-                            if (enemy.isActive && CheckCollision(enemy.x, enemy.y, (float)enemy.width * enemy.scale, (float)enemy.height * enemy.scale, gim.x, gim.y, gim.width, gim.height)) {
+                            if (enemy.isActive && CheckCollision(enemy.x, enemy.y, (float)enemy.hitboxWidth * enemy.scale, (float)enemy.hitboxHeight * enemy.scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                 enemy.hp = 0;
                                 enemy.isActive = false;
                                 gim.isActive = false; // 互いに消滅
+                                const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                                if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                             }
                         }
+                    }
+                    else if (gim.type == GIMMICK_MOVING_PLATFORM) {
+                        // 動く足場：val1(上端)～val2(下端)を自動で往復する
+                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + 96.0f; }
+                        gim.customTimer += 0.02f * gts;
+                        float t = (sinf(gim.customTimer) + 1.0f) * 0.5f;
+                        gim.y = gim.val1 + (gim.val2 - gim.val1) * t;
+                    }
+                    else if (gim.type == GIMMICK_FRAMESTEP_LIFT) {
+                        // コマ送りリフト：一時停止中の→キー（コマ送り）1回ごとに一歩だけ動く
+                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + 128.0f; }
+                        if (isStepFrame) {
+                            gim.customTimer += 0.15f;
+                            if (gim.customTimer > 1.0f) gim.customTimer = 0.0f;
+                        }
+                        gim.y = gim.val1 + (gim.val2 - gim.val1) * gim.customTimer;
+                    }
+                    else if (gim.type == GIMMICK_FASTFORWARD_GATE) {
+                        // 早送りゲート：早送りモード中(Fキー)だけ通過できる壁
+                        gim.isActive = !isFastForward;
+                    }
+                    else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
+                             || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
+                        // 画面全体エフェクト系ゾーン：範囲内にプレイヤーがいる間だけ効果を発動する
+                        float pw_s = (float)player.width * player.scale;
+                        float ph_s = (float)player.height * player.scale;
+                        if (CheckCollision(player.x, player.y, pw_s, ph_s, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                            if (gim.type == GIMMICK_BRIGHTNESS_ZONE) {
+                                // val1 > 0.5 なら明転、それ以外は暗転（デフォルト）
+                                Screen_SetBrightness(gim.val1 > 0.5f ? 1.6f : 0.35f);
+                            } else if (gim.type == GIMMICK_COLOR_ZONE) {
+                                Screen_SetTint(1.0f, 0.6f, 1.0f); // 紫がかった色調
+                            } else if (gim.type == GIMMICK_ZOOM_LENS) {
+                                Screen_SetZoom(1.6f);
+                            } else { // GIMMICK_SLOWMO_FIELD（視覚効果のみのスローモーション演出）
+                                Screen_SetZoom(1.3f);
+                                Screen_SetBrightness(0.85f);
+                            }
+                        }
+                    }
+                    else if (gim.type == GIMMICK_COLOR_LOCK_PLATFORM) {
+                        // 色ロック足場：paramの色番号とプレイヤーの色フィルタが一致する時だけ実体化する
+                        int requiredColor = gim.param.empty() ? 1 : atoi(gim.param.c_str());
+                        gim.isActive = (requiredColor == playerColorFilter);
+                    }
+                    else if (gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
+                        // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する
+                        bool wantsBright = (gim.param == "bright");
+                        gim.isActive = wantsBright ? (fxCurBright > 1.3f) : (fxCurBright < 0.6f);
                     }
                 }
                 if (!isPaused || isStepFrame) {
@@ -2650,6 +3105,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
         }
+
+        // プレイヤーが能動的に使う画面エフェクト操作（敵/ギミックの演出より後に適用し、プレイヤーの意図を優先する）
+        // Z:ズーム保持, X:暗転保持, C:明転保持, T(上で処理済み)の色フィルタを継続適用
+        if (currentScene == PLAY && canPlayerAct) {
+            if (CheckHitKey(KEY_INPUT_Z)) Screen_SetZoom(1.6f);
+            if (CheckHitKey(KEY_INPUT_X)) Screen_SetBrightness(0.3f);
+            if (CheckHitKey(KEY_INPUT_C)) Screen_SetBrightness(1.7f);
+
+            if (playerColorFilter == 1) Screen_SetTint(1.0f, 0.4f, 0.4f);
+            else if (playerColorFilter == 2) Screen_SetTint(0.4f, 1.0f, 0.4f);
+            else if (playerColorFilter == 3) Screen_SetTint(0.4f, 0.4f, 1.0f);
+        }
+
+        Screen_UpdateFrame(ts); // 敵/ギミックがこのフレームで設定した目標値へ滑らかに追従
 
         // --- カメラスクロールシステム ---
         if (!isPaused) {
@@ -2673,7 +3142,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 1. プレイヤー vs トゲ（即死）
             for (const auto& gim : gimmicks) {
                 if (gim.type == GIMMICK_SPIKES && gim.isActive) {
-                    if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.width, gim.height)) {
+                    if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                         ResetStage();
                         break;
                     }
@@ -2688,10 +3157,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         bool isThisEnemyRew = (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
                         if (isThisEnemyRew) continue;
 
-                        float ew_scaled = (float)enemy.width * enemy.scale;
-                        float eh_scaled = (float)enemy.height * enemy.scale;
+                        float ew_scaled = (float)enemy.hitboxWidth * enemy.scale;
+                        float eh_scaled = (float)enemy.hitboxHeight * enemy.scale;
                         if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
                             player.hp--;
+                            {
+                                const EnemyDef* edef = FindEnemyDef(enemy.assetId);
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                            }
                             // 無敵時間を設けていないので連続ダメージが入る可能性があるが簡易実装
                             if (player.hp <= 0) {
                                 currentScene = RESULT_GAMEOVER;
@@ -2711,11 +3184,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 bool isThisEnemyRew = (isRKeyPressed && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
                                 if (isThisEnemyRew) continue;
 
-                                float ew_scaled = (float)enemy.width * enemy.scale;
-                                float eh_scaled = (float)enemy.height * enemy.scale;
+                                float ew_scaled = (float)enemy.hitboxWidth * enemy.scale;
+                                float eh_scaled = (float)enemy.hitboxHeight * enemy.scale;
                                 if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
+                                    if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) {
+                                        // シールド発動中はダメージ無効（弾だけ消える）
+                                        bullets[i].isActive = false;
+                                        break;
+                                    }
                                     enemy.hp--;
-                                    if (enemy.hp <= 0) enemy.isActive = false;      // 敵を倒す
+                                    const EnemyDef* edef = FindEnemyDef(enemy.assetId);
+                                    if (enemy.hp <= 0) {
+                                        if (enemy.type == ENEMY_SHRINKER && !enemy.auxFlag) {
+                                            // 分裂もどき：一度だけ縮小・高速化して復活する
+                                            enemy.auxFlag = true;
+                                            enemy.hp = 1;
+                                            enemy.scale *= 0.6f;
+                                            if (edef) SoundManager::Get().PlaySe(edef->seDamage);
+                                        } else {
+                                            enemy.isActive = false;      // 敵を倒す
+                                            if (edef) SoundManager::Get().PlaySe(edef->seDeath);
+                                        }
+                                    } else if (edef) {
+                                        SoundManager::Get().PlaySe(edef->seDamage);
+                                    }
                                     bullets[i].isActive = false; // 弾を消滅
                                     break;
                                 }
@@ -2726,9 +3218,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
                                 if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, gim.x, gim.y, gim.width, gim.height)) {
+                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                         gim.isActive = false;
                                         bullets[i].isActive = false;
+                                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                                        if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                                         break;
                                     }
                                 }
@@ -2791,17 +3285,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!gim.isActive) continue;
 
             if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
-                // 橋を画像で描画 (回転とスケーリング)
+                // 橋を画像で描画 (回転とスケーリング)。カスタムスプライトが設定されていればそちらを優先する
+                int useHandle = gim.handle >= 0 ? gim.handle : bridgeHandle;
                 int imgW, imgH;
-                GetGraphSize(bridgeHandle, &imgW, &imgH);
-                float gcx = gim.x + gim.width / 2.0f;
-                float gcy = gim.y + gim.height / 2.0f;
-                double extRateX = (double)gim.width / imgW;
-                double extRateY = (double)gim.height / imgH;
+                GetGraphSize(useHandle, &imgW, &imgH);
+                float gcx = gim.x + gim.spriteWidth / 2.0f;
+                float gcy = gim.y + gim.spriteHeight / 2.0f;
+                double extRateX = (double)gim.spriteWidth / imgW;
+                double extRateY = (double)gim.spriteHeight / imgH;
                 if (extRateY < 1.0) extRateY = 20.0 / imgH; // 薄すぎる場合は最低限の厚みを持たせる
-                
+
                 // DrawRotaGraph3 を使用して縦横別スケールで中心回転描画
-                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, bridgeHandle, TRUE, FALSE);
+                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
 
                 // 回転軸を描画
                 DrawCircle((int)(gcx - cameraX), (int)gcy, 5, GetColor(255, 255, 255), TRUE);
@@ -2811,43 +3306,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)gim.y - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
-                // ヒビの入った石ブロック画像をスケーリングして描画
+                // ヒビの入った石ブロック画像をスケーリングして描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : breakableBlockHandle;
                 int bx1 = (int)(gim.x - cameraX);
                 int by1 = (int)gim.y;
-                int bx2 = (int)(gim.x + gim.width - cameraX);
-                int by2 = (int)(gim.y + gim.height);
-                DrawExtendGraph(bx1, by1, bx2, by2, breakableBlockHandle, TRUE);
+                int bx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int by2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(bx1, by1, bx2, by2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_FALLING_LIFT) {
-                // リフト画像を描画
+                // リフト画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : liftHandle;
                 int x1 = (int)(gim.x - cameraX);
                 int y1 = (int)gim.y;
-                int x2 = (int)(gim.x + gim.width - cameraX);
-                int y2 = (int)(gim.y + gim.height);
-                DrawExtendGraph(x1, y1, x2, y2, liftHandle, TRUE);
+                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int y2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
                 else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_REFLECT_MIRROR) {
-                // 反射ミラー画像を描画 (回転とスケーリング)
+                // 反射ミラー画像を描画 (回転とスケーリング)（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : mirrorHandle;
                 int imgW, imgH;
-                GetGraphSize(mirrorHandle, &imgW, &imgH);
-                float gcx = gim.x + gim.width / 2.0f;
-                float gcy = gim.y + gim.height / 2.0f;
-                double extRateX = (double)gim.width / imgW;
+                GetGraphSize(useHandle, &imgW, &imgH);
+                float gcx = gim.x + gim.spriteWidth / 2.0f;
+                float gcy = gim.y + gim.spriteHeight / 2.0f;
+                double extRateX = (double)gim.spriteWidth / imgW;
                 double extRateY = 24.0 / imgH; // ミラーの厚み
-                
-                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, mirrorHandle, TRUE, FALSE);
+
+                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
                 DrawCircle((int)(gcx - cameraX), (int)gcy, 4, GetColor(255, 255, 0), TRUE);
                 if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)gim.y - 35, "|| PAUSE", GetColor(255, 255, 100));
             }
             else if (gim.type == GIMMICK_WEIGHT_SWITCH) {
-                // 重量スイッチ画像を描画
+                // 重量スイッチ画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : switchHandle;
                 int x1 = (int)(gim.x - cameraX);
                 int y1 = (int)gim.y;
-                int x2 = (int)(gim.x + gim.width - cameraX);
-                int y2 = (int)(gim.y + gim.height);
-                
+                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int y2 = (int)(gim.y + gim.spriteHeight);
+
                 bool isActiveState = false;
                 for (const auto& other : gimmicks) {
                     if (other.type == GIMMICK_GATE_DOOR) {
@@ -2855,67 +3354,72 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         break;
                     }
                 }
-                
+
                 if (isActiveState) SetDrawBright(100, 255, 100); // 起動時は緑っぽく
-                DrawExtendGraph(x1, y1, x2, y2, switchHandle, TRUE);
+                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 SetDrawBright(255, 255, 255);
             }
             else if (gim.type == GIMMICK_SCALABLE_BOX) {
-                // 拡大可能ブロック画像を描画
+                // 拡大可能ブロック画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : boxHandle;
                 int x1 = (int)(gim.x - cameraX);
                 int y1 = (int)gim.y;
-                int x2 = (int)(gim.x + gim.width - cameraX);
-                int y2 = (int)(gim.y + gim.height);
-                DrawExtendGraph(x1, y1, x2, y2, boxHandle, TRUE);
+                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int y2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
                 else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_GATE_DOOR) {
-                // ゲートドア画像を描画
+                // ゲートドア画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : doorHandle;
                 int x1 = (int)(gim.x - cameraX);
                 int y1 = (int)gim.y;
-                int x2 = (int)(gim.x + gim.width - cameraX);
-                int y2 = (int)(gim.y + gim.height);
-                DrawExtendGraph(x1, y1, x2, y2, doorHandle, TRUE);
+                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int y2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_CUT_PORTAL) {
-                // ポータル画像を描画
+                // ポータル画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : portalHandle;
                 int px1 = (int)(gim.val1 * STAGE_WIDTH - cameraX);
                 int px2 = (int)(gim.val2 * STAGE_WIDTH - cameraX);
                 int py = (int)groundY - 80;
-                
+
                 // 円形の領域に合わせて画像を描画
-                DrawExtendGraph(px1 - 20, py - 20, px1 + 20, py + 20, portalHandle, TRUE);
-                DrawExtendGraph(px2 - 20, py - 20, px2 + 20, py + 20, portalHandle, TRUE);
+                DrawExtendGraph(px1 - 20, py - 20, px1 + 20, py + 20, useHandle, TRUE);
+                DrawExtendGraph(px2 - 20, py - 20, px2 + 20, py + 20, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SPIKES) {
-                // トゲトゲ画像を描画
+                // トゲトゲ画像を描画（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : spikesHandle;
                 int sx1 = (int)(gim.x - cameraX);
                 int sy1 = (int)gim.y;
-                int sx2 = (int)(gim.x + gim.width - cameraX);
-                int sy2 = (int)(gim.y + gim.height);
-                DrawExtendGraph(sx1, sy1, sx2, sy2, spikesHandle, TRUE);
+                int sx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int sy2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(sx1, sy1, sx2, sy2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SCALABLE_GROUND) {
-                // 画像サイズに合わせてタイリング描画する
+                // 画像サイズに合わせてタイリング描画する（カスタムスプライト優先）
+                int useHandle = gim.handle >= 0 ? gim.handle : jimenHandle;
                 int imgW, imgH;
-                GetGraphSize(jimenHandle, &imgW, &imgH);
-                float tileW = gim.height * ((float)imgW / imgH);
+                GetGraphSize(useHandle, &imgW, &imgH);
+                float tileW = gim.spriteHeight * ((float)imgW / imgH);
                 
                 int startX = (int)(gim.x - cameraX);
                 int y1 = (int)gim.y;
-                int y2 = (int)(gim.y + gim.height);
+                int y2 = (int)(gim.y + gim.spriteHeight);
                 
-                for (float x = 0; x < gim.width; x += tileW) {
+                for (float x = 0; x < gim.spriteWidth; x += tileW) {
                     float drawW = tileW;
-                    if (x + tileW > gim.width) drawW = gim.width - x;
+                    if (x + tileW > gim.spriteWidth) drawW = gim.spriteWidth - x;
                     if (drawW <= 0.0f) break;
                     
                     int x1 = startX + (int)x;
                     int x2 = startX + (int)(x + drawW);
                     int srcW = (int)((drawW / tileW) * imgW);
                     
-                    DrawRectExtendGraph(x1, y1, x2, y2, 0, 0, srcW, imgH, jimenHandle, TRUE);
+                    DrawRectExtendGraph(x1, y1, x2, y2, 0, 0, srcW, imgH, useHandle, TRUE);
                 }
             }
             else if (gim.type == GIMMICK_CHIKUWA_BLOCK) {
@@ -2926,10 +3430,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 
                 int cx1 = (int)(gim.x + shakeX - cameraX);
                 int cy1 = (int)gim.y;
-                int cx2 = (int)(gim.x + gim.width + shakeX - cameraX);
-                int cy2 = (int)(gim.y + gim.height);
-                DrawBox(cx1, cy1, cx2, cy2, GetColor(222, 184, 135), TRUE);
-                DrawBox(cx1, cy1, cx2, cy2, GetColor(139, 69, 19), FALSE);
+                int cx2 = (int)(gim.x + gim.spriteWidth + shakeX - cameraX);
+                int cy2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.handle >= 0) {
+                    DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
+                } else {
+                    DrawBox(cx1, cy1, cx2, cy2, GetColor(222, 184, 135), TRUE);
+                    DrawBox(cx1, cy1, cx2, cy2, GetColor(139, 69, 19), FALSE);
+                }
             }
             else if (gim.type == GIMMICK_TIME_FIELD) {
                 // 反・一時停止装置の描画
@@ -2943,9 +3451,101 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 敵食いギミックの描画（紫色のボックス）
                 int cx1 = (int)(gim.x - cameraX);
                 int cy1 = (int)gim.y;
-                int cx2 = (int)(gim.x + gim.width - cameraX);
-                int cy2 = (int)(gim.y + gim.height);
-                DrawBox(cx1, cy1, cx2, cy2, GetColor(128, 0, 128), TRUE);
+                int cx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int cy2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.handle >= 0) DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
+                else DrawBox(cx1, cy1, cx2, cy2, GetColor(128, 0, 128), TRUE);
+            }
+            else if (gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT) {
+                // 動く足場／コマ送りリフトの描画（カスタムスプライト優先、無ければ木目調の板）
+                int mx1 = (int)(gim.x - cameraX);
+                int my1 = (int)gim.y;
+                int mx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int my2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.handle >= 0) {
+                    DrawExtendGraph(mx1, my1, mx2, my2, gim.handle, TRUE);
+                } else {
+                    DrawBox(mx1, my1, mx2, my2, GetColor(180, 140, 90), TRUE);
+                    DrawBox(mx1, my1, mx2, my2, GetColor(90, 60, 30), FALSE);
+                }
+                if (gim.type == GIMMICK_FRAMESTEP_LIFT) DrawString(mx1, my1 - 18, "STEP", GetColor(255, 255, 0));
+            }
+            else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
+                // 岩（固定障害物）の描画（カスタムスプライト優先）
+                int rx1 = (int)(gim.x - cameraX);
+                int ry1 = (int)gim.y;
+                int rx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int ry2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.handle >= 0) {
+                    DrawExtendGraph(rx1, ry1, rx2, ry2, gim.handle, TRUE);
+                } else {
+                    DrawBox(rx1, ry1, rx2, ry2, GetColor(120, 120, 125), TRUE);
+                    DrawBox(rx1, ry1, rx2, ry2, GetColor(60, 60, 65), FALSE);
+                }
+            }
+            else if (gim.type == GIMMICK_FASTFORWARD_GATE) {
+                // 早送りゲート：非アクティブ（通過可能＝早送り中）の間は半透明に（カスタムスプライト優先）
+                int fx1 = (int)(gim.x - cameraX);
+                int fy1 = (int)gim.y;
+                int fx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int fy2 = (int)(gim.y + gim.spriteHeight);
+                if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 90);
+                if (gim.handle >= 0) DrawExtendGraph(fx1, fy1, fx2, fy2, gim.handle, TRUE);
+                else DrawBox(fx1, fy1, fx2, fy2, GetColor(0, 200, 255), TRUE);
+                if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawString(fx1, fy1 - 18, "FF GATE", GetColor(0, 200, 255));
+            }
+            else if (gim.type == GIMMICK_COLOR_LOCK_PLATFORM) {
+                // 色ロック足場：実体化中は不透明、不一致中は色付きの半透明ゴーストで位置だけ示す
+                int requiredColor = gim.param.empty() ? 1 : atoi(gim.param.c_str());
+                int lockColor = requiredColor == 2 ? GetColor(80, 220, 80)
+                               : requiredColor == 3 ? GetColor(80, 140, 255)
+                                                     : GetColor(255, 90, 90);
+                int lx1 = (int)(gim.x - cameraX);
+                int ly1 = (int)gim.y;
+                int lx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int ly2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.isActive) {
+                    DrawBox(lx1, ly1, lx2, ly2, lockColor, TRUE);
+                    DrawBox(lx1, ly1, lx2, ly2, GetColor(255, 255, 255), FALSE);
+                } else {
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                    DrawBox(lx1, ly1, lx2, ly2, lockColor, TRUE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                }
+            }
+            else if (gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
+                // 明暗ロック足場：実体化中は不透明、不一致中は半透明のゴーストで位置だけ示す
+                bool wantsBright = (gim.param == "bright");
+                int lockColor = wantsBright ? GetColor(255, 240, 150) : GetColor(60, 60, 90);
+                int bx1 = (int)(gim.x - cameraX);
+                int by1 = (int)gim.y;
+                int bx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int by2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.isActive) {
+                    DrawBox(bx1, by1, bx2, by2, lockColor, TRUE);
+                    DrawBox(bx1, by1, bx2, by2, GetColor(255, 255, 255), FALSE);
+                } else {
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                    DrawBox(bx1, by1, bx2, by2, lockColor, TRUE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                }
+            }
+            else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
+                     || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
+                // 画面エフェクトゾーンの範囲を半透明の枠で可視化
+                int zx1 = (int)(gim.x - cameraX);
+                int zy1 = (int)gim.y;
+                int zx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int zy2 = (int)(gim.y + gim.spriteHeight);
+                int zoneColor = gim.type == GIMMICK_BRIGHTNESS_ZONE ? GetColor(255, 255, 150)
+                               : gim.type == GIMMICK_COLOR_ZONE     ? GetColor(220, 120, 255)
+                               : gim.type == GIMMICK_ZOOM_LENS      ? GetColor(120, 220, 255)
+                                                                      : GetColor(160, 160, 255);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50);
+                DrawBox(zx1, zy1, zx2, zy2, zoneColor, TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawBox(zx1, zy1, zx2, zy2, zoneColor, FALSE);
             }
         }
 
@@ -3017,7 +3617,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (item.isActive && !item.isCollected) {
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)item.y;
-                DrawExtendGraph(icx, icy, icx + (int)item.width, icy + (int)item.height, coinHandle, TRUE);
+                DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, coinHandle, TRUE);
             }
         }
 
@@ -3026,15 +3626,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (enemy.isActive) {
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
-                int ecx = (int)(enemy.x + (enemy.width * enemy.scale) / 2.0f - cameraX);
-                int ecy = (int)(enemy.y + (enemy.height * enemy.scale) / 2.0f);
-                SetDrawBright(255, 120, 120);
+                int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
+                int ecy = (int)(enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f);
+                if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
+                else SetDrawBright(255, 120, 120);
                 if (enemy.direction == 0) DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
                 else DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
                 if (isDebugDrawMode) {
-                    DrawBox((int)(enemy.x - cameraX), (int)enemy.y, (int)(enemy.x + enemy.width * enemy.scale - cameraX), (int)(enemy.y + enemy.height * enemy.scale), GetColor(0, 255, 0), FALSE); // 当たり判定
+                    DrawBox((int)(enemy.x - cameraX), (int)enemy.y, (int)(enemy.x + enemy.hitboxWidth * enemy.scale - cameraX), (int)(enemy.y + enemy.hitboxHeight * enemy.scale), GetColor(0, 255, 0), FALSE); // 当たり判定
                     DrawBox((int)(ecx - (imgW * enemy.scale) / 2.0f), (int)(ecy - (imgH * enemy.scale) / 2.0f), (int)(ecx + (imgW * enemy.scale) / 2.0f), (int)(ecy + (imgH * enemy.scale) / 2.0f), GetColor(255, 0, 0), FALSE); // 描画枠
                 }
 
@@ -3088,12 +3689,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             for (auto* e : selectedEnemies) {
                 if (e->isActive) {
-                    DrawBox((int)(e->x - cameraX), (int)e->y, (int)(e->x + e->width * e->scale - cameraX), (int)(e->y + e->height * e->scale), GetColor(255, 255, 0), FALSE);
+                    DrawBox((int)(e->x - cameraX), (int)e->y, (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale), GetColor(255, 255, 0), FALSE);
                 }
             }
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
-                    DrawBox((int)(g->x - cameraX), (int)g->y, (int)(g->x + g->width - cameraX), (int)(g->y + g->height), GetColor(255, 255, 0), FALSE);
+                    DrawBox((int)(g->x - cameraX), (int)g->y, (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight), GetColor(255, 255, 0), FALSE);
                 }
             }
         }
@@ -3114,11 +3715,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         DrawBox(10, 10, 150, 40, GetColor(255, 215, 0), FALSE);
         DrawString(20, 18, coinStr, GetColor(255, 215, 0));
 
+        // 編集ツールの状態インジケータ（色フィルタ・ミュート）
+        if (playerColorFilter != 0) {
+            const char* filterName = playerColorFilter == 1 ? "RED" : playerColorFilter == 2 ? "GREEN" : "BLUE";
+            int filterColor = playerColorFilter == 1 ? GetColor(255, 90, 90) : playerColorFilter == 2 ? GetColor(90, 220, 90) : GetColor(90, 150, 255);
+            DrawFormatString(160, 18, filterColor, "FILTER: %s", filterName);
+        }
+        if (SoundManager::Get().IsMuted()) {
+            DrawString(160, 34, "MUTED", GetColor(150, 150, 150));
+        }
+
         // ヘルプガイドのOSDオーバーレイ
         if (isPaused) {
             DrawString(10, SCREEN_HEIGHT - 25, "PAUSED (EDITING): Drag, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, [MiddleClick] to Resume", GetColor(200, 200, 200));
         } else {
-            DrawString(10, SCREEN_HEIGHT - 25, "PLAYING: [A][D]: Move  [SPACE]: Jump  [ENTER]/Click Screen: Shot  [MiddleClick] to Pause", GetColor(50, 255, 50));
+            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]: Move  [SPACE]: Jump  [ENTER]/Click Screen: Shot  [MiddleClick] to Pause", GetColor(50, 255, 50));
+            DrawString(10, SCREEN_HEIGHT - 22, "EDIT TOOLS: [T]:Color Filter  [Z]:Zoom  [X]:Darken  [C]:Brighten  [M]:Mute", GetColor(120, 220, 255));
         }
 
         // リザルト画面
@@ -3162,62 +3774,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             
             // パネルタイトル
             DrawString(20, 20, "STAGE EDITOR", GetColor(200, 200, 200));
-            
-            // --- モード選択ボタン ---
-            DrawString(20, 45, "EDIT MODE", GetColor(150, 150, 150));
-            
-            int btnObjColor = (toolMode == EDIT_OBJECTS) ? GetColor(100, 150, 255) : GetColor(60, 60, 60);
-            DrawBox(20, 60, 230, 90, btnObjColor, TRUE);
-            DrawBox(20, 60, 230, 90, GetColor(150, 150, 150), FALSE);
-            DrawString(35, 68, "1. Edit Objects", GetColor(255, 255, 255));
-            
-            int btnTileColor = (toolMode == EDIT_TILES) ? GetColor(100, 150, 255) : GetColor(60, 60, 60);
-            DrawBox(20, 100, 230, 130, btnTileColor, TRUE);
-            DrawBox(20, 100, 230, 130, GetColor(150, 150, 150), FALSE);
-            DrawString(35, 108, "2. Paint Tiles", GetColor(255, 255, 255));
-            
-            // --- タイルパレット (EDIT_TILESモードのみ) ---
-            if (toolMode == EDIT_TILES) {
-                DrawString(20, 155, "TILE PALETTE", GetColor(150, 150, 150));
-                
-                int colEraser = (activePaintTile == TILE_NONE) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
-                DrawBox(20, 180, 230, 210, colEraser, FALSE);
-                DrawBox(22, 182, 228, 208, GetColor(80, 80, 80), TRUE);
-                DrawString(35, 188, "[Eraser] (None)", GetColor(255, 255, 255));
-                
-                int colJimen = (activePaintTile == TILE_JIMEN) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
-                DrawBox(20, 220, 230, 250, colJimen, FALSE);
-                DrawExtendGraph(25, 223, 47, 247, jimenHandle, TRUE);
-                DrawString(55, 228, "Jimen (Grass)", GetColor(255, 255, 255));
-                
-                int colTuti = (activePaintTile == TILE_TUTI) ? GetColor(255, 255, 0) : GetColor(50, 50, 50);
-                DrawBox(20, 260, 230, 290, colTuti, FALSE);
-                DrawExtendGraph(25, 263, 47, 287, tutiHandle, TRUE);
-                DrawString(55, 268, "Tuti (Dirt)", GetColor(255, 255, 255));
-            } else {
-                DrawString(20, 155, "TILE PALETTE", GetColor(100, 100, 100));
-                DrawString(20, 180, "(Select 'Paint Tiles' to edit)", GetColor(120, 120, 120));
-            }
-            
-            // --- ステージ選択 ---
-            DrawString(20, 325, "SELECT STAGE", GetColor(150, 150, 150));
-            
-            int btnStg1Color = (currentStageIdx == 0) ? GetColor(50, 180, 50) : GetColor(60, 60, 60);
-            DrawBox(20, 350, 230, 380, btnStg1Color, TRUE);
-            DrawBox(20, 350, 230, 380, GetColor(150, 150, 150), FALSE);
-            DrawString(35, 358, "Stage 1: Grass Fields", GetColor(255, 255, 255));
-            
-            int btnStg2Color = (currentStageIdx == 1) ? GetColor(50, 180, 50) : GetColor(60, 60, 60);
-            DrawBox(20, 390, 230, 420, btnStg2Color, TRUE);
-            DrawBox(20, 390, 230, 420, GetColor(150, 150, 150), FALSE);
-            DrawString(35, 398, "Stage 2: Rugged Valley", GetColor(255, 255, 255));
 
             DrawBox(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, GetColor(45, 45, 45), TRUE); // 右パネル（インスペクター）
             DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(40, 40, 40), TRUE); // 下部パネル（タイムライン）
 
             // モニタープレビューウィンドウ
             DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
-            DrawGraph(monitorX, monitorY, gameScreen, TRUE);
+            Screen_DrawComposited(monitorX, monitorY, SCREEN_WIDTH, SCREEN_HEIGHT, gameScreen);
 
             // 範囲選択矩形の描画
             if (isAreaSelecting) {
@@ -3370,7 +3933,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(10, 10, "PROFESSIONAL PLAY MODE (RUNNING)", GetColor(50, 255, 50));
             }
         } else {
-            DrawExtendGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen, TRUE);
+            Screen_DrawComposited(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen);
             if (isPaused) DrawString(WINDOW_WIDTH / 2 - 40, WINDOW_HEIGHT / 2, "PAUSED", GetColor(255, 255, 255));
         }
         // ImGuiのフレーム開始
@@ -3535,7 +4098,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 std::string id = e["id"]; float x = e["x"]; float y = e["y"];
                                 int t_enum = 0; int pw = 32, ph = 32;
                                 for (auto& d : enemyDefs) { if (d.id == id) { t_enum = d.type_enum; pw = d.width; ph = d.height; break; } }
-                                enemies.push_back({ (EnemyType)t_enum, x, y, 0.0f, 0.0f, playerHandle, 1, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, x - 200.0f, x + 200.0f, false, {} });
+                                enemies.push_back({ (EnemyType)t_enum, x, y, 0.0f, 0.0f, playerHandle, 1, pw, ph, pw, ph, 0, 0, pw, ph, 1.0f, 0.0f, 1.0f, true, false, 3, 0.0f, 0, x - 200.0f, x + 200.0f, false, {}, id, AnimationController() });
                             }
                         }
                     }
@@ -3686,7 +4249,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
 [Step 2] `WinMain` に `std::vector<Item> items;` コンテナへの初期配置を追加します。
     【テンプレート】
-    items.push_back({ ITEM_COIN, 800.0f, 320.0f, 20.0f, 20.0f, true, false, false, {} });
+    items.push_back({ ITEM_COIN, 800.0f, 320.0f, 20.0f, 20.0f, 20.0f, 20.0f, 0.0f, 0.0f, 20.0f, 20.0f, true, false, false, {} });
 
 [Step 3] 物理更新ループに「アイテムの更新・巻き戻し」を追加します。
     【テンプレート】
@@ -3707,6 +4270,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (CheckCollision(player.x, player.y, pw, ph, item.x, item.y, item.width, item.height)) {
                         item.isCollected = true;
                         item.isActive = false; // 画面から消す
+                        const ItemDef* idef = FindItemDef(item.assetId);
+                        if (idef) SoundManager::Get().PlaySe(idef->seCollect);
                         // コイン獲得数増加などの処理
                     }
                 }
