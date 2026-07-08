@@ -436,21 +436,34 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         throw new Exception(msg, e.Exception);
     }
 
+    // dgv内の既存id("prefix"+数字)と衝突しない最小の連番idを生成する
+    private static string MakeUniqueSequentialId(DataGridView dgv, string prefix)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataGridViewRow row in dgv.Rows)
+            if (!row.IsNewRow) existing.Add(row.Cells["id"].Value?.ToString() ?? "");
+
+        int n = 1;
+        string candidate;
+        do { candidate = $"{prefix}{n}"; n++; } while (existing.Contains(candidate));
+        return candidate;
+    }
+
     private object[] GetDefaultEnemyRow()
     {
-        string newId = $"enemy_{assets.Enemies.Count + dgvEnemies.Rows.Count + 1}";
+        string newId = MakeUniqueSequentialId(dgvEnemies, "enemy_");
         return new object[] { newId, "新敵", EnemyTypes[0].desc, 3, 32, 32, "", "画像選択", "削除" };
     }
 
     private object[] GetDefaultGimmickRow()
     {
-        string newId = $"gimmick_{assets.Gimmicks.Count + dgvGimmicks.Rows.Count + 1}";
+        string newId = MakeUniqueSequentialId(dgvGimmicks, "gimmick_");
         return new object[] { newId, "新しいギミック", GimmickTypes[0].desc, "", "📁", "🗑" };
     }
 
     private object[] GetDefaultItemRow()
     {
-        string newId = $"item_{assets.Items.Count + dgvItems.Rows.Count + 1}";
+        string newId = MakeUniqueSequentialId(dgvItems, "item_");
         return new object[] { newId, "新しいアイテム", ItemTypes[0].desc, "", "", "📁", "🗑" };
     }
 

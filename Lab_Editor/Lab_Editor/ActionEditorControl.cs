@@ -17,7 +17,7 @@ public class ActionEditorControl : Panel
     public static readonly string[] ActionTypes =
     {
         "ShowMessage", "ChangeBgm", "PlaySe", "ActivateGimmick",
-        "OpenDoor", "SpawnEnemy", "SpawnItem",
+        "OpenDoor", "SpawnEnemy", "SpawnItem", "SetSwitch",
         "MoveCamera", "StageClear", "GoToStage", "CallCommonEvent"
     };
 
@@ -32,6 +32,7 @@ public class ActionEditorControl : Panel
         ["OpenDoor"]         = ("ギミックID(扉):",   ParamKind.Gimmick,  "",              ParamKind.None),
         ["SpawnEnemy"]       = ("敵ID:",            ParamKind.Enemy,    "座標 X,Y(任意):", ParamKind.FreeText),
         ["SpawnItem"]        = ("アイテムID:",       ParamKind.Item,     "座標 X,Y(任意):", ParamKind.FreeText),
+        ["SetSwitch"]        = ("スイッチID:",       ParamKind.FreeText, "ON/OFF(既定ON):", ParamKind.FreeText),
         ["MoveCamera"]       = ("X座標:",           ParamKind.FreeText, "Y座標:",         ParamKind.FreeText),
         ["StageClear"]       = ("(パラメータなし)",  ParamKind.None,     "",              ParamKind.None),
         ["GoToStage"]        = ("ステージファイル:", ParamKind.Stage,    "",              ParamKind.None),
