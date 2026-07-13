@@ -49,6 +49,43 @@ struct EnemyDef {
     int hitboxWidth = 32;
     int hitboxHeight = 32;
     float scale = 1.0f; // Visual Size Editor で設定される表示スケール倍率
+
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // 各フィールドは既定値 -1 (未設定) の場合、そのtype_enumの従来のハードコード挙動を
+    // そのまま再現する値がLoadAssetDefinitions()で補完される。既存のenemies.jsonは無変更で動作する。
+    float moveSpeed = -1.0f;         // PATROL/WALKER/CHASER/FLOATER/SHRINKER/SHIELD/SIZE_SHIFTER/TEMPO_WARPER/BRIGHTNESS_PHANTOM/COLOR_SHIFTER の移動速度係数(baseSpeedへの乗数)
+    float enragedMoveSpeed = -1.0f;  // SHRINKER: 覚醒(縮小)後の移動速度係数
+    float actionInterval = -1.0f;    // JUMPER/STATIONARY/PATROL_SHOOTER/SPREAD_SHOOTER/AIMED_SHOOTER/TELEPORTERの周期的行動の間隔(フレーム)
+    float jumpPowerMult = -1.0f;     // JUMPER/CHASER のジャンプ力係数(baseJumpPowerへの乗数)
+    float triggerRange = -1.0f;      // DASH_CHARGERの発動距離 / FALLERの真下判定幅 / PATROL_SHOOTERの索敵X範囲
+    float detectionRangeY = -1.0f;   // PATROL_SHOOTERの索敵Y範囲
+    float projectileSpeed = -1.0f;   // 各種射撃タイプの弾速係数(BULLET_SPEEDへの乗数)
+    float chargeTime = -1.0f;        // DASH_CHARGERの溜め時間(フレーム)
+    float dashSpeedMult = -1.0f;     // DASH_CHARGERの突進速度係数(DASH_SPEEDへの乗数)
+    float dashDuration = -1.0f;      // DASH_CHARGERの突進継続時間(フレーム)
+    float cooldownTime = -1.0f;      // DASH_CHARGERの突進後クールダウン / FALLERの着地後クールダウン(フレーム)
+    float fallDelay = -1.0f;         // FALLERの落下開始までの遅延(フレーム)
+    float spreadAngle = -1.0f;       // SPREAD_SHOOTERの拡散角度(ラジアン、片側)
+    int   spreadCount = -1;          // SPREAD_SHOOTERの弾数
+    float floatAmplitude = -1.0f;    // FLOATERの浮遊振幅(px)
+    float floatFrequency = -1.0f;    // FLOATERの浮遊周波数
+    float teleportRangeMin = -1.0f;  // TELEPORTERのワープ先オフセット最小値(px)
+    float teleportRangeMax = -1.0f;  // TELEPORTERのワープ先オフセット最大値(px)
+    float shrinkFactor = -1.0f;      // SHRINKERの被弾時の縮小率
+    float shieldOnDuration = -1.0f;  // SHIELDの無敵状態の継続時間(フレーム)
+    float shieldOffDuration = -1.0f; // SHIELDの無敵解除状態の継続時間(フレーム)
+    float mimicDelayFrames = -1.0f;  // MIMIC_GHOSTの遅延フレーム数
+    float sizeAmplitude = -1.0f;     // SIZE_SHIFTERのスケール振幅
+    float sizeFrequency = -1.0f;     // SIZE_SHIFTERのスケール周波数
+    float minScale = -1.0f;          // SIZE_SHIFTERの最小スケールクランプ
+    float tempoFrequency = -1.0f;    // TEMPO_WARPERの周波数
+    float tempoMin = -1.0f;          // TEMPO_WARPERのspeedScale最小値
+    float tempoMax = -1.0f;          // TEMPO_WARPERのspeedScale最大値
+    float effectRange = -1.0f;       // BRIGHTNESS_PHANTOM/COLOR_SHIFTER/ZOOM_DISRUPTORの効果範囲(px)
+    float brightnessMin = -1.0f;     // BRIGHTNESS_PHANTOMの最小輝度
+    float tintStrength = -1.0f;      // COLOR_SHIFTERの色シフト強度
+    float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTORのズーム振幅
+    float zoomFrequency = -1.0f;     // ZOOM_DISRUPTORのズーム周波数
 };
 
 struct GimmickDef {
@@ -62,6 +99,27 @@ struct GimmickDef {
     int hitboxWidth = 32;
     int hitboxHeight = 32;
     std::string seActivate = "";
+
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // 各フィールドは既定値 -1 (未設定) の場合、そのtype_enumの従来のハードコード挙動を
+    // そのまま再現する値がLoadAssetDefinitions()で補完される。既存のgimmicks.jsonは無変更で動作する。
+    float rotationSpeed = -1.0f;        // ROTATING_BRIDGE: 1フレームあたりの回転量(ラジアン)
+    float sinkSpeed = -1.0f;            // FALLING_LIFT: 降下速度(px/フレーム)
+    float maxDepthOffset = -1.0f;       // FALLING_LIFT: 地面からの最大沈み込み量(px)
+    float pushOutDistance = -1.0f;      // REFLECT_MIRROR: 反射後に弾を押し出す距離係数
+    float triggerWidthThreshold = -1.0f;// WEIGHT_SWITCH: 起動に必要なBOXの横幅(px)
+    float travelDistance = -1.0f;       // MOVING_PLATFORM/FRAMESTEP_LIFT: 上端からの可動距離(px)
+    float oscillationSpeed = -1.0f;     // MOVING_PLATFORM: 往復の速さ
+    float stepIncrement = -1.0f;        // FRAMESTEP_LIFT: コマ送り1回あたりの移動割合(0-1)
+    float standDelayFrames = -1.0f;     // CHIKUWA_BLOCK: 乗ってから落下するまでの時間(フレーム)
+    float standTolerancePx = -1.0f;     // CHIKUWA_BLOCK: 「乗っている」判定の許容誤差(px)
+    float respawnDelayFrames = -1.0f;   // CHIKUWA_BLOCK: 落下後、元の位置に復活するまでの時間(フレーム)
+    float radius = -1.0f;               // TIME_FIELD: 効果範囲の半径(px)
+    float brightLevel = -1.0f;          // BRIGHTNESS_ZONE(明転)/SLOWMO_FIELD: 明るさ倍率
+    float darkLevel = -1.0f;            // BRIGHTNESS_ZONE(暗転): 明るさ倍率
+    float tintR = -1.0f, tintG = -1.0f, tintB = -1.0f; // COLOR_ZONE: 色調(RGB倍率)
+    float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
+    float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
 };
 
 std::vector<EnemyDef> enemyDefs;
@@ -111,6 +169,67 @@ struct PlacedItem {
 };
 std::vector<PlacedItem> editorPlacedItems;
 
+// ==== Feature: Configurable Behavior Parameters (M1) ====
+// EnemyDef/GimmickDefの新パラメータのうち -1 (未設定) のままのフィールドに、
+// そのtype_enumが従来ハードコードされていた値をそのまま補完する。
+// これにより既存のenemies.json/gimmicks.jsonを一切変更せずに挙動が完全に維持される。
+// type_enumの数値は AssetManagerForm.cs の EnemyTypes/GimmickTypes 一覧の並び順と対応する。
+void ApplyEnemyDefaultParams(EnemyDef& def) {
+    auto fill = [](float& field, float legacyDefault) { if (field < 0.0f) field = legacyDefault; };
+    switch (def.type_enum) {
+        case 0: fill(def.moveSpeed, 0.4f); break; // PATROL
+        case 1: fill(def.actionInterval, 90.0f); fill(def.jumpPowerMult, 0.7f); break; // JUMPER
+        case 2: fill(def.actionInterval, 120.0f); fill(def.projectileSpeed, 0.6f); break; // STATIONARY
+        case 3: // PATROL_SHOOTER
+            fill(def.triggerRange, 300.0f); fill(def.detectionRangeY, 100.0f);
+            fill(def.moveSpeed, 0.5f); fill(def.cooldownTime, 60.0f); fill(def.projectileSpeed, 0.5f);
+            break;
+        case 4: fill(def.moveSpeed, 0.35f); break; // WALKER
+        case 5: fill(def.moveSpeed, 0.55f); fill(def.jumpPowerMult, 0.8f); break; // CHASER
+        case 6: // DASH_CHARGER
+            fill(def.triggerRange, 260.0f); fill(def.chargeTime, 30.0f);
+            fill(def.dashSpeedMult, 1.5f); fill(def.dashDuration, 40.0f); fill(def.cooldownTime, 70.0f);
+            break;
+        case 7: fill(def.triggerRange, 24.0f); fill(def.fallDelay, 10.0f); fill(def.cooldownTime, 120.0f); break; // FALLER
+        case 8: // SPREAD_SHOOTER
+            fill(def.actionInterval, 150.0f); fill(def.spreadAngle, 0.35f); fill(def.projectileSpeed, 0.5f);
+            if (def.spreadCount < 0) def.spreadCount = 3;
+            break;
+        case 9: fill(def.actionInterval, 130.0f); fill(def.projectileSpeed, 0.55f); break; // AIMED_SHOOTER
+        case 10: fill(def.floatAmplitude, 40.0f); fill(def.floatFrequency, 0.05f); fill(def.moveSpeed, 0.2f); break; // FLOATER
+        case 11: fill(def.actionInterval, 180.0f); fill(def.teleportRangeMin, 120.0f); fill(def.teleportRangeMax, 220.0f); break; // TELEPORTER
+        case 12: fill(def.moveSpeed, 0.35f); fill(def.enragedMoveSpeed, 0.9f); fill(def.shrinkFactor, 0.6f); break; // SHRINKER
+        case 13: fill(def.moveSpeed, 0.3f); fill(def.shieldOffDuration, 150.0f); fill(def.shieldOnDuration, 90.0f); break; // SHIELD
+        case 14: fill(def.mimicDelayFrames, 90.0f); break; // MIMIC_GHOST
+        case 15: fill(def.moveSpeed, 0.25f); fill(def.sizeAmplitude, 0.5f); fill(def.sizeFrequency, 0.04f); fill(def.minScale, 0.4f); break; // SIZE_SHIFTER
+        case 16: fill(def.moveSpeed, 0.4f); fill(def.tempoFrequency, 0.05f); fill(def.tempoMin, 0.3f); fill(def.tempoMax, 1.6f); break; // TEMPO_WARPER
+        case 17: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.brightnessMin, 0.35f); break; // BRIGHTNESS_PHANTOM
+        case 18: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.tintStrength, 0.6f); break; // COLOR_SHIFTER
+        case 19: fill(def.effectRange, 280.0f); fill(def.zoomAmplitude, 0.25f); fill(def.zoomFrequency, 0.08f); break; // ZOOM_DISRUPTOR
+        default: break;
+    }
+}
+
+void ApplyGimmickDefaultParams(GimmickDef& def) {
+    auto fill = [](float& field, float legacyDefault) { if (field < 0.0f) field = legacyDefault; };
+    switch (def.type_enum) {
+        case 1: fill(def.rotationSpeed, 0.015f); break; // ROTATING_BRIDGE
+        case 4: fill(def.sinkSpeed, 1.5f); fill(def.maxDepthOffset, 20.0f); break; // FALLING_LIFT
+        case 5: fill(def.pushOutDistance, 1.5f); break; // REFLECT_MIRROR
+        case 6: fill(def.triggerWidthThreshold, 140.0f); break; // WEIGHT_SWITCH
+        case 11: fill(def.standDelayFrames, 45.0f); fill(def.standTolerancePx, 10.0f); fill(def.respawnDelayFrames, 180.0f); break; // CHIKUWA_BLOCK
+        case 12: fill(def.radius, 100.0f); break; // TIME_FIELD
+        case 14: fill(def.travelDistance, 96.0f); fill(def.oscillationSpeed, 0.02f); break; // MOVING_PLATFORM
+        case 17: fill(def.travelDistance, 128.0f); fill(def.stepIncrement, 0.15f); break; // FRAMESTEP_LIFT
+        case 18: fill(def.brightLevel, 1.6f); fill(def.darkLevel, 0.35f); break; // BRIGHTNESS_ZONE
+        case 19: fill(def.tintR, 1.0f); fill(def.tintG, 0.6f); fill(def.tintB, 1.0f); break; // COLOR_ZONE
+        case 20: fill(def.zoomLevel, 1.6f); break; // ZOOM_LENS
+        case 21: fill(def.zoomLevel, 1.3f); fill(def.brightLevel, 0.85f); break; // SLOWMO_FIELD
+        case 0: fill(def.warpOffsetPx, 8.0f); break; // CUT_PORTAL
+        default: break;
+    }
+}
+
 void LoadAssetDefinitions() {
     {
         std::ifstream ef("assets/enemies.json");
@@ -145,6 +264,41 @@ void LoadAssetDefinitions() {
                         if (def.hitboxWidth == 0) def.hitboxWidth = gw;
                         if (def.hitboxHeight == 0) def.hitboxHeight = gh;
                     }
+                    // Feature: Configurable Behavior Parameters (M1)
+                    def.moveSpeed = e.value("moveSpeed", -1.0f);
+                    def.enragedMoveSpeed = e.value("enragedMoveSpeed", -1.0f);
+                    def.actionInterval = e.value("actionInterval", -1.0f);
+                    def.jumpPowerMult = e.value("jumpPowerMult", -1.0f);
+                    def.triggerRange = e.value("triggerRange", -1.0f);
+                    def.detectionRangeY = e.value("detectionRangeY", -1.0f);
+                    def.projectileSpeed = e.value("projectileSpeed", -1.0f);
+                    def.chargeTime = e.value("chargeTime", -1.0f);
+                    def.dashSpeedMult = e.value("dashSpeedMult", -1.0f);
+                    def.dashDuration = e.value("dashDuration", -1.0f);
+                    def.cooldownTime = e.value("cooldownTime", -1.0f);
+                    def.fallDelay = e.value("fallDelay", -1.0f);
+                    def.spreadAngle = e.value("spreadAngle", -1.0f);
+                    def.spreadCount = e.value("spreadCount", -1);
+                    def.floatAmplitude = e.value("floatAmplitude", -1.0f);
+                    def.floatFrequency = e.value("floatFrequency", -1.0f);
+                    def.teleportRangeMin = e.value("teleportRangeMin", -1.0f);
+                    def.teleportRangeMax = e.value("teleportRangeMax", -1.0f);
+                    def.shrinkFactor = e.value("shrinkFactor", -1.0f);
+                    def.shieldOnDuration = e.value("shieldOnDuration", -1.0f);
+                    def.shieldOffDuration = e.value("shieldOffDuration", -1.0f);
+                    def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
+                    def.sizeAmplitude = e.value("sizeAmplitude", -1.0f);
+                    def.sizeFrequency = e.value("sizeFrequency", -1.0f);
+                    def.minScale = e.value("minScale", -1.0f);
+                    def.tempoFrequency = e.value("tempoFrequency", -1.0f);
+                    def.tempoMin = e.value("tempoMin", -1.0f);
+                    def.tempoMax = e.value("tempoMax", -1.0f);
+                    def.effectRange = e.value("effectRange", -1.0f);
+                    def.brightnessMin = e.value("brightnessMin", -1.0f);
+                    def.tintStrength = e.value("tintStrength", -1.0f);
+                    def.zoomAmplitude = e.value("zoomAmplitude", -1.0f);
+                    def.zoomFrequency = e.value("zoomFrequency", -1.0f);
+                    ApplyEnemyDefaultParams(def);
                     enemyDefs.push_back(def);
                 }
             } else {
@@ -210,6 +364,27 @@ void LoadAssetDefinitions() {
                             def.hitboxWidth = w; def.hitboxHeight = h;
                         }
                     }
+                    // Feature: Configurable Behavior Parameters (M1)
+                    def.rotationSpeed = g.value("rotationSpeed", -1.0f);
+                    def.sinkSpeed = g.value("sinkSpeed", -1.0f);
+                    def.maxDepthOffset = g.value("maxDepthOffset", -1.0f);
+                    def.pushOutDistance = g.value("pushOutDistance", -1.0f);
+                    def.triggerWidthThreshold = g.value("triggerWidthThreshold", -1.0f);
+                    def.travelDistance = g.value("travelDistance", -1.0f);
+                    def.oscillationSpeed = g.value("oscillationSpeed", -1.0f);
+                    def.stepIncrement = g.value("stepIncrement", -1.0f);
+                    def.standDelayFrames = g.value("standDelayFrames", -1.0f);
+                    def.standTolerancePx = g.value("standTolerancePx", -1.0f);
+                    def.respawnDelayFrames = g.value("respawnDelayFrames", -1.0f);
+                    def.radius = g.value("radius", -1.0f);
+                    def.brightLevel = g.value("brightLevel", -1.0f);
+                    def.darkLevel = g.value("darkLevel", -1.0f);
+                    def.tintR = g.value("tintR", -1.0f);
+                    def.tintG = g.value("tintG", -1.0f);
+                    def.tintB = g.value("tintB", -1.0f);
+                    def.zoomLevel = g.value("zoomLevel", -1.0f);
+                    def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    ApplyGimmickDefaultParams(def);
                     gimmickDefs.push_back(def);
                 }
             } else {
@@ -392,6 +567,7 @@ struct Item {
     std::vector<ItemState> history;
 
     std::string assetId = ""; // ItemDef.id への参照（SE検索用）
+    int handle = -1;          // ItemDef.graphHandle（カスタムスプライト）。-1ならcoinHandleを使う
 };
 
 // 主要な構造体
@@ -519,6 +695,7 @@ struct BackgroundLayer {
 struct StageData {
     int id = 0;
     char name[64] = "";
+    std::string sourceFile = ""; // assets/stages/ 配下のファイル名（GoToStageでの再読み込み判定に使用）
     std::vector<std::vector<int>> map;
     
     // Feature 1
@@ -1312,10 +1489,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     GameScene currentScene = PLAY;
 
     // ===== JSON ステージ読み込み =====
-    // エディタからコマンドライン引数でステージファイル名が渡された場合、
-    // そのJSONを読み込んでstagesに追加し、それを初期ステージとして使用する
-    {
-        std::string stageJsonPath = "assets/stages/" + currentStageFileName;
+    // assets/stages/<ファイル名> を読み込みStageDataを構築するラムダ。
+    // 起動時の初期ステージ読み込みと、GoToStageアクションによる実行時のステージ切り替えの両方から使う。
+    auto LoadStageJson = [&](const std::string& fileNameArg, StageData& jsonStage) -> bool {
+        std::string stageJsonPath = "assets/stages/" + fileNameArg;
         std::ifstream stageFile(stageJsonPath);
         if (stageFile.is_open()) {
             try {
@@ -1324,8 +1501,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     Logger::Error("DrawPixel", "WinMain", "Failed to parse stage json", stageJsonPath);
                 } else {
 
-                    StageData jsonStage;
                     jsonStage.id = (int)stages.size();
+                    jsonStage.sourceFile = fileNameArg;
                     strcpy_s(jsonStage.name, "JSON Stage");
 
                     // プレイヤー開始位置
@@ -1431,6 +1608,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             int sw = 32, sh = 32; int hx = 0, hy = 0;
                             int handle = playerHandle;
                             float defScale = 1.0f;
+                            int defHp = 3;
                             for (auto& d : enemyDefs) {
                                 if (d.id == id) {
                                     t_enum = d.type_enum;
@@ -1439,10 +1617,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     hx = d.hitboxOffsetX; hy = d.hitboxOffsetY;
                                     handle = d.graphHandle;
                                     defScale = d.scale;
+                                    defHp = d.hp;
                                     break;
                                 }
                             }
-                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx, y + hy, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, 3, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx, y + hy, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
                         }
                     }
 
@@ -1483,18 +1662,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float y = ij.value("y", 0.0f);
 
                             int t_enum = 0;
-                            int pw = 32, ph = 32, sw = 32, sh = 32, hx = 0, hy = 0;
-                            for (auto& d : itemDefs) { 
-                                if (d.id == id) { 
-                                    t_enum = d.type_enum; 
+                            int pw = 32, ph = 32, sw = 32, sh = 32, hx = 0, hy = 0, iHandle = -1;
+                            for (auto& d : itemDefs) {
+                                if (d.id == id) {
+                                    t_enum = d.type_enum;
                                     pw = d.hitboxWidth; ph = d.hitboxHeight;
                                     sw = d.hitboxWidth; sh = d.hitboxHeight;
                                     hx = d.hitboxOffsetX; hy = d.hitboxOffsetY;
-                                    break; 
-                                } 
+                                    iHandle = d.graphHandle;
+                                    break;
+                                }
                             }
                             Item newItem{ (ItemType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, false, false, {} };
                             newItem.assetId = id;
+                            newItem.handle = iHandle;
                             jsonStage.items.push_back(newItem);
                         }
                     }
@@ -1511,13 +1692,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
 
-                    stages.push_back(jsonStage);
-                    currentStageIdx = (int)stages.size() - 1;
-
+                    return true;
                 }
             } catch (...) {
-                // JSON読み込み失敗時はハードコードステージを使用
+                // JSON読み込み失敗
             }
+        }
+        return false;
+    };
+
+    // 起動時の初期ステージ読み込み（エディタからコマンドライン引数で渡されたファイル名）
+    {
+        StageData initialStage;
+        if (LoadStageJson(currentStageFileName, initialStage)) {
+            stages.push_back(initialStage);
+            currentStageIdx = (int)stages.size() - 1;
         }
     }
     Logger::Info("System", "WinMain", "[Init] stages.json parsing finished");
@@ -1541,29 +1730,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         
         enemies = stage.enemies;
         for (auto& enemy : enemies) {
-            // enemyDefsから正しいgraphHandleを検索して適用
+            // enemyDefsから正しいgraphHandle/HP/サイズを検索して適用。
+            // ステージJSON由来の配置ならenemy.assetIdは既に正しいIDが入っているのでそれを優先する
+            // （以前はここでtype_enumのみによる検索で毎回上書きしており、同じtype_enumを共有する
+            //   複数のEnemyDefが存在する場合に誤ったdefのHP/サイズが適用される不具合があった）。
+            // ハードコードされた旧ステージ由来などassetId未設定の場合のみtype_enumの最初の一致にフォールバックする。
             enemy.handle = playerHandle; // デフォルト（見つからない場合）
-            enemy.assetId = "enemy_" + std::to_string((int)enemy.type);
-            for (auto& d : enemyDefs) {
-                if (d.type_enum == (int)enemy.type) {
-                    if (d.graphHandle >= 0) enemy.handle = d.graphHandle;
-                    if (!d.id.empty()) enemy.assetId = d.id;
-                    break;
-                }
+            const EnemyDef* matched = nullptr;
+            if (!enemy.assetId.empty()) {
+                for (auto& d : enemyDefs) { if (d.id == enemy.assetId) { matched = &d; break; } }
+            }
+            if (!matched) {
+                enemy.assetId = "enemy_" + std::to_string((int)enemy.type);
+                for (auto& d : enemyDefs) { if (d.type_enum == (int)enemy.type) { matched = &d; break; } }
+            }
+            if (matched) {
+                if (matched->graphHandle >= 0) enemy.handle = matched->graphHandle;
+                if (!matched->id.empty()) enemy.assetId = matched->id;
+                enemy.hp = matched->hp;
+                enemy.width = matched->hitboxWidth;
+                enemy.height = matched->hitboxHeight;
+            } else {
+                enemy.hp = 3;
             }
             enemy.anim.LoadForAsset(enemy.assetId, "assets");
-            // HPもenemyDefsの定義に従ってリセット
-            bool hpSet = false;
-            for (auto& d : enemyDefs) {
-                if (d.type_enum == (int)enemy.type) {
-                    enemy.hp = d.hp;
-                    enemy.width = d.hitboxWidth;
-                    enemy.height = d.hitboxHeight;
-                    hpSet = true;
-                    break;
-                }
-            }
-            if (!hpSet) enemy.hp = 3;
             enemy.history.clear();
         }
 
@@ -1614,6 +1804,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature 5: イベントトリガー初期化
         EventManager::Get().LoadFromJson(stage.triggersJson);
         EventManager::Get().Reset();
+    };
+
+    // GoToStageアクション等から呼ばれる、実行時のステージ切り替えヘルパー。
+    // 既に読み込み済みのステージがあれば使い回し、無ければassets/stages/から読み込んでstagesに追加した上で
+    // currentStageIdxを切り替え、ResetStageで敵・アイテム・ギミック・BGM・トリガーを新ステージの内容に同期する。
+    auto SwitchToStage = [&](const std::string& fileName) -> bool {
+        for (int i = 0; i < (int)stages.size(); i++) {
+            if (stages[i].sourceFile == fileName) {
+                currentStageIdx = i;
+                currentStageFileName = fileName;
+                ResetStage();
+                return true;
+            }
+        }
+        StageData newStage;
+        if (LoadStageJson(fileName, newStage)) {
+            stages.push_back(newStage);
+            currentStageIdx = (int)stages.size() - 1;
+            currentStageFileName = fileName;
+            ResetStage();
+            return true;
+        }
+        Logger::Error("DrawPixel", "SwitchToStage", "Failed to load stage for GoToStage", fileName);
+        return false;
     };
 
     // 音声マネージャー初期化
@@ -1679,6 +1893,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                   (float)d.hitboxWidth, (float)d.hitboxHeight, (float)d.hitboxOffsetX, (float)d.hitboxOffsetY,
                                   (float)d.hitboxWidth, (float)d.hitboxHeight, true, false, false, {} };
                     newItem.assetId = d.id;
+                    newItem.handle = d.graphHandle;
                     items.push_back(newItem);
                     break;
                 }
@@ -2393,6 +2608,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (CheckHitKey(KEY_INPUT_SPACE) && !player.isJumping) {
                 player.vy = baseJmp;
                 player.isJumping = true;
+                SoundManager::Get().PlaySe("jump");
             }
         } else {
             player.vx = 0;
@@ -2435,8 +2651,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (stageClear) {
                 currentScene = RESULT_VICTORY;
             } else if (!gotoStage.empty()) {
-                currentStageFileName = gotoStage;
-                // 注意: ここで直接ロードすると他と干渉する可能性があるため、後ほど安全な場所でロード処理を行う
+                SwitchToStage(gotoStage);
             }
         }
 
@@ -3748,12 +3963,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // 前の床の描画は完全に削除されました
 
-        // 収集用コインの描画
+        // アイテムの描画（assetIdごとのスプライトがあればそれを使い、無ければcoinHandleにフォールバック）
         for (const auto& item : items) {
             if (item.isActive && !item.isCollected) {
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)item.y;
-                DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, coinHandle, TRUE);
+                int useHandle = item.handle >= 0 ? item.handle : coinHandle;
+                DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
             }
         }
 
@@ -3766,8 +3982,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int ecy = (int)(enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f);
                 if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
                 else SetDrawBright(255, 120, 120);
-                if (enemy.direction == 0) DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
-                else DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                if (enemy.anim.HasClip(enemy.anim.currentClip)) {
+                    // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
+                    int animH = enemy.anim.GetCurrentFrameHeight();
+                    int animCy = (int)(enemy.y + (animH * enemy.scale) / 2.0f);
+                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, enemy.angle, enemy.direction != 0);
+                } else if (enemy.direction == 0) {
+                    DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
+                } else {
+                    DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                }
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
                 if (isDebugDrawMode) {

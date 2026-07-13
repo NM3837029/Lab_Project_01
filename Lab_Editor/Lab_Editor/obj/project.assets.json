@@ -61,11 +61,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\naots\\Documents\\OriginalGame\\C++\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\Lab_Editor.csproj",
+      "projectUniqueName": "C:\\Users\\naots\\Documents\\OriginalGame\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\Lab_Editor.csproj",
       "projectName": "Lab_Editor",
-      "projectPath": "C:\\Users\\naots\\Documents\\OriginalGame\\C++\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\Lab_Editor.csproj",
+      "projectPath": "C:\\Users\\naots\\Documents\\OriginalGame\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\Lab_Editor.csproj",
       "packagesPath": "C:\\Users\\naots\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\naots\\Documents\\OriginalGame\\C++\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\obj\\",
+      "outputPath": "C:\\Users\\naots\\Documents\\OriginalGame\\Lab_Project_01\\Lab_Editor\\Lab_Editor\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

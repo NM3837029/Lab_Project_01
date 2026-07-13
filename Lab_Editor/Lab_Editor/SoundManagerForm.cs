@@ -294,11 +294,41 @@ public class SoundManagerForm : Form
     // ── 保存 ──────────────────────────────────
     private void BtnSave_Click(object? sender, EventArgs e)
     {
-        ResultBgm = ExtractSoundDefs(_gridBgm, isBgm: true);
-        ResultSe  = ExtractSoundDefs(_gridSe,  isBgm: false);
-        ResultUiSe = ExtractSoundDefs(_gridUi, isBgm: false);
+        var bgm  = ExtractSoundDefs(_gridBgm, isBgm: true);
+        var se   = ExtractSoundDefs(_gridSe,  isBgm: false);
+        var uiSe = ExtractSoundDefs(_gridUi,  isBgm: false);
+
+        string? error = ValidateSoundDefs("BGM", bgm)
+                     ?? ValidateSoundDefs("SE", se)
+                     ?? ValidateSoundDefs("UI音", uiSe);
+        if (error != null)
+        {
+            MessageBox.Show(error, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        ResultBgm  = bgm;
+        ResultSe   = se;
+        ResultUiSe = uiSe;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    // id/file が片方だけ空、または同一カテゴリ内でidが重複している行がないか検証する。
+    // 両方空の行（未入力のまま追加しただけの行）はExtractSoundDefsの時点で除外済みなのでここでは扱わない。
+    private static string? ValidateSoundDefs(string categoryLabel, List<SoundDef> defs)
+    {
+        var seenIds = new HashSet<string>();
+        foreach (var d in defs)
+        {
+            if (string.IsNullOrWhiteSpace(d.id) && !string.IsNullOrWhiteSpace(d.file))
+                return $"[{categoryLabel}] ファイル「{d.file}」にIDが設定されていません。\nIDが空のままだとゲーム側から一切参照できず、無効なデータとして保存されます。";
+            if (!string.IsNullOrWhiteSpace(d.id) && string.IsNullOrWhiteSpace(d.file))
+                return $"[{categoryLabel}] ID「{d.id}」にファイルが設定されていません。\n先に「📁選択」でファイルを指定してください。";
+            if (!string.IsNullOrWhiteSpace(d.id) && !seenIds.Add(d.id))
+                return $"[{categoryLabel}] ID「{d.id}」が重複しています。\nIDは一意である必要があります。";
+        }
+        return null;
     }
 
     private List<SoundDef> ExtractSoundDefs(DataGridView grid, bool isBgm)
@@ -316,6 +346,8 @@ public class SoundManagerForm : Form
                     ? (row.Cells["colLoop"].Value is bool b && b)
                     : false
             };
+            // id・fileが両方とも未入力の行は、未使用の空行として無視する
+            if (string.IsNullOrWhiteSpace(def.id) && string.IsNullOrWhiteSpace(def.file)) continue;
             list.Add(def);
         }
         return list;

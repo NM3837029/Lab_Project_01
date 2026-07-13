@@ -1,7 +1,7 @@
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\DrawPixel.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\DrawPixel.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\imgui.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\imgui_draw.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_draw.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\imgui_tables.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_tables.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\imgui_widgets.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_widgets.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\backends\imgui_impl_win32.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_impl_win32.obj
-C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\imgui\backends\imgui_impl_dx11.cpp;C:\Users\naots\Documents\OriginalGame\C++\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_impl_dx11.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\DrawPixel.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\DrawPixel.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\imgui.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\imgui_draw.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_draw.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\imgui_tables.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_tables.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\imgui_widgets.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_widgets.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\backends\imgui_impl_win32.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_impl_win32.obj
+C:\Users\naots\Documents\OriginalGame\Lab_Project_01\imgui\backends\imgui_impl_dx11.cpp;C:\Users\naots\Documents\OriginalGame\Lab_Project_01\Lab_Project_01\x64\Debug\imgui_impl_dx11.obj

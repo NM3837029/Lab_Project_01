@@ -1,1 +1,8 @@
-[]
+[
+  {
+    "id": "jump",
+    "name": "Jump",
+    "file": "sound/jump01.wav",
+    "isLoop": false
+  }
+]
