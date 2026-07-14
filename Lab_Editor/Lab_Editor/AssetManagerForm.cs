@@ -101,6 +101,7 @@ public partial class AssetManagerForm : Form
         (17, "17 = 明るさ操作敵 (Brightness Phantom)", "射程内で画面を暗転させます（新画面エフェクト機能と連携）。"),
         (18, "18 = 色調整敵 (Color Shifter)", "射程内で画面の色調を変化させます（新画面エフェクト機能と連携）。"),
         (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
+        (20, "20 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
     };
     private static readonly (int type, string desc)[] GimmickTypes =
     {
@@ -128,6 +129,7 @@ public partial class AssetManagerForm : Form
         (21, "21 = スローフィールド (Slowmo Field)"),
         (22, "22 = 色ロック足場 (Color Lock Platform)"),
         (23, "23 = 明暗ロック足場 (Brightness Lock Platform)"),
+        (24, "24 = カスタムスクリプト (Custom Script)"),
     };
     private static readonly (int type, string desc)[] ItemTypes =
     {
@@ -264,7 +266,11 @@ public partial class AssetManagerForm : Form
         var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", Location = new Point(360, 5), Size = new Size(150, 30) };
         btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
 
-        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnClose, btnSave });
+        // Feature: Puzzle-like Behavior Scripting (M4) — ブロックパレットのプレビュー画面
+        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", Location = new Point(890, 5), Size = new Size(190, 30) };
+        btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
+
+        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnBehaviorScript, btnClose, btnSave });
 
         Controls.AddRange(new Control[] { pnlToolbar, tabControl, pnlRight, pnlBottom });
         RefreshCommonEventsList();
@@ -590,6 +596,46 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             }
         }
         return 0;
+    }
+
+    // Feature: Puzzle-like Behavior Scripting (M6)
+    // 現在選択中のタブ・行がtype_enum=20(敵)/24(ギミック)＝カスタムスクリプトであれば
+    // ブロックエディタを開き、OKで閉じたらそのEnemyDef/GimmickDef.scriptへ書き戻す。
+    private const int CustomScriptEnemyType = 20;
+    private const int CustomScriptGimmickType = 24;
+
+    private void BtnBehaviorScript_Click()
+    {
+        if (tabControl.SelectedIndex == 0)
+        {
+            if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("編集する敵を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var row = dgvEnemies.SelectedRows[0];
+            if (GetSelectedTypeEnum(row) != CustomScriptEnemyType)
+            {
+                MessageBox.Show("挙動スクリプトは、タイプが「20 = カスタムスクリプト」の敵にのみ設定できます。\nタイプ列で切り替えてからお試しください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var def = GetOrCreateEnemyParams(row);
+            using var form = new BehaviorScriptEditorForm($"敵: {row.Cells["id"].Value}", def.script);
+            if (form.ShowDialog() == DialogResult.OK) def.script = form.ResultScript;
+        }
+        else if (tabControl.SelectedIndex == 1)
+        {
+            if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("編集するギミックを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var row = dgvGimmicks.SelectedRows[0];
+            if (GetSelectedTypeEnum(row) != CustomScriptGimmickType)
+            {
+                MessageBox.Show("挙動スクリプトは、タイプが「24 = カスタムスクリプト」のギミックにのみ設定できます。\nタイプ列で切り替えてからお試しください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var def = GetOrCreateGimmickParams(row);
+            using var form = new BehaviorScriptEditorForm($"ギミック: {row.Cells["id"].Value}", def.script);
+            if (form.ShowDialog() == DialogResult.OK) def.script = form.ResultScript;
+        }
+        else
+        {
+            MessageBox.Show("挙動スクリプトは「敵」または「ギミック」タブで対象を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
     }
 
     // 選択中の敵/ギミック行のtype_enumに応じて、挙動パラメータの入力欄を動的に組み立てる。

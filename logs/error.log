@@ -536,3 +536,8 @@
 [2026-07-14 18:56:40] [System::WinMain] INFO: [Init] StageLoader Success
 [2026-07-14 18:56:40] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-07-14 18:56:40] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-15 03:48:46] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-15 03:48:48] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-15 03:48:48] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-15 03:48:48] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-15 03:48:49] [System::ResetStage] INFO: Begin ResetStage

@@ -4122,6 +4122,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     const char* status = gim.scriptState.faulted ? "FAULT" : gim.scriptState.finished ? "DONE" : "RUN";
                     DrawFormatString(cx1, cy1 - 16, GetColor(0, 255, 255),
                         "SCRIPT:%s stack=%d wait=%d", status, (int)gim.scriptState.callStack.size(), gim.scriptState.waitFramesRemaining);
+                    if (gim.scriptState.faulted) {
+                        DrawFormatString(cx1, cy1 - 32, GetColor(255, 60, 60), "ERR: %s", gim.scriptState.faultMsg.c_str());
+                    }
+                }
+                // Feature: Puzzle-like Behavior Scripting (M7) — デバッグモードでなくても、
+                // スクリプトがFaulted状態（不正なJSON等で停止）になった個体は常に警告マークを出す
+                if (gim.scriptState.faulted) {
+                    DrawFormatString(cx1, cy1 - (isDebugDrawMode ? 48 : 16), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
             }
         }
@@ -4234,11 +4242,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
                 }
 
-                // Feature: Puzzle-like Behavior Scripting (M2) — デバッグモード時にスクリプト実行状態を表示
+                // Feature: Puzzle-like Behavior Scripting (M2/M7) — スクリプト実行状態の表示
                 if (isDebugDrawMode && enemy.type == ENEMY_CUSTOM_SCRIPT) {
                     const char* status = enemy.scriptState.faulted ? "FAULT" : enemy.scriptState.finished ? "DONE" : "RUN";
                     DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 56, GetColor(0, 255, 255),
                         "SCRIPT:%s stack=%d wait=%d", status, (int)enemy.scriptState.callStack.size(), enemy.scriptState.waitFramesRemaining);
+                    if (enemy.scriptState.faulted) {
+                        DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 72, GetColor(255, 60, 60), "ERR: %s", enemy.scriptState.faultMsg.c_str());
+                    }
+                }
+                // デバッグモードでなくても、Faulted状態の敵は常に警告マークを出す（M7）
+                if (enemy.type == ENEMY_CUSTOM_SCRIPT && enemy.scriptState.faulted) {
+                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
             }
         }

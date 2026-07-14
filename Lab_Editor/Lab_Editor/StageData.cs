@@ -535,6 +535,9 @@ public class EnemyDef
     public float tintStrength { get; set; } = -1.0f;
     public float zoomAmplitude { get; set; } = -1.0f;
     public float zoomFrequency { get; set; } = -1.0f;
+
+    // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
+    public JArray script { get; set; } = new JArray();
 }
 
 public class GimmickDef
@@ -572,6 +575,9 @@ public class GimmickDef
     public float tintB { get; set; } = -1.0f;
     public float zoomLevel { get; set; } = -1.0f;
     public float warpOffsetPx { get; set; } = -1.0f;
+
+    // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==24(GIMMICK_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
+    public JArray script { get; set; } = new JArray();
 }
 
 public class ItemDef
