@@ -376,5 +376,122 @@
     "hitboxWidth": 0,
     "hitboxHeight": 0,
     "scale": 1.0
+  },
+  {
+    "id": "enemy_script_sample",
+    "name": "サンプル：カスタムスクリプト敵",
+    "type_enum": 20,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/enemy.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 0,
+    "hitboxHeight": 0,
+    "scale": 1.0,
+    "script": [
+      {
+        "hat": "OnSpawn",
+        "body": [
+          { "op": "Forever", "body": [
+            { "op": "MoveDirection", "dir": "Toward", "speed": 2 },
+            { "op": "Wait", "frames": 30 },
+            { "op": "Shoot", "angle": {"op": "DirectionToPlayer"}, "speed": 6, "damage": 1 }
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_script_patrol",
+    "name": "サンプル：巡回(スクリプト版) ※M3検証用",
+    "type_enum": 20,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/enemy.png",
+    "seSpawn": "", "seAttack": "", "seDamage": "", "seDeath": "",
+    "hitboxOffsetX": 0, "hitboxOffsetY": 0, "hitboxWidth": 0, "hitboxHeight": 0,
+    "scale": 1.0,
+    "script": [
+      {
+        "hat": "OnSpawn",
+        "body": [
+          { "op": "SetVar", "name": "spawnX", "value": {"op": "SelfX"} },
+          { "op": "SetVar", "name": "dir", "value": 0 },
+          { "op": "Forever", "body": [
+            { "op": "IfElse", "cond": {"op": "Eq", "a": {"op": "GetVar", "name": "dir"}, "b": 0},
+              "body": [
+                { "op": "MoveDirection", "dir": "Right", "speed": 1.6 },
+                { "op": "If", "cond": {"op": "Gt", "a": {"op": "SelfX"}, "b": {"op": "Add", "a": {"op": "GetVar", "name": "spawnX"}, "b": 200}},
+                  "body": [ { "op": "SetVar", "name": "dir", "value": 1 } ] }
+              ],
+              "else": [
+                { "op": "MoveDirection", "dir": "Left", "speed": 1.6 },
+                { "op": "If", "cond": {"op": "Lt", "a": {"op": "SelfX"}, "b": {"op": "Sub", "a": {"op": "GetVar", "name": "spawnX"}, "b": 200}},
+                  "body": [ { "op": "SetVar", "name": "dir", "value": 0 } ] }
+              ]
+            }
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_script_stationary",
+    "name": "サンプル：固定砲台(スクリプト版) ※M3検証用",
+    "type_enum": 20,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/enemy.png",
+    "seSpawn": "", "seAttack": "", "seDamage": "", "seDeath": "",
+    "hitboxOffsetX": 0, "hitboxOffsetY": 0, "hitboxWidth": 0, "hitboxHeight": 0,
+    "scale": 1.0,
+    "script": [
+      {
+        "hat": "OnSpawn",
+        "body": [
+          { "op": "Forever", "body": [
+            { "op": "FaceTowards" },
+            { "op": "Wait", "frames": 120 },
+            { "op": "ShootAtPlayer", "speed": 12, "damage": 1 }
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_script_dashcharger",
+    "name": "サンプル：突進(スクリプト版) ※M3検証用",
+    "type_enum": 20,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/enemy.png",
+    "seSpawn": "", "seAttack": "", "seDamage": "", "seDeath": "",
+    "hitboxOffsetX": 0, "hitboxOffsetY": 0, "hitboxWidth": 0, "hitboxHeight": 0,
+    "scale": 1.0,
+    "script": [
+      {
+        "hat": "OnSpawn",
+        "body": [
+          { "op": "Forever", "body": [
+            { "op": "WaitUntil", "cond": {"op": "Lt", "a": {"op": "DistanceToPlayer"}, "b": 260} },
+            { "op": "FaceTowards" },
+            { "op": "Wait", "frames": 30 },
+            { "op": "Repeat", "count": 40, "body": [
+              { "op": "MoveDirection", "dir": "Toward", "speed": 12 }
+            ]},
+            { "op": "Wait", "frames": 70 }
+          ]}
+        ]
+      }
+    ]
   }
 ]

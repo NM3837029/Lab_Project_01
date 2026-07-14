@@ -262,5 +262,27 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 96,
     "hitboxHeight": 32
+  },
+  {
+    "id": "gim_script_movingplatform",
+    "name": "サンプル：動く足場(スクリプト版) ※M3検証用",
+    "type_enum": 24,
+    "sprite": "",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 96,
+    "hitboxHeight": 32,
+    "script": [
+      {
+        "hat": "OnSpawn",
+        "body": [
+          { "op": "SetVar", "name": "baseY", "value": {"op": "SelfY"} },
+          { "op": "Forever", "body": [
+            { "op": "Oscillate", "min": {"op": "GetVar", "name": "baseY"}, "max": {"op": "Add", "a": {"op": "GetVar", "name": "baseY"}, "b": 96}, "periodFrames": 314 }
+          ]}
+        ]
+      }
+    ]
   }
 ]

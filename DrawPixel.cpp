@@ -30,6 +30,7 @@ bool isDedicatedEditorMode = false;
 #include "SoundManager.h"
 #include "EventManager.h"
 #include "AnimationController.h"
+#include "BehaviorScript.h"
 
 struct EnemyDef {
     std::string id = "";
@@ -86,6 +87,9 @@ struct EnemyDef {
     float tintStrength = -1.0f;      // COLOR_SHIFTERの色シフト強度
     float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTORのズーム振幅
     float zoomFrequency = -1.0f;     // ZOOM_DISRUPTORのズーム周波数
+
+    // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
+    json script = json::array();
 };
 
 struct GimmickDef {
@@ -120,6 +124,9 @@ struct GimmickDef {
     float tintR = -1.0f, tintG = -1.0f, tintB = -1.0f; // COLOR_ZONE: 色調(RGB倍率)
     float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
     float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
+
+    // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==GIMMICK_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
+    json script = json::array();
 };
 
 std::vector<EnemyDef> enemyDefs;
@@ -298,6 +305,8 @@ void LoadAssetDefinitions() {
                     def.tintStrength = e.value("tintStrength", -1.0f);
                     def.zoomAmplitude = e.value("zoomAmplitude", -1.0f);
                     def.zoomFrequency = e.value("zoomFrequency", -1.0f);
+                    // Feature: Puzzle-like Behavior Scripting (M2)
+                    if (e.contains("script") && e["script"].is_array()) def.script = e["script"];
                     ApplyEnemyDefaultParams(def);
                     enemyDefs.push_back(def);
                 }
@@ -384,6 +393,8 @@ void LoadAssetDefinitions() {
                     def.tintB = g.value("tintB", -1.0f);
                     def.zoomLevel = g.value("zoomLevel", -1.0f);
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    // Feature: Puzzle-like Behavior Scripting (M2)
+                    if (g.contains("script") && g["script"].is_array()) def.script = g["script"];
                     ApplyGimmickDefaultParams(def);
                     gimmickDefs.push_back(def);
                 }
@@ -483,6 +494,7 @@ enum EnemyType {
     ENEMY_BRIGHTNESS_PHANTOM, // 明るさ操作敵：射程内で画面を暗転させる（新画面エフェクト連携）
     ENEMY_COLOR_SHIFTER,      // 色調整敵：射程内で画面を色調変化させる（新画面エフェクト連携）
     ENEMY_ZOOM_DISRUPTOR,     // ズーム撹乱敵：射程内で画面ズームを揺さぶる（新画面エフェクト連携）
+    ENEMY_CUSTOM_SCRIPT,      // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで挙動を自作する
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
@@ -531,7 +543,8 @@ enum GimmickType {
 
     // ===== プレイヤーが能動的に使う編集ツール（T/Z/X/C）と連動する地形 =====
     GIMMICK_COLOR_LOCK_PLATFORM,     // 色ロック足場：param("1"/"2"/"3"=赤/緑/青)とプレイヤーの色フィルタが一致する時だけ実体化する
-    GIMMICK_BRIGHTNESS_LOCK_PLATFORM // 明暗ロック足場：param("dark"/"bright")と現在の画面の明るさが一致する時だけ実体化する
+    GIMMICK_BRIGHTNESS_LOCK_PLATFORM,// 明暗ロック足場：param("dark"/"bright")と現在の画面の明るさが一致する時だけ実体化する
+    GIMMICK_CUSTOM_SCRIPT            // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで挙動を自作する
 };
 
 struct GimmickState {
@@ -633,6 +646,9 @@ struct Enemy {
     float auxF2 = 0.0f;   // 例: テレポート先候補、分裂済みフラグ用の残りHP比
     int   auxState = 0;   // 例: シールドON/OFF、テレポートのクールダウン段階
     bool  auxFlag = false; // 例: 分裂済みかどうか
+
+    // Feature: Puzzle-like Behavior Scripting (M2) — type==ENEMY_CUSTOM_SCRIPTの実行状態
+    ScriptState scriptState;
 };
 
 struct Gimmick {
@@ -656,6 +672,9 @@ struct Gimmick {
     std::string assetId = "";  // GimmickDef.id への参照（SE検索・タイプ判定補助用）
     std::string param = "";    // ステージJSONの "param" フィールド（ポータル遷移先など）
     int handle = -1;           // GimmickDef.graphHandle（カスタムスプライト）。-1なら種別ごとの既定画像を使う
+
+    // Feature: Puzzle-like Behavior Scripting (M2) — type==GIMMICK_CUSTOM_SCRIPTの実行状態
+    ScriptState scriptState;
 };
 
 struct Bullet {
@@ -1380,6 +1399,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Logger::Info("System", "WinMain", "[Init] StageLoader Success");
     std::set_terminate([]() {
         Logger::Error("System", "Terminate", "Unhandled exception occurred");
+        try {
+            if (std::current_exception()) std::rethrow_exception(std::current_exception());
+        } catch (const std::exception& e) {
+            Logger::Error("System", "Terminate", std::string("what(): ") + e.what());
+        } catch (...) {
+            Logger::Error("System", "Terminate", "Unknown exception type (not derived from std::exception)");
+        }
         exit(1);
     });
     
@@ -1765,6 +1791,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         gimmicks = stage.gimmicks;
         for (auto& gim : gimmicks) {
             gim.history.clear();
+            // Feature: Puzzle-like Behavior Scripting (M2)
+            if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
+                const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                BehaviorInterpreter::Start(gim.scriptState, gdef ? gdef->script : json::array(), "OnSpawn");
+            }
         }
 
         platforms = stage.platforms;
@@ -2559,8 +2590,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (gim.type == GIMMICK_TIME_FIELD && gim.isActive) {
                     float dx = cx - gim.x;
                     float dy = cy - gim.y;
-                    // val1 を半径(radius)として扱う。ここでは仮に100.0fとするか、後で配置時にval1=100等にする
-                    float radius = gim.val1 > 0 ? gim.val1 : 100.0f;
+                    // val1 が配置時に設定されていればそれを半径として使い、無ければGimmickDefの既定半径を使う
+                    const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                    float radius = gim.val1 > 0 ? gim.val1 : (gdef ? gdef->radius : 100.0f);
                     if (dx * dx + dy * dy <= radius * radius) {
                         return true;
                     }
@@ -2624,6 +2656,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         float ts = isStepFrame ? 1.0f : finalTimeScale;
         Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
+        BehaviorInterpreter::globalOpsThisFrame = 0; // Feature: Puzzle-like Behavior Scripting (M2) — 全スクリプト実行体の命令数予算を毎フレームリセット
 
         // Feature 3 & 5: 各種マネージャーの更新
         if (!isPaused || isStepFrame) {
@@ -2691,17 +2724,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (gim.type == GIMMICK_CUT_PORTAL && gim.isActive) {
                         float timePos = gim.val1;
                         float targetTimePos = gim.val2;
-                        
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float warpOffset = gdef ? gdef->warpOffsetPx : 8.0f;
+
                         // 左の境界（timePos）を左から右に越えたときのみ前方にワープ
                         if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
-                            player.x = targetTimePos * STAGE_WIDTH + 8.0f;
-                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            player.x = targetTimePos * STAGE_WIDTH + warpOffset;
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                         // 右の境界（targetTimePos）を右から左に越えたときのみ後方にワープ
                         else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
-                            player.x = timePos * STAGE_WIDTH - pw_scaled - 8.0f;
-                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                            player.x = timePos * STAGE_WIDTH - pw_scaled - warpOffset;
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                     }
@@ -2716,6 +2749,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 1. 砂時計リフトの更新（プレイヤーが乗っているとゆっくり降下）
                 for (auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_FALLING_LIFT && gim.isActive) {
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float sinkSpeed = gdef ? gdef->sinkSpeed : 1.5f;
+                        float maxDepth = gdef ? gdef->maxDepthOffset : 20.0f;
                         float objW = (float)player.width * player.scale;
                         float objH = (float)player.height * player.scale;
                         float footY = player.y + objH;
@@ -2723,8 +2759,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.spriteWidth) {
                             float threshold = player.vy + 8.0f;
                             if (footY >= gim.y && footY <= gim.y + threshold) {
-                                gim.y += 1.5f * pts; // ゆっくり降下
-                                if (gim.y > groundY - 20.0f) gim.y = groundY - 20.0f; // 地面を限界とする
+                                gim.y += sinkSpeed * pts; // ゆっくり降下
+                                if (gim.y > groundY - maxDepth) gim.y = groundY - maxDepth; // 地面を限界とする
                             }
                         }
                     }
@@ -2734,10 +2770,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool switchActive = false;
                 float switchX = 0.0f;
                 float switchWidth = 0.0f;
+                float switchTriggerThreshold = 140.0f;
                 for (const auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_WEIGHT_SWITCH && gim.isActive) {
                         switchX = gim.x;
                         switchWidth = gim.spriteWidth;
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        switchTriggerThreshold = gdef ? gdef->triggerWidthThreshold : 140.0f;
                         break;
                     }
                 }
@@ -2747,8 +2786,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (gim.type == GIMMICK_SCALABLE_BOX && gim.isActive) {
                             // 拡大可能ボックスがスイッチの上にあるかチェック
                             if (gim.x + gim.spriteWidth >= switchX && gim.x <= switchX + switchWidth) {
-                                // 横幅が140以上に拡大されている必要がある
-                                if (gim.spriteWidth >= 140.0f) {
+                                // スイッチが要求する横幅以上に拡大されている必要がある
+                                if (gim.spriteWidth >= switchTriggerThreshold) {
                                     switchActive = true;
                                 }
                             }
@@ -2799,11 +2838,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Apply Gravity first
                     enemy.vy += GRAVITY * ets;
 
+                    // Feature: Configurable Behavior Parameters (M1) — このフレームのEnemyDefを一度だけ引く
+                    const EnemyDef* edef = FindEnemyDef(enemy.assetId);
+
                     // Switch behavior based on EnemyType
                     switch (enemy.type) {
                         case ENEMY_PATROL: {
                             // シンプルAI：patrolLeft ～ patrolRight の範囲でパトロール
-                            float enemySpeed = editorPlayerCaps.baseSpeed * ets * 0.4f;
+                            float enemySpeed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f);
                             // 巡回範囲が未設定なら ±200px で初期化
                             if (enemy.patrolLeft < 0 && enemy.patrolRight < 0) {
                                 enemy.patrolLeft = std::max<float>(0.0f, enemy.x - 200.0f);
@@ -2824,6 +2866,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_JUMPER: {
                             // ジャンプAI：定期的にジャンプ（タイルマップ＋足場両方で着地チェック）
+                            float jumpInterval = edef ? edef->actionInterval : 90.0f;
+                            float jumpPowerMult = edef ? edef->jumpPowerMult : 0.7f;
                             enemy.customTimer += ets;
                             enemy.vx = 0.0f;
 
@@ -2840,26 +2884,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
                             }
 
-                            if (isGrounded && enemy.customTimer >= 90.0f) { // 約1.5秒ごとにジャンプ
-                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * 0.7f;
+                            if (isGrounded && enemy.customTimer >= jumpInterval) {
+                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpPowerMult;
                                 enemy.customTimer = 0.0f;
                             }
                             break;
                         }
                         case ENEMY_STATIONARY: {
                             // 固定AI：定期的な射撃、プレイヤーの方向を向く
+                            float shootInterval = edef ? edef->actionInterval : 120.0f;
+                            float projSpeed = edef ? edef->projectileSpeed : 0.6f;
                             enemy.vx = 0.0f;
                             if (player.x < enemy.x) enemy.direction = 1;
                             else enemy.direction = 0;
 
                             enemy.customTimer += ets;
-                            if (enemy.customTimer >= 120.0f) { // 2秒ごとに射撃
+                            if (enemy.customTimer >= shootInterval) {
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
                                         bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
                                         bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
-                                        bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.6f : -BULLET_SPEED * 0.6f);
+                                        bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * projSpeed : -BULLET_SPEED * projSpeed);
                                         bullets[i].vy = 0.0f;
                                         bullets[i].isPlayerOwned = false; // 敵の弾
                                         bullets[i].isRewinding = false;
@@ -2873,6 +2919,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_PATROL_SHOOTER: {
                             // 索敵＆射撃AI（DrawPixel2.cpp準拠）
+                            float detectX = edef ? edef->triggerRange : 300.0f;
+                            float detectY = edef ? edef->detectionRangeY : 100.0f;
+                            float patrolSpd = edef ? edef->moveSpeed : 0.5f;
+                            float cooldown = edef ? edef->cooldownTime : 60.0f;
+                            float projSpeed = edef ? edef->projectileSpeed : 0.5f;
                             float pCenterX = player.x + (player.width * player.scale) / 2.0f;
                             float pCenterY = player.y + (player.height * player.scale) / 2.0f;
                             float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
@@ -2881,15 +2932,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distY = std::abs(pCenterY - eCenterY);
 
                             // aiState: 0=PATROL, 1=ATTACK
-                            if (distX <= 300.0f && distY <= 100.0f) enemy.aiState = 1; // ATTACK
+                            if (distX <= detectX && distY <= detectY) enemy.aiState = 1; // ATTACK
                             else enemy.aiState = 0; // PATROL
 
                             if (enemy.aiState == 0) {
                                 if (enemy.direction == 1) {
-                                    enemy.vx = -WALK_SPEED * ets * 0.5f;
+                                    enemy.vx = -WALK_SPEED * ets * patrolSpd;
                                     if (enemy.x <= enemy.patrolLeft) enemy.direction = 0;
                                 } else {
-                                    enemy.vx = WALK_SPEED * ets * 0.5f;
+                                    enemy.vx = WALK_SPEED * ets * patrolSpd;
                                     if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
                                 }
                             } else if (enemy.aiState == 1) {
@@ -2903,7 +2954,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             bullets[i].isActive = true;
                                             bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
                                             bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
-                                            bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * 0.5f : -BULLET_SPEED * 0.5f);
+                                            bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * projSpeed : -BULLET_SPEED * projSpeed);
                                             bullets[i].vy = 0.0f;
                                             bullets[i].isPlayerOwned = false;
                                             bullets[i].isRewinding = false;
@@ -2911,7 +2962,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             break;
                                         }
                                     }
-                                    enemy.customTimer = 60.0f; // クールダウン60フレーム
+                                    enemy.customTimer = cooldown;
                                 }
                             }
                             break;
@@ -2920,7 +2971,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // ===== ここから追加タイプ =====
                         case ENEMY_WALKER: {
                             // 歩いてくる：常にプレイヤー方向へ歩く。崖のふちで止まる。
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.35f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.35f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
@@ -2939,7 +2990,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_CHASER: {
                             // 追っかけてくる：WALKERに加え、壁に当たると自動でジャンプする
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.55f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.55f);
+                            float jumpPowerMult = edef ? edef->jumpPowerMult : 0.8f;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
@@ -2954,25 +3006,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 wallAhead = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
                             }
                             if (wallAhead && std::abs(enemy.vy) < 1.0f) {
-                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * 0.8f;
+                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpPowerMult;
                             }
                             break;
                         }
                         case ENEMY_DASH_CHARGER: {
                             // 突進：射程内に入ると溜め→高速直進→クールダウン。auxState: 0待機/1溜め/2突進/3クールダウン
+                            float triggerRange = edef ? edef->triggerRange : 260.0f;
+                            float chargeTime = edef ? edef->chargeTime : 30.0f;
+                            float dashSpeedMult = edef ? edef->dashSpeedMult : 1.5f;
+                            float dashDuration = edef ? edef->dashDuration : 40.0f;
+                            float cooldownTime = edef ? edef->cooldownTime : 70.0f;
                             float distXd = player.x - enemy.x;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f;
-                                if (std::abs(distXd) < 260.0f) { enemy.auxState = 1; enemy.customTimer = 30.0f; enemy.direction = (distXd < 0) ? 1 : 0; }
+                                if (std::abs(distXd) < triggerRange) { enemy.auxState = 1; enemy.customTimer = chargeTime; enemy.direction = (distXd < 0) ? 1 : 0; }
                             } else if (enemy.auxState == 1) {
                                 enemy.vx = 0.0f;
                                 enemy.customTimer -= ets;
-                                if (enemy.customTimer <= 0) { enemy.auxState = 2; enemy.customTimer = 40.0f; }
+                                if (enemy.customTimer <= 0) { enemy.auxState = 2; enemy.customTimer = dashDuration; }
                             } else if (enemy.auxState == 2) {
-                                float dashSpeed = DASH_SPEED * ets * 1.5f;
+                                float dashSpeed = DASH_SPEED * ets * dashSpeedMult;
                                 enemy.vx = (enemy.direction == 1) ? -dashSpeed : dashSpeed;
                                 enemy.customTimer -= ets;
-                                if (enemy.customTimer <= 0) { enemy.auxState = 3; enemy.customTimer = 70.0f; }
+                                if (enemy.customTimer <= 0) { enemy.auxState = 3; enemy.customTimer = cooldownTime; }
                             } else {
                                 enemy.vx = 0.0f;
                                 enemy.customTimer -= ets;
@@ -2982,19 +3039,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_FALLER: {
                             // 待機(0)：静止 → プレイヤーが真下を通ると落下(1) → 着地後クールダウン(2) → 元の高さへ復帰
+                            float triggerWidth = edef ? edef->triggerRange : 24.0f;
+                            float fallDelay = edef ? edef->fallDelay : 10.0f;
+                            float cooldownTime = edef ? edef->cooldownTime : 120.0f;
                             if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
-                                if (std::abs(player.x - enemy.x) < 24.0f && player.y > enemy.y) {
+                                if (std::abs(player.x - enemy.x) < triggerWidth && player.y > enemy.y) {
                                     enemy.auxState = 1;
-                                    enemy.customTimer = 10.0f;
+                                    enemy.customTimer = fallDelay;
                                 }
                             } else if (enemy.auxState == 1) {
                                 enemy.vx = 0.0f;
                                 if (enemy.customTimer > 0) enemy.customTimer -= ets;
                                 else if (std::abs(enemy.vy) < 0.5f) {
                                     enemy.auxState = 2;
-                                    enemy.customTimer = 120.0f;
+                                    enemy.customTimer = cooldownTime;
                                 }
                             } else {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
@@ -3008,21 +3068,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SPREAD_SHOOTER: {
                             // 拡散弾：固定位置から3方向へ拡散射撃
+                            float shootInterval = edef ? edef->actionInterval : 150.0f;
+                            float spreadAngle = edef ? edef->spreadAngle : 0.35f;
+                            int spreadCount = (edef && edef->spreadCount > 0) ? edef->spreadCount : 3;
+                            float projSpeed = edef ? edef->projectileSpeed : 0.5f;
                             enemy.vx = 0.0f;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.customTimer += ets;
-                            if (enemy.customTimer >= 150.0f) {
+                            if (enemy.customTimer >= shootInterval) {
                                 float baseDir = (enemy.direction == 0) ? 1.0f : -1.0f;
-                                float angles[3] = { -0.35f, 0.0f, 0.35f };
-                                for (int a = 0; a < 3; a++) {
+                                for (int a = 0; a < spreadCount; a++) {
+                                    // spreadCount本を -spreadAngle ～ +spreadAngle の範囲に等間隔配置（spreadCount==1なら正面のみ）
+                                    float angle = (spreadCount > 1)
+                                        ? (-spreadAngle + (2.0f * spreadAngle) * ((float)a / (float)(spreadCount - 1)))
+                                        : 0.0f;
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
                                             bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
                                             bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
-                                            float spd = BULLET_SPEED * 0.5f;
-                                            bullets[i].vx = baseDir * spd * cosf(angles[a]);
-                                            bullets[i].vy = spd * sinf(angles[a]);
+                                            float spd = BULLET_SPEED * projSpeed;
+                                            bullets[i].vx = baseDir * spd * cosf(angle);
+                                            bullets[i].vy = spd * sinf(angle);
                                             bullets[i].isPlayerOwned = false;
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
@@ -3036,9 +3103,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_AIMED_SHOOTER: {
                             // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ
+                            float shootInterval = edef ? edef->actionInterval : 130.0f;
+                            float projSpeed = edef ? edef->projectileSpeed : 0.55f;
                             enemy.vx = 0.0f;
                             enemy.customTimer += ets;
-                            if (enemy.customTimer >= 130.0f) {
+                            if (enemy.customTimer >= shootInterval) {
                                 float pCenterX = player.x + (player.width * player.scale) / 2.0f;
                                 float pCenterY = player.y + (player.height * player.scale) / 2.0f;
                                 float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
@@ -3053,7 +3122,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].isActive = true;
                                         bullets[i].x = eCenterX;
                                         bullets[i].y = eCenterY;
-                                        float spd = BULLET_SPEED * 0.55f;
+                                        float spd = BULLET_SPEED * projSpeed;
                                         bullets[i].vx = dxA / distA * spd;
                                         bullets[i].vy = dyA / distA * spd;
                                         bullets[i].isPlayerOwned = false;
@@ -3068,22 +3137,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_FLOATER: {
                             // 浮遊敵：重力を打ち消してサインカーブで浮遊しながらゆっくり接近
+                            float amplitude = edef ? edef->floatAmplitude : 40.0f;
+                            float frequency = edef ? edef->floatFrequency : 0.05f;
                             if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
                             enemy.vy = 0.0f;
                             enemy.customTimer += ets;
-                            enemy.y = enemy.auxF2 + sinf(enemy.customTimer * 0.05f) * 40.0f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.2f;
+                            enemy.y = enemy.auxF2 + sinf(enemy.customTimer * frequency) * amplitude;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.2f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
                             break;
                         }
                         case ENEMY_TELEPORTER: {
                             // テレポーター：一定間隔でプレイヤー付近へ瞬間移動する
+                            float interval = edef ? edef->actionInterval : 180.0f;
+                            float rangeMin = edef ? edef->teleportRangeMin : 120.0f;
+                            float rangeMax = edef ? edef->teleportRangeMax : 220.0f;
+                            float rangeSpan = std::max<float>(0.0f, rangeMax - rangeMin);
                             enemy.vx = 0.0f;
                             enemy.customTimer += ets;
-                            if (enemy.customTimer >= 180.0f) {
+                            if (enemy.customTimer >= interval) {
                                 float side = (rand() % 2 == 0) ? 1.0f : -1.0f;
-                                float offset = 120.0f + (float)(rand() % 100);
+                                float offset = rangeMin + (float)(rand() % (int)std::max<float>(1.0f, rangeSpan));
                                 enemy.x = player.x + side * offset;
                                 if (enemy.x < 0.0f) enemy.x = 0.0f;
                                 enemy.customTimer = 0.0f;
@@ -3092,7 +3167,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SHRINKER: {
                             // 分裂もどき：通常時はゆっくり接近。被弾で縮小・高速化した後(auxFlag)は素早く接近する。
-                            float mult = enemy.auxFlag ? 0.9f : 0.35f;
+                            float normalMult = edef ? edef->moveSpeed : 0.35f;
+                            float enragedMult = edef ? edef->enragedMoveSpeed : 0.9f;
+                            float mult = enemy.auxFlag ? enragedMult : normalMult;
                             float speed = editorPlayerCaps.baseSpeed * ets * mult;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
@@ -3100,19 +3177,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SHIELD: {
                             // シールド：ゆっくり接近しつつ、一定間隔で無敵状態(auxFlag)を切り替える（無敵中は描画側で発光）
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            float offDuration = edef ? edef->shieldOffDuration : 150.0f;
+                            float onDuration = edef ? edef->shieldOnDuration : 90.0f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
                             enemy.customTimer += ets;
-                            if (!enemy.auxFlag && enemy.customTimer >= 150.0f) { enemy.auxFlag = true; enemy.customTimer = 0.0f; }
-                            else if (enemy.auxFlag && enemy.customTimer >= 90.0f) { enemy.auxFlag = false; enemy.customTimer = 0.0f; }
+                            if (!enemy.auxFlag && enemy.customTimer >= offDuration) { enemy.auxFlag = true; enemy.customTimer = 0.0f; }
+                            else if (enemy.auxFlag && enemy.customTimer >= onDuration) { enemy.auxFlag = false; enemy.customTimer = 0.0f; }
                             break;
                         }
                         case ENEMY_MIMIC_GHOST: {
                             // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生して過去の動きをなぞる
                             enemy.vx = 0.0f; enemy.vy = 0.0f;
-                            if (enemy.auxF1 <= 0.0f) enemy.auxF1 = 90.0f; // 遅延フレーム数（約1.5秒）
+                            if (enemy.auxF1 <= 0.0f) enemy.auxF1 = edef ? edef->mimicDelayFrames : 90.0f;
                             size_t delay = (size_t)enemy.auxF1;
                             if (player.history.size() > delay) {
                                 const PlayerState& past = player.history[player.history.size() - 1 - delay];
@@ -3123,58 +3202,138 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SIZE_SHIFTER: {
                             // 大きさが変わる敵：scaleが周期的に変化（当たり判定も連動）
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.25f;
+                            float amplitude = edef ? edef->sizeAmplitude : 0.5f;
+                            float frequency = edef ? edef->sizeFrequency : 0.04f;
+                            float minSc = edef ? edef->minScale : 0.4f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.25f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
                             enemy.customTimer += ets;
-                            enemy.scale = 1.0f + sinf(enemy.customTimer * 0.04f) * 0.5f;
-                            if (enemy.scale < 0.4f) enemy.scale = 0.4f;
+                            enemy.scale = 1.0f + sinf(enemy.customTimer * frequency) * amplitude;
+                            if (enemy.scale < minSc) enemy.scale = minSc;
                             break;
                         }
                         case ENEMY_TEMPO_WARPER: {
                             // 速さ操作敵：speedScaleが周期的に激しく変化し接近速度が乱れる
+                            float frequency = edef ? edef->tempoFrequency : 0.05f;
+                            float tempoMin = edef ? edef->tempoMin : 0.3f;
+                            float tempoMax = edef ? edef->tempoMax : 1.6f;
                             enemy.customTimer += ets;
-                            enemy.speedScale = 0.3f + 1.3f * (0.5f + 0.5f * sinf(enemy.customTimer * 0.05f));
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.4f;
+                            enemy.speedScale = tempoMin + (tempoMax - tempoMin) * (0.5f + 0.5f * sinf(enemy.customTimer * frequency));
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
                             break;
                         }
                         case ENEMY_BRIGHTNESS_PHANTOM: {
                             // 明るさ操作敵：射程内で画面を暗転させる
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            float range = edef ? edef->effectRange : 320.0f;
+                            float brightnessMin = edef ? edef->brightnessMin : 0.35f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
                             float distB = std::abs(player.x - enemy.x);
-                            if (distB < 320.0f) {
-                                float t = 1.0f - (distB / 320.0f);
-                                Screen_SetBrightness(1.0f - t * 0.65f);
+                            if (distB < range) {
+                                float t = 1.0f - (distB / range);
+                                Screen_SetBrightness(1.0f - t * (1.0f - brightnessMin));
                             }
                             break;
                         }
                         case ENEMY_COLOR_SHIFTER: {
                             // 色調整敵：射程内で画面を赤みがかった色調へシフトさせる
-                            float speed = editorPlayerCaps.baseSpeed * ets * 0.3f;
+                            float range = edef ? edef->effectRange : 320.0f;
+                            float tintStrength = edef ? edef->tintStrength : 0.6f;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.vx = (enemy.direction == 1) ? -speed : speed;
 
                             float distCol = std::abs(player.x - enemy.x);
-                            if (distCol < 320.0f) {
-                                float t = 1.0f - (distCol / 320.0f);
-                                Screen_SetTint(1.0f, 1.0f - t * 0.6f, 1.0f - t * 0.6f);
+                            if (distCol < range) {
+                                float t = 1.0f - (distCol / range);
+                                Screen_SetTint(1.0f, 1.0f - t * tintStrength, 1.0f - t * tintStrength);
                             }
                             break;
                         }
                         case ENEMY_ZOOM_DISRUPTOR: {
                             // ズーム撹乱敵：射程内で画面ズームを周期的に揺さぶる
+                            float range = edef ? edef->effectRange : 280.0f;
+                            float amplitude = edef ? edef->zoomAmplitude : 0.25f;
+                            float frequency = edef ? edef->zoomFrequency : 0.08f;
                             enemy.vx = 0.0f;
                             enemy.customTimer += ets;
                             float distZ = std::abs(player.x - enemy.x);
-                            if (distZ < 280.0f) {
-                                Screen_SetZoom(1.0f + sinf(enemy.customTimer * 0.08f) * 0.25f);
+                            if (distZ < range) {
+                                Screen_SetZoom(1.0f + sinf(enemy.customTimer * frequency) * amplitude);
                             }
+                            break;
+                        }
+                        case ENEMY_CUSTOM_SCRIPT: {
+                            // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで駆動する
+                            if (edef && !enemy.scriptState.started && !enemy.scriptState.finished && !enemy.scriptState.faulted) {
+                                BehaviorInterpreter::Start(enemy.scriptState, edef->script, "OnSpawn");
+                            }
+
+                            ScriptActor actor;
+                            actor.x = &enemy.x; actor.y = &enemy.y;
+                            actor.vx = &enemy.vx; actor.vy = &enemy.vy;
+                            actor.direction = &enemy.direction;
+                            actor.scale = &enemy.scale;
+                            actor.playerX = player.x; actor.playerY = player.y;
+
+                            // 接地・進行方向の壁/足場の有無を判定（WALKER/CHASER/JUMPERと同じタイル判定を流用）
+                            {
+                                float testY = enemy.y + 2.0f;
+                                float testVY = 1.0f;
+                                bool tileGround = CheckGridCollisionY(enemy.x, testY, testVY,
+                                    enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
+                                    stages[currentStageIdx].map, tileDefs);
+                                bool platGround = CheckPlatformCollision(enemy.x, testY, testVY,
+                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                actor.isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
+                            }
+                            auto& mpS = stages[currentStageIdx].map;
+                            auto checkAheadTile = [&](float dx) -> bool {
+                                float aheadX = enemy.x + dx;
+                                float footY = enemy.y + (float)enemy.hitboxHeight * enemy.scale + 4.0f;
+                                int tCol = (int)(aheadX / TILE_SIZE);
+                                int tRow = (int)(footY / TILE_SIZE);
+                                if (!mpS.empty() && tRow >= 0 && tRow < (int)mpS.size() && tCol >= 0 && tCol < (int)mpS[0].size()) {
+                                    int tid = mpS[tRow][tCol];
+                                    return (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                                }
+                                return false;
+                            };
+                            actor.groundAheadLeft = checkAheadTile(-8.0f);
+                            actor.groundAheadRight = checkAheadTile((float)enemy.hitboxWidth * enemy.scale + 8.0f);
+                            actor.wallAheadLeft = checkAheadTile(-4.0f);
+                            actor.wallAheadRight = checkAheadTile((float)enemy.hitboxWidth * enemy.scale + 4.0f);
+
+                            Enemy* enemyPtr = &enemy;
+                            actor.shoot = [&bullets, enemyPtr](float angleRad, float speed, float damage) {
+                                (void)damage; // Bullet構造体に damage フィールドが無いため現状1固定ダメージ（将来拡張の余地）
+                                for (int i = 0; i < MAX_BULLETS; i++) {
+                                    if (!bullets[i].isActive) {
+                                        bullets[i].isActive = true;
+                                        bullets[i].x = enemyPtr->x + (float)enemyPtr->hitboxWidth * enemyPtr->scale / 2.0f;
+                                        bullets[i].y = enemyPtr->y + (float)enemyPtr->hitboxHeight * enemyPtr->scale / 2.0f;
+                                        bullets[i].vx = cosf(angleRad) * speed;
+                                        bullets[i].vy = sinf(angleRad) * speed;
+                                        bullets[i].isPlayerOwned = false;
+                                        bullets[i].isRewinding = false;
+                                        bullets[i].history.clear();
+                                        break;
+                                    }
+                                }
+                            };
+                            actor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                            actor.visualEffect = [&](const std::string& kind, float intensity) {
+                                if (kind == "brightness") Screen_SetBrightness(intensity);
+                                else if (kind == "zoom") Screen_SetZoom(intensity);
+                            };
+
+                            BehaviorInterpreter::Tick(enemy.scriptState, actor);
                             break;
                         }
                     }
@@ -3282,20 +3441,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // 反射のバウンディングボックス交差チェック
                                     if (bullets[i].x >= gim.x && bullets[i].x <= gim.x + gim.spriteWidth &&
                                         bullets[i].y >= gim.y && bullets[i].y <= gim.y + gim.spriteHeight) {
-                                        
+
                                         // 反射物理：角度 gim.angle は板の回転を表す
                                         // 面の法線ベクトル N は ( -sin(angle), cos(angle) )
                                         float nx = -sinf(gim.angle);
                                         float ny = cosf(gim.angle);
-                                        
+
                                         // 反射速度ベクトル：R = V - 2 * (V . N) * N
                                         float dot = bullets[i].vx * nx + bullets[i].vy * ny;
                                         bullets[i].vx = bullets[i].vx - 2.0f * dot * nx;
                                         bullets[i].vy = bullets[i].vy - 2.0f * dot * ny;
-                                        
+
                                         // 無限反射ループを避けるため、弾をミラーから少し押し出す
-                                        bullets[i].x += bullets[i].vx * 1.5f;
-                                        bullets[i].y += bullets[i].vy * 1.5f;
+                                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                                        float pushOut = gdef ? gdef->pushOutDistance : 1.5f;
+                                        bullets[i].x += bullets[i].vx * pushOut;
+                                        bullets[i].y += bullets[i].vy * pushOut;
                                         break;
                                     }
                                 }
@@ -3326,15 +3487,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (canGimAct) {
                     float gts = ts;
                     if (gim.type == GIMMICK_ROTATING_BRIDGE) {
-                        // 橋を自動回転（1フレームあたり約0.85度）
-                        gim.angle += 0.015f * gts;
+                        // 橋を自動回転
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float rotSpeed = gdef ? gdef->rotationSpeed : 0.015f;
+                        gim.angle += rotSpeed * gts;
                     }
                     else if (gim.type == GIMMICK_CHIKUWA_BLOCK) {
                         // ちくわブロックロジック（gim.customTimerをrideTimer、gim.val1を元のY座標、gim.val2をfallDelay、gim.angleをisFallingフラグとして使用）
-                        // gim.val1 が未初期化(0)なら現在Yを記録し、fallDelayを45にセット
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float standDelay = gdef ? gdef->standDelayFrames : 45.0f;
+                        float standTolerance = gdef ? gdef->standTolerancePx : 10.0f;
+                        float respawnDelay = gdef ? gdef->respawnDelayFrames : 180.0f;
+                        // gim.val1 が未初期化(0)なら現在Yを記録し、fallDelayをセット
                         if (gim.val1 == 0.0f) {
                             gim.val1 = gim.y;
-                            gim.val2 = 45.0f;
+                            gim.val2 = standDelay;
                         }
 
                         // プレイヤーが上に乗っているか判定
@@ -3343,7 +3510,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float footY = player.y + ph_scaled;
                         bool isPlayerOn = false;
                         if (player.vy >= 0 && player.x + pw_scaled > gim.x && player.x < gim.x + gim.spriteWidth) {
-                            if (footY >= gim.y && footY <= gim.y + 10.0f) {
+                            if (footY >= gim.y && footY <= gim.y + standTolerance) {
                                 isPlayerOn = true;
                             }
                         }
@@ -3363,10 +3530,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             gim.y += gim.val2 * gts;
                             if (gim.y > SCREEN_HEIGHT + 100) {
                                 gim.customTimer += 1.0f * gts;
-                                if (gim.customTimer > 180.0f) {
+                                if (gim.customTimer > respawnDelay) {
                                     gim.angle = 0.0f;
                                     gim.y = gim.val1;
-                                    gim.val2 = 45.0f;
+                                    gim.val2 = standDelay;
                                     gim.customTimer = 0.0f;
                                 }
                             }
@@ -3395,16 +3562,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                     else if (gim.type == GIMMICK_MOVING_PLATFORM) {
                         // 動く足場：val1(上端)～val2(下端)を自動で往復する
-                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + 96.0f; }
-                        gim.customTimer += 0.02f * gts;
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float travel = gdef ? gdef->travelDistance : 96.0f;
+                        float oscSpeed = gdef ? gdef->oscillationSpeed : 0.02f;
+                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + travel; }
+                        gim.customTimer += oscSpeed * gts;
                         float t = (sinf(gim.customTimer) + 1.0f) * 0.5f;
                         gim.y = gim.val1 + (gim.val2 - gim.val1) * t;
                     }
                     else if (gim.type == GIMMICK_FRAMESTEP_LIFT) {
                         // コマ送りリフト：一時停止中の→キー（コマ送り）1回ごとに一歩だけ動く
-                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + 128.0f; }
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        float travel = gdef ? gdef->travelDistance : 128.0f;
+                        float stepInc = gdef ? gdef->stepIncrement : 0.15f;
+                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + travel; }
                         if (isStepFrame) {
-                            gim.customTimer += 0.15f;
+                            gim.customTimer += stepInc;
                             if (gim.customTimer > 1.0f) gim.customTimer = 0.0f;
                         }
                         gim.y = gim.val1 + (gim.val2 - gim.val1) * gim.customTimer;
@@ -3416,19 +3589,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
                              || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
                         // 画面全体エフェクト系ゾーン：範囲内にプレイヤーがいる間だけ効果を発動する
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                         float pw_s = (float)player.width * player.scale;
                         float ph_s = (float)player.height * player.scale;
                         if (CheckCollision(player.x, player.y, pw_s, ph_s, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             if (gim.type == GIMMICK_BRIGHTNESS_ZONE) {
                                 // val1 > 0.5 なら明転、それ以外は暗転（デフォルト）
-                                Screen_SetBrightness(gim.val1 > 0.5f ? 1.6f : 0.35f);
+                                float bright = gdef ? gdef->brightLevel : 1.6f;
+                                float dark = gdef ? gdef->darkLevel : 0.35f;
+                                Screen_SetBrightness(gim.val1 > 0.5f ? bright : dark);
                             } else if (gim.type == GIMMICK_COLOR_ZONE) {
-                                Screen_SetTint(1.0f, 0.6f, 1.0f); // 紫がかった色調
+                                float r = gdef ? gdef->tintR : 1.0f, g = gdef ? gdef->tintG : 0.6f, b = gdef ? gdef->tintB : 1.0f;
+                                Screen_SetTint(r, g, b); // 紫がかった色調（既定値）
                             } else if (gim.type == GIMMICK_ZOOM_LENS) {
-                                Screen_SetZoom(1.6f);
+                                Screen_SetZoom(gdef ? gdef->zoomLevel : 1.6f);
                             } else { // GIMMICK_SLOWMO_FIELD（視覚効果のみのスローモーション演出）
-                                Screen_SetZoom(1.3f);
-                                Screen_SetBrightness(0.85f);
+                                Screen_SetZoom(gdef ? gdef->zoomLevel : 1.3f);
+                                Screen_SetBrightness(gdef ? gdef->brightLevel : 0.85f);
                             }
                         }
                     }
@@ -3441,6 +3618,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する
                         bool wantsBright = (gim.param == "bright");
                         gim.isActive = wantsBright ? (fxCurBright > 1.3f) : (fxCurBright < 0.6f);
+                    }
+                    else if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
+                        // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで駆動する
+                        ScriptActor actor;
+                        actor.x = &gim.x; actor.y = &gim.y;
+                        actor.playerX = player.x; actor.playerY = player.y;
+                        // ギミックにはvx/vy/direction/scaleに相当するフィールドが無いため、それらを使うブロックは
+                        // 自動的に何もしない（ScriptActorのnullチェックにより安全にスキップされる）
+                        Gimmick* gimPtr = &gim;
+                        actor.shoot = [&bullets, gimPtr](float angleRad, float speed, float damage) {
+                            (void)damage;
+                            for (int i = 0; i < MAX_BULLETS; i++) {
+                                if (!bullets[i].isActive) {
+                                    bullets[i].isActive = true;
+                                    bullets[i].x = gimPtr->x + gimPtr->spriteWidth / 2.0f;
+                                    bullets[i].y = gimPtr->y + gimPtr->spriteHeight / 2.0f;
+                                    bullets[i].vx = cosf(angleRad) * speed;
+                                    bullets[i].vy = sinf(angleRad) * speed;
+                                    bullets[i].isPlayerOwned = false;
+                                    bullets[i].isRewinding = false;
+                                    bullets[i].history.clear();
+                                    break;
+                                }
+                            }
+                        };
+                        actor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                        actor.visualEffect = [&](const std::string& kind, float intensity) {
+                            if (kind == "brightness") Screen_SetBrightness(intensity);
+                            else if (kind == "zoom") Screen_SetZoom(intensity);
+                        };
+                        BehaviorInterpreter::Tick(gim.scriptState, actor);
                     }
                 }
                 if (canGimAct) {
@@ -3550,7 +3758,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             // 分裂もどき：一度だけ縮小・高速化して復活する
                                             enemy.auxFlag = true;
                                             enemy.hp = 1;
-                                            enemy.scale *= 0.6f;
+                                            enemy.scale *= (edef ? edef->shrinkFactor : 0.6f);
                                             if (edef) SoundManager::Get().PlaySe(edef->seDamage);
                                         } else {
                                             enemy.isActive = false;      // 敵を倒す
@@ -3898,6 +4106,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 DrawBox(zx1, zy1, zx2, zy2, zoneColor, FALSE);
             }
+            else if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
+                // Feature: Puzzle-like Behavior Scripting (M2) — カスタムスプライトがあればそれを、無ければ簡易プレースホルダーを描画
+                int cx1 = (int)(gim.x - cameraX);
+                int cy1 = (int)gim.y;
+                int cx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int cy2 = (int)(gim.y + gim.spriteHeight);
+                if (gim.handle >= 0) {
+                    DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
+                } else {
+                    DrawBox(cx1, cy1, cx2, cy2, GetColor(0, 255, 255), TRUE);
+                    DrawBox(cx1, cy1, cx2, cy2, GetColor(255, 255, 255), FALSE);
+                }
+                if (isDebugDrawMode) {
+                    const char* status = gim.scriptState.faulted ? "FAULT" : gim.scriptState.finished ? "DONE" : "RUN";
+                    DrawFormatString(cx1, cy1 - 16, GetColor(0, 255, 255),
+                        "SCRIPT:%s stack=%d wait=%d", status, (int)gim.scriptState.callStack.size(), gim.scriptState.waitFramesRemaining);
+                }
+            }
         }
 
         // 共通レイヤー描画ラムダ
@@ -4006,6 +4232,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 敵HP表示
                 if (enemy.hp > 0) {
                     DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
+                }
+
+                // Feature: Puzzle-like Behavior Scripting (M2) — デバッグモード時にスクリプト実行状態を表示
+                if (isDebugDrawMode && enemy.type == ENEMY_CUSTOM_SCRIPT) {
+                    const char* status = enemy.scriptState.faulted ? "FAULT" : enemy.scriptState.finished ? "DONE" : "RUN";
+                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 56, GetColor(0, 255, 255),
+                        "SCRIPT:%s stack=%d wait=%d", status, (int)enemy.scriptState.callStack.size(), enemy.scriptState.waitFramesRemaining);
                 }
             }
         }

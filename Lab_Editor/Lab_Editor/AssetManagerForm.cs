@@ -27,6 +27,57 @@ public partial class AssetManagerForm : Form
     private Button btnSave = null!, btnClose = null!;
     private RichTextBox rtbTypeHint = null!;
 
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // 行(DataGridViewRow)ごとに、グリッド列には出さない挙動パラメータ本体を保持する。
+    // idではなく行オブジェクト自体をキーにすることで、id欄のリネームによる不整合を避ける。
+    private readonly Dictionary<DataGridViewRow, EnemyDef> _enemyParams = new();
+    private readonly Dictionary<DataGridViewRow, GimmickDef> _gimmickParams = new();
+    private Panel pnlBehaviorParams = null!;
+    private Label lblTypeHintTitle = null!;
+    private bool _isUpdatingBehaviorPanel = false;
+
+    // type_enum ごとに表示する挙動パラメータ欄 (フィールド名, ラベル, 小数点以下桁数)
+    private static readonly Dictionary<int, (string Field, string Label, int Decimals)[]> EnemyParamFields = new()
+    {
+        [0] = new[] { ("moveSpeed", "移動速度係数", 2) }, // PATROL
+        [1] = new[] { ("actionInterval", "ジャンプ間隔(フレーム)", 0), ("jumpPowerMult", "ジャンプ力係数", 2) }, // JUMPER
+        [2] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // STATIONARY
+        [3] = new[] { ("triggerRange", "索敵X範囲(px)", 0), ("detectionRangeY", "索敵Y範囲(px)", 0), ("moveSpeed", "巡回速度係数", 2), ("cooldownTime", "射撃後クールダウン(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // PATROL_SHOOTER
+        [4] = new[] { ("moveSpeed", "移動速度係数", 2) }, // WALKER
+        [5] = new[] { ("moveSpeed", "移動速度係数", 2), ("jumpPowerMult", "ジャンプ力係数", 2) }, // CHASER
+        [6] = new[] { ("triggerRange", "発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("dashSpeedMult", "突進速度係数", 2), ("dashDuration", "突進継続時間(フレーム)", 0), ("cooldownTime", "クールダウン(フレーム)", 0) }, // DASH_CHARGER
+        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0) }, // FALLER
+        [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2) }, // SPREAD_SHOOTER
+        [9] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // AIMED_SHOOTER
+        [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2) }, // FLOATER
+        [11] = new[] { ("actionInterval", "テレポート間隔(フレーム)", 0), ("teleportRangeMin", "オフセット最小(px)", 0), ("teleportRangeMax", "オフセット最大(px)", 0) }, // TELEPORTER
+        [12] = new[] { ("moveSpeed", "通常時速度係数", 2), ("enragedMoveSpeed", "覚醒後速度係数", 2), ("shrinkFactor", "縮小率", 2) }, // SHRINKER
+        [13] = new[] { ("moveSpeed", "移動速度係数", 2), ("shieldOffDuration", "無敵解除継続(フレーム)", 0), ("shieldOnDuration", "無敵継続(フレーム)", 0) }, // SHIELD
+        [14] = new[] { ("mimicDelayFrames", "遅延フレーム数", 0) }, // MIMIC_GHOST
+        [15] = new[] { ("moveSpeed", "移動速度係数", 2), ("sizeAmplitude", "スケール振幅", 2), ("sizeFrequency", "スケール周波数", 3), ("minScale", "最小スケール", 2) }, // SIZE_SHIFTER
+        [16] = new[] { ("moveSpeed", "基準速度係数", 2), ("tempoFrequency", "周波数", 3), ("tempoMin", "speedScale最小", 2), ("tempoMax", "speedScale最大", 2) }, // TEMPO_WARPER
+        [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // BRIGHTNESS_PHANTOM
+        [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // COLOR_SHIFTER
+        [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // ZOOM_DISRUPTOR
+    };
+
+    private static readonly Dictionary<int, (string Field, string Label, int Decimals)[]> GimmickParamFields = new()
+    {
+        [0] = new[] { ("warpOffsetPx", "ワープ後オフセット(px)", 1) }, // CUT_PORTAL
+        [1] = new[] { ("rotationSpeed", "回転速度(rad/フレーム)", 3) }, // ROTATING_BRIDGE
+        [4] = new[] { ("sinkSpeed", "降下速度(px/フレーム)", 2), ("maxDepthOffset", "最大沈み込み(px)", 0) }, // FALLING_LIFT
+        [5] = new[] { ("pushOutDistance", "押し出し距離係数", 2) }, // REFLECT_MIRROR
+        [6] = new[] { ("triggerWidthThreshold", "起動に必要な横幅(px)", 0) }, // WEIGHT_SWITCH
+        [11] = new[] { ("standDelayFrames", "乗ってから落下まで(フレーム)", 0), ("standTolerancePx", "乗り判定の許容誤差(px)", 0), ("respawnDelayFrames", "復活までの時間(フレーム)", 0) }, // CHIKUWA_BLOCK
+        [12] = new[] { ("radius", "効果範囲の半径(px)", 0) }, // TIME_FIELD
+        [14] = new[] { ("travelDistance", "可動距離(px)", 0), ("oscillationSpeed", "往復の速さ", 3) }, // MOVING_PLATFORM
+        [17] = new[] { ("travelDistance", "可動距離(px)", 0), ("stepIncrement", "1回あたりの移動割合", 2) }, // FRAMESTEP_LIFT
+        [18] = new[] { ("brightLevel", "明転時の輝度", 2), ("darkLevel", "暗転時の輝度", 2) }, // BRIGHTNESS_ZONE
+        [19] = new[] { ("tintR", "色調R", 2), ("tintG", "色調G", 2), ("tintB", "色調B", 2) }, // COLOR_ZONE
+        [20] = new[] { ("zoomLevel", "ズーム倍率", 2) }, // ZOOM_LENS
+        [21] = new[] { ("zoomLevel", "ズーム倍率", 2), ("brightLevel", "明るさ倍率", 2) }, // SLOWMO_FIELD
+    };
+
     // type_enum の説明
     private static readonly (int type, string desc, string detail)[] EnemyTypes =
     {
@@ -133,7 +184,7 @@ public partial class AssetManagerForm : Form
         pbPreview = new PictureBox { Location = new Point(5, 28), Size = new Size(238, 180), BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
         lblPreviewPath = new Label { Location = new Point(5, 212), Size = new Size(238, 40), Font = new Font("Meiryo UI", 7), ForeColor = Color.Gray, Text = "(選択なし)" };
 
-        var lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Location = new Point(5, 258), Size = new Size(238, 20), Font = new Font("Meiryo UI", 9, FontStyle.Bold) };
+        lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Location = new Point(5, 258), Size = new Size(238, 20), Font = new Font("Meiryo UI", 9, FontStyle.Bold) };
         rtbTypeHint = new RichTextBox
         {
             Location = new Point(5, 280),
@@ -145,7 +196,18 @@ public partial class AssetManagerForm : Form
             BorderStyle = BorderStyle.None
         };
 
-        pnlRight.Controls.AddRange(new Control[] { lblPrev, pbPreview, lblPreviewPath, lblTypeHintTitle, rtbTypeHint });
+        // Feature: Configurable Behavior Parameters (M1) — 選択中の敵/ギミック行のtype_enumに応じて
+        // 挙動パラメータの入力欄を動的に切り替えるパネル。rtbTypeHintと同じ場所に重ねて表示し、
+        // 行が選択されている間だけこちらを前面に出す（何も選択されていない時は従来通りタイプ一覧を見せる）。
+        pnlBehaviorParams = new Panel
+        {
+            Location = new Point(5, 280),
+            Size = new Size(238, 265),
+            AutoScroll = true,
+            Visible = false
+        };
+
+        pnlRight.Controls.AddRange(new Control[] { lblPrev, pbPreview, lblPreviewPath, lblTypeHintTitle, rtbTypeHint, pnlBehaviorParams });
 
         // ===== 敵タブ =====
         var tabEnemies = new TabPage("👾 敵 (Enemies)");
@@ -173,7 +235,7 @@ public partial class AssetManagerForm : Form
         tabCommonEvents.Controls.AddRange(new Control[] { lstCommonEvents, btnCeEdit, btnCeDelete });
 
         tabControl.TabPages.AddRange(new TabPage[] { tabEnemies, tabGimmicks, tabItems, tabCommonEvents });
-        tabControl.SelectedIndexChanged += (s, e) => { txtSearch.Text = ""; UpdateTypeHint(); };
+        tabControl.SelectedIndexChanged += (s, e) => { txtSearch.Text = ""; pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; UpdateTypeHint(); };
 
         // ===== 下部ボタン =====
         var pnlBottom = new Panel { Location = new Point(5, 558), Size = new Size(1082, 40) };
@@ -248,8 +310,9 @@ public partial class AssetManagerForm : Form
         });
 
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => UpdatePreview(dgv);
+        dgv.SelectionChanged += (s, e) => { UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: true); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") UpdateBehaviorParamsPanel(dgv, isEnemy: true); };
         return dgv;
     }
 
@@ -287,8 +350,9 @@ public partial class AssetManagerForm : Form
         });
 
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => UpdatePreview(dgv);
+        dgv.SelectionChanged += (s, e) => { UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: false); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") UpdateBehaviorParamsPanel(dgv, isEnemy: false); };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -499,6 +563,91 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         catch { pbPreview.Image = null; }
     }
 
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+
+    private EnemyDef GetOrCreateEnemyParams(DataGridViewRow row)
+    {
+        if (!_enemyParams.TryGetValue(row, out var def)) { def = new EnemyDef(); _enemyParams[row] = def; }
+        return def;
+    }
+
+    private GimmickDef GetOrCreateGimmickParams(DataGridViewRow row)
+    {
+        if (!_gimmickParams.TryGetValue(row, out var def)) { def = new GimmickDef(); _gimmickParams[row] = def; }
+        return def;
+    }
+
+    // 選択中の行のtype_enumを、そのグリッドのコンボボックス列から読み取る（ReadEnemies/ReadGimmicksと同じ判定方式）
+    private static int GetSelectedTypeEnum(DataGridViewRow row)
+    {
+        if (row.Cells["type_enum"] is DataGridViewComboBoxCell combo)
+        {
+            var vals = (string[]?)combo.DataSource;
+            if (vals != null)
+            {
+                int idx = Array.IndexOf(vals, combo.Value?.ToString() ?? "");
+                if (idx >= 0) return idx;
+            }
+        }
+        return 0;
+    }
+
+    // 選択中の敵/ギミック行のtype_enumに応じて、挙動パラメータの入力欄を動的に組み立てる。
+    // 該当タイプに調整可能なパラメータが無い場合は非表示にし、従来のタイプ一覧説明を見せる。
+    private void UpdateBehaviorParamsPanel(DataGridView dgv, bool isEnemy)
+    {
+        if (dgv.SelectedRows.Count == 0) { pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; return; }
+        var row = dgv.SelectedRows[0];
+        int typeEnum = GetSelectedTypeEnum(row);
+        var fieldMap = isEnemy ? EnemyParamFields : GimmickParamFields;
+
+        if (!fieldMap.TryGetValue(typeEnum, out var fields) || fields.Length == 0)
+        {
+            pnlBehaviorParams.Visible = false;
+            rtbTypeHint.Visible = true;
+            lblTypeHintTitle.Text = "📋 タイプ説明";
+            return;
+        }
+
+        object paramsObj = isEnemy ? GetOrCreateEnemyParams(row) : GetOrCreateGimmickParams(row);
+        _isUpdatingBehaviorPanel = true;
+        pnlBehaviorParams.SuspendLayout();
+        pnlBehaviorParams.Controls.Clear();
+
+        int y = 4;
+        foreach (var (field, label, decimals) in fields)
+        {
+            var prop = paramsObj.GetType().GetProperty(field)!;
+            var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
+            var nud = new NumericUpDown
+            {
+                Location = new Point(4, y + 18),
+                Size = new Size(140, 22),
+                DecimalPlaces = decimals,
+                Increment = decimals > 0 ? (decimal)Math.Pow(10, -decimals) : 1m,
+                Minimum = -100000m,
+                Maximum = 100000m,
+                Value = (decimal)Convert.ToSingle(prop.GetValue(paramsObj))
+            };
+            nud.ValueChanged += (s, e) =>
+            {
+                if (_isUpdatingBehaviorPanel) return;
+                if (prop.PropertyType == typeof(int)) prop.SetValue(paramsObj, (int)nud.Value);
+                else prop.SetValue(paramsObj, (float)nud.Value);
+            };
+            pnlBehaviorParams.Controls.Add(lbl);
+            pnlBehaviorParams.Controls.Add(nud);
+            y += 42;
+        }
+
+        pnlBehaviorParams.ResumeLayout();
+        _isUpdatingBehaviorPanel = false;
+
+        rtbTypeHint.Visible = false;
+        pnlBehaviorParams.Visible = true;
+        lblTypeHintTitle.Text = "⚙ 挙動パラメータ";
+    }
+
     private void UpdateTypeHint()
     {
         rtbTypeHint.Clear();
@@ -556,27 +705,32 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     private void LoadData()
     {
         dgvEnemies.Rows.Clear();
+        _enemyParams.Clear();
         foreach (var e in assets.Enemies)
         {
             string typeLabel = EnemyTypes.FirstOrDefault(t => t.type == e.type_enum).desc;
-            if (string.IsNullOrEmpty(typeLabel) || !EnemyTypes.Any(t => t.desc == typeLabel)) 
+            if (string.IsNullOrEmpty(typeLabel) || !EnemyTypes.Any(t => t.desc == typeLabel))
             {
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Enemy ID '{e.id}' has invalid type_enum '{e.type_enum}'. Auto-converted to default.\n");
                 typeLabel = EnemyTypes[0].desc;
             }
             dgvEnemies.Rows.Add(e.id, e.name, typeLabel, e.hp, e.width, e.height, e.hitboxOffsetX, e.hitboxOffsetY, e.hitboxWidth, e.hitboxHeight, e.scale, e.sprite, "🎯", "📏", "📁", "🗑");
+            // Feature: Configurable Behavior Parameters (M1) — 行オブジェクトに紐づけて挙動パラメータ本体を保持する
+            _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = e;
         }
 
         dgvGimmicks.Rows.Clear();
+        _gimmickParams.Clear();
         foreach (var g in assets.Gimmicks)
         {
             string typeLabel = GimmickTypes.FirstOrDefault(t => t.type == g.type_enum).desc;
-            if (string.IsNullOrEmpty(typeLabel) || !GimmickTypes.Any(t => t.desc == typeLabel)) 
+            if (string.IsNullOrEmpty(typeLabel) || !GimmickTypes.Any(t => t.desc == typeLabel))
             {
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Gimmick ID '{g.id}' has invalid type_enum '{g.type_enum}'. Auto-converted to default.\n");
                 typeLabel = GimmickTypes[0].desc;
             }
             dgvGimmicks.Rows.Add(g.id, g.name, typeLabel, g.hitboxOffsetX, g.hitboxOffsetY, g.hitboxWidth, g.hitboxHeight, g.sprite, "🎯", "📁", "🗑");
+            _gimmickParams[dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1]] = g;
         }
 
         dgvItems.Rows.Clear();
@@ -632,21 +786,22 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            list.Add(new EnemyDef
-            {
-                id = id,
-                name = row.Cells["name"].Value?.ToString() ?? "",
-                type_enum = typeIdx,
-                hp = IntCell(row, "hp", 3),
-                width = IntCell(row, "width", 32),
-                height = IntCell(row, "height", 32),
-                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
-                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
-                hitboxWidth = IntCell(row, "hitboxWidth", 32),
-                hitboxHeight = IntCell(row, "hitboxHeight", 32),
-                scale = FloatCell(row, "scale", 1.0f),
-                sprite = row.Cells["sprite"].Value?.ToString() ?? ""
-            });
+            // Feature: Configurable Behavior Parameters (M1) — 行に紐づく保持済みEnemyDef（挙動パラメータ・SE等を保持）を
+            // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する（新規に作り直すと挙動パラメータが失われるため）
+            var def = GetOrCreateEnemyParams(row);
+            def.id = id;
+            def.name = row.Cells["name"].Value?.ToString() ?? "";
+            def.type_enum = typeIdx;
+            def.hp = IntCell(row, "hp", 3);
+            def.width = IntCell(row, "width", 32);
+            def.height = IntCell(row, "height", 32);
+            def.hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0);
+            def.hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0);
+            def.hitboxWidth = IntCell(row, "hitboxWidth", 32);
+            def.hitboxHeight = IntCell(row, "hitboxHeight", 32);
+            def.scale = FloatCell(row, "scale", 1.0f);
+            def.sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            list.Add(def);
         }
         return list;
     }
@@ -671,17 +826,18 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            list.Add(new GimmickDef
-            {
-                id = id,
-                name = row.Cells["name"].Value?.ToString() ?? "",
-                type_enum = typeIdx,
-                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
-                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
-                hitboxWidth = IntCell(row, "hitboxWidth", 32),
-                hitboxHeight = IntCell(row, "hitboxHeight", 32),
-                sprite = row.Cells["sprite"].Value?.ToString() ?? ""
-            });
+            // Feature: Configurable Behavior Parameters (M1) — 行に紐づく保持済みGimmickDef（挙動パラメータ・SE等を保持）を
+            // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する
+            var def = GetOrCreateGimmickParams(row);
+            def.id = id;
+            def.name = row.Cells["name"].Value?.ToString() ?? "";
+            def.type_enum = typeIdx;
+            def.hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0);
+            def.hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0);
+            def.hitboxWidth = IntCell(row, "hitboxWidth", 32);
+            def.hitboxHeight = IntCell(row, "hitboxHeight", 32);
+            def.sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            list.Add(def);
         }
         return list;
     }
@@ -846,6 +1002,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["scale"].Value ?? 1.0f,
             r.Cells["sprite"].Value ?? "", "🎯", "📏", "📁", "🗑"
         });
+        // Feature: Configurable Behavior Parameters (M1) — 挙動パラメータも複製する
+        var srcDef = GetOrCreateEnemyParams(r);
+        _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = JsonConvert.DeserializeObject<EnemyDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
     private void DuplicateGimmickRow()
@@ -860,6 +1019,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
             r.Cells["sprite"].Value ?? "", "🎯", "📁", "🗑"
         });
+        // Feature: Configurable Behavior Parameters (M1) — 挙動パラメータも複製する
+        var srcDef = GetOrCreateGimmickParams(r);
+        _gimmickParams[dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1]] = JsonConvert.DeserializeObject<GimmickDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
     private void DuplicateItemRow()

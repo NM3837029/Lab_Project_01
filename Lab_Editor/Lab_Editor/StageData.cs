@@ -499,6 +499,42 @@ public class EnemyDef
     public int hitboxHeight { get; set; } = 32;
     // 表示スケール（Feature: Visual Size Editor）ゲーム内での表示サイズ倍率
     public float scale { get; set; } = 1.0f;
+
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // -1 (未設定) の場合、ゲーム側でそのtype_enumの従来の挙動と同じ値が自動的に補完される。
+    public float moveSpeed { get; set; } = -1.0f;
+    public float enragedMoveSpeed { get; set; } = -1.0f;
+    public float actionInterval { get; set; } = -1.0f;
+    public float jumpPowerMult { get; set; } = -1.0f;
+    public float triggerRange { get; set; } = -1.0f;
+    public float detectionRangeY { get; set; } = -1.0f;
+    public float projectileSpeed { get; set; } = -1.0f;
+    public float chargeTime { get; set; } = -1.0f;
+    public float dashSpeedMult { get; set; } = -1.0f;
+    public float dashDuration { get; set; } = -1.0f;
+    public float cooldownTime { get; set; } = -1.0f;
+    public float fallDelay { get; set; } = -1.0f;
+    public float spreadAngle { get; set; } = -1.0f;
+    public int spreadCount { get; set; } = -1;
+    public float floatAmplitude { get; set; } = -1.0f;
+    public float floatFrequency { get; set; } = -1.0f;
+    public float teleportRangeMin { get; set; } = -1.0f;
+    public float teleportRangeMax { get; set; } = -1.0f;
+    public float shrinkFactor { get; set; } = -1.0f;
+    public float shieldOnDuration { get; set; } = -1.0f;
+    public float shieldOffDuration { get; set; } = -1.0f;
+    public float mimicDelayFrames { get; set; } = -1.0f;
+    public float sizeAmplitude { get; set; } = -1.0f;
+    public float sizeFrequency { get; set; } = -1.0f;
+    public float minScale { get; set; } = -1.0f;
+    public float tempoFrequency { get; set; } = -1.0f;
+    public float tempoMin { get; set; } = -1.0f;
+    public float tempoMax { get; set; } = -1.0f;
+    public float effectRange { get; set; } = -1.0f;
+    public float brightnessMin { get; set; } = -1.0f;
+    public float tintStrength { get; set; } = -1.0f;
+    public float zoomAmplitude { get; set; } = -1.0f;
+    public float zoomFrequency { get; set; } = -1.0f;
 }
 
 public class GimmickDef
@@ -514,6 +550,28 @@ public class GimmickDef
     public int hitboxOffsetY { get; set; } = 0;
     public int hitboxWidth { get; set; } = 32;
     public int hitboxHeight { get; set; } = 32;
+
+    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // -1 (未設定) の場合、ゲーム側でそのtype_enumの従来の挙動と同じ値が自動的に補完される。
+    public float rotationSpeed { get; set; } = -1.0f;
+    public float sinkSpeed { get; set; } = -1.0f;
+    public float maxDepthOffset { get; set; } = -1.0f;
+    public float pushOutDistance { get; set; } = -1.0f;
+    public float triggerWidthThreshold { get; set; } = -1.0f;
+    public float travelDistance { get; set; } = -1.0f;
+    public float oscillationSpeed { get; set; } = -1.0f;
+    public float stepIncrement { get; set; } = -1.0f;
+    public float standDelayFrames { get; set; } = -1.0f;
+    public float standTolerancePx { get; set; } = -1.0f;
+    public float respawnDelayFrames { get; set; } = -1.0f;
+    public float radius { get; set; } = -1.0f;
+    public float brightLevel { get; set; } = -1.0f;
+    public float darkLevel { get; set; } = -1.0f;
+    public float tintR { get; set; } = -1.0f;
+    public float tintG { get; set; } = -1.0f;
+    public float tintB { get; set; } = -1.0f;
+    public float zoomLevel { get; set; } = -1.0f;
+    public float warpOffsetPx { get; set; } = -1.0f;
 }
 
 public class ItemDef
