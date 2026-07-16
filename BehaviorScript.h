@@ -35,12 +35,19 @@ struct ScriptActor {
     int* direction = nullptr;   // 0=右向き, 1=左向き（既存のenemy.direction/gim系と同じ規約）
     float* scale = nullptr;     // 存在しない対象はnullptrのままでよい（安全にスキップされる）
     bool* invincible = nullptr; // 同上
+    float* angle = nullptr;     // 見た目の回転角（Parts-M2で新設。ドアのパネルや砲塔の向きなど）
 
     // センシング用に呼び出し側が毎フレーム計算して渡すスナップショット
     float playerX = 0.0f, playerY = 0.0f;
     bool isGrounded = false;
     bool wallAheadLeft = false, wallAheadRight = false;
     bool groundAheadLeft = false, groundAheadRight = false;
+
+    // Feature: Composite Multi-Part Objects (Parts-M2) — パーツ(部品)としての実行時のみ意味を持つ
+    float parentX = 0.0f, parentY = 0.0f; // 親(複合体本体)の現在のワールド座標
+    bool hasParent = false;               // このアクターがパーツかどうか
+    int partIndex = 0;                    // 親のparts[]内インデックス（同一スクリプトを複数パーツで共有し、
+                                           // パーツごとに異なる位相をつけるためのPartIndexレポーターに使う）
 
     // 環境依存のグローバル呼び出し（弾生成・SE再生・画面演出）はコールバックとして注入する
     std::function<void(float angleRad, float speed, float damage)> shoot;
@@ -91,6 +98,10 @@ public:
     // メインループの先頭で毎フレーム0にリセットすること。
     static inline int globalOpsThisFrame = 0;
 
+    // Feature: Composite Multi-Part Objects (Parts-M2) — Timeレポーター用のグローバル経過フレーム数。
+    // リセットせず、毎フレーム加算し続けるだけ（Waitのフレームカウントとは無関係の「時計」）。
+    static inline float globalFrameCounter = 0.0f;
+
     // program（enemies.json等の"script"フィールド）からhatNameのハット（"OnSpawn"等）を探し、
     // 見つかればその本体から実行を開始する。見つからなければ何もしない（finished=trueのまま）。
     static void Start(ScriptState& state, const json& program, const std::string& hatName) {
@@ -100,6 +111,16 @@ public:
         if (!body) { state.finished = true; return; }
         state.callStack.push_back(ScriptFrame::Plain(body));
         state.started = true;
+    }
+
+    // Feature: Composite Multi-Part Objects (Parts-M6) — OnDamaged/OnDeath等の反応イベントを発火する。
+    // 呼び出し側が持つ専用のreactiveState（scriptStateとは別のScriptState）に対して使うことを想定している。
+    // Start()は毎回stateを完全にリセットするため、OnSpawn用のscriptState(Foreverループ等)を巻き込まないよう、
+    // 必ずreactiveState専用のScriptStateへ対して呼ぶこと。v1では、そのティック内で完結する処理
+    // （PlaySound/SetVisualEffect/Shoot等）のみを想定し、Waitを跨ぐ複数フレームの演出はサポートしない。
+    static void FireReactiveHat(ScriptState& reactiveState, const json& program, const std::string& hatName, ScriptActor& actor) {
+        Start(reactiveState, program, hatName);
+        Tick(reactiveState, actor);
     }
 
     // 1フレーム分だけ実行を進める。Wait系に達するか、安全装置の上限に達するとその場で戻る。
@@ -218,6 +239,13 @@ private:
             float b = GetNumberArg(expr, "b", 1.0f, actor, state);
             return b != 0.0f ? GetNumberArg(expr, "a", 0.0f, actor, state) / b : 0.0f;
         }
+        // Feature: Composite Multi-Part Objects (Parts-M2) — 汎用の三角関数・時計・親座標・パーツ位相
+        if (op == "Sin") return sinf(GetNumberArg(expr, "a", 0.0f, actor, state));
+        if (op == "Cos") return cosf(GetNumberArg(expr, "a", 0.0f, actor, state));
+        if (op == "Time") return BehaviorInterpreter::globalFrameCounter;
+        if (op == "ParentX") return actor.parentX;
+        if (op == "ParentY") return actor.parentY;
+        if (op == "PartIndex") return (float)actor.partIndex;
         return 0.0f;
     }
 
@@ -311,6 +339,19 @@ private:
         if (op == "OffsetPosition") {
             if (actor.x) *actor.x += GetNumberArg(block, "dx", 0.0f, actor, state);
             if (actor.y) *actor.y += GetNumberArg(block, "dy", 0.0f, actor, state);
+            return false;
+        }
+        if (op == "SetLocalOffset") {
+            // Feature: Composite Multi-Part Objects (Parts-M2) — 親(複合体本体)の現在座標からの相対位置を設定する。
+            // パーツ以外(hasParent==false)では意味を持たないため何もしない。
+            if (actor.hasParent && actor.x && actor.y) {
+                *actor.x = actor.parentX + GetNumberArg(block, "dx", 0.0f, actor, state);
+                *actor.y = actor.parentY + GetNumberArg(block, "dy", 0.0f, actor, state);
+            }
+            return false;
+        }
+        if (op == "SetAngle") {
+            if (actor.angle) *actor.angle = GetNumberArg(block, "angle", *actor.angle, actor, state);
             return false;
         }
         if (op == "FaceTowards") {

@@ -32,6 +32,44 @@ bool isDedicatedEditorMode = false;
 #include "AnimationController.h"
 #include "BehaviorScript.h"
 
+// ======================================================
+// Feature: Composite Multi-Part Objects (Parts-M1)
+// 敵/ギミック/アイテムを、複数の画像パーツの組み合わせとして構成するためのテンプレート/ランタイム構造体。
+// 例: 開閉する扉の各パネル、ファイアバーの各火の玉、体が分かれた敵の各部位。
+// parts配列が空のままなら既存のenemies.json/gimmicks.json/items.jsonは完全に無変更で動作する。
+// ======================================================
+struct PartDef {
+    std::string id = "";
+    std::string sprite_path = "";
+    int graphHandle = -1;
+    float offsetX = 0.0f, offsetY = 0.0f; // 親からの初期相対オフセット（見た目のアンカー）
+    int width = 0, height = 0;             // 既定=画像サイズ
+    int hitboxOffsetX = 0, hitboxOffsetY = 0;
+    int hitboxWidth = 32, hitboxHeight = 32;
+    float scale = 1.0f;
+    int hp = 0;      // 0=破壊不能(常在ハザード) / 1以上=個別に破壊可能
+    int zOrder = 0;  // 負=親より奥に描画、正=親より手前
+    json script = json::array();
+};
+
+// ランタイム側のパーツ状態。PartDefへのポインタは持たず、スポーン時に値をコピーする
+// （この構造体を長時間保持するEnemy/Gimmick/Itemが、既存のenemyDefs等と同じく
+//   毎フレームdefを再検索する慣習に合わせるため。詳細はプラン文書を参照）。
+struct PartInstance {
+    float x = 0.0f, y = 0.0f; // 見た目のアンカー座標（世界座標）。hitboxOffsetは焼き込まず判定のたびに加算する
+    int handle = -1;
+    float scale = 1.0f;
+    float angle = 0.0f;
+    int hp = 0;
+    bool isActive = true;
+    int hitboxOffsetX = 0, hitboxOffsetY = 0, hitboxWidth = 32, hitboxHeight = 32;
+    int width = 0, height = 0;
+    int zOrder = 0;
+    int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
+    ScriptState scriptState;   // OnSpawn用
+    ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+};
+
 struct EnemyDef {
     std::string id = "";
     std::string name = "";
@@ -90,6 +128,9 @@ struct EnemyDef {
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartDef> parts;
 };
 
 struct GimmickDef {
@@ -127,6 +168,9 @@ struct GimmickDef {
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==GIMMICK_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartDef> parts;
 };
 
 std::vector<EnemyDef> enemyDefs;
@@ -157,6 +201,9 @@ struct ItemDef {
     int hitboxWidth = 32;
     int hitboxHeight = 32;
     std::string seCollect = "";
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartDef> parts;
 };
 
 struct PlayerCapabilities {
@@ -237,6 +284,41 @@ void ApplyGimmickDefaultParams(GimmickDef& def) {
     }
 }
 
+// Feature: Composite Multi-Part Objects (Parts-M1) — 敵/ギミック/アイテム共通の「parts」テンプレート配列パーサー
+void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts) {
+    if (!parentObj.contains("parts") || !parentObj["parts"].is_array()) return;
+    for (const auto& p : parentObj["parts"]) {
+        if (!p.is_object()) continue;
+        PartDef part;
+        part.id = p.value("id", "");
+        part.sprite_path = p.value("sprite", "");
+        part.offsetX = p.value("offsetX", 0.0f);
+        part.offsetY = p.value("offsetY", 0.0f);
+        part.width = p.value("width", 0);
+        part.height = p.value("height", 0);
+        part.hitboxOffsetX = p.value("hitboxOffsetX", 0);
+        part.hitboxOffsetY = p.value("hitboxOffsetY", 0);
+        part.hitboxWidth = p.value("hitboxWidth", 32);
+        part.hitboxHeight = p.value("hitboxHeight", 32);
+        part.scale = p.value("scale", 1.0f);
+        part.hp = p.value("hp", 0);
+        part.zOrder = p.value("zOrder", 0);
+        if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
+        if (!part.sprite_path.empty()) {
+            part.graphHandle = LoadGraph(part.sprite_path.c_str());
+            if (part.graphHandle >= 0) {
+                int gw, gh;
+                GetGraphSize(part.graphHandle, &gw, &gh);
+                if (part.width <= 0) part.width = gw;
+                if (part.height <= 0) part.height = gh;
+                if (part.hitboxWidth == 0) part.hitboxWidth = gw;
+                if (part.hitboxHeight == 0) part.hitboxHeight = gh;
+            }
+        }
+        outParts.push_back(part);
+    }
+}
+
 void LoadAssetDefinitions() {
     {
         std::ifstream ef("assets/enemies.json");
@@ -308,6 +390,7 @@ void LoadAssetDefinitions() {
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     if (e.contains("script") && e["script"].is_array()) def.script = e["script"];
                     ApplyEnemyDefaultParams(def);
+                    ParsePartDefsFromJson(e, def.parts);
                     enemyDefs.push_back(def);
                 }
             } else {
@@ -341,6 +424,7 @@ void LoadAssetDefinitions() {
                             def.hitboxWidth = w; def.hitboxHeight = h;
                         }
                     }
+                    ParsePartDefsFromJson(i, def.parts);
                     itemDefs.push_back(def);
                 }
             } else {
@@ -396,6 +480,7 @@ void LoadAssetDefinitions() {
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     if (g.contains("script") && g["script"].is_array()) def.script = g["script"];
                     ApplyGimmickDefaultParams(def);
+                    ParsePartDefsFromJson(g, def.parts);
                     gimmickDefs.push_back(def);
                 }
             } else {
@@ -417,6 +502,46 @@ const GimmickDef* FindGimmickDef(const std::string& assetId) {
 const ItemDef* FindItemDef(const std::string& assetId) {
     for (const auto& d : itemDefs) if (d.id == assetId) return &d;
     return nullptr;
+}
+
+// Feature: Composite Multi-Part Objects (Parts-M1) — PartDef群からランタイムのPartInstance群を構築する。
+// 親(敵/ギミック/アイテム)のResetStage時に呼び、baseX/baseYには親の(既に確定済みの)スポーン座標を渡す。
+std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, float baseX, float baseY) {
+    std::vector<PartInstance> result;
+    for (size_t pi = 0; pi < defs.size(); pi++) {
+        const PartDef& pd = defs[pi];
+        PartInstance inst;
+        inst.x = baseX + pd.offsetX;
+        inst.y = baseY + pd.offsetY;
+        inst.handle = pd.graphHandle;
+        inst.scale = pd.scale;
+        inst.hp = pd.hp;
+        inst.isActive = true;
+        inst.hitboxOffsetX = pd.hitboxOffsetX;
+        inst.hitboxOffsetY = pd.hitboxOffsetY;
+        inst.hitboxWidth = pd.hitboxWidth;
+        inst.hitboxHeight = pd.hitboxHeight;
+        inst.width = pd.width;
+        inst.height = pd.height;
+        inst.zOrder = pd.zOrder;
+        inst.partIndex = (int)pi;
+        result.push_back(inst);
+    }
+    return result;
+}
+
+// Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
+// zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
+// wantBehindParent引数でどちらのパスを描画するかを切り替える。
+void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, bool wantBehindParent) {
+    for (const auto& part : parts) {
+        if (!part.isActive) continue;
+        if ((part.zOrder < 0) != wantBehindParent) continue;
+        if (part.handle < 0) continue;
+        int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
+        int pcy = (int)(part.y + (part.height * part.scale) / 2.0f);
+        DrawRotaGraph(pcx, pcy, part.scale, part.angle, part.handle, TRUE);
+    }
 }
 
 
@@ -581,6 +706,9 @@ struct Item {
 
     std::string assetId = ""; // ItemDef.id への参照（SE検索用）
     int handle = -1;          // ItemDef.graphHandle（カスタムスプライト）。-1ならcoinHandleを使う
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartInstance> parts;
 };
 
 // 主要な構造体
@@ -649,6 +777,10 @@ struct Enemy {
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type==ENEMY_CUSTOM_SCRIPTの実行状態
     ScriptState scriptState;
+    ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartInstance> parts;
 };
 
 struct Gimmick {
@@ -675,6 +807,10 @@ struct Gimmick {
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type==GIMMICK_CUSTOM_SCRIPTの実行状態
     ScriptState scriptState;
+    ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+
+    // Feature: Composite Multi-Part Objects (Parts-M1)
+    std::vector<PartInstance> parts;
 };
 
 struct Bullet {
@@ -1027,7 +1163,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
     if (l != nullptr && strlen(l) > 0) {
         currentStageFileName = l;
-        if (currentStageFileName.find(".json") == std::string::npos) {
+        // コマンドライン引数の前後に空白/引用符が付くケースへの防御（呼び出し元により混入することがある）
+        while (!currentStageFileName.empty() && (currentStageFileName.front() == ' ' || currentStageFileName.front() == '"')) currentStageFileName.erase(0, 1);
+        while (!currentStageFileName.empty() && (currentStageFileName.back() == ' ' || currentStageFileName.back() == '"')) currentStageFileName.pop_back();
+        if (!currentStageFileName.empty() && currentStageFileName.find(".json") == std::string::npos) {
             currentStageFileName += ".json";
         }
     }
@@ -1776,8 +1915,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 enemy.hp = matched->hp;
                 enemy.width = matched->hitboxWidth;
                 enemy.height = matched->hitboxHeight;
+                // Feature: Composite Multi-Part Objects (Parts-M1)
+                enemy.parts = BuildPartInstances(matched->parts, enemy.x, enemy.y);
             } else {
                 enemy.hp = 3;
+                enemy.parts.clear();
             }
             enemy.anim.LoadForAsset(enemy.assetId, "assets");
             enemy.history.clear();
@@ -1786,16 +1928,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         items = stage.items;
         for (auto& item : items) {
             item.history.clear();
+            // Feature: Composite Multi-Part Objects (Parts-M1)
+            const ItemDef* idef = FindItemDef(item.assetId);
+            item.parts = idef ? BuildPartInstances(idef->parts, item.x, item.y) : std::vector<PartInstance>();
         }
 
         gimmicks = stage.gimmicks;
         for (auto& gim : gimmicks) {
             gim.history.clear();
-            // Feature: Puzzle-like Behavior Scripting (M2)
+            // Feature: Puzzle-like Behavior Scripting (M2)。Parts-M1で全ギミックタイプ共通のdef検索に変更
+            // （元はGIMMICK_CUSTOM_SCRIPTの時だけ検索していたが、パーツは親のtype_enumに関係なく使えるため）
+            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
             if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
-                const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                 BehaviorInterpreter::Start(gim.scriptState, gdef ? gdef->script : json::array(), "OnSpawn");
             }
+            // Feature: Composite Multi-Part Objects (Parts-M1)
+            gim.parts = gdef ? BuildPartInstances(gdef->parts, gim.x, gim.y) : std::vector<PartInstance>();
         }
 
         platforms = stage.platforms;
@@ -2657,6 +2805,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         float ts = isStepFrame ? 1.0f : finalTimeScale;
         Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
         BehaviorInterpreter::globalOpsThisFrame = 0; // Feature: Puzzle-like Behavior Scripting (M2) — 全スクリプト実行体の命令数予算を毎フレームリセット
+        BehaviorInterpreter::globalFrameCounter += 1.0f; // Feature: Composite Multi-Part Objects (Parts-M2) — Timeレポーター用（リセットせず加算のみ）
 
         // Feature 3 & 5: 各種マネージャーの更新
         if (!isPaused || isStepFrame) {
@@ -3280,6 +3429,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             actor.vx = &enemy.vx; actor.vy = &enemy.vy;
                             actor.direction = &enemy.direction;
                             actor.scale = &enemy.scale;
+                            actor.angle = &enemy.angle; // Feature: Composite Multi-Part Objects (Parts-M2)
                             actor.playerX = player.x; actor.playerY = player.y;
 
                             // 接地・進行方向の壁/足場の有無を判定（WALKER/CHASER/JUMPERと同じタイル判定を流用）
@@ -3359,6 +3509,48 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (enemy.x > mapRight - (float)enemy.hitboxWidth * enemy.scale) {
                         enemy.x = mapRight - (float)enemy.hitboxWidth * enemy.scale;
                     }
+
+                    // Feature: Composite Multi-Part Objects (Parts-M3)
+                    // パーツは親のtype_enum(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
+                    if (edef) {
+                        for (auto& part : enemy.parts) {
+                            if (!part.isActive) continue;
+                            if (!part.scriptState.started && !part.scriptState.finished && !part.scriptState.faulted) {
+                                json partScript = (part.partIndex >= 0 && part.partIndex < (int)edef->parts.size())
+                                    ? edef->parts[part.partIndex].script : json::array();
+                                BehaviorInterpreter::Start(part.scriptState, partScript, "OnSpawn");
+                            }
+                            ScriptActor partActor;
+                            partActor.x = &part.x; partActor.y = &part.y;
+                            partActor.scale = &part.scale; partActor.angle = &part.angle;
+                            partActor.hasParent = true;
+                            partActor.parentX = enemy.x; partActor.parentY = enemy.y;
+                            partActor.partIndex = part.partIndex;
+                            partActor.playerX = player.x; partActor.playerY = player.y;
+                            PartInstance* partPtr = &part;
+                            partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
+                                (void)damage;
+                                for (int i = 0; i < MAX_BULLETS; i++) {
+                                    if (!bullets[i].isActive) {
+                                        bullets[i].isActive = true;
+                                        bullets[i].x = partPtr->x; bullets[i].y = partPtr->y;
+                                        bullets[i].vx = cosf(angleRad) * speed;
+                                        bullets[i].vy = sinf(angleRad) * speed;
+                                        bullets[i].isPlayerOwned = false;
+                                        bullets[i].isRewinding = false;
+                                        bullets[i].history.clear();
+                                        break;
+                                    }
+                                }
+                            };
+                            partActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                            partActor.visualEffect = [&](const std::string& kind, float intensity) {
+                                if (kind == "brightness") Screen_SetBrightness(intensity);
+                                else if (kind == "zoom") Screen_SetZoom(intensity);
+                            };
+                            BehaviorInterpreter::Tick(part.scriptState, partActor);
+                        }
+                    }
                 }
                 if (canEnemyAct) {
                     enemy.history.push_back({ enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.direction, enemy.scale, enemy.angle, enemy.speedScale, enemy.isActive, enemy.isPaused, enemy.type });
@@ -3391,6 +3583,54 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             item.isActive = false;
                             const ItemDef* idef = FindItemDef(item.assetId);
                             if (idef) SoundManager::Get().PlaySe(idef->seCollect);
+                        }
+                    }
+
+                    // Feature: Composite Multi-Part Objects (Parts-M4) — パーツに触れてもアイテム全体を回収する
+                    // （アイテムは回収と同時に消えるため、パーツ単体を破壊する概念は無い＝装飾/収集判定のみ）
+                    if (item.isActive && !item.isCollected) {
+                        float pw_scaled = (float)player.width * player.scale;
+                        float ph_scaled = (float)player.height * player.scale;
+                        for (const auto& part : item.parts) {
+                            if (!part.isActive) continue;
+                            float partW = (float)part.hitboxWidth * part.scale;
+                            float partH = (float)part.hitboxHeight * part.scale;
+                            if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
+                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                item.isCollected = true;
+                                item.isActive = false;
+                                const ItemDef* idef = FindItemDef(item.assetId);
+                                if (idef) SoundManager::Get().PlaySe(idef->seCollect);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Feature: Composite Multi-Part Objects (Parts-M3)
+                    if (item.isActive && !item.isCollected) {
+                        const ItemDef* idefForParts = FindItemDef(item.assetId);
+                        if (idefForParts) {
+                            for (auto& part : item.parts) {
+                                if (!part.isActive) continue;
+                                if (!part.scriptState.started && !part.scriptState.finished && !part.scriptState.faulted) {
+                                    json partScript = (part.partIndex >= 0 && part.partIndex < (int)idefForParts->parts.size())
+                                        ? idefForParts->parts[part.partIndex].script : json::array();
+                                    BehaviorInterpreter::Start(part.scriptState, partScript, "OnSpawn");
+                                }
+                                ScriptActor partActor;
+                                partActor.x = &part.x; partActor.y = &part.y;
+                                partActor.scale = &part.scale; partActor.angle = &part.angle;
+                                partActor.hasParent = true;
+                                partActor.parentX = item.x; partActor.parentY = item.y;
+                                partActor.partIndex = part.partIndex;
+                                partActor.playerX = player.x; partActor.playerY = player.y;
+                                partActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                                partActor.visualEffect = [&](const std::string& kind, float intensity) {
+                                    if (kind == "brightness") Screen_SetBrightness(intensity);
+                                    else if (kind == "zoom") Screen_SetZoom(intensity);
+                                };
+                                BehaviorInterpreter::Tick(part.scriptState, partActor);
+                            }
                         }
                     }
                     item.history.push_back({ item.x, item.y, item.isCollected });
@@ -3623,6 +3863,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで駆動する
                         ScriptActor actor;
                         actor.x = &gim.x; actor.y = &gim.y;
+                        actor.angle = &gim.angle; // Feature: Composite Multi-Part Objects (Parts-M2)
                         actor.playerX = player.x; actor.playerY = player.y;
                         // ギミックにはvx/vy/direction/scaleに相当するフィールドが無いため、それらを使うブロックは
                         // 自動的に何もしない（ScriptActorのnullチェックにより安全にスキップされる）
@@ -3649,6 +3890,64 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             else if (kind == "zoom") Screen_SetZoom(intensity);
                         };
                         BehaviorInterpreter::Tick(gim.scriptState, actor);
+                    }
+
+                    // Feature: Composite Multi-Part Objects (Parts-M3)
+                    // パーツは親のtype(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
+                    const GimmickDef* gdefForParts = FindGimmickDef(gim.assetId);
+                    if (gdefForParts) {
+                        for (auto& part : gim.parts) {
+                            if (!part.isActive) continue;
+                            if (!part.scriptState.started && !part.scriptState.finished && !part.scriptState.faulted) {
+                                json partScript = (part.partIndex >= 0 && part.partIndex < (int)gdefForParts->parts.size())
+                                    ? gdefForParts->parts[part.partIndex].script : json::array();
+                                BehaviorInterpreter::Start(part.scriptState, partScript, "OnSpawn");
+                            }
+                            ScriptActor partActor;
+                            partActor.x = &part.x; partActor.y = &part.y;
+                            partActor.scale = &part.scale; partActor.angle = &part.angle;
+                            partActor.hasParent = true;
+                            partActor.parentX = gim.x; partActor.parentY = gim.y;
+                            partActor.partIndex = part.partIndex;
+                            partActor.playerX = player.x; partActor.playerY = player.y;
+                            PartInstance* partPtr = &part;
+                            partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
+                                (void)damage;
+                                for (int i = 0; i < MAX_BULLETS; i++) {
+                                    if (!bullets[i].isActive) {
+                                        bullets[i].isActive = true;
+                                        bullets[i].x = partPtr->x; bullets[i].y = partPtr->y;
+                                        bullets[i].vx = cosf(angleRad) * speed;
+                                        bullets[i].vy = sinf(angleRad) * speed;
+                                        bullets[i].isPlayerOwned = false;
+                                        bullets[i].isRewinding = false;
+                                        bullets[i].history.clear();
+                                        break;
+                                    }
+                                }
+                            };
+                            partActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                            partActor.visualEffect = [&](const std::string& kind, float intensity) {
+                                if (kind == "brightness") Screen_SetBrightness(intensity);
+                                else if (kind == "zoom") Screen_SetZoom(intensity);
+                            };
+                            BehaviorInterpreter::Tick(part.scriptState, partActor);
+
+                            // Feature: Composite Multi-Part Objects (Parts-M4) — パーツごとの接触ダメージ判定
+                            // （ギミック本体側の個別ロジック(CHOMPER/SPIKES等)とは独立して、パーツは常にこの一律の
+                            //   接触ダメージ判定を持つ。hp==0のパーツは常在ハザードとして永続的にこの判定を持ち続ける）
+                            if (!isPlayerRewinding) {
+                                float pw_ = (float)player.width * player.scale;
+                                float ph_ = (float)player.height * player.scale;
+                                float partW = (float)part.hitboxWidth * part.scale;
+                                float partH = (float)part.hitboxHeight * part.scale;
+                                if (CheckCollision(player.x, player.y, pw_, ph_,
+                                                    part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                    player.hp--;
+                                    if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
+                                }
+                            }
+                        }
                     }
                 }
                 if (canGimAct) {
@@ -3729,6 +4028,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 currentScene = RESULT_GAMEOVER;
                             }
                         }
+
+                        // Feature: Composite Multi-Part Objects (Parts-M4) — パーツごとの接触ダメージ判定
+                        for (const auto& part : enemy.parts) {
+                            if (!part.isActive) continue;
+                            float partW = (float)part.hitboxWidth * part.scale;
+                            float partH = (float)part.hitboxHeight * part.scale;
+                            if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
+                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                player.hp--;
+                                if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
+                            }
+                        }
                     }
                 }
             }
@@ -3753,6 +4064,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     }
                                     enemy.hp--;
                                     const EnemyDef* edef = FindEnemyDef(enemy.assetId);
+                                    // Feature: Composite Multi-Part Objects (Parts-M6) — OnDamaged/OnDeathの発火（ENEMY_CUSTOM_SCRIPTのみ。
+                                    // scriptState(OnSpawn用)とは別のreactiveStateを使うため、通常挙動のForeverループは止まらない）
+                                    Enemy* enemyForReact = &enemy;
+                                    auto buildReactActor = [&]() {
+                                        ScriptActor a;
+                                        a.x = &enemyForReact->x; a.y = &enemyForReact->y;
+                                        a.vx = &enemyForReact->vx; a.vy = &enemyForReact->vy;
+                                        a.direction = &enemyForReact->direction; a.scale = &enemyForReact->scale; a.angle = &enemyForReact->angle;
+                                        a.playerX = player.x; a.playerY = player.y;
+                                        a.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                                        a.visualEffect = [&](const std::string& kind, float intensity) {
+                                            if (kind == "brightness") Screen_SetBrightness(intensity);
+                                            else if (kind == "zoom") Screen_SetZoom(intensity);
+                                        };
+                                        return a;
+                                    };
                                     if (enemy.hp <= 0) {
                                         if (enemy.type == ENEMY_SHRINKER && !enemy.auxFlag) {
                                             // 分裂もどき：一度だけ縮小・高速化して復活する
@@ -3763,13 +4090,58 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         } else {
                                             enemy.isActive = false;      // 敵を倒す
                                             if (edef) SoundManager::Get().PlaySe(edef->seDeath);
+                                            if (enemy.type == ENEMY_CUSTOM_SCRIPT && edef) {
+                                                ScriptActor reactActor = buildReactActor();
+                                                BehaviorInterpreter::FireReactiveHat(enemy.reactiveState, edef->script, "OnDeath", reactActor);
+                                            }
                                         }
                                     } else if (edef) {
                                         SoundManager::Get().PlaySe(edef->seDamage);
+                                        if (enemy.type == ENEMY_CUSTOM_SCRIPT) {
+                                            ScriptActor reactActor = buildReactActor();
+                                            BehaviorInterpreter::FireReactiveHat(enemy.reactiveState, edef->script, "OnDamaged", reactActor);
+                                        }
                                     }
                                     bullets[i].isActive = false; // 弾を消滅
                                     break;
                                 }
+
+                                // Feature: Composite Multi-Part Objects (Parts-M4/M6) — 本体に当たらなかった場合のみパーツも判定
+                                if (bullets[i].isActive) {
+                                    const EnemyDef* edefForParts = FindEnemyDef(enemy.assetId);
+                                    for (auto& part : enemy.parts) {
+                                        if (!part.isActive) continue;
+                                        float partW = (float)part.hitboxWidth * part.scale;
+                                        float partH = (float)part.hitboxHeight * part.scale;
+                                        if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f,
+                                                            part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                            if (part.hp > 0) {
+                                                part.hp--;
+                                                bool partDied = part.hp <= 0;
+                                                if (partDied) part.isActive = false;
+                                                if (edefForParts && part.partIndex >= 0 && part.partIndex < (int)edefForParts->parts.size()) {
+                                                    ScriptActor reactActor;
+                                                    reactActor.x = &part.x; reactActor.y = &part.y;
+                                                    reactActor.scale = &part.scale; reactActor.angle = &part.angle;
+                                                    reactActor.hasParent = true;
+                                                    reactActor.parentX = enemy.x; reactActor.parentY = enemy.y;
+                                                    reactActor.partIndex = part.partIndex;
+                                                    reactActor.playerX = player.x; reactActor.playerY = player.y;
+                                                    reactActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                                                    reactActor.visualEffect = [&](const std::string& kind, float intensity) {
+                                                        if (kind == "brightness") Screen_SetBrightness(intensity);
+                                                        else if (kind == "zoom") Screen_SetZoom(intensity);
+                                                    };
+                                                    const json& partScript = edefForParts->parts[part.partIndex].script;
+                                                    BehaviorInterpreter::FireReactiveHat(part.reactiveState, partScript, partDied ? "OnDeath" : "OnDamaged", reactActor);
+                                                }
+                                            }
+                                            bullets[i].isActive = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!bullets[i].isActive) break; // パーツに当たった場合もこの弾はもう他の敵を判定しない
                             }
                         }
 
@@ -3785,6 +4157,46 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         break;
                                     }
                                 }
+                            }
+                        }
+
+                        // Feature: Composite Multi-Part Objects (Parts-M4/M6) — プレイヤーの弾がギミックのパーツにヒット
+                        if (bullets[i].isActive) {
+                            for (auto& gim : gimmicks) {
+                                if (!gim.isActive) continue;
+                                const GimmickDef* gdefForPartHit = FindGimmickDef(gim.assetId);
+                                for (auto& part : gim.parts) {
+                                    if (!part.isActive) continue;
+                                    float partW = (float)part.hitboxWidth * part.scale;
+                                    float partH = (float)part.hitboxHeight * part.scale;
+                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f,
+                                                        part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                        if (part.hp > 0) {
+                                            part.hp--;
+                                            bool partDied = part.hp <= 0;
+                                            if (partDied) part.isActive = false;
+                                            if (gdefForPartHit && part.partIndex >= 0 && part.partIndex < (int)gdefForPartHit->parts.size()) {
+                                                ScriptActor reactActor;
+                                                reactActor.x = &part.x; reactActor.y = &part.y;
+                                                reactActor.scale = &part.scale; reactActor.angle = &part.angle;
+                                                reactActor.hasParent = true;
+                                                reactActor.parentX = gim.x; reactActor.parentY = gim.y;
+                                                reactActor.partIndex = part.partIndex;
+                                                reactActor.playerX = player.x; reactActor.playerY = player.y;
+                                                reactActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
+                                                reactActor.visualEffect = [&](const std::string& kind, float intensity) {
+                                                    if (kind == "brightness") Screen_SetBrightness(intensity);
+                                                    else if (kind == "zoom") Screen_SetZoom(intensity);
+                                                };
+                                                const json& partScript = gdefForPartHit->parts[part.partIndex].script;
+                                                BehaviorInterpreter::FireReactiveHat(part.reactiveState, partScript, partDied ? "OnDeath" : "OnDamaged", reactActor);
+                                            }
+                                        }
+                                        bullets[i].isActive = false;
+                                        break;
+                                    }
+                                }
+                                if (!bullets[i].isActive) break;
                             }
                         }
                     } else {
@@ -3842,6 +4254,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ステージギミックの描画
         for (const auto& gim : gimmicks) {
             if (!gim.isActive) continue;
+
+            DrawPartsPass(gim.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
             if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
                 // 橋を画像で描画 (回転とスケーリング)。カスタムスプライトが設定されていればそちらを優先する
@@ -4132,6 +4546,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawFormatString(cx1, cy1 - (isDebugDrawMode ? 48 : 16), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
             }
+
+            DrawPartsPass(gim.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder>=0のパーツを後に描画
         }
 
         // 共通レイヤー描画ラムダ
@@ -4200,16 +4616,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // アイテムの描画（assetIdごとのスプライトがあればそれを使い、無ければcoinHandleにフォールバック）
         for (const auto& item : items) {
             if (item.isActive && !item.isCollected) {
+                DrawPartsPass(item.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)item.y;
                 int useHandle = item.handle >= 0 ? item.handle : coinHandle;
                 DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
+                DrawPartsPass(item.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 
         // 敵の描画
         for (const auto& enemy : enemies) {
             if (enemy.isActive) {
+                DrawPartsPass(enemy.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
                 int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
@@ -4255,6 +4674,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (enemy.type == ENEMY_CUSTOM_SCRIPT && enemy.scriptState.faulted) {
                     DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
+
+                DrawPartsPass(enemy.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 

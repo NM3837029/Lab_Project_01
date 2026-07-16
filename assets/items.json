@@ -9,7 +9,8 @@
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 32,
-    "hitboxHeight": 32
+    "hitboxHeight": 32,
+    "parts": []
   },
   {
     "id": "item_dash",
@@ -21,7 +22,8 @@
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 32,
-    "hitboxHeight": 32
+    "hitboxHeight": 32,
+    "parts": []
   },
   {
     "id": "item_fireball",
@@ -33,6 +35,261 @@
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 32,
-    "hitboxHeight": 32
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_coin_sparkle",
+    "name": "キラキラ付きコイン",
+    "type_enum": 1,
+    "sprite": "img/enemy.png",
+    "grant_ability": "",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 20,
+    "hitboxHeight": 20,
+    "parts": [
+      {
+        "id": "sparkle",
+        "sprite": "img/bullet.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 6,
+        "height": 6,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 6,
+        "hitboxHeight": 6,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Cos",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "Time"
+                          },
+                          "b": 0.1
+                        }
+                      },
+                      "b": 14
+                    },
+                    "dy": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Sin",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "Time"
+                          },
+                          "b": 0.1
+                        }
+                      },
+                      "b": 14
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "item_treasure_orbit",
+    "name": "守護オーブ付きの宝",
+    "type_enum": 2,
+    "sprite": "img/enemy.png",
+    "grant_ability": "",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 24,
+    "hitboxHeight": 24,
+    "parts": [
+      {
+        "id": "guardian0",
+        "sprite": "img/bullet.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 8,
+        "height": 8,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 8,
+        "hitboxHeight": 8,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Cos",
+                        "a": {
+                          "op": "Add",
+                          "a": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "Time"
+                            },
+                            "b": 0.07
+                          },
+                          "b": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "PartIndex"
+                            },
+                            "b": 3.1416
+                          }
+                        }
+                      },
+                      "b": 20
+                    },
+                    "dy": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Sin",
+                        "a": {
+                          "op": "Add",
+                          "a": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "Time"
+                            },
+                            "b": 0.07
+                          },
+                          "b": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "PartIndex"
+                            },
+                            "b": 3.1416
+                          }
+                        }
+                      },
+                      "b": 20
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "guardian1",
+        "sprite": "img/bullet.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 8,
+        "height": 8,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 8,
+        "hitboxHeight": 8,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Cos",
+                        "a": {
+                          "op": "Add",
+                          "a": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "Time"
+                            },
+                            "b": 0.07
+                          },
+                          "b": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "PartIndex"
+                            },
+                            "b": 3.1416
+                          }
+                        }
+                      },
+                      "b": 20
+                    },
+                    "dy": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Sin",
+                        "a": {
+                          "op": "Add",
+                          "a": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "Time"
+                            },
+                            "b": 0.07
+                          },
+                          "b": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "PartIndex"
+                            },
+                            "b": 3.1416
+                          }
+                        }
+                      },
+                      "b": 20
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

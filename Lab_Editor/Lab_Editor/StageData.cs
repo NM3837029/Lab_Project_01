@@ -538,6 +538,9 @@ public class EnemyDef
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();
+
+    // Feature: Composite Multi-Part Objects (Parts-M7)
+    public List<PartDef> parts { get; set; } = new();
 }
 
 public class GimmickDef
@@ -578,6 +581,9 @@ public class GimmickDef
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==24(GIMMICK_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();
+
+    // Feature: Composite Multi-Part Objects (Parts-M7)
+    public List<PartDef> parts { get; set; } = new();
 }
 
 public class ItemDef
@@ -594,6 +600,33 @@ public class ItemDef
     public int hitboxOffsetY { get; set; } = 0;
     public int hitboxWidth { get; set; } = 32;
     public int hitboxHeight { get; set; } = 32;
+
+    // Feature: Composite Multi-Part Objects (Parts-M7)
+    public List<PartDef> parts { get; set; } = new();
+}
+
+// ===== 複合オブジェクトのパーツ定義 (Feature: Composite Multi-Part Objects) =====
+// 敵/ギミック/アイテムを、複数の画像パーツの組み合わせとして構成するためのテンプレート。
+// C++側 DrawPixel.cpp の PartDef 構造体と1:1で対応する（フィールド名も一致させること）。
+public class PartDef
+{
+    public string id { get; set; } = "";
+    public string sprite { get; set; } = "";
+    public float offsetX { get; set; } = 0f;
+    public float offsetY { get; set; } = 0f;
+    public int width { get; set; } = 0;
+    public int height { get; set; } = 0;
+    public int hitboxOffsetX { get; set; } = 0;
+    public int hitboxOffsetY { get; set; } = 0;
+    public int hitboxWidth { get; set; } = 32;
+    public int hitboxHeight { get; set; } = 32;
+    public float scale { get; set; } = 1.0f;
+    // 0=破壊不能(常在ハザード) / 1以上=個別に破壊可能
+    public int hp { get; set; } = 0;
+    // 負=親より奥に描画、正=親より手前
+    public int zOrder { get; set; } = 0;
+    // このパーツ専用のBehaviorScript（OnSpawn/OnDamaged/OnDeath）
+    public JArray script { get; set; } = new JArray();
 }
 
 public class AssetDefinitions

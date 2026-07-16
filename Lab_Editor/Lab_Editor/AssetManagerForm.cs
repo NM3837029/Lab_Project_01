@@ -32,6 +32,9 @@ public partial class AssetManagerForm : Form
     // idではなく行オブジェクト自体をキーにすることで、id欄のリネームによる不整合を避ける。
     private readonly Dictionary<DataGridViewRow, EnemyDef> _enemyParams = new();
     private readonly Dictionary<DataGridViewRow, GimmickDef> _gimmickParams = new();
+    // Feature: Composite Multi-Part Objects (Parts-M7) — アイテムも敵/ギミックと同様に、
+    // グリッドに出さない付加情報（parts等）を行に紐づけて保持する
+    private readonly Dictionary<DataGridViewRow, ItemDef> _itemParams = new();
     private Panel pnlBehaviorParams = null!;
     private Label lblTypeHintTitle = null!;
     private bool _isUpdatingBehaviorPanel = false;
@@ -164,7 +167,7 @@ public partial class AssetManagerForm : Form
     private void InitUI()
     {
         Text = "アセット管理エディタ - 敵 / ギミック / アイテム";
-        Size = new Size(1100, 620);
+        Size = new Size(1100, 656);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
@@ -240,18 +243,18 @@ public partial class AssetManagerForm : Form
         tabControl.SelectedIndexChanged += (s, e) => { txtSearch.Text = ""; pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; UpdateTypeHint(); };
 
         // ===== 下部ボタン =====
-        var pnlBottom = new Panel { Location = new Point(5, 558), Size = new Size(1082, 40) };
+        var pnlBottom = new Panel { Location = new Point(5, 558), Size = new Size(1082, 76) };
 
         btnSave = new Button
         {
             Text = "💾 保存して閉じる",
-            Location = new Point(720, 5), Size = new Size(160, 30),
+            Location = new Point(915, 41), Size = new Size(160, 30),
             BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
             Font = new Font("Meiryo UI", 10, FontStyle.Bold)
         };
         btnSave.Click += BtnSave_Click;
 
-        btnClose = new Button { Text = "キャンセル", Location = new Point(600, 5), Size = new Size(110, 30) };
+        btnClose = new Button { Text = "キャンセル", Location = new Point(795, 41), Size = new Size(110, 30) };
         btnClose.Click += (s, e) => Close();
 
         var btnAddEnemy = new Button { Text = "＋ 敵追加", Location = new Point(5, 5), Size = new Size(100, 30) };
@@ -267,10 +270,14 @@ public partial class AssetManagerForm : Form
         btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
 
         // Feature: Puzzle-like Behavior Scripting (M4) — ブロックパレットのプレビュー画面
-        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", Location = new Point(890, 5), Size = new Size(190, 30) };
+        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", Location = new Point(200, 41), Size = new Size(190, 30) };
         btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
 
-        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnBehaviorScript, btnClose, btnSave });
+        // Feature: Composite Multi-Part Objects (Parts-M7) — 敵/ギミック/アイテム共通。type_enumに関係なく使える
+        var btnPartsEditor = new Button { Text = "🧩 パーツを編集", Location = new Point(5, 41), Size = new Size(190, 30) };
+        btnPartsEditor.Click += (s, e) => BtnPartsEditor_Click();
+
+        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnClose, btnSave });
 
         Controls.AddRange(new Control[] { pnlToolbar, tabControl, pnlRight, pnlBottom });
         RefreshCommonEventsList();
@@ -415,17 +422,10 @@ public partial class AssetManagerForm : Form
             using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "スプライト画像を選択" };
             if (ofd.ShowDialog() != DialogResult.OK) return;
 
-            // imgフォルダへコピー
-            string imgDir = Path.Combine(projectRoot, "img");
-            Directory.CreateDirectory(imgDir);
-            string destPath = Path.Combine(imgDir, Path.GetFileName(ofd.FileName));
-            if (!destPath.Equals(ofd.FileName, StringComparison.OrdinalIgnoreCase))
-                File.Copy(ofd.FileName, destPath, overwrite: true);
-
-            // 相対パスとして保存（ゲームはimg/xxxx.pngを使用）
-            string relPath = "img/" + Path.GetFileName(ofd.FileName);
+            // imgフォルダへコピー（同名で内容の異なるファイルは連番を付けて別名保存する。Parts-M7）
+            string relPath = ImageImportHelper.CopyIntoImgFolder(projectRoot, ofd.FileName);
             dgv.Rows[e.RowIndex].Cells["sprite"].Value = relPath;
-            ShowPreview(destPath);
+            ShowPreview(Path.Combine(projectRoot, relPath.Replace('/', '\\')));
             lblPreviewPath.Text = relPath;
         }
         else if (colName == "btnHitbox")
@@ -583,6 +583,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return def;
     }
 
+    // Feature: Composite Multi-Part Objects (Parts-M7)
+    private ItemDef GetOrCreateItemParams(DataGridViewRow row)
+    {
+        if (!_itemParams.TryGetValue(row, out var def)) { def = new ItemDef(); _itemParams[row] = def; }
+        return def;
+    }
+
     // 選択中の行のtype_enumを、そのグリッドのコンボボックス列から読み取る（ReadEnemies/ReadGimmicksと同じ判定方式）
     private static int GetSelectedTypeEnum(DataGridViewRow row)
     {
@@ -635,6 +642,44 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         else
         {
             MessageBox.Show("挙動スクリプトは「敵」または「ギミック」タブで対象を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    // Feature: Composite Multi-Part Objects (Parts-M7)
+    // 敵/ギミック/アイテムいずれのタブでも、タイプ(type_enum)に関係なく使える
+    // （パーツは親のタイプとは独立して機能するため、挙動スクリプトのようなタイプ制限は設けない）
+    private void BtnPartsEditor_Click()
+    {
+        if (tabControl.SelectedIndex == 0)
+        {
+            if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("編集する敵を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var row = dgvEnemies.SelectedRows[0];
+            var def = GetOrCreateEnemyParams(row);
+            string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            using var form = new PartsEditorForm($"敵: {row.Cells["id"].Value}", def.parts, projectRoot, sprite);
+            if (form.ShowDialog() == DialogResult.OK) def.parts = form.ResultParts;
+        }
+        else if (tabControl.SelectedIndex == 1)
+        {
+            if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("編集するギミックを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var row = dgvGimmicks.SelectedRows[0];
+            var def = GetOrCreateGimmickParams(row);
+            string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            using var form = new PartsEditorForm($"ギミック: {row.Cells["id"].Value}", def.parts, projectRoot, sprite);
+            if (form.ShowDialog() == DialogResult.OK) def.parts = form.ResultParts;
+        }
+        else if (tabControl.SelectedIndex == 2)
+        {
+            if (dgvItems.SelectedRows.Count == 0) { MessageBox.Show("編集するアイテムを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            var row = dgvItems.SelectedRows[0];
+            var def = GetOrCreateItemParams(row);
+            string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            using var form = new PartsEditorForm($"アイテム: {row.Cells["id"].Value}", def.parts, projectRoot, sprite);
+            if (form.ShowDialog() == DialogResult.OK) def.parts = form.ResultParts;
+        }
+        else
+        {
+            MessageBox.Show("パーツ編集は「敵」「ギミック」「アイテム」タブで対象を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -780,15 +825,18 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
 
         dgvItems.Rows.Clear();
+        _itemParams.Clear();
         foreach (var i in assets.Items)
         {
             string typeLabel = ItemTypes.FirstOrDefault(t => t.type == i.type_enum).desc;
-            if (string.IsNullOrEmpty(typeLabel) || !ItemTypes.Any(t => t.desc == typeLabel)) 
+            if (string.IsNullOrEmpty(typeLabel) || !ItemTypes.Any(t => t.desc == typeLabel))
             {
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Item ID '{i.id}' has invalid type_enum '{i.type_enum}'. Auto-converted to default.\n");
                 typeLabel = ItemTypes[0].desc;
             }
             dgvItems.Rows.Add(i.id, i.name, typeLabel, i.hitboxOffsetX, i.hitboxOffsetY, i.hitboxWidth, i.hitboxHeight, i.sprite, i.grant_ability, "🎯", "📁", "🗑");
+            // Feature: Composite Multi-Part Objects (Parts-M7) — 行オブジェクトに紐づけて非グリッド項目(parts等)を保持する
+            _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = i;
         }
     }
 
@@ -908,18 +956,19 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            list.Add(new ItemDef
-            {
-                id = id,
-                name = row.Cells["name"].Value?.ToString() ?? "",
-                type_enum = typeIdx,
-                hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0),
-                hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0),
-                hitboxWidth = IntCell(row, "hitboxWidth", 32),
-                hitboxHeight = IntCell(row, "hitboxHeight", 32),
-                sprite = row.Cells["sprite"].Value?.ToString() ?? "",
-                grant_ability = row.Cells["grant_ability"].Value?.ToString() ?? ""
-            });
+            // Feature: Composite Multi-Part Objects (Parts-M7) — 行に紐づく保持済みItemDef（parts等）を
+            // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する（新規に作り直すとpartsが失われるため）
+            var def = GetOrCreateItemParams(row);
+            def.id = id;
+            def.name = row.Cells["name"].Value?.ToString() ?? "";
+            def.type_enum = typeIdx;
+            def.hitboxOffsetX = IntCell(row, "hitboxOffsetX", 0);
+            def.hitboxOffsetY = IntCell(row, "hitboxOffsetY", 0);
+            def.hitboxWidth = IntCell(row, "hitboxWidth", 32);
+            def.hitboxHeight = IntCell(row, "hitboxHeight", 32);
+            def.sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            def.grant_ability = row.Cells["grant_ability"].Value?.ToString() ?? "";
+            list.Add(def);
         }
         return list;
     }
@@ -1082,6 +1131,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
             r.Cells["sprite"].Value ?? "", r.Cells["grant_ability"].Value ?? "", "🎯", "📁", "🗑"
         });
+        // Feature: Composite Multi-Part Objects (Parts-M7) — parts等の非グリッド項目も複製する
+        var srcDef = GetOrCreateItemParams(r);
+        _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = JsonConvert.DeserializeObject<ItemDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
     private void DuplicateCommonEvent()

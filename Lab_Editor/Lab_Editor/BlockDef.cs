@@ -140,6 +140,14 @@ public static class BlockCatalog
                 new BlockArgSpec("max", "最大", BlockArgType.Number, 100f),
                 new BlockArgSpec("periodFrames", "周期(フレーム)", BlockArgType.Number, 60f),
             }),
+        // Feature: Composite Multi-Part Objects (Parts-M2) — パーツ(部品)の位置・角度を制御する
+        new BlockDef("SetLocalOffset", "親からの相対位置を設定 dx/dy", BlockCategory.Motion, BlockShape.Stack,
+            new[] {
+                new BlockArgSpec("dx", "dx", BlockArgType.Number, 0f),
+                new BlockArgSpec("dy", "dy", BlockArgType.Number, 0f),
+            }),
+        new BlockDef("SetAngle", "見た目の回転角を設定(rad)", BlockCategory.Motion, BlockShape.Stack,
+            new[] { new BlockArgSpec("angle", "角度(rad)", BlockArgType.Number, 0f) }),
 
         // ── Combat / gameplay ────────────────────────────────
         new BlockDef("Shoot", "角度/速さ/威力で弾を撃つ", BlockCategory.Combat, BlockShape.Stack,
@@ -191,6 +199,11 @@ public static class BlockCatalog
                 new BlockArgSpec("min", "最小", BlockArgType.Number, 0f),
                 new BlockArgSpec("max", "最大", BlockArgType.Number, 1f),
             }),
+        // Feature: Composite Multi-Part Objects (Parts-M2)
+        new BlockDef("Time", "経過フレーム数(全体時計)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ParentX", "親(本体)のX座標", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ParentY", "親(本体)のY座標", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("PartIndex", "自分のパーツ番号(0始まり)", BlockCategory.Sensing, BlockShape.Reporter),
 
         // ── Sensing: booleans (真偽値) ───────────────────────
         new BlockDef("IsGrounded", "地面に接地している", BlockCategory.Sensing, BlockShape.Boolean),
@@ -208,6 +221,11 @@ public static class BlockCatalog
             new[] { new BlockArgSpec("a", "a", BlockArgType.Number, 0f), new BlockArgSpec("b", "b", BlockArgType.Number, 0f) }),
         new BlockDef("Div", "〜 ÷ 〜", BlockCategory.Operators, BlockShape.Reporter,
             new[] { new BlockArgSpec("a", "a", BlockArgType.Number, 0f), new BlockArgSpec("b", "b", BlockArgType.Number, 1f) }),
+        // Feature: Composite Multi-Part Objects (Parts-M2) — 汎用の三角関数（回転・周回運動の自作に使う）
+        new BlockDef("Sin", "sin(〜) [ラジアン]", BlockCategory.Operators, BlockShape.Reporter,
+            new[] { new BlockArgSpec("a", "角度(rad)", BlockArgType.Number, 0f) }),
+        new BlockDef("Cos", "cos(〜) [ラジアン]", BlockCategory.Operators, BlockShape.Reporter,
+            new[] { new BlockArgSpec("a", "角度(rad)", BlockArgType.Number, 0f) }),
 
         // ── Operators: booleans ──────────────────────────────
         new BlockDef("Gt", "〜 > 〜", BlockCategory.Operators, BlockShape.Boolean,
