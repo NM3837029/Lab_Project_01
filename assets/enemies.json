@@ -1999,86 +1999,50 @@
       {
         "id": "barrelL",
         "sprite": "img/enemy.png",
-        "offsetX": -12.0,
-        "offsetY": -8.0,
+        "offsetX": -91.63637,
+        "offsetY": 33.818184,
         "width": 10,
         "height": 10,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxOffsetX": 12,
+        "hitboxOffsetY": 14,
+        "hitboxWidth": 42,
+        "hitboxHeight": 39,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": -12,
-                    "dy": -8
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "DirectionToPlayer"
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "script": []
       },
       {
         "id": "barrelR",
         "sprite": "img/enemy.png",
-        "offsetX": 12.0,
-        "offsetY": -8.0,
+        "offsetX": -32.0,
+        "offsetY": 30.18182,
         "width": 10,
         "height": 10,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxOffsetX": 11,
+        "hitboxOffsetY": 10,
+        "hitboxWidth": 42,
+        "hitboxHeight": 42,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": 12,
-                    "dy": -8
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "DirectionToPlayer"
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "script": []
+      },
+      {
+        "id": "part1",
+        "sprite": "",
+        "offsetX": -121.818184,
+        "offsetY": 42.181816,
+        "width": 0,
+        "height": 0,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 32,
+        "hitboxHeight": 32,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 0,
+        "script": []
       }
     ]
   },

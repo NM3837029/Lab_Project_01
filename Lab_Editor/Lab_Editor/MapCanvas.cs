@@ -65,6 +65,11 @@ public class MapCanvas : Panel
     private bool isDragging = false;
     private bool isRightDrag = false;
 
+    // Feature: 配置の重複防止 — Enemy/Gimmick/Itemモードは「クリック(ドラッグ含む)1ストロークにつき1個」に制限する。
+    // タイルモードのようにドラッグ中連続で置きたいわけではないため、MouseDown〜MouseUpの間で既に1個配置済みなら
+    // MouseMoveでの追加配置をスキップする。
+    private bool _strokePlacedAsset = false;
+
     // タイル色マップ（Tile ID → Color）
     private Dictionary<int, Color> _tileColors = new()
     {
@@ -190,17 +195,26 @@ public class MapCanvas : Panel
         // 7.5. 敵の巡回範囲プレビュー（MZ の移動ルートプレビュー風）
         DrawPatrolRanges(g);
 
-        // 8. 敵
+        // 8. 敵（type_enumごとのアイコンで表示。テキスト表記のみでは判別しにくいため）
         foreach (var en in Stage.Enemies)
-            DrawMarker(g, en.X, en.Y, "E", SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50));
+        {
+            string icon = AssetIcons.ForEnemy(Assets?.Enemies.FirstOrDefault(d => d.id == en.Id)?.type_enum ?? -1);
+            DrawMarker(g, en.X, en.Y, icon, SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50), 11f);
+        }
 
         // 9. ギミック
         foreach (var gi in Stage.Gimmicks)
-            DrawMarker(g, gi.X, gi.Y, "Gi", SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220));
+        {
+            string icon = AssetIcons.ForGimmick(Assets?.Gimmicks.FirstOrDefault(d => d.id == gi.Id)?.type_enum ?? -1);
+            DrawMarker(g, gi.X, gi.Y, icon, SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220), 11f);
+        }
 
         // 10. アイテム
         foreach (var it in Stage.Items)
-            DrawMarker(g, it.X, it.Y, "I", SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0));
+        {
+            string icon = AssetIcons.ForItem(Assets?.Items.FirstOrDefault(d => d.id == it.Id)?.type_enum ?? -1);
+            DrawMarker(g, it.X, it.Y, icon, SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0), 11f);
+        }
 
         // 11. トリガー矩形 (Feature 5)
         if (Stage.Triggers.Count > 0)
@@ -336,7 +350,7 @@ public class MapCanvas : Panel
         g.DrawString(layerName, font, tb, 7, 6);
     }
 
-    private void DrawMarker(Graphics g, float worldX, float worldY, string label, Color color)
+    private void DrawMarker(Graphics g, float worldX, float worldY, string label, Color color, float fontSize = 7f)
     {
         float scale = (float)TILE_SIZE / GAME_TILE;
         int px = (int)(worldX * scale) - ScrollX;
@@ -348,7 +362,7 @@ public class MapCanvas : Panel
         g.FillRectangle(brush, px, py, sz, sz);
         using var pen = new Pen(color, 2);
         g.DrawRectangle(pen, px, py, sz, sz);
-        using var font = new Font("Meiryo UI", 7, FontStyle.Bold);
+        using var font = new Font("Meiryo UI", fontSize, FontStyle.Bold);
         using var tb = new SolidBrush(Color.White);
         g.DrawString(label, font, tb, px + 1, py + 2);
     }
@@ -371,10 +385,16 @@ public class MapCanvas : Panel
         return (wx, wy);
     }
 
+    // Feature: UI改善（友人フィードバック対応）— ToTileと同様にマップ範囲へクランプする
     private (float wx, float wy) ToWorld(int cx, int cy)
     {
+        if (Stage == null) return (0, 0);
         float scale = (float)GAME_TILE / TILE_SIZE;
-        return ((cx + ScrollX) * scale, (cy + ScrollY) * scale);
+        float wx = (cx + ScrollX) * scale;
+        float wy = (cy + ScrollY) * scale;
+        wx = Math.Clamp(wx, 0f, Stage.MapW * (float)GAME_TILE);
+        wy = Math.Clamp(wy, 0f, Stage.MapH * (float)GAME_TILE);
+        return (wx, wy);
     }
 
     // キャンバス座標 → スクリーン矩形
@@ -402,7 +422,7 @@ public class MapCanvas : Panel
             return;
         }
 
-        if (e.Button == MouseButtons.Left) { isDragging = true; HandleLeft(e.X, e.Y); }
+        if (e.Button == MouseButtons.Left) { isDragging = true; _strokePlacedAsset = false; HandleLeft(e.X, e.Y); }
         else if (e.Button == MouseButtons.Right) { isRightDrag = true; HandleRight(e.X, e.Y); }
     }
 
@@ -501,28 +521,31 @@ public class MapCanvas : Panel
                 break;
 
             case EditMode.Enemy:
-                if (!string.IsNullOrEmpty(SelectedAssetId))
+                if (!string.IsNullOrEmpty(SelectedAssetId) && !_strokePlacedAsset)
                 {
                     var (wx, wy) = ToWorldSnapped(cx, cy);
                     Stage.Enemies.Add(new PlacedEnemy { Id = SelectedAssetId, X = wx, Y = wy });
+                    _strokePlacedAsset = true;
                     Fire();
                 }
                 break;
 
             case EditMode.Gimmick:
-                if (!string.IsNullOrEmpty(SelectedAssetId))
+                if (!string.IsNullOrEmpty(SelectedAssetId) && !_strokePlacedAsset)
                 {
                     var (wx, wy) = ToWorldSnapped(cx, cy);
                     Stage.Gimmicks.Add(new PlacedGimmick { Id = SelectedAssetId, X = wx, Y = wy });
+                    _strokePlacedAsset = true;
                     Fire();
                 }
                 break;
 
             case EditMode.Item:
-                if (!string.IsNullOrEmpty(SelectedAssetId))
+                if (!string.IsNullOrEmpty(SelectedAssetId) && !_strokePlacedAsset)
                 {
                     var (wx, wy) = ToWorldSnapped(cx, cy);
                     Stage.Items.Add(new PlacedItem { Id = SelectedAssetId, X = wx, Y = wy });
+                    _strokePlacedAsset = true;
                     Fire();
                 }
                 break;
@@ -546,6 +569,10 @@ public class MapCanvas : Panel
                 break;
 
             case EditMode.TestPlay: // Feature 4
+                // Feature: UI改善（友人フィードバック対応）— マップ範囲外をクリックした場合は何も起きないようにする
+                int tpCol = (cx + ScrollX) / TILE_SIZE;
+                int tpRow = (cy + ScrollY) / TILE_SIZE;
+                if (tpCol < 0 || tpCol >= Stage.MapW || tpRow < 0 || tpRow >= Stage.MapH) break;
                 var (tx, ty) = ToWorld(cx, cy);
                 TestPlayClicked?.Invoke(this, (tx, ty));
                 break;
@@ -577,20 +604,63 @@ public class MapCanvas : Panel
         }
     }
 
+    // Feature: 選択/削除ロジックの改善 — オブジェクトの実際のhitbox(なければGAME_TILE四方にフォールバック)で
+    // 判定するようにし、複数重なっている場合はクリック位置に最も近い中心を持つものを優先する
+    // （従来は敵→ギミック→アイテム→トリガーの固定順で最初に見つかったものを機械的に採用していた）。
+    private (float x, float y, float w, float h) GetFootprint(object obj)
+    {
+        switch (obj)
+        {
+            case PlacedEnemy pe:
+                {
+                    var def = Assets?.Enemies.FirstOrDefault(d => d.id == pe.Id);
+                    return def != null
+                        ? (pe.X + def.hitboxOffsetX, pe.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
+                        : (pe.X, pe.Y, GAME_TILE, GAME_TILE);
+                }
+            case PlacedGimmick pg:
+                {
+                    var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == pg.Id);
+                    return def != null
+                        ? (pg.X + def.hitboxOffsetX, pg.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
+                        : (pg.X, pg.Y, GAME_TILE, GAME_TILE);
+                }
+            case PlacedItem pi:
+                {
+                    var def = Assets?.Items.FirstOrDefault(d => d.id == pi.Id);
+                    return def != null
+                        ? (pi.X + def.hitboxOffsetX, pi.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
+                        : (pi.X, pi.Y, GAME_TILE, GAME_TILE);
+                }
+            case EventTrigger t:
+                return (t.x, t.y, t.width, t.height);
+            default:
+                return (0, 0, GAME_TILE, GAME_TILE);
+        }
+    }
+
     private void DoSelect(int cx, int cy)
     {
         if (Stage == null) return;
         var (wx, wy) = ToWorld(cx, cy);
-        object? found = null;
-        foreach (var e in Stage.Enemies) if (wx >= e.X && wx <= e.X + GAME_TILE && wy >= e.Y && wy <= e.Y + GAME_TILE) { found = e; break; }
-        if (found == null) foreach (var gi in Stage.Gimmicks) if (wx >= gi.X && wx <= gi.X + GAME_TILE && wy >= gi.Y && wy <= gi.Y + GAME_TILE) { found = gi; break; }
-        if (found == null) foreach (var it in Stage.Items) if (wx >= it.X && wx <= it.X + GAME_TILE && wy >= it.Y && wy <= it.Y + GAME_TILE) { found = it; break; }
-        // トリガーも選択対象
-        if (found == null) foreach (var t in Stage.Triggers)
-            {
-                if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) { found = t; break; }
-            }
-        SelectedObject = found;
+        object? best = null;
+        float bestDist = float.MaxValue;
+
+        void Consider(object obj)
+        {
+            var (fx, fy, fw, fh) = GetFootprint(obj);
+            if (wx < fx || wx > fx + fw || wy < fy || wy > fy + fh) return;
+            float ccx = fx + fw / 2f, ccy = fy + fh / 2f;
+            float dist = (wx - ccx) * (wx - ccx) + (wy - ccy) * (wy - ccy);
+            if (dist < bestDist) { bestDist = dist; best = obj; }
+        }
+
+        foreach (var e in Stage.Enemies) Consider(e);
+        foreach (var gi in Stage.Gimmicks) Consider(gi);
+        foreach (var it in Stage.Items) Consider(it);
+        foreach (var t in Stage.Triggers) Consider(t);
+
+        SelectedObject = best;
         ObjectSelected?.Invoke(this, EventArgs.Empty);
         Invalidate();
     }
@@ -599,31 +669,24 @@ public class MapCanvas : Panel
     {
         if (Stage == null) return;
         var (wx, wy) = ToWorld(cx, cy);
-        for (int i = Stage.Enemies.Count - 1; i >= 0; i--)
+        float bestDist = float.MaxValue;
+        Action? removeBest = null;
+
+        void Consider(object obj, Action remove)
         {
-            var e = Stage.Enemies[i];
-            if (wx >= e.X && wx <= e.X + GAME_TILE && wy >= e.Y && wy <= e.Y + GAME_TILE)
-            { Stage.Enemies.RemoveAt(i); Fire(); Invalidate(); return; }
+            var (fx, fy, fw, fh) = GetFootprint(obj);
+            if (wx < fx || wx > fx + fw || wy < fy || wy > fy + fh) return;
+            float ccx = fx + fw / 2f, ccy = fy + fh / 2f;
+            float dist = (wx - ccx) * (wx - ccx) + (wy - ccy) * (wy - ccy);
+            if (dist < bestDist) { bestDist = dist; removeBest = remove; }
         }
-        for (int i = Stage.Gimmicks.Count - 1; i >= 0; i--)
-        {
-            var gi = Stage.Gimmicks[i];
-            if (wx >= gi.X && wx <= gi.X + GAME_TILE && wy >= gi.Y && wy <= gi.Y + GAME_TILE)
-            { Stage.Gimmicks.RemoveAt(i); Fire(); Invalidate(); return; }
-        }
-        for (int i = Stage.Items.Count - 1; i >= 0; i--)
-        {
-            var it = Stage.Items[i];
-            if (wx >= it.X && wx <= it.X + GAME_TILE && wy >= it.Y && wy <= it.Y + GAME_TILE)
-            { Stage.Items.RemoveAt(i); Fire(); Invalidate(); return; }
-        }
-        // トリガーも右クリックで削除
-        for (int i = Stage.Triggers.Count - 1; i >= 0; i--)
-        {
-            var t = Stage.Triggers[i];
-            if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height)
-            { Stage.Triggers.RemoveAt(i); Fire(); Invalidate(); return; }
-        }
+
+        for (int i = 0; i < Stage.Enemies.Count; i++) { int idx = i; Consider(Stage.Enemies[i], () => Stage.Enemies.RemoveAt(idx)); }
+        for (int i = 0; i < Stage.Gimmicks.Count; i++) { int idx = i; Consider(Stage.Gimmicks[i], () => Stage.Gimmicks.RemoveAt(idx)); }
+        for (int i = 0; i < Stage.Items.Count; i++) { int idx = i; Consider(Stage.Items[i], () => Stage.Items.RemoveAt(idx)); }
+        for (int i = 0; i < Stage.Triggers.Count; i++) { int idx = i; Consider(Stage.Triggers[i], () => Stage.Triggers.RemoveAt(idx)); }
+
+        if (removeBest != null) { removeBest(); Fire(); Invalidate(); }
     }
 
     private void Fire()

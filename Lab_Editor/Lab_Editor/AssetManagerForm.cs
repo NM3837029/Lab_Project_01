@@ -16,7 +16,10 @@ public partial class AssetManagerForm : Form
     private readonly string projectRoot;
     private AssetDefinitions assets;
 
-    private TabControl tabControl = null!;
+    // Feature: UI改善（友人フィードバック対応） — タブを廃止し、1つの縦積みビュー＋
+    // 上部のタグボタン（複数選択可）で絞り込む構成にした。各セクション自体は
+    // 既存のグリッド/リストをそのまま流用する（データの読み書きロジックは無変更）。
+    private Panel sectionEnemy = null!, sectionGimmick = null!, sectionItem = null!, sectionCommonEvent = null!;
     private DataGridView dgvEnemies = null!, dgvGimmicks = null!, dgvItems = null!;
     private ListBox lstCommonEvents = null!;
     private List<CommonEventDef> _commonEvents = new();
@@ -167,33 +170,56 @@ public partial class AssetManagerForm : Form
     private void InitUI()
     {
         Text = "アセット管理エディタ - 敵 / ギミック / アイテム";
-        Size = new Size(1100, 656);
+        Size = new Size(1160, 720);
+        MinimumSize = new Size(900, 560);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
-        // ===== 検索・複製ツールバー (MZ風: ID/名前検索 + 選択行の複製) =====
-        var pnlToolbar = new Panel { Location = new Point(5, 5), Size = new Size(820, 30) };
-        var lblSearch = new Label { Text = "🔍", Location = new Point(0, 6), Size = new Size(20, 20) };
-        txtSearch = new TextBox { Location = new Point(20, 3), Size = new Size(260, 23), PlaceholderText = "ID・名前で検索..." };
+        // ===== 上部: 検索ボックス + タグ絞り込みボタン =====
+        // Feature: UI改善 — 検索欄と、複数選択可能な種別タグボタン（チェック状態のボタン=Appearance.Button）を
+        // 1つのDock=Topパネルにまとめる。タグはCheckBoxで実装し、押した状態(Checked)がタグON。
+        // Feature: UI改善 — 検索/タグ行もウィンドウ幅次第で折り返しうるため、固定Heightではなく
+        // AutoSizeにして必要な行数ぶん高さが伸びるようにする（下段のグリッド等がはみ出しを防ぐ）。
+        var pnlTop = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+
+        var pnlToolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
+        var lblSearch = new Label { Text = "🔍", AutoSize = true, Margin = new Padding(2, 6, 0, 0) };
+        txtSearch = new TextBox { Width = 240, Margin = new Padding(4, 3, 12, 0), PlaceholderText = "ID・名前で検索..." };
         txtSearch.TextChanged += (s, e) => ApplySearchFilter();
-        btnDuplicate = new Button { Text = "⧉ 選択行を複製", Location = new Point(290, 2), Size = new Size(130, 25) };
+        btnDuplicate = new Button { Text = "⧉ 選択行を複製", AutoSize = true, Padding = new Padding(6, 4, 6, 4), Margin = new Padding(4, 1, 0, 0) };
         btnDuplicate.Click += BtnDuplicate_Click;
         pnlToolbar.Controls.AddRange(new Control[] { lblSearch, txtSearch, btnDuplicate });
 
-        tabControl = new TabControl { Location = new Point(5, 38), Size = new Size(820, 517) };
+        var pnlTags = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4, 0, 4, 4) };
+        var chkTagEnemy = new CheckBox { Text = "👾 敵", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
+        var chkTagGimmick = new CheckBox { Text = "🔧 ギミック", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
+        var chkTagItem = new CheckBox { Text = "💎 アイテム", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
+        var chkTagCommonEvent = new CheckBox { Text = "🔔 コモンイベント", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
+        chkTagEnemy.CheckedChanged += (s, e) => sectionEnemy.Visible = chkTagEnemy.Checked;
+        chkTagGimmick.CheckedChanged += (s, e) => sectionGimmick.Visible = chkTagGimmick.Checked;
+        chkTagItem.CheckedChanged += (s, e) => sectionItem.Visible = chkTagItem.Checked;
+        chkTagCommonEvent.CheckedChanged += (s, e) => sectionCommonEvent.Visible = chkTagCommonEvent.Checked;
+        pnlTags.Controls.AddRange(new Control[] { chkTagEnemy, chkTagGimmick, chkTagItem, chkTagCommonEvent });
+
+        pnlTop.Controls.Add(pnlTags);
+        pnlTop.Controls.Add(pnlToolbar);
 
         // ===== 右サイドパネル =====
-        var pnlRight = new Panel { Location = new Point(835, 5), Size = new Size(250, 550), BorderStyle = BorderStyle.FixedSingle };
+        var pnlRight = new Panel { Dock = DockStyle.Right, Width = 260, BorderStyle = BorderStyle.FixedSingle };
+        var flowRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(5) };
 
-        var lblPrev = new Label { Text = "🖼 スプライトプレビュー", Location = new Point(5, 5), Size = new Size(240, 20), Font = new Font("Meiryo UI", 9, FontStyle.Bold) };
-        pbPreview = new PictureBox { Location = new Point(5, 28), Size = new Size(238, 180), BorderStyle = BorderStyle.FixedSingle, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Black };
-        lblPreviewPath = new Label { Location = new Point(5, 212), Size = new Size(238, 40), Font = new Font("Meiryo UI", 7), ForeColor = Color.Gray, Text = "(選択なし)" };
+        var lblPrev = new Label { Text = "🖼 スプライトプレビュー（ホイールでズーム）", AutoSize = true, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 0, 0, 4) };
+        var pnlPreviewHost = new Panel { Width = 238, Height = 180, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black, AutoScroll = true, Margin = new Padding(0, 0, 0, 2) };
+        pbPreview = new PictureBox { SizeMode = PictureBoxSizeMode.Normal, BackColor = Color.Black };
+        pnlPreviewHost.Controls.Add(pbPreview);
+        pnlPreviewHost.MouseWheel += PnlPreviewHost_MouseWheel;
+        lblPreviewPath = new Label { Width = 238, Height = 40, Font = new Font("Meiryo UI", 7), ForeColor = Color.Gray, Text = "(選択なし)", Margin = new Padding(0, 0, 0, 4) };
 
-        lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Location = new Point(5, 258), Size = new Size(238, 20), Font = new Font("Meiryo UI", 9, FontStyle.Bold) };
+        lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Width = 238, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 4, 0, 2) };
         rtbTypeHint = new RichTextBox
         {
-            Location = new Point(5, 280),
-            Size = new Size(238, 265),
+            Width = 238,
+            Height = 330,
             ReadOnly = true,
             ScrollBars = RichTextBoxScrollBars.Vertical,
             Font = new Font("Meiryo UI", 8),
@@ -202,93 +228,149 @@ public partial class AssetManagerForm : Form
         };
 
         // Feature: Configurable Behavior Parameters (M1) — 選択中の敵/ギミック行のtype_enumに応じて
-        // 挙動パラメータの入力欄を動的に切り替えるパネル。rtbTypeHintと同じ場所に重ねて表示し、
-        // 行が選択されている間だけこちらを前面に出す（何も選択されていない時は従来通りタイプ一覧を見せる）。
+        // 挙動パラメータの入力欄を動的に切り替えるパネル。rtbTypeHintと同じ場所（表示/非表示切替）。
         pnlBehaviorParams = new Panel
         {
-            Location = new Point(5, 280),
-            Size = new Size(238, 265),
+            Width = 238,
+            Height = 330,
             AutoScroll = true,
             Visible = false
         };
 
-        pnlRight.Controls.AddRange(new Control[] { lblPrev, pbPreview, lblPreviewPath, lblTypeHintTitle, rtbTypeHint, pnlBehaviorParams });
+        flowRight.Controls.Add(lblPrev);
+        flowRight.Controls.Add(pnlPreviewHost);
+        flowRight.Controls.Add(lblPreviewPath);
+        flowRight.Controls.Add(lblTypeHintTitle);
+        flowRight.Controls.Add(rtbTypeHint);
+        flowRight.Controls.Add(pnlBehaviorParams);
+        pnlRight.Controls.Add(flowRight);
 
-        // ===== 敵タブ =====
-        var tabEnemies = new TabPage("👾 敵 (Enemies)");
-        dgvEnemies = CreateEnemyGrid();
-        tabEnemies.Controls.Add(dgvEnemies);
-
-        // ===== ギミックタブ =====
-        var tabGimmicks = new TabPage("🔧 ギミック (Gimmicks)");
-        dgvGimmicks = CreateGimmickGrid();
-        tabGimmicks.Controls.Add(dgvGimmicks);
-
-        // ===== アイテムタブ =====
-        var tabItems = new TabPage("💎 アイテム (Items)");
-        dgvItems = CreateItemGrid();
-        tabItems.Controls.Add(dgvItems);
-
-        // ===== コモンイベントタブ (RPGツクールMZ風: 複数トリガーから呼び出せる共通処理) =====
-        var tabCommonEvents = new TabPage("🔔 コモンイベント");
-        lstCommonEvents = new ListBox { Location = new Point(5, 5), Size = new Size(790, 470), Font = new Font("Meiryo UI", 9) };
-        lstCommonEvents.DoubleClick += (s, e) => EditSelectedCommonEvent();
-        var btnCeEdit = new Button { Text = "✎ 編集", Location = new Point(5, 480), Size = new Size(100, 26) };
-        btnCeEdit.Click += (s, e) => EditSelectedCommonEvent();
-        var btnCeDelete = new Button { Text = "🗑 削除", Location = new Point(110, 480), Size = new Size(100, 26) };
-        btnCeDelete.Click += (s, e) => DeleteSelectedCommonEvent();
-        tabCommonEvents.Controls.AddRange(new Control[] { lstCommonEvents, btnCeEdit, btnCeDelete });
-
-        tabControl.TabPages.AddRange(new TabPage[] { tabEnemies, tabGimmicks, tabItems, tabCommonEvents });
-        tabControl.SelectedIndexChanged += (s, e) => { txtSearch.Text = ""; pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; UpdateTypeHint(); };
-
-        // ===== 下部ボタン =====
-        var pnlBottom = new Panel { Location = new Point(5, 558), Size = new Size(1082, 76) };
-
-        btnSave = new Button
-        {
-            Text = "💾 保存して閉じる",
-            Location = new Point(915, 41), Size = new Size(160, 30),
-            BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-            Font = new Font("Meiryo UI", 10, FontStyle.Bold)
-        };
+        // ===== 下部ボタン（右詰め/左詰めFlowLayoutPanelで自動配置） =====
+        // Feature: UI改善 — 左詰め側はボタン数が多くWrapContentsで折り返しうるため、
+        // 固定Heightだと折り返した行（保存/キャンセルボタンを含む）がパネルの外にはみ出して
+        // 見えなくなっていた。pnlBottom自体をAutoSizeにして必要な行数ぶん高さが伸びるようにする。
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        var flowBottomRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 6, 8, 2), AutoSize = true };
+        btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 6, 10, 6), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Meiryo UI", 10, FontStyle.Bold) };
         btnSave.Click += BtnSave_Click;
-
-        btnClose = new Button { Text = "キャンセル", Location = new Point(795, 41), Size = new Size(110, 30) };
+        btnClose = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 6, 10, 6) };
         btnClose.Click += (s, e) => Close();
+        flowBottomRight.Controls.Add(btnSave);
+        flowBottomRight.Controls.Add(btnClose);
 
-        var btnAddEnemy = new Button { Text = "＋ 敵追加", Location = new Point(5, 5), Size = new Size(100, 30) };
+        var flowBottomLeft = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8, 2, 8, 6), AutoSize = true, WrapContents = true };
+        var btnAddEnemy = new Button { Text = "＋ 敵追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddEnemy.Click += (s, e) => AddRow(dgvEnemies, GetDefaultEnemyRow());
-
-        var btnAddGimmick = new Button { Text = "＋ ギミック追加", Location = new Point(110, 5), Size = new Size(120, 30) };
+        var btnAddGimmick = new Button { Text = "＋ ギミック追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddGimmick.Click += (s, e) => AddRow(dgvGimmicks, GetDefaultGimmickRow());
-
-        var btnAddItem = new Button { Text = "＋ アイテム追加", Location = new Point(235, 5), Size = new Size(120, 30) };
+        var btnAddItem = new Button { Text = "＋ アイテム追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddItem.Click += (s, e) => AddRow(dgvItems, GetDefaultItemRow());
-
-        var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", Location = new Point(360, 5), Size = new Size(150, 30) };
+        var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
-
-        // Feature: Puzzle-like Behavior Scripting (M4) — ブロックパレットのプレビュー画面
-        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", Location = new Point(200, 41), Size = new Size(190, 30) };
-        btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
-
         // Feature: Composite Multi-Part Objects (Parts-M7) — 敵/ギミック/アイテム共通。type_enumに関係なく使える
-        var btnPartsEditor = new Button { Text = "🧩 パーツを編集", Location = new Point(5, 41), Size = new Size(190, 30) };
+        var btnPartsEditor = new Button { Text = "🧩 パーツを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnPartsEditor.Click += (s, e) => BtnPartsEditor_Click();
+        // Feature: Puzzle-like Behavior Scripting (M4) — ブロックエディタを開く
+        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
+        btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
+        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript });
 
-        pnlBottom.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnClose, btnSave });
+        pnlBottom.Controls.Add(flowBottomLeft);
+        pnlBottom.Controls.Add(flowBottomRight);
 
-        Controls.AddRange(new Control[] { pnlToolbar, tabControl, pnlRight, pnlBottom });
+        // ===== 中央: 敵/ギミック/アイテム/コモンイベントを1つの縦スクロールビューに集約 =====
+        // Feature: UI改善 — 以前はFlowLayoutPanel(AutoSize)の直接の子にDock=Fillのグリッドを置いており、
+        // 親のサイズが子から逆算される一方で子は親のサイズから逆算しようとする循環に陥り、グリッドが
+        // 極端に狭く潰れていた。ここでは各セクションを「高さ固定・幅は可変(Dock=Top)」のPanelにし、
+        // その内部でグリッドをDock=Fillにする（親の高さが確定しているためDock=Fillが安全に働く）。
+        // これにより、ウィンドウ幅に合わせてグリッドの横幅も正しく追従するようになる。
+        var pnlSections = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+
+        dgvEnemies = CreateEnemyGrid();
+        sectionEnemy = BuildSection("👾 敵 (Enemies)", dgvEnemies, 300);
+
+        dgvGimmicks = CreateGimmickGrid();
+        sectionGimmick = BuildSection("🔧 ギミック (Gimmicks)", dgvGimmicks, 300);
+
+        dgvItems = CreateItemGrid();
+        sectionItem = BuildSection("💎 アイテム (Items)", dgvItems, 220);
+
+        // ===== コモンイベント (RPGツクールMZ風: 複数トリガーから呼び出せる共通処理) =====
+        lstCommonEvents = new ListBox { Font = new Font("Meiryo UI", 9) };
+        lstCommonEvents.DoubleClick += (s, e) => EditSelectedCommonEvent();
+        lstCommonEvents.SelectedIndexChanged += (s, e) => { if (lstCommonEvents.SelectedIndex >= 0) ClearOtherSelections(AssetKind.CommonEvent); };
+        var pnlCommonEventContent = new Panel();
+        lstCommonEvents.Dock = DockStyle.Fill;
+        var flowCeButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 34, Padding = new Padding(2) };
+        var btnCeEdit = new Button { Text = "✎ 編集", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
+        btnCeEdit.Click += (s, e) => EditSelectedCommonEvent();
+        var btnCeDelete = new Button { Text = "🗑 削除", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
+        btnCeDelete.Click += (s, e) => DeleteSelectedCommonEvent();
+        flowCeButtons.Controls.AddRange(new Control[] { btnCeEdit, btnCeDelete });
+        pnlCommonEventContent.Controls.Add(lstCommonEvents);
+        pnlCommonEventContent.Controls.Add(flowCeButtons);
+        sectionCommonEvent = BuildSection("🔔 コモンイベント", pnlCommonEventContent, 240);
+
+        // Dock=Topは「先に追加したものほど端(上)に近づく」ため、この順番がそのまま表示順になる
+        pnlSections.Controls.Add(sectionEnemy);
+        pnlSections.Controls.Add(sectionGimmick);
+        pnlSections.Controls.Add(sectionItem);
+        pnlSections.Controls.Add(sectionCommonEvent);
+
+        Controls.Add(pnlSections);
+        Controls.Add(pnlRight);
+        Controls.Add(pnlBottom);
+        Controls.Add(pnlTop);
         RefreshCommonEventsList();
         UpdateTypeHint();
     }
 
+    // 種別セクション1つぶんの見出し+中身をまとめる。
+    // Feature: UI改善 — 高さ固定・幅可変(Dock=Top)のPanelにすることで、中身(グリッド等)をDock=Fillにしても
+    // 安全（親の高さが確定しているため）。ウィンドウ幅に応じて中身の横幅も正しく追従する。
+    private Panel BuildSection(string title, Control content, int contentHeight)
+    {
+        const int titleHeight = 24;
+        const int topMargin = 4, bottomMargin = 14;
+        var section = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = titleHeight + contentHeight + topMargin + bottomMargin,
+            Padding = new Padding(4, topMargin, 4, bottomMargin),
+        };
+        var lbl = new Label { Dock = DockStyle.Top, Height = titleHeight, Text = title, Font = new Font(Font, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
+        content.Dock = DockStyle.Fill;
+        content.Margin = new Padding(0);
+        // Dock=Fillの子を先に追加し、その後にDock=Topの見出しラベルを追加する（安全なDock順）
+        section.Controls.Add(content);
+        section.Controls.Add(lbl);
+        return section;
+    }
+
+    private void PnlPreviewHost_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (pbPreview.Image == null) return;
+        float factor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
+        _previewZoom = Math.Clamp(_previewZoom * factor, 0.1f, 8f);
+        ApplyPreviewZoom();
+    }
+
+    private float _previewZoom = 1f;
+
+    private void ApplyPreviewZoom()
+    {
+        if (pbPreview.Image == null) return;
+        pbPreview.Size = new Size((int)(pbPreview.Image.Width * _previewZoom), (int)(pbPreview.Image.Height * _previewZoom));
+    }
+
     private DataGridView CreateEnemyGrid()
     {
+        // Feature: UI改善 — Dock=FillはAutoSizeのFlowLayoutPanel(BuildSection内)の直接の子には設定しない。
+        // 親がAutoSizeで子のサイズから逆算する一方、Dock=Fillは親のサイズから子を逆算しようとするため
+        // サイズ計算が循環してしまい、グリッドが極端に狭く潰れる不具合の原因になっていた。
+        // ここでは固定サイズ（BuildSectionでWidth/Heightを明示指定）にする。
         var dgv = new DataGridView
         {
-            Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -299,6 +381,7 @@ public partial class AssetManagerForm : Form
 
         dgv.Columns.AddRange(new DataGridViewColumn[]
         {
+            new DataGridViewTextBoxColumn { Name="icon",     HeaderText="",         FillWeight=30, ReadOnly=true },
             new DataGridViewTextBoxColumn { Name="id",       HeaderText="ID",       FillWeight=80 },
             new DataGridViewTextBoxColumn { Name="name",     HeaderText="名前",     FillWeight=100 },
             new DataGridViewComboBoxColumn
@@ -323,9 +406,9 @@ public partial class AssetManagerForm : Form
         });
 
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => { UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: true); };
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Enemy); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: true); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") UpdateBehaviorParamsPanel(dgv, isEnemy: true); };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, isEnemy: true); RefreshIconCell(dgv, e.RowIndex, isEnemy: true, isGimmick: false); } };
         return dgv;
     }
 
@@ -333,7 +416,6 @@ public partial class AssetManagerForm : Form
     {
         var dgv = new DataGridView
         {
-            Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -344,6 +426,7 @@ public partial class AssetManagerForm : Form
 
         dgv.Columns.AddRange(new DataGridViewColumn[]
         {
+            new DataGridViewTextBoxColumn { Name="icon",     HeaderText="",        FillWeight=30, ReadOnly=true },
             new DataGridViewTextBoxColumn { Name="id",       HeaderText="ID",      FillWeight=80 },
             new DataGridViewTextBoxColumn { Name="name",     HeaderText="名前",    FillWeight=120 },
             new DataGridViewComboBoxColumn
@@ -363,9 +446,9 @@ public partial class AssetManagerForm : Form
         });
 
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => { UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: false); };
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Gimmick); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: false); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") UpdateBehaviorParamsPanel(dgv, isEnemy: false); };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, isEnemy: false); RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: true); } };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -374,7 +457,6 @@ public partial class AssetManagerForm : Form
     {
         var dgv = new DataGridView
         {
-            Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -385,6 +467,7 @@ public partial class AssetManagerForm : Form
 
         dgv.Columns.AddRange(new DataGridViewColumn[]
         {
+            new DataGridViewTextBoxColumn { Name="icon",         HeaderText="",          FillWeight=30, ReadOnly=true },
             new DataGridViewTextBoxColumn { Name="id",           HeaderText="ID",        FillWeight=80 },
             new DataGridViewTextBoxColumn { Name="name",         HeaderText="名前",      FillWeight=100 },
             new DataGridViewComboBoxColumn
@@ -405,8 +488,9 @@ public partial class AssetManagerForm : Form
         });
 
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => UpdatePreview(dgv);
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Item); UpdatePreview(dgv); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: false); };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -522,19 +606,19 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     private object[] GetDefaultEnemyRow()
     {
         string newId = MakeUniqueSequentialId(dgvEnemies, "enemy_");
-        return new object[] { newId, "新敵", EnemyTypes[0].desc, 3, 32, 32, "", "画像選択", "削除" };
+        return new object[] { AssetIcons.ForEnemy(EnemyTypes[0].type), newId, "新敵", EnemyTypes[0].desc, 3, 32, 32, "", "画像選択", "削除" };
     }
 
     private object[] GetDefaultGimmickRow()
     {
         string newId = MakeUniqueSequentialId(dgvGimmicks, "gimmick_");
-        return new object[] { newId, "新しいギミック", GimmickTypes[0].desc, "", "📁", "🗑" };
+        return new object[] { AssetIcons.ForGimmick(GimmickTypes[0].type), newId, "新しいギミック", GimmickTypes[0].desc, "", "📁", "🗑" };
     }
 
     private object[] GetDefaultItemRow()
     {
         string newId = MakeUniqueSequentialId(dgvItems, "item_");
-        return new object[] { newId, "新しいアイテム", ItemTypes[0].desc, "", "", "📁", "🗑" };
+        return new object[] { AssetIcons.ForItem(ItemTypes[0].type), newId, "新しいアイテム", ItemTypes[0].desc, "", "", "📁", "🗑" };
     }
 
     // ===== プレビュー更新 =====
@@ -559,6 +643,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 // ファイルロックを避けるためにStreamで読む
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 pbPreview.Image = Image.FromStream(fs);
+                // Feature: UI改善 — プレビューズーム。小さいドット絵は見やすいよう自動的に拡大した初期値にする
+                _previewZoom = 1f;
+                if (pbPreview.Image.Width > 0 && pbPreview.Image.Width < 100)
+                    _previewZoom = Math.Min(8f, 160f / pbPreview.Image.Width);
+                ApplyPreviewZoom();
             }
             else
             {
@@ -590,6 +679,29 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return def;
     }
 
+    // Feature: UI改善 — タブ廃止に伴い、「現在操作対象とみなす種別」をタブのインデックスではなく
+    // 「どのグリッド/リストに選択中の行があるか」から判定する（同時に選択できるのは1つのみになるよう
+    // 各グリッドのSelectionChangedで他を解除する。ClearOtherSelections参照）。
+    private enum AssetKind { None = -1, Enemy = 0, Gimmick = 1, Item = 2, CommonEvent = 3 }
+
+    private AssetKind GetActiveKind()
+    {
+        if (dgvEnemies.SelectedRows.Count > 0) return AssetKind.Enemy;
+        if (dgvGimmicks.SelectedRows.Count > 0) return AssetKind.Gimmick;
+        if (dgvItems.SelectedRows.Count > 0) return AssetKind.Item;
+        if (lstCommonEvents.SelectedIndex >= 0) return AssetKind.CommonEvent;
+        return AssetKind.None;
+    }
+
+    // exceptを除く全ての種別の選択を解除する（1つの種別だけが選択状態を持つようにする）
+    private void ClearOtherSelections(AssetKind except)
+    {
+        if (except != AssetKind.Enemy) dgvEnemies.ClearSelection();
+        if (except != AssetKind.Gimmick) dgvGimmicks.ClearSelection();
+        if (except != AssetKind.Item) dgvItems.ClearSelection();
+        if (except != AssetKind.CommonEvent) lstCommonEvents.ClearSelected();
+    }
+
     // 選択中の行のtype_enumを、そのグリッドのコンボボックス列から読み取る（ReadEnemies/ReadGimmicksと同じ判定方式）
     private static int GetSelectedTypeEnum(DataGridViewRow row)
     {
@@ -605,6 +717,15 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return 0;
     }
 
+    // Feature: UI改善 — グリッドのicon列を、行のtype_enum(選択中の値)に応じたAssetIconsの絵文字で更新する
+    private void RefreshIconCell(DataGridView dgv, int rowIndex, bool isEnemy, bool isGimmick)
+    {
+        if (rowIndex < 0 || rowIndex >= dgv.Rows.Count) return;
+        int typeEnum = GetSelectedTypeEnum(dgv.Rows[rowIndex]);
+        string icon = isEnemy ? AssetIcons.ForEnemy(typeEnum) : isGimmick ? AssetIcons.ForGimmick(typeEnum) : AssetIcons.ForItem(typeEnum);
+        dgv.Rows[rowIndex].Cells["icon"].Value = icon;
+    }
+
     // Feature: Puzzle-like Behavior Scripting (M6)
     // 現在選択中のタブ・行がtype_enum=20(敵)/24(ギミック)＝カスタムスクリプトであれば
     // ブロックエディタを開き、OKで閉じたらそのEnemyDef/GimmickDef.scriptへ書き戻す。
@@ -613,9 +734,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
 
     private void BtnBehaviorScript_Click()
     {
-        if (tabControl.SelectedIndex == 0)
+        var kind = GetActiveKind();
+        if (kind == AssetKind.Enemy)
         {
-            if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("編集する敵を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             var row = dgvEnemies.SelectedRows[0];
             if (GetSelectedTypeEnum(row) != CustomScriptEnemyType)
             {
@@ -626,9 +747,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             using var form = new BehaviorScriptEditorForm($"敵: {row.Cells["id"].Value}", def.script);
             if (form.ShowDialog() == DialogResult.OK) def.script = form.ResultScript;
         }
-        else if (tabControl.SelectedIndex == 1)
+        else if (kind == AssetKind.Gimmick)
         {
-            if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("編集するギミックを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             var row = dgvGimmicks.SelectedRows[0];
             if (GetSelectedTypeEnum(row) != CustomScriptGimmickType)
             {
@@ -641,7 +761,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         else
         {
-            MessageBox.Show("挙動スクリプトは「敵」または「ギミック」タブで対象を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("挙動スクリプトは「敵」または「ギミック」を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -650,27 +770,25 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // （パーツは親のタイプとは独立して機能するため、挙動スクリプトのようなタイプ制限は設けない）
     private void BtnPartsEditor_Click()
     {
-        if (tabControl.SelectedIndex == 0)
+        var kind = GetActiveKind();
+        if (kind == AssetKind.Enemy)
         {
-            if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("編集する敵を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             var row = dgvEnemies.SelectedRows[0];
             var def = GetOrCreateEnemyParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             using var form = new PartsEditorForm($"敵: {row.Cells["id"].Value}", def.parts, projectRoot, sprite);
             if (form.ShowDialog() == DialogResult.OK) def.parts = form.ResultParts;
         }
-        else if (tabControl.SelectedIndex == 1)
+        else if (kind == AssetKind.Gimmick)
         {
-            if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("編集するギミックを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             var row = dgvGimmicks.SelectedRows[0];
             var def = GetOrCreateGimmickParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             using var form = new PartsEditorForm($"ギミック: {row.Cells["id"].Value}", def.parts, projectRoot, sprite);
             if (form.ShowDialog() == DialogResult.OK) def.parts = form.ResultParts;
         }
-        else if (tabControl.SelectedIndex == 2)
+        else if (kind == AssetKind.Item)
         {
-            if (dgvItems.SelectedRows.Count == 0) { MessageBox.Show("編集するアイテムを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             var row = dgvItems.SelectedRows[0];
             var def = GetOrCreateItemParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
@@ -679,7 +797,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         else
         {
-            MessageBox.Show("パーツ編集は「敵」「ギミック」「アイテム」タブで対象を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("パーツ編集は「敵」「ギミック」「アイテム」のいずれかを選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
     }
 
@@ -742,9 +860,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     private void UpdateTypeHint()
     {
         rtbTypeHint.Clear();
-        switch (tabControl.SelectedIndex)
+        switch (GetActiveKind())
         {
-            case 0:
+            case AssetKind.Enemy:
                 rtbTypeHint.AppendText("【敵タイプ一覧】\n\n");
                 foreach (var (type, desc, detail) in EnemyTypes)
                 {
@@ -756,7 +874,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                     rtbTypeHint.AppendText(detail + "\n\n");
                 }
                 break;
-            case 1:
+            case AssetKind.Gimmick:
                 rtbTypeHint.AppendText("【ギミックタイプ一覧】\n\n");
                 foreach (var (type, desc) in GimmickTypes)
                 {
@@ -772,7 +890,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                     "・明暗ロック足場: \"dark\"(既定)=画面が暗い時だけ実体化 / \"bright\"=明るい時だけ実体化\n" +
                     "（プレイヤー側の操作: T=色フィルタ切替, Z=ズーム, X=暗転, C=明転, M=SEミュート）");
                 break;
-            case 2:
+            case AssetKind.Item:
                 rtbTypeHint.AppendText("【アイテムタイプ一覧】\n\n");
                 foreach (var (type, desc) in ItemTypes)
                 {
@@ -783,7 +901,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 rtbTypeHint.AppendText("\n【grant_ability フィールド】\n");
                 rtbTypeHint.AppendText("取得時にプレイヤーに付与する能力名を入力。\n例: canDoubleJump, canDash, canShootFireball\n");
                 break;
-            case 3:
+            case AssetKind.CommonEvent:
                 rtbTypeHint.AppendText("【コモンイベントとは】\n\n");
                 rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
                 rtbTypeHint.SelectionColor = Color.DarkGray;
@@ -805,7 +923,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Enemy ID '{e.id}' has invalid type_enum '{e.type_enum}'. Auto-converted to default.\n");
                 typeLabel = EnemyTypes[0].desc;
             }
-            dgvEnemies.Rows.Add(e.id, e.name, typeLabel, e.hp, e.width, e.height, e.hitboxOffsetX, e.hitboxOffsetY, e.hitboxWidth, e.hitboxHeight, e.scale, e.sprite, "🎯", "📏", "📁", "🗑");
+            dgvEnemies.Rows.Add(AssetIcons.ForEnemy(e.type_enum), e.id, e.name, typeLabel, e.hp, e.width, e.height, e.hitboxOffsetX, e.hitboxOffsetY, e.hitboxWidth, e.hitboxHeight, e.scale, e.sprite, "🎯", "📏", "📁", "🗑");
             // Feature: Configurable Behavior Parameters (M1) — 行オブジェクトに紐づけて挙動パラメータ本体を保持する
             _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = e;
         }
@@ -820,7 +938,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Gimmick ID '{g.id}' has invalid type_enum '{g.type_enum}'. Auto-converted to default.\n");
                 typeLabel = GimmickTypes[0].desc;
             }
-            dgvGimmicks.Rows.Add(g.id, g.name, typeLabel, g.hitboxOffsetX, g.hitboxOffsetY, g.hitboxWidth, g.hitboxHeight, g.sprite, "🎯", "📁", "🗑");
+            dgvGimmicks.Rows.Add(AssetIcons.ForGimmick(g.type_enum), g.id, g.name, typeLabel, g.hitboxOffsetX, g.hitboxOffsetY, g.hitboxWidth, g.hitboxHeight, g.sprite, "🎯", "📁", "🗑");
             _gimmickParams[dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1]] = g;
         }
 
@@ -834,7 +952,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 System.IO.File.AppendAllText(Path.Combine(AppPaths.LogsDir, "warning_log.txt"), $"[WARNING] AssetManagerForm: Item ID '{i.id}' has invalid type_enum '{i.type_enum}'. Auto-converted to default.\n");
                 typeLabel = ItemTypes[0].desc;
             }
-            dgvItems.Rows.Add(i.id, i.name, typeLabel, i.hitboxOffsetX, i.hitboxOffsetY, i.hitboxWidth, i.hitboxHeight, i.sprite, i.grant_ability, "🎯", "📁", "🗑");
+            dgvItems.Rows.Add(AssetIcons.ForItem(i.type_enum), i.id, i.name, typeLabel, i.hitboxOffsetX, i.hitboxOffsetY, i.hitboxWidth, i.hitboxHeight, i.sprite, i.grant_ability, "🎯", "📁", "🗑");
             // Feature: Composite Multi-Part Objects (Parts-M7) — 行オブジェクトに紐づけて非グリッド項目(parts等)を保持する
             _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = i;
         }
@@ -1025,16 +1143,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== 検索フィルタ (MZ風 ID/名前検索) =====
+    // Feature: UI改善 — タブ廃止により全種別が同時に画面上へ並ぶため、検索は表示中の全グリッド/一覧へ横断的に適用する
     private void ApplySearchFilter()
     {
         string q = txtSearch.Text.Trim();
-        switch (tabControl.SelectedIndex)
-        {
-            case 0: FilterGrid(dgvEnemies, q); break;
-            case 1: FilterGrid(dgvGimmicks, q); break;
-            case 2: FilterGrid(dgvItems, q); break;
-            case 3: FilterCommonEventsList(q); break;
-        }
+        FilterGrid(dgvEnemies, q);
+        FilterGrid(dgvGimmicks, q);
+        FilterGrid(dgvItems, q);
+        FilterCommonEventsList(q);
     }
 
     private static void FilterGrid(DataGridView dgv, string query)
@@ -1062,12 +1178,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // ===== 選択行の複製 (MZ風: 似た定義を素早く量産) =====
     private void BtnDuplicate_Click(object? sender, EventArgs e)
     {
-        switch (tabControl.SelectedIndex)
+        switch (GetActiveKind())
         {
-            case 0: DuplicateEnemyRow(); break;
-            case 1: DuplicateGimmickRow(); break;
-            case 2: DuplicateItemRow(); break;
-            case 3: DuplicateCommonEvent(); break;
+            case AssetKind.Enemy: DuplicateEnemyRow(); break;
+            case AssetKind.Gimmick: DuplicateGimmickRow(); break;
+            case AssetKind.Item: DuplicateItemRow(); break;
+            case AssetKind.CommonEvent: DuplicateCommonEvent(); break;
+            default: MessageBox.Show("複製する行を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); break;
         }
     }
 
@@ -1090,6 +1207,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         string newId = MakeUniqueId(dgvEnemies, r.Cells["id"].Value?.ToString() ?? "enemy");
         AddRow(dgvEnemies, new object[]
         {
+            r.Cells["icon"].Value ?? "👾",
             newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? EnemyTypes[0].desc,
             r.Cells["hp"].Value ?? 3, r.Cells["width"].Value ?? 32, r.Cells["height"].Value ?? 32,
             r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
@@ -1109,6 +1227,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         string newId = MakeUniqueId(dgvGimmicks, r.Cells["id"].Value?.ToString() ?? "gimmick");
         AddRow(dgvGimmicks, new object[]
         {
+            r.Cells["icon"].Value ?? "🔧",
             newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? GimmickTypes[0].desc,
             r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
@@ -1126,6 +1245,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         string newId = MakeUniqueId(dgvItems, r.Cells["id"].Value?.ToString() ?? "item");
         AddRow(dgvItems, new object[]
         {
+            r.Cells["icon"].Value ?? "💎",
             newId, (r.Cells["name"].Value?.ToString() ?? "") + "のコピー", r.Cells["type_enum"].Value ?? ItemTypes[0].desc,
             r.Cells["hitboxOffsetX"].Value ?? 0, r.Cells["hitboxOffsetY"].Value ?? 0,
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,

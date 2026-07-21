@@ -184,6 +184,31 @@ public partial class Form1 : Form
         }
     }
 
+    // Feature: UI改善（友人フィードバック対応）— 行・列数を数値指定して矩形範囲を一括でタイル埋めする
+    private void BtnBulkFill_Click(object? sender, EventArgs e)
+    {
+        if (currentStage == null) { MessageBox.Show("先にステージを選択してください。"); return; }
+
+        int[,] targetLayer = mapCanvas.CurrentMode switch
+        {
+            MapCanvas.EditMode.DecoLayerBack => currentStage.DecoLayerBack,
+            MapCanvas.EditMode.DecoLayerFront => currentStage.DecoLayerFront,
+            _ => currentStage.Map
+        };
+
+        using var form = new BulkTileFillForm(currentStage.MapW, currentStage.MapH);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        int rEnd = Math.Min(currentStage.MapH, form.StartRow + form.RowCount);
+        int cEnd = Math.Min(currentStage.MapW, form.StartCol + form.ColCount);
+        for (int r = form.StartRow; r < rEnd; r++)
+            for (int c = form.StartCol; c < cEnd; c++)
+                targetLayer[r, c] = mapCanvas.SelectedTileId;
+
+        mapCanvas.Invalidate();
+        SaveCurrentStage();
+    }
+
     private void lstEnemies_SelectedIndexChanged(object? sender, EventArgs e)
     {
         if (lstEnemies.SelectedIndex >= 0 && lstEnemies.SelectedIndex < assets.Enemies.Count)
@@ -544,6 +569,7 @@ public partial class Form1 : Form
         string name = txtNewStage.Text.Trim();
         if (string.IsNullOrEmpty(name)) { MessageBox.Show("名前を入力してください"); return; }
         CreateNewStage(name);
+        txtNewStage.Text = "";
     }
 
     private void CreateNewStage(string name)
@@ -590,13 +616,13 @@ public partial class Form1 : Form
     }
 
     // Feature 4: ここからプレイ
+    // Feature: UI改善（友人フィードバック対応）— 確認モーダルポップアップはうざいとの指摘のため削除。
+    // 案内は既存のlblLayerInfo（UpdateLayerInfo内で「📍 クリックでテストプレイ開始位置を指定」を表示）に一本化する。
     private void btnTestPlay_Click(object? sender, EventArgs e)
     {
         if (currentStage == null) { MessageBox.Show("ステージを選択してください。"); return; }
         mapCanvas.CurrentMode = MapCanvas.EditMode.TestPlay;
         UpdateLayerInfo();
-        MessageBox.Show("マップ上でテストプレイを開始したい位置をクリックしてください。\n\n右クリックでキャンセル。", "ここからプレイ",
-            MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     // Feature 1: 背景設定

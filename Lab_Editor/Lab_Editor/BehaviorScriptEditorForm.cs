@@ -33,6 +33,7 @@ public class BehaviorScriptEditorForm : Form
             ? $"🧩 挙動スクリプトエディタ - {subjectLabel}"
             : "🧩 挙動スクリプトエディタ（プレビュー版）";
         Size = new Size(1000, 650);
+        MinimumSize = new Size(700, 450);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
@@ -67,11 +68,17 @@ public class BehaviorScriptEditorForm : Form
             _canvas.LoadProgram(loaded);
         }
 
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 36 };
-        var btnOk = new Button { Text = "💾 OK", DialogResult = DialogResult.OK, Location = new Point(790, 3), Size = new Size(90, 30), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, Location = new Point(890, 3), Size = new Size(90, 30) };
+        // Feature: UI改善 — 固定座標(Location)のボタンはウィンドウを縮小すると画面外にはみ出してしまうため、
+        // 他フォームと同様のDock=Fill+RightToLeftのFlowLayoutPanelへ変更し、幅に追従するようにする。
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 42 };
+        var flowBottom = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        var btnOk = new Button { Text = "💾 OK", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnOk.Click += (s, e) => { ResultScript = BlockScriptSerializer.Serialize(_canvas.TopLevel); };
-        pnlBottom.Controls.AddRange(new Control[] { btnOk, btnCancel });
+        // RightToLeftは追加順が右から並ぶため、OKを一番右にしたい場合は先にCancelを追加する
+        flowBottom.Controls.Add(btnCancel);
+        flowBottom.Controls.Add(btnOk);
+        pnlBottom.Controls.Add(flowBottom);
         AcceptButton = btnOk;
         CancelButton = btnCancel;
 

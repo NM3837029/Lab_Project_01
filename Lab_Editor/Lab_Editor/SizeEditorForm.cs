@@ -27,6 +27,9 @@ public class SizeEditorForm : Form
     {
         Text = "表示サイズ(スケール)エディタ";
         Size = new Size(600, 600);
+        // Feature: UI改善 — 全コントロールが固定座標(Location)配置のため、ウィンドウを縮小すると
+        // 保存/キャンセル等のボタンが表示領域外にはみ出してしまう。最小サイズを設計時のサイズに固定する。
+        MinimumSize = new Size(600, 600);
         StartPosition = FormStartPosition.CenterParent;
 
         currentScale = initialScale > 0 ? initialScale : 1.0f;

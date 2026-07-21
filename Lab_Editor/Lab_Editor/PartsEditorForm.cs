@@ -146,10 +146,14 @@ public class PartsEditorForm : Form
             pnlComposer.Invalidate();
         };
 
+        // Feature: UI改善 — ボタン数が多く折り返し(WrapContents)が発生しうるため、固定Heightだと
+        // 折り返した行がパネルからはみ出して見えなくなっていた。AutoSizeにして必要な行数ぶん
+        // 高さが自動的に伸びるようにする（幅はDock=Bottomにより親の幅に追従する）。
         var flowButtons = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
-            Height = 74,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
             FlowDirection = FlowDirection.LeftToRight,
             WrapContents = true,
             Padding = new Padding(2),
@@ -166,7 +170,9 @@ public class PartsEditorForm : Form
         btnApplyScript.Click += (s, e) => ApplyScriptToAllParts();
         var btnRod = new Button { Text = "🌀 回転する棒として配置...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
         btnRod.Click += (s, e) => OpenRodGenerator();
-        flowButtons.Controls.AddRange(new Control[] { btnAdd, btnDel, btnUp, btnDown, btnApplyScript, btnRod });
+        var btnEditRod = new Button { Text = "🔧 回転する棒を編集...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
+        btnEditRod.Click += (s, e) => OpenRodEditor();
+        flowButtons.Controls.AddRange(new Control[] { btnAdd, btnDel, btnUp, btnDown, btnApplyScript, btnRod, btnEditRod });
 
         pnl.Controls.Add(dgvList);
         pnl.Controls.Add(flowButtons);
@@ -559,15 +565,13 @@ public class PartsEditorForm : Form
         if (form.ShowDialog() == DialogResult.OK) p.script = form.ResultScript;
     }
 
-    // ==== 🌀 回転する棒として配置（ジェネレータ） ====
+    // ==== 🌀 回転する棒として配置（ジェネレータ）／🔧 既存の棒を編集 ====
 
-    private void OpenRodGenerator()
+    // フォームの入力値から、指定した開始インデックス(全体配列内での通し番号)を基準にパーツ一式を生成する。
+    // 新規作成でも既存の棒の再生成でも、この1メソッドを共有する。
+    private List<PartDef> GenerateRodParts(RodGeneratorForm form, int startIndexForPhase)
     {
-        using var form = new RodGeneratorForm(projectRoot);
-        if (form.ShowDialog() != DialogResult.OK) return;
-
         var existing = new HashSet<string>(parts.Select(p => p.id));
-        int startIndexForPhase = parts.Count; // 既存パーツの後ろに追加し、PartIndexは配列全体でのインデックスになる
         var newParts = new List<PartDef>();
         for (int i = 0; i < form.Count; i++)
         {
@@ -612,12 +616,69 @@ public class PartsEditorForm : Form
             pd.script = new JArray { new JObject { ["hat"] = "OnSpawn", ["body"] = body } };
             newParts.Add(pd);
         }
+        return newParts;
+    }
 
+    private void OpenRodGenerator()
+    {
+        using var form = new RodGeneratorForm(projectRoot);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        var newParts = GenerateRodParts(form, parts.Count);
         parts.AddRange(newParts);
         selectedIndex = parts.Count - newParts.Count;
         RefreshList();
         MessageBox.Show($"{newParts.Count}個のパーツを「回転する棒」として配置しました。\n（半径はパーツの並び順(PartIndex)に応じて自動的に増えていくため、全て同じスクリプトを共有しても一直線に並んで回転します）",
             "生成完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // 選択中のパーツが「🌀 回転する棒として配置」で作られた棒の一部かどうかを判定し、
+    // 同じ棒に属する他のパーツ（idの接頭辞が同じ かつ 同じ速さ・間隔のSetLocalOffsetPolarスクリプトを持つ）をまとめて検出する。
+    private RodGroupInfo? DetectRodGroup(int fromIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= parts.Count) return null;
+        var seed = parts[fromIndex];
+        if (!RodGroupInfo.TryParseRodScript(seed.script, out float speed, out float spacing)) return null;
+
+        string id = seed.id;
+        int cut = id.Length;
+        while (cut > 0 && char.IsDigit(id[cut - 1])) cut--;
+        string prefix = id.Substring(0, cut);
+        if (string.IsNullOrEmpty(prefix)) return null;
+
+        var info = new RodGroupInfo { IdPrefix = prefix, Spacing = spacing, Speed = speed, Hp = seed.hp, ZOrder = seed.zOrder, PartSize = seed.width > 0 ? seed.width : 12, SpritePath = seed.sprite };
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var p = parts[i];
+            if (!p.id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (!RodGroupInfo.TryParseRodScript(p.script, out float s2, out float sp2)) continue;
+            if (Math.Abs(s2 - speed) > 0.0001f || Math.Abs(sp2 - spacing) > 0.0001f) continue;
+            info.Indices.Add(i);
+        }
+        return info.Indices.Count > 0 ? info : null;
+    }
+
+    private void OpenRodEditor()
+    {
+        if (selectedIndex < 0) { MessageBox.Show("編集したい「回転する棒」のパーツをどれか1つ選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        var group = DetectRodGroup(selectedIndex);
+        if (group == null)
+        {
+            MessageBox.Show("選択中のパーツは「回転する棒」として認識できませんでした。\n（「🌀 回転する棒として配置」で作成したパーツのみ、この機能で編集できます）", "認識できません", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var form = new RodGeneratorForm(projectRoot, group);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        // 既存メンバーを削除してから同じパラメータ体系で再生成する（並び順は末尾に移動する）
+        foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
+        var newParts = GenerateRodParts(form, parts.Count);
+        parts.AddRange(newParts);
+        selectedIndex = parts.Count - newParts.Count;
+        RefreshList();
+        MessageBox.Show($"「回転する棒」を{newParts.Count}個のパーツに更新しました。\n（更新後はパーツ一覧の末尾に移動しています）",
+            "更新完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     // ==== 下部ボタン ====
@@ -654,25 +715,28 @@ public class RodGeneratorForm : Form
 {
     private readonly string projectRoot;
     private NumericUpDown nudCount = null!, nudSpacing = null!, nudSpeed = null!, nudHp = null!, nudZOrder = null!, nudSize = null!;
+    private CheckBox chkReverse = null!;
     private TextBox txtIdPrefix = null!;
     private Label lblSprite = null!;
     private string spritePath = "";
 
     public int Count => (int)nudCount.Value;
     public float Spacing => (float)nudSpacing.Value;
-    public float Speed => (float)nudSpeed.Value;
+    public float Speed => (float)nudSpeed.Value * (chkReverse.Checked ? -1f : 1f);
     public int Hp => (int)nudHp.Value;
     public int ZOrder => (int)nudZOrder.Value;
     public int PartSize => (int)nudSize.Value;
     public string IdPrefix => string.IsNullOrWhiteSpace(txtIdPrefix.Text) ? "rod" : txtIdPrefix.Text.Trim();
     public string SpritePath => spritePath;
 
-    public RodGeneratorForm(string projectRoot)
+    // initialを渡すと「既存の棒を編集」モードになり、現在の値が入った状態で開く（値の意味はRodGroupInfo参照）
+    public RodGeneratorForm(string projectRoot, RodGroupInfo? initial = null)
     {
         this.projectRoot = projectRoot;
-        Text = "🌀 回転する棒として配置";
-        Size = new Size(480, 420);
-        MinimumSize = new Size(420, 380);
+        bool isEdit = initial != null;
+        Text = isEdit ? "🔧 回転する棒を編集" : "🌀 回転する棒として配置";
+        Size = new Size(480, 460);
+        MinimumSize = new Size(420, 400);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
@@ -681,8 +745,10 @@ public class RodGeneratorForm : Form
             Dock = DockStyle.Top,
             Height = 70,
             Padding = new Padding(8),
-            Text = "マリオのファイアバーのように、中心から一直線に並んだ球が棒状に回転するパーツ一式を自動生成します。\n" +
-                   "「□○○○○○」のように、球が同じ角度・異なる半径で並ぶため、常に一直線のまま回転します。",
+            Text = isEdit
+                ? "現在の「回転する棒」のパラメータを変更して更新します。球の数を増減させたり、回転速度・向き・間隔（伸び縮み）を調整できます。"
+                : "マリオのファイアバーのように、中心から一直線に並んだ球が棒状に回転するパーツ一式を自動生成します。\n" +
+                  "「□○○○○○」のように、球が同じ角度・異なる半径で並ぶため、常に一直線のまま回転します。",
             Font = new Font(Font.FontFamily, 8f),
             ForeColor = Color.DarkSlateGray,
         };
@@ -704,29 +770,33 @@ public class RodGeneratorForm : Form
             table.Controls.Add(control, 1, r);
         }
 
-        nudCount = new NumericUpDown { Minimum = 1, Maximum = 20, Value = 5, Width = 100 };
-        AddRow("球の数", nudCount);
+        nudCount = new NumericUpDown { Minimum = 1, Maximum = 40, Value = initial?.Indices.Count ?? 5, Width = 100 };
+        AddRow("球の数（増減で伸縮）", nudCount);
 
-        nudSpacing = new NumericUpDown { Minimum = 2, Maximum = 500, Value = 14, Width = 100 };
+        nudSpacing = new NumericUpDown { Minimum = 2, Maximum = 500, Value = (decimal)(initial?.Spacing ?? 14f), Width = 100 };
         AddRow("間隔(px)", nudSpacing);
 
-        nudSpeed = new NumericUpDown { Minimum = 0.001m, Maximum = 1m, DecimalPlaces = 3, Increment = 0.005m, Value = 0.04m, Width = 100 };
+        nudSpeed = new NumericUpDown { Minimum = 0.001m, Maximum = 1m, DecimalPlaces = 3, Increment = 0.005m, Value = (decimal)Math.Abs(initial?.Speed ?? 0.04f), Width = 100 };
         AddRow("回転速度", nudSpeed);
 
-        nudSize = new NumericUpDown { Minimum = 2, Maximum = 200, Value = 12, Width = 100 };
+        chkReverse = new CheckBox { Text = "逆回転（反時計回り）にする", AutoSize = true, Checked = (initial?.Speed ?? 0f) < 0f };
+        AddRow("回転方向", chkReverse);
+
+        nudSize = new NumericUpDown { Minimum = 2, Maximum = 200, Value = initial?.PartSize ?? 12, Width = 100 };
         AddRow("球の表示/当たり判定サイズ(px)", nudSize);
 
-        nudHp = new NumericUpDown { Minimum = 0, Maximum = 999, Value = 0, Width = 100 };
+        nudHp = new NumericUpDown { Minimum = 0, Maximum = 999, Value = initial?.Hp ?? 0, Width = 100 };
         AddRow("HP(0=不滅)", nudHp);
 
-        nudZOrder = new NumericUpDown { Minimum = -100, Maximum = 100, Value = 1, Width = 100 };
+        nudZOrder = new NumericUpDown { Minimum = -100, Maximum = 100, Value = initial?.ZOrder ?? 1, Width = 100 };
         AddRow("zOrder", nudZOrder);
 
-        txtIdPrefix = new TextBox { Text = "rod", Width = 150 };
+        txtIdPrefix = new TextBox { Text = initial?.IdPrefix ?? "rod", Width = 150 };
         AddRow("パーツID接頭辞", txtIdPrefix);
 
+        spritePath = initial?.SpritePath ?? "";
         var spritePanel = new FlowLayoutPanel { AutoSize = true };
-        lblSprite = new Label { Text = "(画像なし)", AutoSize = true, MaximumSize = new Size(220, 0), Margin = new Padding(3, 6, 6, 3) };
+        lblSprite = new Label { Text = string.IsNullOrEmpty(spritePath) ? "(画像なし)" : spritePath, AutoSize = true, MaximumSize = new Size(220, 0), Margin = new Padding(3, 6, 6, 3) };
         var btnPick = new Button { Text = "📁 画像選択", AutoSize = true, Padding = new Padding(4, 2, 4, 2) };
         btnPick.Click += (s, e) =>
         {
@@ -741,7 +811,7 @@ public class RodGeneratorForm : Form
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
-        var btnOk = new Button { Text = "生成", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        var btnOk = new Button { Text = isEdit ? "更新" : "生成", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         flow.Controls.Add(btnCancel);
         flow.Controls.Add(btnOk);
         AcceptButton = btnOk;
@@ -754,6 +824,46 @@ public class RodGeneratorForm : Form
         Controls.Add(pnlScroll);
         Controls.Add(pnlBottom);
         Controls.Add(lblExplain);
+    }
+}
+
+// ======================================================
+// RodGroupInfo - 「回転する棒」として検出済みのパーツ群の共有パラメータ
+// Feature: Composite Multi-Part Objects (Parts-Fix5)
+// ======================================================
+public class RodGroupInfo
+{
+    public List<int> Indices = new(); // parts配列内でのインデックス（棒を構成する全パーツ）
+    public string IdPrefix = "rod";
+    public float Spacing;
+    public float Speed; // 符号が回転方向（負=逆回転）
+    public int Hp;
+    public int ZOrder;
+    public int PartSize;
+    public string SpritePath = "";
+
+    // scriptが「SetLocalOffsetPolar(angle:Mul(Time,speed), radius:Mul(Add(PartIndex,1),spacing))」の
+    // 形になっているかを判定し、speed/spacingを取り出す。ジェネレータが生成した形と完全一致する場合のみtrue。
+    public static bool TryParseRodScript(JArray script, out float speed, out float spacing)
+    {
+        speed = 0; spacing = 0;
+        try
+        {
+            var hat = script.FirstOrDefault(t => t["hat"]?.ToString() == "OnSpawn") as JObject;
+            var body = hat?["body"] as JArray;
+            var forever = body?.FirstOrDefault(t => t["op"]?.ToString() == "Forever") as JObject;
+            var fbody = forever?["body"] as JArray;
+            var setOp = fbody?.FirstOrDefault(t => t["op"]?.ToString() == "SetLocalOffsetPolar") as JObject;
+            if (setOp == null) return false;
+            var angle = setOp["angle"] as JObject;
+            var radius = setOp["radius"] as JObject;
+            if (angle?["op"]?.ToString() != "Mul") return false;
+            if (radius?["op"]?.ToString() != "Mul") return false;
+            speed = angle["b"]!.Value<float>();
+            spacing = radius["b"]!.Value<float>();
+            return true;
+        }
+        catch { return false; }
     }
 }
 

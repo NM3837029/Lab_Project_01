@@ -811,6 +811,11 @@ struct Gimmick {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartInstance> parts;
+
+    // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTAL:
+    // 前フレームにプレイヤーと接触していたかどうか（同じフレーム内での往復ワープ連鎖や、
+    // 転送先に立った瞬間の即時再トリガーを防ぐエッジトリガー用）
+    bool portalWasTouching = false;
 };
 
 struct Bullet {
@@ -1074,7 +1079,10 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE) {
+        // Feature: ゲート扉の修正（友人フィードバック対応）— GIMMICK_GATE_DOORを横方向の実体判定に追加。
+        // isActive==true（施錠中/閉状態）の間だけこのループに乗り、通行を塞げるようにする
+        // （元々ここに無かったため、閉じているはずのドアを素通りできてしまっていた）。
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_GATE_DOOR) {
             // Y軸の重なり判定（少しの遊びを持たせる）
             if (y + objH > gim.y + 4.0f && y < gim.y + gim.height - 4.0f) {
                 if (vx > 0.0f) { // 右方向へ移動中
@@ -1372,8 +1380,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         stage1.gimmicks.push_back({ GIMMICK_ROTATING_BRIDGE, 1824.0f, 350.0f, 120.0f, 16.0f, 120.0f, 16.0f, 0.0f, 0.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
         // セクション4: 手動橋（タイミングを自分で制御）
         stage1.gimmicks.push_back({ GIMMICK_MANUAL_BRIDGE, 1984.0f, 290.0f, 120.0f, 16.0f, 120.0f, 16.0f, 0.0f, 0.0f, 120.0f, 16.0f, true, 0.0f, 0.0f, 1.5708f, 0.0f, false, false, {} });
-        // カットポータル（ステージ通過演出）
-        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL,       0.0f,   0.0f,   0.0f,  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, true, 0.15f, 0.22f, 0.0f, 0.0f, false, false, {} });
+        // Feature: ポータルの作り直し（友人フィードバック対応）— 2地点間テレポート。同じparam値("portal_a")の
+        // ポータル同士がペアになり、片方に触れるともう片方の位置へワープする。
+        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL,  640.0f, 380.0f, 32.0f, 32.0f, 32.0f, 32.0f, 0.0f, 0.0f, 32.0f, 32.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+        stage1.gimmicks.back().param = "portal_a";
+        stage1.gimmicks.push_back({ GIMMICK_CUT_PORTAL, 2100.0f, 300.0f, 32.0f, 32.0f, 32.0f, 32.0f, 0.0f, 0.0f, 32.0f, 32.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+        stage1.gimmicks.back().param = "portal_a";
 
         // -----敵配置-----
         // セクション1 低地をパトロール
@@ -1622,7 +1634,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     float dragOffsetX = 0, dragOffsetY = 0, baseScale = 1.0f, baseAngle = 0.0f, baseSpeed = 1.0f;
     int lastMouseX = 0, lastMouseY = 0;
-    float tempCutStart = -1.0f, globalTimeScale = 1.0f;
+    float globalTimeScale = 1.0f;
 
     // 複数選択用コンテナとドラッグ用変数
     std::vector<Player*> selectedPlayers;
@@ -2109,9 +2121,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (currentMiddleClick && !lastMiddleClick) { isPaused = !isPaused; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
         lastMiddleClick = currentMiddleClick;
 
+        // Feature: 操作性改善（友人フィードバック対応）— 一時停止をSpaceキーに変更
         static bool lastPauseKey = false;
-        if (CheckHitKey(KEY_INPUT_B) && !lastPauseKey) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
-        lastPauseKey = (CheckHitKey(KEY_INPUT_B) != 0);
+        if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
+        lastPauseKey = (CheckHitKey(KEY_INPUT_SPACE) != 0);
 
         // Feature 5: ShowMessageアクションで表示中のメッセージウィンドウをEnterキーで閉じる
         static bool lastMsgKey = false;
@@ -2205,58 +2218,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     
                     if (!enemySelected) {
                         // ギミックの選択状態をチェック
+                        // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTALも他のギミックと同様、
+                        // 通常のgim.x/gim.yに基づくクリック選択の対象にする（専用タイムラインUIは廃止）
                         bool gimSelected = false;
                         for (auto& gim : gimmicks) {
-                            // CUT_PORTALのみ専用のタイムラインUIで選択するため除外。それ以外の全ギミック種別を選択可能にする
-                            // （旧: 6種類のみのホワイトリストだったため、追加された新種別のギミックがここで選択できなかった）
-                            if (gim.type != GIMMICK_CUT_PORTAL) {
-                                if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
-                                    gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
-                                    selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
-                                    selectedGimmicks.push_back(&gim);
-                                    selectedType = SELECT_GIMMICK;
-                                    targetScale = &gim.width; // スケールを幅にマッピング！
-                                    targetAngle = &gim.angle;
-                                    targetSpeedScale = &gim.customTimer;
-                                    targetPaused = &gim.isPaused;
-                                    targetRewind = &gim.isRewinding;
-                                    targetDirection = nullptr;
-                                    targetEnemyType = nullptr;
-                                    targetGimmick = &gim;
-                                    targetEnemy = nullptr;
-                                    gimSelected = true;
-                                    break;
-                                }
+                            if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                                gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedGimmicks.push_back(&gim);
+                                selectedType = SELECT_GIMMICK;
+                                targetScale = &gim.width; // スケールを幅にマッピング！
+                                targetAngle = &gim.angle;
+                                targetSpeedScale = &gim.customTimer;
+                                targetPaused = &gim.isPaused;
+                                targetRewind = &gim.isRewinding;
+                                targetDirection = nullptr;
+                                targetEnemyType = nullptr;
+                                targetGimmick = &gim;
+                                targetEnemy = nullptr;
+                                gimSelected = true;
+                                break;
                             }
                         }
-                        
-                        if (!gimSelected) {
-                            // タイムラインカットの選択状態をチェック（右クリックで選択して削除）
-                            if (my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
-                                float ct = (float)(mx - 50) / (WINDOW_WIDTH - 100);
-                                for (auto& gim : gimmicks) {
-                                    if (gim.type == GIMMICK_CUT_PORTAL && gim.isActive) {
-                                        if (ct >= gim.val1 && ct <= gim.val2) {
-                                            selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
-                                            selectedGimmicks.push_back(&gim);
-                                            selectedType = SELECT_GIMMICK;
-                                            targetScale = nullptr;
-                                            targetAngle = nullptr;
-                                            targetSpeedScale = nullptr;
-                                            targetPaused = nullptr;
-                                            targetRewind = nullptr;
-                                            targetDirection = nullptr;
-                                            targetEnemyType = nullptr;
-                                            targetGimmick = &gim;
-                                            targetEnemy = nullptr;
-                                            gimSelected = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
- 
+
                         if (!gimSelected) {
                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                             selectedType = SELECT_NONE;
@@ -2276,39 +2260,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (selectedType == SELECT_NONE) {
                     menu.isOpen = false;
                 } else {
-                    // コンテキストメニューの高さを動的に調整
-                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
-                        menu.height = 40;
-                    } else {
-                        menu.height = 160;
-                    }
-                    menu.isOpen = true; 
-                    menu.x = mx; 
-                    menu.y = my; 
+                    // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTAL専用の「Delete Cut」メニューは
+                    // 廃止し、他のギミックと同じ標準コンテキストメニュー（巻き戻し/一時停止トグル等）を使う
+                    menu.height = 160;
+                    menu.isOpen = true;
+                    menu.x = mx;
+                    menu.y = my;
                 }
             }
 
             // コンテキストメニューのアクショントリガー
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
                 if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
-                    // 特殊ケース：タイムラインカットギミックの削除
-                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
-                        if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            // Find and erase the portal gimmick from vector to completely destroy its existence and history
-                            for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
-                                if (&(*it) == targetGimmick) {
-                                    gimmicks.erase(it);
-                                    break;
-                                }
-                            }
-                            selectedPlayers.clear();
-                            selectedEnemies.clear();
-                            selectedGimmicks.clear();
-                            selectedType = SELECT_NONE;
-                            targetGimmick = nullptr;
-                            menu.isOpen = false;
-                        } else { menu.isOpen = false; }
-                    } else {
+                    {
                         // 巻き戻しの切り替え
                         if (my >= menu.y + 5 && my <= menu.y + 30) {
                             *targetRewind = !(*targetRewind);
@@ -2386,7 +2350,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 // 重複している場合にギミックを選択
                 for (auto& gim : gimmicks) {
-                    if (gim.isActive && gim.type != GIMMICK_CUT_PORTAL) {
+                    if (gim.isActive) {
                         if (gim.x + gim.spriteWidth >= selX1 && gim.x <= selX2 && gim.y + gim.spriteHeight >= selY1 && gim.y <= selY2) {
                             selectedGimmicks.push_back(&gim);
                         }
@@ -2443,21 +2407,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 一時停止ボタンのチェック
                 if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
 
-                // タイムラインカット
-                if (!lastLeftClick && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
-                    if (CheckHitKey(KEY_INPUT_LCONTROL)) {
-                        float ct = (float)(mx - 50) / (WINDOW_WIDTH - 100);
-                        if (ct < 0.0f) ct = 0.0f;
-                        if (ct > 1.0f) ct = 1.0f;
-                        if (tempCutStart < 0) tempCutStart = ct;
-                        else {
-                            float start = (ct > tempCutStart ? tempCutStart : ct);
-                            float end = (ct > tempCutStart ? ct : tempCutStart);
-                            gimmicks.push_back({ GIMMICK_CUT_PORTAL, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, true, start, end, 0.0f, 0.0f, false, false, {} });
-                            tempCutStart = -1.0f;
-                        }
-                    }
-                }
+                // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン上のCtrl+クリックによる
+                // ポータル生成は廃止。ポータルはC#側のLab_Editor（通常のX,Y配置フロー）で作成する。
 
                 // インスペクターのドラッグと切り替え（選択されたすべてに適用）
                 if (!lastLeftClick && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
@@ -2599,7 +2550,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // ギミックのチェック
                             if (!objectClicked) {
                                 for (auto& gim : gimmicks) {
-                                    if (gim.isActive && gim.type != GIMMICK_CUT_PORTAL) {
+                                    if (gim.isActive) {
                                         if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
                                             gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
                                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
@@ -2776,6 +2727,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // キーボード移動（通常モード、または一時停止していないエディットモード）
         // editorPlayerCapsのbaseSpeed/baseJumpPowerをステージ設定として使用
+        // Feature: ジャンプ連打・オーディオ制御の修正（友人フィードバック対応）— ジャンプキーをB/F/T/M等と同様の
+        // edge-trigger方式にする。天井に頭をぶつけて即座にisJumpingがfalseへ戻っても、キーを押しっぱなしのままでは
+        // 再発火しないため、SE連続再生や不自然な連続ジャンプを防げる。
+        static bool lastJumpKey = false;
+        bool currentJumpKey = CheckHitKey(KEY_INPUT_W) != 0;
         if (currentScene == PLAY && canPlayerAct) {
             float baseSpd = editorPlayerCaps.baseSpeed;
             float baseJmp = (float)editorPlayerCaps.baseJumpPower;
@@ -2785,7 +2741,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             player.vx = 0;
             if (CheckHitKey(KEY_INPUT_A)) { player.vx = -speed; player.direction = 1; }
             if (CheckHitKey(KEY_INPUT_D)) { player.vx = speed; player.direction = 0; }
-            if (CheckHitKey(KEY_INPUT_SPACE) && !player.isJumping) {
+            if (currentJumpKey && !lastJumpKey && !player.isJumping) {
                 player.vy = baseJmp;
                 player.isJumping = true;
                 SoundManager::Get().PlaySe("jump");
@@ -2793,6 +2749,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         } else {
             player.vx = 0;
         }
+        lastJumpKey = currentJumpKey;
 
         // --- バッファへの描画 / 物理更新 ---
         SetDrawScreen(gameScreen);
@@ -2866,27 +2823,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     player.isJumping = false;
                 }
 
-                float tp = player.x / STAGE_WIDTH;
-                float prev_tp = prevPlayerX / STAGE_WIDTH; // 前フレームのタイムライン位置
+                // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン比率の通過判定ではなく、
+                // 通常のX,Y配置されたポータル同士をgim.paramの一致でペアリングし、AABB接触で転移させる。
+                // 転移直後に転移先のポータルへ即座に押し戻される（無限往復）のを防ぐため、
+                // portalWasTouchingによるエッジトリガー（「触れていない→触れた」の瞬間のみ発火）を用いる。
                 float pw_scaled = (float)player.width * player.scale;
+                float ph_scaled = (float)player.height * player.scale;
                 for (auto& gim : gimmicks) {
-                    if (gim.type == GIMMICK_CUT_PORTAL && gim.isActive) {
-                        float timePos = gim.val1;
-                        float targetTimePos = gim.val2;
-                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float warpOffset = gdef ? gdef->warpOffsetPx : 8.0f;
-
-                        // 左の境界（timePos）を左から右に越えたときのみ前方にワープ
-                        if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
-                            player.x = targetTimePos * STAGE_WIDTH + warpOffset;
+                    if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive) continue;
+                    bool touching = CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
+                    if (touching && !gim.portalWasTouching && !gim.param.empty()) {
+                        for (auto& other : gimmicks) {
+                            if (&other == &gim || other.type != GIMMICK_CUT_PORTAL || !other.isActive) continue;
+                            if (other.param != gim.param) continue;
+                            player.x = other.x;
+                            player.y = other.y;
+                            other.portalWasTouching = true; // 転送先での即時再トリガーを防ぐ
+                            const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
-                        }
-                        // 右の境界（targetTimePos）を右から左に越えたときのみ後方にワープ
-                        else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
-                            player.x = timePos * STAGE_WIDTH - pw_scaled - warpOffset;
-                            if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
+                            break;
                         }
                     }
+                    gim.portalWasTouching = touching;
                 }
 
                 // ステージ境界の制限
@@ -2916,38 +2874,39 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 // 2. 重量スイッチとドアの開閉ロジック
-                bool switchActive = false;
-                float switchX = 0.0f;
-                float switchWidth = 0.0f;
-                float switchTriggerThreshold = 140.0f;
-                for (const auto& gim : gimmicks) {
-                    if (gim.type == GIMMICK_WEIGHT_SWITCH && gim.isActive) {
-                        switchX = gim.x;
-                        switchWidth = gim.spriteWidth;
-                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        switchTriggerThreshold = gdef ? gdef->triggerWidthThreshold : 140.0f;
-                        break;
-                    }
-                }
-
-                if (switchWidth > 0.0f) {
-                    for (const auto& gim : gimmicks) {
-                        if (gim.type == GIMMICK_SCALABLE_BOX && gim.isActive) {
+                // Feature: ゲート扉の修正（友人フィードバック対応）— 複数の重量スイッチ/ゲート扉が同じステージに
+                // 存在する場合に個別ペアリングできるよう、各スイッチのアクティブ状態を個別に計算する。
+                // ドア側のparamが空でなければ同じparamを持つスイッチとのみ連動し、空の場合は従来通り
+                // 「最初に見つかったスイッチ」を全ドアに適用する（後方互換）。
+                struct SwitchState { const Gimmick* gim; bool active; };
+                std::vector<SwitchState> switchStates;
+                for (const auto& switchGim : gimmicks) {
+                    if (switchGim.type != GIMMICK_WEIGHT_SWITCH || !switchGim.isActive) continue;
+                    const GimmickDef* gdef = FindGimmickDef(switchGim.assetId);
+                    float switchTriggerThreshold = gdef ? gdef->triggerWidthThreshold : 140.0f;
+                    bool active = false;
+                    for (const auto& boxGim : gimmicks) {
+                        if (boxGim.type == GIMMICK_SCALABLE_BOX && boxGim.isActive) {
                             // 拡大可能ボックスがスイッチの上にあるかチェック
-                            if (gim.x + gim.spriteWidth >= switchX && gim.x <= switchX + switchWidth) {
+                            if (boxGim.x + boxGim.spriteWidth >= switchGim.x && boxGim.x <= switchGim.x + switchGim.spriteWidth) {
                                 // スイッチが要求する横幅以上に拡大されている必要がある
-                                if (gim.spriteWidth >= switchTriggerThreshold) {
-                                    switchActive = true;
-                                }
+                                if (boxGim.spriteWidth >= switchTriggerThreshold) active = true;
                             }
                         }
                     }
+                    switchStates.push_back({ &switchGim, active });
                 }
 
                 // スイッチの状態をゲートドアのロックに適用
                 for (auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_GATE_DOOR) {
                         if (gim.val1 > 0.5f) continue; // OpenDoorイベントで手動オープン済みのドアは自動ロジックの対象外
+                        bool switchActive = false;
+                        if (!gim.param.empty()) {
+                            for (auto& sw : switchStates) if (sw.gim->param == gim.param) switchActive = switchActive || sw.active;
+                        } else if (!switchStates.empty()) {
+                            switchActive = switchStates[0].active; // 後方互換：param未指定なら最初に見つかったスイッチ
+                        }
                         bool wasOpen = !gim.isActive;
                         gim.isActive = !switchActive; // スイッチがアクティブでない場合はドアを閉じる（isActive=true）
                         bool isOpenNow = !gim.isActive;
@@ -3802,10 +3761,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                     else if (gim.type == GIMMICK_MOVING_PLATFORM) {
                         // 動く足場：val1(上端)～val2(下端)を自動で往復する
+                        // Feature: 動く足場の空中配置対応（友人フィードバック対応）— 従来は配置Yを上端として
+                        // 常に下方向にのみ振動する式だったため、空中に置いても地面側へ沈むように見えていた。
+                        // 配置Yを振動の中心とし、±travel/2の範囲で往復するようにする。
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                         float travel = gdef ? gdef->travelDistance : 96.0f;
                         float oscSpeed = gdef ? gdef->oscillationSpeed : 0.02f;
-                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + travel; }
+                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y - travel * 0.5f; gim.val2 = gim.y + travel * 0.5f; }
                         gim.customTimer += oscSpeed * gts;
                         float t = (sinf(gim.customTimer) + 1.0f) * 0.5f;
                         gim.y = gim.val1 + (gim.val2 - gim.val1) * t;
@@ -4353,15 +4315,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_CUT_PORTAL) {
-                // ポータル画像を描画（カスタムスプライト優先）
+                // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン比率(val1/val2)ではなく、
+                // 他のギミックと同じくgim.x/gim.yに基づいて通常のスプライト描画を行う
                 int useHandle = gim.handle >= 0 ? gim.handle : portalHandle;
-                int px1 = (int)(gim.val1 * STAGE_WIDTH - cameraX);
-                int px2 = (int)(gim.val2 * STAGE_WIDTH - cameraX);
-                int py = (int)groundY - 80;
-
-                // 円形の領域に合わせて画像を描画
-                DrawExtendGraph(px1 - 20, py - 20, px1 + 20, py + 20, useHandle, TRUE);
-                DrawExtendGraph(px2 - 20, py - 20, px2 + 20, py + 20, useHandle, TRUE);
+                int x1 = (int)(gim.x - cameraX);
+                int y1 = (int)gim.y;
+                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int y2 = (int)(gim.y + gim.spriteHeight);
+                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SPIKES) {
                 // トゲトゲ画像を描画（カスタムスプライト優先）
@@ -4413,12 +4374,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
             else if (gim.type == GIMMICK_TIME_FIELD) {
-                // 反・一時停止装置の描画
+                // Feature: TIME_FIELDの見た目変更（友人フィードバック対応）— 単なる円塗りではなく、
+                // 中央に棒を配置し、そこから円状にエネルギーが脈動しながら放出されている表現にする。
+                // アニメーションはBehaviorInterpreter::globalFrameCounter（ポーズ中も止まらず加算され続ける）を
+                // 使うことで、「この一時停止装置の中だけ時間が流れ続ける」というギミックの意味と一致させる。
                 float radius = gim.val1 > 0 ? gim.val1 : 100.0f;
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
-                DrawCircle((int)(gim.x - cameraX), (int)gim.y, (int)radius, GetColor(0, 255, 255), TRUE);
+                int centerX = (int)(gim.x - cameraX);
+                int centerY = (int)gim.y;
+
+                // 範囲全体のうっすらとした塗り（従来通り範囲を把握しやすくする）
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 25);
+                DrawCircle(centerX, centerY, (int)radius, GetColor(0, 255, 255), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                DrawCircle((int)(gim.x - cameraX), (int)gim.y, (int)radius, GetColor(0, 255, 255), FALSE);
+
+                // 同心円状に脈動しながら広がるエネルギーリング
+                const int ringCount = 3;
+                for (int i = 0; i < ringCount; i++) {
+                    float phase = fmodf(BehaviorInterpreter::globalFrameCounter * 1.5f + (float)i * (100.0f / ringCount * 3.0f), 300.0f) / 300.0f; // 0.0〜1.0を繰り返す
+                    float ringRadius = radius * phase;
+                    int alpha = (int)(180 * (1.0f - phase));
+                    if (alpha < 0) alpha = 0;
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, alpha);
+                    DrawCircle(centerX, centerY, (int)ringRadius, GetColor(0, 255, 255), FALSE);
+                }
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+                // 中央の棒（縦棒、エネルギーの発生源）
+                int rodHalfHeight = (int)(radius * 0.35f);
+                if (rodHalfHeight < 8) rodHalfHeight = 8;
+                DrawLine(centerX - 1, centerY - rodHalfHeight, centerX - 1, centerY + rodHalfHeight, GetColor(0, 200, 200));
+                DrawLine(centerX + 1, centerY - rodHalfHeight, centerX + 1, centerY + rodHalfHeight, GetColor(0, 200, 200));
+                DrawLine(centerX, centerY - rodHalfHeight, centerX, centerY + rodHalfHeight, GetColor(220, 255, 255));
             }
             else if (gim.type == GIMMICK_CHOMPER) {
                 // 敵食いギミックの描画（紫色のボックス）
@@ -4838,22 +4824,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(x1, y1, x2, y2, GetColor(100, 150, 255), FALSE); // 不透明の青い輪郭線
             }
 
-            // タイムラインのトラックと現在の再生ヘッド
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(60, 60, 60), TRUE);
-            float mxp = 50 + (player.x / (float)STAGE_WIDTH) * (WINDOW_WIDTH - 100);
-            DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
-            
-            // タイムラインカットの描画
-            for (auto& gim : gimmicks) {
-                if (gim.type == GIMMICK_CUT_PORTAL) {
-                    int x1 = 50 + (int)(gim.val1 * (float)(WINDOW_WIDTH - 100));
-                    int x2 = 50 + (int)(gim.val2 * (float)(WINDOW_WIDTH - 100));
-                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 80); DrawBox(x1, WINDOW_HEIGHT - 60, x2, WINDOW_HEIGHT - 40, GetColor(200, 50, 50), TRUE); SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                    DrawLine(x1, WINDOW_HEIGHT - 60, x1, WINDOW_HEIGHT - 40, GetColor(255, 255, 0)); DrawLine(x2, WINDOW_HEIGHT - 60, x2, WINDOW_HEIGHT - 40, GetColor(255, 255, 0));
-                }
-            }
-            if (tempCutStart >= 0) { int px = 50 + (int)(tempCutStart * (float)(WINDOW_WIDTH - 100)); DrawLine(px, WINDOW_HEIGHT - 75, px, WINDOW_HEIGHT - 25, GetColor(0, 255, 255)); }
-            
+            // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライントラック/再生ヘッド/カット表示は
+            // CUT_PORTALの専用UIだったため廃止（ポータルは通常のギミックとして画面上に直接描画・選択される）
+
             // 動的インスペクターパネルの描画
             DrawString(WINDOW_WIDTH - 240, 20, "[INSPECTOR]", GetColor(200, 200, 200));
             if (selectedType == SELECT_NONE) {
@@ -4874,7 +4847,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else if (targetGimmick->type == GIMMICK_SCALABLE_BOX) sprintf_s(objName, sizeof(objName), "Selected: SCALABLE BOX");
                         else if (targetGimmick->type == GIMMICK_WEIGHT_SWITCH) sprintf_s(objName, sizeof(objName), "Selected: WEIGHT SWITCH");
                         else if (targetGimmick->type == GIMMICK_GATE_DOOR) sprintf_s(objName, sizeof(objName), "Selected: GATE DOOR");
-                        else if (targetGimmick->type == GIMMICK_CUT_PORTAL) sprintf_s(objName, sizeof(objName), "Selected: TIMELINE CUT");
+                        else if (targetGimmick->type == GIMMICK_CUT_PORTAL) sprintf_s(objName, sizeof(objName), "Selected: PORTAL");
                     }
                 }
                 DrawString(WINDOW_WIDTH - 240, 50, objName, GetColor(0, 255, 255));
@@ -4937,9 +4910,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(50, 50, 50), TRUE);
                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(180, 180, 180), FALSE);
 
-                if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && targetGimmick->type == GIMMICK_CUT_PORTAL) {
-                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", GetColor(255, 100, 100)); // 目立つ赤色で "Delete Cut" を描画
-                } else {
+                {
                     char rewindStr[32];
                     sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
                     char pausedStr[32];

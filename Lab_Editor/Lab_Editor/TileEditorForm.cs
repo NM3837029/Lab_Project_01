@@ -33,20 +33,53 @@ public class TileEditorForm : Form
     private void InitUI()
     {
         Text = "タイル定義エディタ";
-        Size = new Size(820, 520);
+        Size = new Size(820, 560);
+        MinimumSize = new Size(600, 420);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
-        // 検索ボックス (MZ風 ID/名前検索)
+        // ==== 上部: 検索ボックス ====
+        // Feature: レイアウト修正 — 固定座標(Location)ではなくDockベースにすることで、
+        // Form.Size(タイトルバー等を含む外形)とClientSize(実際の描画領域)の取り違えによる
+        // 下部見切れを構造的に起こらないようにする。
+        var pnlSearch = new Panel { Dock = DockStyle.Top, Height = 30 };
         var lblSearch = new Label { Text = "🔍", Location = new Point(5, 6), Size = new Size(20, 20) };
         txtSearch = new TextBox { Location = new Point(25, 3), Size = new Size(220, 23), PlaceholderText = "ID・名前で検索..." };
         txtSearch.TextChanged += (s, e) => ApplySearchFilter();
+        pnlSearch.Controls.AddRange(new Control[] { lblSearch, txtSearch });
 
-        // DataGridView
+        // ==== 右側: プレビューパネル ====
+        pnlPreview = new Panel
+        {
+            Dock = DockStyle.Right,
+            Width = 120,
+            BorderStyle = BorderStyle.FixedSingle,
+        };
+
+        // ==== 下部: ボタン（右詰めFlowLayoutPanelで自動配置、はみ出す心配がない） ====
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        var flowRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        btnClose = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        btnClose.Click += (s, e) => Close();
+        btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnSave.Click += BtnSave_Click;
+        flowRight.Controls.Add(btnClose);
+        flowRight.Controls.Add(btnSave);
+        var flowLeft = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8), AutoSize = true };
+        btnAdd = new Button { Text = "＋ タイル追加", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
+        btnAdd.Click += BtnAdd_Click;
+        var btnDel = new Button { Text = "🗑 削除", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
+        btnDel.Click += BtnDel_Click;
+        var btnDuplicate = new Button { Text = "⧉ 複製", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
+        btnDuplicate.Click += BtnDuplicate_Click;
+        flowLeft.Controls.AddRange(new Control[] { btnAdd, btnDel, btnDuplicate });
+        pnlBottom.Controls.Add(flowRight);
+        pnlBottom.Controls.Add(flowLeft);
+
+        // ==== 中央: DataGridView ====
         dgv = new DataGridView
         {
-            Location = new Point(5, 35),
-            Size = new Size(680, 410),
+            Dock = DockStyle.Fill,
             AllowUserToAddRows = false,
             AllowUserToDeleteRows = false,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
@@ -71,31 +104,10 @@ public class TileEditorForm : Form
         dgv.CellContentClick += Dgv_CellContentClick;
         dgv.SelectionChanged += Dgv_SelectionChanged;
 
-        // プレビューパネル
-        pnlPreview = new Panel
-        {
-            Location = new Point(695, 5),
-            Size = new Size(110, 110),
-            BorderStyle = BorderStyle.FixedSingle
-        };
-
-        // ボタンパネル
-        btnAdd = new Button { Text = "＋ タイル追加", Location = new Point(5, 455), Size = new Size(120, 30) };
-        btnAdd.Click += BtnAdd_Click;
-
-        var btnDel = new Button { Text = "🗑 削除", Location = new Point(135, 455), Size = new Size(90, 30) };
-        btnDel.Click += BtnDel_Click;
-
-        var btnDuplicate = new Button { Text = "⧉ 複製", Location = new Point(235, 455), Size = new Size(90, 30) };
-        btnDuplicate.Click += BtnDuplicate_Click;
-
-        btnSave = new Button { Text = "💾 保存して閉じる", Location = new Point(570, 455), Size = new Size(150, 30), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnSave.Click += BtnSave_Click;
-
-        btnClose = new Button { Text = "キャンセル", Location = new Point(460, 455), Size = new Size(100, 30) };
-        btnClose.Click += (s, e) => Close();
-
-        Controls.AddRange(new Control[] { lblSearch, txtSearch, dgv, pnlPreview, btnAdd, btnDel, btnDuplicate, btnSave, btnClose });
+        Controls.Add(dgv);
+        Controls.Add(pnlPreview);
+        Controls.Add(pnlBottom);
+        Controls.Add(pnlSearch);
     }
 
     private void LoadGrid()

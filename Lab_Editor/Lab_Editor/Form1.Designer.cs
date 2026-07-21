@@ -52,6 +52,7 @@ partial class Form1
     private System.Windows.Forms.TabPage tabEventList = null!;
 
     private System.Windows.Forms.FlowLayoutPanel flpTiles = null!;
+    private System.Windows.Forms.Button btnBulkFill = null!;
 
     // イベントパレット（敵・ギミック・アイテム）
     private System.Windows.Forms.ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;
@@ -81,7 +82,7 @@ partial class Form1
         var miRedo = new System.Windows.Forms.ToolStripMenuItem("やり直し(&R)", null, (_,_) => Redo()) { ShortcutKeys = System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Y };
         menuEdit.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miUndo, miRedo });
 
-        var menuData = new System.Windows.Forms.ToolStripMenuItem("データベース(&D)");
+        var menuData = new System.Windows.Forms.ToolStripMenuItem("アセット管理(&D)");
         var miAsset = new System.Windows.Forms.ToolStripMenuItem("アセット管理", null, btnAssetManager_Click);
         var miTile = new System.Windows.Forms.ToolStripMenuItem("タイルエディタ", null, btnTileEditor_Click);
         var miAnim = new System.Windows.Forms.ToolStripMenuItem("アニメーションエディタ", null, btnAnimEditor_Click);
@@ -200,7 +201,14 @@ partial class Form1
         tabEventList = new System.Windows.Forms.TabPage("イベントリスト");
 
         flpTiles = new System.Windows.Forms.FlowLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight, AutoScroll = true };
+        // Feature: UI改善（友人フィードバック対応）— 数値指定で行・列の範囲を一括配置するボタン。
+        // Dock=Fillのflptilesを先にAddし、Dock=Bottomのパネルを後からAddする安全な順序を守る。
+        var pnlBulkFill = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Bottom, Height = 34 };
+        btnBulkFill = new System.Windows.Forms.Button { Text = "🔢 数値指定で一括配置", Dock = System.Windows.Forms.DockStyle.Fill, FlatStyle = System.Windows.Forms.FlatStyle.Flat };
+        btnBulkFill.Click += BtnBulkFill_Click;
+        pnlBulkFill.Controls.Add(btnBulkFill);
         tabTilePalette.Controls.Add(flpTiles);
+        tabTilePalette.Controls.Add(pnlBulkFill);
 
         // イベント配置パレット
         var lblEn = new System.Windows.Forms.Label { Text = "👾 敵", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(185, 18) };
@@ -270,7 +278,7 @@ partial class Form1
         this.Controls.Add(vScrollMap);
         this.MainMenuStrip = menuStrip1;
         this.Name = "Form1";
-        this.Text = "Lab Editor (RPG Maker MZ Style)";
+        this.Text = "Lab Editor";
         this.Load += new System.EventHandler(this.Form1_Load);
         
         // 修正：プロパティグリッドの表示順を調整（タブの裏に隠れないように）

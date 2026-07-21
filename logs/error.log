@@ -1151,3 +1151,20 @@
 [2026-07-22 00:53:22] [System::WinMain] INFO: [Init] StageLoader Success
 [2026-07-22 00:53:22] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-07-22 00:53:22] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:57:17] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:57:19] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:57:20] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:57:20] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:57:20] [System::ResetStage] INFO: Begin ResetStage
+----TEST-MARKER-START----
+[2026-07-22 02:24:59] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 02:25:00] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 02:25:00] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 02:25:00] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 02:25:00] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 02:25:00] [TEST::Portal] INFO: Warped to x=900.000000 y=200.000000
+[2026-07-22 02:33:12] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 02:33:13] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 02:33:13] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 02:33:13] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 02:33:13] [System::ResetStage] INFO: Begin ResetStage

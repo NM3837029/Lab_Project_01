@@ -30,6 +30,10 @@ public class HitboxEditorForm : Form
     {
         Text = "当たり判定(Hitbox)エディタ";
         Size = new Size(600, 600);
+        // Feature: UI改善 — 全コントロールが固定座標(Location)配置のため、ウィンドウを縮小すると
+        // 保存/キャンセルボタンが表示領域外にはみ出してしまう。最小サイズを設計時のサイズに固定し、
+        // それより縮小できないようにすることではみ出しを防ぐ。
+        MinimumSize = new Size(600, 600);
         StartPosition = FormStartPosition.CenterParent;
 
         HitboxOffsetX = ox;
@@ -186,34 +190,44 @@ public class HitboxEditorForm : Form
             int dy = (int)((e.Y - dragStart.Y) / scale);
 
             var newRect = dragStartRect;
-            
+
             if (dragMode == 5) // move
             {
                 newRect.X += dx;
                 newRect.Y += dy;
             }
-            else if (dragMode == 1) // top-left
+            else if (dragMode != 0)
             {
-                newRect.X += dx; newRect.Y += dy;
-                newRect.Width -= dx; newRect.Height -= dy;
+                // Feature: 当たり判定エディタの角ドラッグ修正（友人フィードバック対応）
+                // 角ドラッグ中に反対側の角を追い越すと、従来はWidth/Heightだけ1にクランプされてX/Yが
+                // 再計算されず、固定されるべき反対側の角がズレていた。ここでは「固定されるべき反対側の角(anchor)」と
+                // 「操作中の自由な角(free)」を明示的に求め、それらからMin/Maxで矩形を再構成することで、
+                // 追い越した場合も反対側の角が常に正しい位置に固定されるようにする。
+                int anchorX, anchorY, freeX, freeY;
+                switch (dragMode)
+                {
+                    case 1: // top-left をドラッグ → anchorはbottom-right
+                        anchorX = dragStartRect.Right; anchorY = dragStartRect.Bottom;
+                        freeX = dragStartRect.X + dx; freeY = dragStartRect.Y + dy;
+                        break;
+                    case 2: // top-right をドラッグ → anchorはbottom-left
+                        anchorX = dragStartRect.X; anchorY = dragStartRect.Bottom;
+                        freeX = dragStartRect.Right + dx; freeY = dragStartRect.Y + dy;
+                        break;
+                    case 3: // bottom-left をドラッグ → anchorはtop-right
+                        anchorX = dragStartRect.Right; anchorY = dragStartRect.Y;
+                        freeX = dragStartRect.X + dx; freeY = dragStartRect.Bottom + dy;
+                        break;
+                    default: // 4: bottom-right をドラッグ → anchorはtop-left
+                        anchorX = dragStartRect.X; anchorY = dragStartRect.Y;
+                        freeX = dragStartRect.Right + dx; freeY = dragStartRect.Bottom + dy;
+                        break;
+                }
+                newRect.X = Math.Min(anchorX, freeX);
+                newRect.Y = Math.Min(anchorY, freeY);
+                newRect.Width = Math.Max(1, Math.Abs(freeX - anchorX));
+                newRect.Height = Math.Max(1, Math.Abs(freeY - anchorY));
             }
-            else if (dragMode == 2) // top-right
-            {
-                newRect.Y += dy;
-                newRect.Width += dx; newRect.Height -= dy;
-            }
-            else if (dragMode == 3) // bottom-left
-            {
-                newRect.X += dx;
-                newRect.Width -= dx; newRect.Height += dy;
-            }
-            else if (dragMode == 4) // bottom-right
-            {
-                newRect.Width += dx; newRect.Height += dy;
-            }
-
-            if (newRect.Width < 1) newRect.Width = 1;
-            if (newRect.Height < 1) newRect.Height = 1;
 
             hitboxRect = newRect;
             lblInfo.Text = $"Hitbox: X={hitboxRect.X}, Y={hitboxRect.Y}, W={hitboxRect.Width}, H={hitboxRect.Height}";
