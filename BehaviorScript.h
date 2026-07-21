@@ -350,6 +350,18 @@ private:
             }
             return false;
         }
+        if (op == "SetLocalOffsetPolar") {
+            // Feature: Composite Multi-Part Objects (Parts-M2追加) — 親を中心に「角度・半径」で相対位置を設定する。
+            // ファイアバーのように「同じ角度・異なる半径」のパーツを並べて回転する棒状の配置を、
+            // Cos/Sinを2回書かずに1命令で表現できるようにする糖衣構文。
+            if (actor.hasParent && actor.x && actor.y) {
+                float ang = GetNumberArg(block, "angle", 0.0f, actor, state);
+                float rad = GetNumberArg(block, "radius", 0.0f, actor, state);
+                *actor.x = actor.parentX + cosf(ang) * rad;
+                *actor.y = actor.parentY + sinf(ang) * rad;
+            }
+            return false;
+        }
         if (op == "SetAngle") {
             if (actor.angle) *actor.angle = GetNumberArg(block, "angle", *actor.angle, actor, state);
             return false;

@@ -146,6 +146,11 @@ public static class BlockCatalog
                 new BlockArgSpec("dx", "dx", BlockArgType.Number, 0f),
                 new BlockArgSpec("dy", "dy", BlockArgType.Number, 0f),
             }),
+        new BlockDef("SetLocalOffsetPolar", "親から角度/半径で相対位置を設定", BlockCategory.Motion, BlockShape.Stack,
+            new[] {
+                new BlockArgSpec("angle", "角度(rad)", BlockArgType.Number, 0f),
+                new BlockArgSpec("radius", "半径", BlockArgType.Number, 0f),
+            }),
         new BlockDef("SetAngle", "見た目の回転角を設定(rad)", BlockCategory.Motion, BlockShape.Stack,
             new[] { new BlockArgSpec("angle", "角度(rad)", BlockArgType.Number, 0f) }),
 

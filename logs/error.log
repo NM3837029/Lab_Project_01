@@ -721,3 +721,433 @@
 [2026-07-16 18:42:10] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-07-16 18:42:10] [System::ResetStage] INFO: Begin ResetStage
 [2026-07-16 18:42:14] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-18 18:31:48] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-18 18:31:50] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-18 18:31:50] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-18 18:31:50] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-18 18:31:50] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-18 18:32:17] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-18 18:32:19] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-18 18:32:19] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-18 18:32:19] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-18 18:32:19] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-18 18:32:28] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-18 18:32:30] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-18 18:32:30] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-18 18:32:30] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-18 18:32:30] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-20 16:25:45] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-20 16:25:46] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-20 16:25:46] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-20 16:25:46] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-20 16:25:46] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-20 16:26:02] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-20 16:26:03] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-20 16:26:03] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-20 16:26:03] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-20 16:26:03] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-20 16:26:51] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-20 16:26:52] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-20 16:26:52] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-20 16:26:52] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-20 16:26:52] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:52:00] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:52:01] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:52:01] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:52:01] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:52:01] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:52:13] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:52:14] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:52:14] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:52:14] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:52:14] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:52:23] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:52:23] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:52:24] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:52:24] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:52:24] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:52:32] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:52:32] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:52:32] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:52:33] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:52:33] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:52:41] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:52:42] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:52:42] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:52:42] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:52:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:41] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:54:42] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:54:42] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:54:42] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:43] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:44] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:45] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:54] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:54:54] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:54:54] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:54:54] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:54:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:55:41] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:55:42] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:55:42] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:55:42] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:55:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:55:54] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:55:55] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:55:55] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:55:55] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:55:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:56:38] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:56:38] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:56:39] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:56:39] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:56:39] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:57:11] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:57:12] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:57:12] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:57:12] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:57:12] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:58:28] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:58:28] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:58:29] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:58:29] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:58:29] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:58:31] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 22:59:01] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 22:59:02] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 22:59:02] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 22:59:02] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 22:59:02] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 23:14:44] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-21 23:14:45] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-21 23:14:45] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-21 23:14:46] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-21 23:14:46] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-21 23:14:47] [PartsFixTest::gim_firebar] INFO:  [r=13.999996 ang=-2.763185] [r=27.999992 ang=-2.763185] [r=42.000008 ang=-2.763186] [r=56.000004 ang=-2.763186] [r=70.000000 ang=-2.763185]
+[2026-07-22 00:51:38] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:51:41] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:51:41] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:51:41] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:51:41] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:51:52] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:51:55] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:51:55] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:51:55] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:51:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:52:07] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:52:10] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:52:10] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:52:10] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:52:10] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:52:17] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:52:20] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:52:43] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:52:45] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:52:46] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:52:46] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:52:46] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:53:01] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:53:04] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:53:04] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:53:04] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:53:05] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 00:53:20] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 00:53:22] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 00:53:22] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 00:53:22] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 00:53:22] [System::ResetStage] INFO: Begin ResetStage
