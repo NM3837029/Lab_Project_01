@@ -180,7 +180,7 @@
     ],
     [
       0,
-      1,
+      0,
       0,
       0,
       0,
@@ -3712,13 +3712,7 @@
   "backgrounds": [],
   "triggers": [],
   "enemies": [],
-  "gimmicks": [
-    {
-      "id": "gim_firebar",
-      "x": 640.0,
-      "y": 288.0
-    }
-  ],
+  "gimmicks": [],
   "items": [],
   "platforms": []
 }

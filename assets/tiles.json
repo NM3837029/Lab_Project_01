@@ -29,7 +29,7 @@
     "color": "#CC3333",
     "collidable": false,
     "deadly": true,
-    "sprite": "img/spikes.png"
+    "sprite": "img/stage1/spike_tile.png"
   },
   {
     "id": 4,
@@ -54,5 +54,13 @@
     "collidable": true,
     "deadly": false,
     "sprite": "img/block/376_20260621172247.png"
+  },
+  {
+    "id": 7,
+    "name": "草の足場ブロック",
+    "color": "#7A6042",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/stage1/platform_block.png"
   }
 ]

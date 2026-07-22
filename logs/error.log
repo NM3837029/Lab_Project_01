@@ -1168,3 +1168,102 @@
 [2026-07-22 02:33:13] [System::WinMain] INFO: [Init] StageLoader Success
 [2026-07-22 02:33:13] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-07-22 02:33:13] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 03:05:00] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 03:05:01] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 03:05:01] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 03:05:01] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 03:05:01] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 03:22:16] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 03:22:17] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 03:22:17] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 03:22:17] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 03:22:17] [System::ResetStage] INFO: Begin ResetStage
+----STAGE1-TEST----
+[2026-07-22 06:20:02] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 06:20:03] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 06:20:03] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 06:20:03] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 06:20:03] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:20:21] [System::ResetStage] INFO: Begin ResetStage
+----DIAG-RUN----
+[2026-07-22 06:21:52] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 06:21:52] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 06:21:52] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 06:21:52] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 06:21:52] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:21:52] [TEST::Diag] INFO: map 80x15 tiles air=945 grass=62 dirt=142 spike=36 block=15
+[2026-07-22 06:21:52] [TEST::Diag] INFO: player 64.000000,320.000000 size 64x64 goal 2464.000000,352.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: enemy st1_slime type=0 at 768.000000,352.000000 hb=32x32 patrol=704.000000..864.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: enemy st1_slime type=0 at 1280.000000,352.000000 hb=32x32 patrol=1184.000000..1568.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: enemy st1_dropper type=7 at 1984.000000,160.000000 hb=32x32 patrol=1784.000000..2184.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: enemy st1_turret type=2 at 2112.000000,352.000000 hb=32x32 patrol=1912.000000..2312.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: gimmick gim_moving_platform type=14 at 992.000000,320.000000 wh=96.000000x16.000000
+[2026-07-22 06:21:52] [TEST::Diag] INFO: items=15
+----FINAL-RUN----
+[2026-07-22 06:23:33] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 06:23:34] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 06:23:34] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 06:23:34] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 06:23:34] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:25:14] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 06:25:15] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 06:25:15] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 06:25:15] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 06:25:15] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:25:23] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:25:36] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:25:40] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 06:25:57] [System::ResetStage] INFO: Begin ResetStage
+----STAGE2-RUN----
+[2026-07-22 10:19:04] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:19:06] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:19:06] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:19:07] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:19:07] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:20:33] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:20:34] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:20:35] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:20:35] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:20:35] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:20:40] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:20:42] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:20:42] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:20:42] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:20:42] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:21:28] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:21:30] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:21:30] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:21:30] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:21:30] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:21:37] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:21:38] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:21:38] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:21:38] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:21:38] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:23:15] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:23:17] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:23:17] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:23:17] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:23:17] [System::ResetStage] INFO: Begin ResetStage
+----ENC-CHECK----
+[2026-07-22 10:26:51] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:26:53] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:26:53] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:26:53] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:26:53] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:26:53] [TEST::Enc] INFO: len=57 text=A/Dで移動、Wでジャンプ。Enterで弾を撃てる
+[2026-07-22 10:27:47] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:27:48] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:27:49] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:27:49] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:27:49] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:44:26] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:44:27] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:44:27] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:44:27] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:44:27] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:49:06] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:49:07] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:49:07] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:49:07] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:49:08] [System::ResetStage] INFO: Begin ResetStage

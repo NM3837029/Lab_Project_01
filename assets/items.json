@@ -291,5 +291,18 @@
         ]
       }
     ]
+  },
+  {
+    "id": "st1_coin",
+    "name": "ステージ1：コイン",
+    "type_enum": 1,
+    "sprite": "img/stage1/coin.png",
+    "grant_ability": "",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 24,
+    "hitboxHeight": 24,
+    "parts": []
   }
 ]

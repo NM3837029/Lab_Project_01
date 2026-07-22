@@ -1,4 +1,4 @@
-#include "DxLib.h"
+﻿#include "DxLib.h"
 #include <vector>
 #include <stdio.h>
 #include <fstream>
@@ -1165,6 +1165,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     Logger::Info("System", "WinMain", "[Init] WinMain Begin");
 
+    // DxLibへ渡す文字列の扱いをUTF-8にする（DxLib_Initより前に呼ぶ必要がある）。
+    // 既定はShift-JIS解釈のため、assets/*.json（UTF-8）由来の日本語をDrawStringへ渡すと
+    // 文字化けしていた（ShowMessageのヒント等）。ソースもUTF-8なので全体をUTF-8で統一する。
+    // なお既存のDrawString呼び出しの文字列は全てASCIIのため、この変更で崩れる表示は無い。
+    SetUseCharCodeFormat(DX_CHARCODEFORMAT_UTF8);
+
     ChangeWindowMode(TRUE);
     SetGraphMode(WINDOW_WIDTH, WINDOW_HEIGHT, 32);
     if (DxLib_Init() == -1) return -1;
@@ -1823,7 +1829,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
-                            Gimmick newGim{ (GimmickType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} };
+                            // 初期角度。手動橋(GIMMICK_MANUAL_BRIDGE=2)は「プレイヤーがR+ドラッグで倒して渡る」ギミックなので、
+                            // 指定が無ければ縦向き(=渡れない状態)で始める。従来は常に0(水平)で置かれ、最初から渡れてしまっていた。
+                            float initAngle = gj.value("angle", (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f);
+                            Gimmick newGim{ (GimmickType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
                             newGim.assetId = id;
                             newGim.param = param;
                             newGim.handle = gHandle;
@@ -2305,6 +2314,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else if (my >= menu.y + 131 && my <= menu.y + 155) {
                             if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
                                 targetGimmick->width = 120.0f;
+                                targetGimmick->spriteWidth = 120.0f; // 描画側(spriteWidth)も併せて戻す
                                 targetGimmick->angle = (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) ? 1.57079f : 0.0f;
                                 targetGimmick->isPaused = false;
                                 targetGimmick->isRewinding = false;
@@ -2614,9 +2624,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dw = (float)(lastMouseY - my) * 1.0f;
                     for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
                     for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
-                    for (auto* g : selectedGimmicks) { 
-                        g->width += dw; 
-                        if (g->width < 10.0f) g->width = 10.0f; 
+                    for (auto* g : selectedGimmicks) {
+                        g->width += dw;
+                        if (g->width < 10.0f) g->width = 10.0f;
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
@@ -2624,21 +2634,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             g->width = roundf(g->width / tileW) * tileW;
                             if (g->width < tileW) g->width = tileW;
                         }
+                        g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
                     }
                     lastMouseY = my;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
                     float dh = (float)(lastMouseY - my) * 1.0f;
-                    for (auto* g : selectedGimmicks) { 
-                        g->spriteHeight += dh; 
-                        if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f; 
+                    for (auto* g : selectedGimmicks) {
+                        g->spriteHeight += dh;
+                        if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f;
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
                             float tileW = g->spriteHeight * ((float)imgW / imgH);
                             g->width = roundf(g->width / tileW) * tileW;
                             if (g->width < tileW) g->width = tileW;
+                            g->spriteWidth = g->width;
                         }
+                        g->height = g->spriteHeight; // 当たり判定はheightを見るため同期が必須
                     }
                     lastMouseY = my;
                 }
@@ -2654,7 +2667,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dw = (float)(mx - lastMouseX) * 1.0f;
                     for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
                     for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
-                    for (auto* g : selectedGimmicks) { g->width += dw; if (g->width < 10.0f) g->width = 10.0f; }
+                    for (auto* g : selectedGimmicks) { g->width += dw; if (g->width < 10.0f) g->width = 10.0f; g->spriteWidth = g->width; }
                     lastMouseX = mx;
                 }
                 if (isInspAngle && selectedType != SELECT_NONE) {
@@ -4188,6 +4201,31 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (CheckCollision(player.x, player.y, _pw, _ph, gx, gy, gw, gh)) {
                     currentScene = RESULT_VICTORY;
                 }
+            }
+        }
+
+        // ===== ゴールの描画 =====
+        // 従来はゴールが当たり判定のみで一切描画されておらず、プレイヤーから位置が見えなかった。
+        // 外部画像に依存せず確実に表示されるよう、旗をプリミティブ描画で組み立てる。
+        {
+            const auto& curStage = stages[currentStageIdx];
+            if (curStage.goalX >= 0) {
+                int gx = (int)(curStage.goalX - cameraX);
+                int gy = (int)curStage.goalY;
+                // 目印の光柱（ゴールの位置を遠くからでも分かるようにする）
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 40);
+                DrawBox(gx + 10, 0, gx + TILE_SIZE - 10, gy + TILE_SIZE, GetColor(255, 240, 120), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                // 支柱
+                DrawBox(gx + 12, gy - TILE_SIZE, gx + 17, gy + TILE_SIZE, GetColor(230, 230, 235), TRUE);
+                DrawBox(gx + 12, gy - TILE_SIZE, gx + 17, gy + TILE_SIZE, GetColor(120, 120, 130), FALSE);
+                // 旗（はためきをsinで表現）
+                float wave = sinf(BehaviorInterpreter::globalFrameCounter * 0.12f) * 3.0f;
+                int fx = gx + 17, fy = gy - TILE_SIZE + 4;
+                DrawTriangle(fx, fy, fx, fy + 18, fx + 22 + (int)wave, fy + 9, GetColor(230, 60, 70), TRUE);
+                // 台座
+                DrawBox(gx + 4, gy + TILE_SIZE - 6, gx + TILE_SIZE - 4, gy + TILE_SIZE, GetColor(200, 180, 90), TRUE);
+                DrawString(gx - 4, gy - TILE_SIZE - 18, "GOAL", GetColor(255, 255, 160));
             }
         }
 
