@@ -1267,3 +1267,24 @@
 [2026-07-22 10:49:07] [System::WinMain] INFO: [Init] StageLoader Success
 [2026-07-22 10:49:07] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-07-22 10:49:08] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 10:57:53] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 10:57:54] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 10:57:55] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 10:57:55] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 10:57:55] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 11:11:04] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 11:11:06] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 11:11:06] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 11:11:06] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 11:11:06] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 11:11:19] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 11:12:08] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 11:12:10] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 11:12:10] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 11:12:10] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 11:12:11] [System::ResetStage] INFO: Begin ResetStage
+[2026-07-22 12:03:26] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-07-22 12:03:28] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-07-22 12:03:28] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-07-22 12:03:28] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-07-22 12:03:29] [System::ResetStage] INFO: Begin ResetStage
