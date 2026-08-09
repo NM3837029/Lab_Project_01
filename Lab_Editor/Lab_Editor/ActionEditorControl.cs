@@ -42,6 +42,9 @@ public class ActionEditorControl : Panel
     private ListBox       _lstActions    = null!;
     private Button        _btnAddAction  = null!;
     private Button        _btnDelAction  = null!;
+    // Feature: UI改善（提案書 EV-1）— 実行順が意味を持つコマンド列を、削除して再追加せずに並び替えられるようにする
+    private Button        _btnMoveUp     = null!;
+    private Button        _btnMoveDown   = null!;
 
     private Panel         _pnlParams     = null!;
     private ComboBox      _cmbActionType = null!;
@@ -138,10 +141,14 @@ public class ActionEditorControl : Panel
 
         _btnAddAction = new Button { Text = "＋追加", Location = new Point(0, 216), Size = new Size(100, 30) };
         _btnDelAction = new Button { Text = "🗑 削除", Location = new Point(110, 216), Size = new Size(100, 30) };
+        _btnMoveUp = new Button { Text = "▲ 上へ", Location = new Point(220, 216), Size = new Size(100, 30) };
+        _btnMoveDown = new Button { Text = "▼ 下へ", Location = new Point(330, 216), Size = new Size(100, 30) };
         _btnAddAction.Click += (_, _) => AddActionRow(new EventActionEntry());
         _btnDelAction.Click += BtnDelAction_Click;
+        _btnMoveUp.Click += (_, _) => MoveSelectedAction(-1);
+        _btnMoveDown.Click += (_, _) => MoveSelectedAction(1);
 
-        Controls.AddRange(new Control[] { _lstActions, _pnlParams, _btnAddAction, _btnDelAction });
+        Controls.AddRange(new Control[] { _lstActions, _pnlParams, _btnAddAction, _btnDelAction, _btnMoveUp, _btnMoveDown });
         Height = 250;
     }
 
@@ -257,6 +264,20 @@ public class ActionEditorControl : Panel
         _lstActions.Items[idx] = GetActionDisplayText(act);
     }
 
+    // 選択中のコマンドを1つ上/下(dir=-1/+1)へ入れ替える。ShowMessage→OpenDoorのように
+    // 実行順が結果を左右するコマンド列を、一度削除して末尾に再追加し直さずに調整できるようにする。
+    private void MoveSelectedAction(int dir)
+    {
+        int idx = _lstActions.SelectedIndex;
+        if (idx < 0) return;
+        int newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= _actions.Count) return;
+        (_actions[idx], _actions[newIdx]) = (_actions[newIdx], _actions[idx]);
+        _lstActions.Items[idx] = GetActionDisplayText(_actions[idx]);
+        _lstActions.Items[newIdx] = GetActionDisplayText(_actions[newIdx]);
+        _lstActions.SelectedIndex = newIdx;
+    }
+
     private void BtnDelAction_Click(object? sender, EventArgs e)
     {
         int idx = _lstActions.SelectedIndex;
@@ -274,33 +295,80 @@ public class ActionEditorControl : Panel
 internal class LongTextEditForm : Form
 {
     public string ResultText { get; private set; }
+    private readonly TextBox txt;
+    private Panel previewPanel = null!;
+
+    // Feature: UI改善（提案書 EV-4）— ゲーム内メッセージボックスの実寸・実際の描画方式に合わせたプレビュー。
+    // DrawPixel.cpp の isShowingMessage 描画ブロックを参照：boxX=20,boxY=SCREEN_HEIGHT-110,boxW=SCREEN_WIDTH-40,boxH=90、
+    // かつ DrawString は自動改行を一切行わない単一行描画のため、長い文章は折り返されずボックスからはみ出す。
+    // ここでは「折り返されて見える」という誤った期待を与えないよう、あえて折り返さずに実機同様1行で表示し、
+    // 収まりきらない場合は明示的に警告する。
+    private const int GameBoxW = 600, GameBoxH = 90;
+    private const int EstCharPx = 16; // ShowMessage表示時はSetFontSizeが呼ばれないため、DxLib既定フォントの概算幅(px)を使用
 
     public LongTextEditForm(string initial)
     {
         ResultText = initial;
         Text = "メッセージ編集";
-        Size = new Size(420, 300);
+        Size = new Size(420, 340);
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
         MaximizeBox = false;
         FormBorderStyle = FormBorderStyle.FixedDialog;
 
-        var txt = new TextBox
+        txt = new TextBox
         {
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
             Location = new Point(10, 10),
-            Size = new Size(384, 200),
+            Size = new Size(384, 140),
             Text = initial,
             Font = new Font("Meiryo UI", 10f)
         };
+        txt.TextChanged += (s, e) => previewPanel.Invalidate();
 
-        var btnOk = new Button { Text = "OK", Location = new Point(214, 220), Size = new Size(90, 30), DialogResult = DialogResult.OK };
-        var btnCancel = new Button { Text = "キャンセル", Location = new Point(310, 220), Size = new Size(90, 30), DialogResult = DialogResult.Cancel };
+        var lblPreviewTitle = new Label
+        {
+            Text = "🎮 ゲーム内での見え方（実機は自動改行されないため、はみ出す場合があります）",
+            Location = new Point(10, 155),
+            Size = new Size(384, 16),
+            Font = new Font("Meiryo UI", 7.5f),
+            ForeColor = Color.DimGray,
+        };
+
+        previewPanel = new Panel { Location = new Point(10, 173), Size = new Size(384, 96), BorderStyle = BorderStyle.FixedSingle, BackColor = Color.FromArgb(30, 30, 30) };
+        previewPanel.Paint += PreviewPanel_Paint;
+
+        var btnOk = new Button { Text = "OK", Location = new Point(214, 280), Size = new Size(90, 30), DialogResult = DialogResult.OK };
+        var btnCancel = new Button { Text = "キャンセル", Location = new Point(310, 280), Size = new Size(90, 30), DialogResult = DialogResult.Cancel };
         btnOk.Click += (_, _) => { ResultText = txt.Text; };
 
-        Controls.AddRange(new Control[] { txt, btnOk, btnCancel });
+        Controls.AddRange(new Control[] { txt, lblPreviewTitle, previewPanel, btnOk, btnCancel });
         AcceptButton = btnOk;
         CancelButton = btnCancel;
+    }
+
+    private void PreviewPanel_Paint(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        float scale = (float)previewPanel.Width / GameBoxW;
+        var boxRect = new RectangleF(2, 2, GameBoxW * scale - 4, GameBoxH * scale - 4);
+        using (var bg = new SolidBrush(Color.FromArgb(220, 0, 0, 0))) g.FillRectangle(bg, boxRect);
+        g.DrawRectangle(Pens.White, boxRect.X, boxRect.Y, boxRect.Width, boxRect.Height);
+
+        string text = txt.Text.Replace("\r", "").Replace("\n", " ");
+        int usableChars = Math.Max(1, (int)((GameBoxW - 24) / (float)EstCharPx));
+        bool overflow = text.Length > usableChars;
+        string shown = overflow ? text.Substring(0, usableChars) + "…" : text;
+
+        using var font = new Font("MS Gothic", 9f);
+        g.DrawString(shown, font, Brushes.White, boxRect.X + 8 * scale, boxRect.Y + 8 * scale);
+
+        if (overflow)
+        {
+            using var warnFont = new Font("Meiryo UI", 7.5f, FontStyle.Bold);
+            g.DrawString($"⚠ 約{usableChars}文字を超えるとボックスからはみ出します（現在{text.Length}文字・改行は無視されます）",
+                warnFont, Brushes.OrangeRed, 2, previewPanel.Height - 16);
+        }
     }
 }

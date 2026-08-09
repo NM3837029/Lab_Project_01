@@ -15,10 +15,25 @@ public class EventEditorForm : Form
     public EventTrigger ResultTrigger { get; private set; } = null!;
 
     // ── 条件型 ──────────────────────────────────
-    private static readonly string[] ConditionTypes =
+    // Feature: UI改善（提案書 EV-2）— コンボボックスには日本語ラベル(Label)を表示しつつ、
+    // 保存されるデータ自体は従来通りKey(英語)を使う。ToString()をオーバーライドすることで、
+    // DataSource/DisplayMemberのリフレクション（ValueTupleの要素名は実行時に反映されない）に
+    // 頼らずシンプルに表示を切り替えている。
+    private class ConditionOption
     {
-        "PlayerEnter", "PlayerExit", "AllEnemiesDefeated",
-        "SwitchOn", "ItemCollected", "TimerExpired"
+        public string Key = "";
+        public string Label = "";
+        public override string ToString() => Label;
+    }
+
+    private static readonly ConditionOption[] ConditionTypes =
+    {
+        new() { Key = "PlayerEnter", Label = "プレイヤーが範囲に入ったとき" },
+        new() { Key = "PlayerExit", Label = "プレイヤーが範囲から出たとき" },
+        new() { Key = "AllEnemiesDefeated", Label = "敵を全滅させたとき" },
+        new() { Key = "SwitchOn", Label = "スイッチがONになったとき" },
+        new() { Key = "ItemCollected", Label = "アイテムを取得したとき" },
+        new() { Key = "TimerExpired", Label = "タイマーが切れたとき" },
     };
 
     // ── コントロール ────────────────────────────
@@ -148,7 +163,7 @@ public class EventEditorForm : Form
         _txtCondParam.Text = t.conditionParam ?? "";
         _chkOneShot.Checked = t.oneShot;
 
-        int condIdx = Array.IndexOf(ConditionTypes, t.condition ?? "");
+        int condIdx = Array.FindIndex(ConditionTypes, o => o.Key == (t.condition ?? ""));
         _cmbCondition.SelectedIndex = condIdx >= 0 ? condIdx : 0;
 
         _actionEditor.LoadActions(t.actions);
@@ -164,7 +179,7 @@ public class EventEditorForm : Form
             y              = (float)_nudY.Value,
             width          = (float)_nudW.Value,
             height         = (float)_nudH.Value,
-            condition      = _cmbCondition.SelectedItem?.ToString() ?? "",
+            condition      = (_cmbCondition.SelectedItem as ConditionOption)?.Key ?? "",
             conditionParam = _txtCondParam.Text,
             oneShot        = _chkOneShot.Checked,
             actions        = _actionEditor.GetActions(),

@@ -55,6 +55,12 @@ public class BlockCanvasControl : Panel
 
     public BlockInstance? SelectedBlock { get; private set; }
 
+    // Feature: UI改善（提案書 BS-5）— 複雑な組み立てで縦に長くなったキャンバスを縮小表示して
+    // 全体を見渡せるようにする（Ctrl+ホイールでズーム、通常のホイールは従来通り縦スクロール）。
+    // レイアウト計算・当たり判定は常に等倍(1.0)の論理座標で行い、描画とマウス座標の変換
+    // (ToContentPoint)だけをズーム率で補正することで、どのズーム率でも編集操作がずれないようにしている。
+    private float _viewZoom = 1.0f;
+
     public BlockCanvasControl()
     {
         DoubleBuffered = true;
@@ -63,6 +69,13 @@ public class BlockCanvasControl : Panel
         AllowDrop = true;
         TabStop = true;
         BuildDemoTree();
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (ModifierKeys != Keys.Control) { base.OnMouseWheel(e); return; }
+        _viewZoom = Math.Clamp(_viewZoom + (e.Delta > 0 ? 0.1f : -0.1f), 0.4f, 1.5f);
+        Invalidate();
     }
 
     // Feature: Puzzle-like Behavior Scripting (M6) — 特定の敵/ギミックのscriptを編集する際に、
@@ -125,7 +138,9 @@ public class BlockCanvasControl : Panel
         g.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
         BlockRenderer.CanvasBackColor = BackColor;
 
-        EnsureLayout(g);
+        EnsureLayout(g); // レイアウト計算は常に等倍座標で行う（当たり判定と一致させるため）
+
+        if (_viewZoom != 1.0f) g.ScaleTransform(_viewZoom, _viewZoom); // 見た目だけをズーム
 
         foreach (var root in TopLevel)
             BlockRenderer.Draw(g, root, _font);
@@ -475,7 +490,9 @@ public class BlockCanvasControl : Panel
 
     // ==== ヒットテスト ====================================================
 
-    private Point ToContentPoint(Point clientPt) => new(clientPt.X - AutoScrollPosition.X, clientPt.Y - AutoScrollPosition.Y);
+    private Point ToContentPoint(Point clientPt) => new(
+        (int)((clientPt.X - AutoScrollPosition.X) / _viewZoom),
+        (int)((clientPt.Y - AutoScrollPosition.Y) / _viewZoom));
 
     // キャンバス内の既存ブロックをMouseDownでつまむための検索（Body/Elseも再帰的に見る）
     private (List<BlockInstance> list, int index)? FindChainAt(List<BlockInstance> list, Point pt)

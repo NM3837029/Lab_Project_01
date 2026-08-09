@@ -298,6 +298,8 @@ public class AnimationEditorForm : Form
     {
         StopPreview();
         LoadSelectedClip();
+        // Feature: UI改善（提案書 AN-2）— クリップを選んだ瞬間に自動再生し、都度ボタンを押す手間を無くす
+        if (_spriteSheet != null) StartPreview();
     }
 
     private void LoadSelectedClip()
@@ -410,12 +412,17 @@ public class AnimationEditorForm : Form
                     "プレビュー", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-
-            _isPlaying = true;
-            _btnPreview.Text = "⏹ 停止";
-            _currentFrame = _startFrame;
-            _animTimer.Start();
+            StartPreview();
         }
+    }
+
+    private void StartPreview()
+    {
+        if (_spriteSheet == null) return;
+        _isPlaying = true;
+        _btnPreview.Text = "⏹ 停止";
+        _currentFrame = _startFrame;
+        _animTimer.Start();
     }
 
     private void StopPreview()

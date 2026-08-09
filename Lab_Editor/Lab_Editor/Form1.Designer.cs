@@ -94,7 +94,12 @@ partial class Form1
         var miPlay = new System.Windows.Forms.ToolStripMenuItem("テストプレイ", null, btnPlay_Click) { ShortcutKeys = System.Windows.Forms.Keys.F5 };
         menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay });
 
-        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuPlay });
+        // Feature: UI改善（提案書 MW-2）— 詰まったときに参照できる使い方ガイドをメニューから開けるようにする
+        var menuHelp = new System.Windows.Forms.ToolStripMenuItem("ヘルプ(&H)");
+        var miHelp = new System.Windows.Forms.ToolStripMenuItem("使い方ガイド", null, (_, _) => new HelpForm().ShowDialog(this));
+        menuHelp.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miHelp });
+
+        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuPlay, menuHelp });
 
         // ===== ツールバー =====
         toolStrip1 = new System.Windows.Forms.ToolStrip();

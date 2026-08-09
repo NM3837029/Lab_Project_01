@@ -51,16 +51,31 @@ public class BehaviorScriptEditorForm : Form
         };
 
         var lblPaletteTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "📦 ブロックパレット（ドラッグしてキャンバスへ）", Font = new Font(Font, FontStyle.Bold), Padding = new Padding(6, 4, 0, 0) };
+        // Feature: UI改善（提案書 CUT-6）— 約55種のブロックを名前で絞り込める検索欄
+        var txtPaletteSearch = new TextBox { Dock = DockStyle.Top, PlaceholderText = "🔍 ブロックを検索..." };
         var palette = new BlockPaletteControl { Dock = DockStyle.Fill, Width = 260 };
+        txtPaletteSearch.TextChanged += (s, e) => palette.SetFilter(txtPaletteSearch.Text);
         var pnlPalette = new Panel { Dock = DockStyle.Left, Width = 260 };
         pnlPalette.Controls.Add(palette);
         pnlPalette.Controls.Add(lblPaletteTitle);
+        pnlPalette.Controls.Add(txtPaletteSearch);
 
-        var lblCanvasTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "🖼 キャンバス", Font = new Font(Font, FontStyle.Bold), Padding = new Padding(6, 4, 0, 0) };
+        var lblCanvasTitle = new Label { Dock = DockStyle.Top, Height = 22, Text = "🖼 キャンバス（Ctrl+ホイールでズーム）", Font = new Font(Font, FontStyle.Bold), Padding = new Padding(6, 4, 0, 0) };
         _canvas = new BlockCanvasControl { Dock = DockStyle.Fill };
+
+        // Feature: UI改善（提案書 BS-3）— 空のキャンバスとブロックパレットだけでは何から組み立てればよいか
+        // 分かりにくいため、よくある動きの完成形を選んで読み込めるテンプレートピッカーを追加する。
+        var pnlTemplateBar = new Panel { Dock = DockStyle.Top, Height = 30 };
+        var flowTemplateBar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4, 2, 4, 2) };
+        var btnTemplate = new Button { Text = "📋 テンプレートから開始...", AutoSize = true, Padding = new Padding(8, 2, 8, 2), BackColor = Color.FromArgb(255, 244, 214) };
+        btnTemplate.Click += (s, e) => OpenTemplatePicker();
+        flowTemplateBar.Controls.Add(btnTemplate);
+        pnlTemplateBar.Controls.Add(flowTemplateBar);
+
         var pnlCanvas = new Panel { Dock = DockStyle.Fill };
         pnlCanvas.Controls.Add(_canvas);
         pnlCanvas.Controls.Add(lblCanvasTitle);
+        pnlCanvas.Controls.Add(pnlTemplateBar);
 
         if (_isEditingSpecificScript)
         {
@@ -73,8 +88,24 @@ public class BehaviorScriptEditorForm : Form
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 42 };
         var flowBottom = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
-        var btnOk = new Button { Text = "💾 OK", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnOk.Click += (s, e) => { ResultScript = BlockScriptSerializer.Serialize(_canvas.TopLevel); };
+        // Feature: UI改善（提案書 BS-4）— 保存前に「実行すると何もしない/意図しない既定動作になる」パターンを
+        // 検知して警告する。DialogResultはボタンに持たせず、検証を通ってから手動でCloseする。
+        var btnOk = new Button { Text = "💾 OK", AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnOk.Click += (s, e) =>
+        {
+            var warnings = ValidateScript();
+            if (warnings.Count > 0)
+            {
+                string msg = "保存前に確認してください:\n\n" +
+                    string.Join("\n", warnings.Take(8)) +
+                    (warnings.Count > 8 ? $"\n…他{warnings.Count - 8}件" : "") +
+                    "\n\nこのまま保存しますか？";
+                if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            }
+            ResultScript = BlockScriptSerializer.Serialize(_canvas.TopLevel);
+            DialogResult = DialogResult.OK;
+            Close();
+        };
         // RightToLeftは追加順が右から並ぶため、OKを一番右にしたい場合は先にCancelを追加する
         flowBottom.Controls.Add(btnCancel);
         flowBottom.Controls.Add(btnOk);
@@ -86,5 +117,54 @@ public class BehaviorScriptEditorForm : Form
         Controls.Add(pnlPalette);
         Controls.Add(pnlBottom);
         Controls.Add(lblNotice);
+    }
+
+    // Feature: UI改善（提案書 BS-4）— C型ブロックの中身が空、または条件ソケットが未設定のまま保存すると
+    // 「実行しても何も起きない」「常に既定の動作になる」状態になり、ゲーム内デバッグ表示でしか気づけない。
+    // 保存前にツリー全体を辿ってこれらを検出し、具体的な箇所を教える。
+    private List<string> ValidateScript()
+    {
+        var warnings = new List<string>();
+
+        void Walk(List<BlockInstance> seq, string context)
+        {
+            foreach (var b in seq)
+            {
+                if (b.Def.HasBody && b.Body.Count == 0)
+                    warnings.Add($"「{b.Def.DisplayName}」の中身が空です（{context}の中）。何も実行されません。");
+                if (b.Def.HasElse && b.Else.Count == 0 && b.Body.Count > 0)
+                    warnings.Add($"「{b.Def.DisplayName}」の「でなければ」側が空です（{context}の中）。");
+
+                foreach (var arg in b.Def.Args)
+                {
+                    if (arg.Type == BlockArgType.BoolSlot && !b.ArgBlocks.ContainsKey(arg.Name))
+                        warnings.Add($"「{b.Def.DisplayName}」の条件（{arg.Label}）が未設定です（{context}の中）。既定の動作になります。");
+                }
+
+                if (b.Def.HasBody) Walk(b.Body, b.Def.DisplayName);
+                if (b.Def.HasElse) Walk(b.Else, b.Def.DisplayName);
+            }
+        }
+
+        foreach (var hat in _canvas.TopLevel)
+        {
+            if (hat.Def.HasBody && hat.Body.Count == 0)
+                warnings.Add($"「{hat.Def.DisplayName}」の中身が空です。何も実行されません。");
+            else if (hat.Def.HasBody)
+                Walk(hat.Body, hat.Def.DisplayName);
+        }
+        return warnings;
+    }
+
+    private void OpenTemplatePicker()
+    {
+        if (_canvas.TopLevel.Count > 0)
+        {
+            if (MessageBox.Show("テンプレートを読み込むと、現在キャンバスにある内容は失われます。よろしいですか？", "確認",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
+        using var picker = new TemplatePickerForm();
+        if (picker.ShowDialog() != DialogResult.OK || picker.SelectedTemplate == null) return;
+        _canvas.LoadProgram(BlockScriptSerializer.Deserialize(picker.SelectedTemplate.Build()));
     }
 }

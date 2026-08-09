@@ -33,6 +33,21 @@ public class PartsEditorForm : Form
     private Point _dragMouseStart;
     private float _dragOffsetStartX, _dragOffsetStartY;
 
+    // Feature: UI改善（提案書 PT-1）— 挙動スクリプトによる動きをその場で確認する再生プレビュー
+    private System.Windows.Forms.Timer? _previewTimer;
+    private float _previewTime = 0f;
+    private bool _isPlaying = false;
+    private Button _btnPlayToggle = null!;
+
+    // Feature: UI改善（提案書 CUT-1）— パーツ編集画面自体のUndo/Redo（マップ編集限定だった仕組みの拡張）
+    private readonly HistoryManager<List<PartDef>> _history = new();
+    private Button _btnUndo = null!, _btnRedo = null!;
+
+    // Feature: UI改善（提案書 PT-6）— 「このスクリプトを全パーツへ」適用後、どのパーツが変わったか
+    // 一目で分かるよう、対象パーツの枠を一瞬光らせる
+    private readonly HashSet<PartDef> _highlightedParts = new();
+    private System.Windows.Forms.Timer? _highlightTimer;
+
     // ==== コントロール ====
     private DataGridView dgvList = null!;
     private Panel pnlComposer = null!;
@@ -93,7 +108,54 @@ public class PartsEditorForm : Form
             rightSplit.SplitterDistance = Math.Max(300, (int)(rightSplit.Height * 0.55));
         };
 
+        PushHistory();
         RefreshList();
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z)) { PartsUndo(); return true; }
+        if (keyData == (Keys.Control | Keys.Y)) { PartsRedo(); return true; }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    // このメソッド1つを、パーツ一覧を実際に変更する全ての操作（追加/削除/並び替え/複製/反転複製/
+    // 各ウィザードの生成・編集/詳細パネルの値確定/キャンバスのドラッグ確定/画像・当たり判定・
+    // スクリプトの変更確定）の末尾から呼ぶことで、Undo/Redoの対象を機能追加のたびに
+    // 個別配線し直さずに済むようにしている。
+    private void PushHistory()
+    {
+        _history.Push(parts.Select(ClonePart).ToList());
+        UpdateUndoRedoButtons();
+    }
+
+    private void PartsUndo()
+    {
+        if (!_history.CanUndo) return;
+        var restored = _history.Undo();
+        if (restored == null) return;
+        parts = restored;
+        selectedIndex = Math.Clamp(selectedIndex, -1, parts.Count - 1);
+        RefreshList();
+        UpdateUndoRedoButtons();
+    }
+
+    private void PartsRedo()
+    {
+        if (!_history.CanRedo) return;
+        var restored = _history.Redo();
+        if (restored == null) return;
+        parts = restored;
+        selectedIndex = Math.Clamp(selectedIndex, -1, parts.Count - 1);
+        RefreshList();
+        UpdateUndoRedoButtons();
+    }
+
+    private void UpdateUndoRedoButtons()
+    {
+        if (_btnUndo == null! || _btnRedo == null!) return;
+        _btnUndo.Enabled = _history.CanUndo;
+        _btnRedo.Enabled = _history.CanRedo;
     }
 
     private static PartDef ClonePart(PartDef p) => new PartDef
@@ -132,12 +194,17 @@ public class PartsEditorForm : Form
             Font = new Font("Meiryo UI", 8.5f),
             RowHeadersWidth = 20,
             ScrollBars = ScrollBars.Vertical,
+            RowTemplate = { Height = 30 },
         };
+        // Feature: UI改善（提案書 PT-4）— 一覧上でどの画像のパーツか一目で分かるよう、サムネイル列を追加する。
+        var colThumb = new DataGridViewImageColumn { Name = "thumb", HeaderText = "", FillWeight = 22, ImageLayout = DataGridViewImageCellLayout.Zoom };
+        colThumb.DefaultCellStyle.NullValue = null;
         dgvList.Columns.AddRange(new DataGridViewColumn[]
         {
-            new DataGridViewTextBoxColumn { Name = "id", HeaderText = "パーツID", FillWeight = 60, ReadOnly = true },
-            new DataGridViewTextBoxColumn { Name = "hp", HeaderText = "HP", FillWeight = 20, ReadOnly = true },
-            new DataGridViewTextBoxColumn { Name = "zOrder", HeaderText = "Z", FillWeight = 20, ReadOnly = true },
+            colThumb,
+            new DataGridViewTextBoxColumn { Name = "id", HeaderText = "パーツID", FillWeight = 55, ReadOnly = true },
+            new DataGridViewTextBoxColumn { Name = "hp", HeaderText = "HP", FillWeight = 18, ReadOnly = true },
+            new DataGridViewTextBoxColumn { Name = "zOrder", HeaderText = "Z", FillWeight = 18, ReadOnly = true },
         });
         dgvList.SelectionChanged += (s, e) =>
         {
@@ -168,11 +235,24 @@ public class PartsEditorForm : Form
         btnDown.Click += (s, e) => MoveSelectedPart(1);
         var btnApplyScript = new Button { Text = "🧩 このスクリプトを全パーツへ", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnApplyScript.Click += (s, e) => ApplyScriptToAllParts();
+        // Feature: UI改善（提案書 PT-3）— よく似たパーツをゼロから作り直さずに済むよう、複製ボタンを追加。
+        var btnDuplicate = new Button { Text = "⧉ 複製", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
+        btnDuplicate.Click += (s, e) => DuplicatePart();
+        // Feature: UI改善（提案書 PT-2）— 左右対称の敵/ギミック（棘やツノなど）を素早く作れるよう、反転複製ボタンを追加。
+        var btnMirror = new Button { Text = "🪞 反転複製", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
+        btnMirror.Click += (s, e) => MirrorSelectedPart();
         var btnRod = new Button { Text = "🌀 回転する棒として配置...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
         btnRod.Click += (s, e) => OpenRodGenerator();
-        var btnEditRod = new Button { Text = "🔧 回転する棒を編集...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
-        btnEditRod.Click += (s, e) => OpenRodEditor();
-        flowButtons.Controls.AddRange(new Control[] { btnAdd, btnDel, btnUp, btnDown, btnApplyScript, btnRod, btnEditRod });
+        // Feature: UI改善（提案書 PT-2）— ウィザードの拡充。振り子・公転の2種類を追加し、動きを持つ複合パーツを
+        // プログラミング知識なしで組み立てられるようにする。
+        var btnPendulum = new Button { Text = "🕰 振り子として配置...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
+        btnPendulum.Click += (s, e) => OpenPendulumGenerator();
+        var btnOrbit = new Button { Text = "🛰 公転として配置...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
+        btnOrbit.Click += (s, e) => OpenOrbitGenerator();
+        // 回転する棒/振り子/公転のいずれで作られたパーツかを自動判別して編集する統一ボタン（種類ごとにボタンを分けない）
+        var btnEditMotion = new Button { Text = "🔧 動きのパターンを編集...", AutoSize = true, Padding = new Padding(6, 4, 6, 4), BackColor = Color.FromArgb(255, 244, 214) };
+        btnEditMotion.Click += (s, e) => OpenMotionEditor();
+        flowButtons.Controls.AddRange(new Control[] { btnAdd, btnDel, btnUp, btnDown, btnDuplicate, btnMirror, btnApplyScript, btnRod, btnPendulum, btnOrbit, btnEditMotion });
 
         pnl.Controls.Add(dgvList);
         pnl.Controls.Add(flowButtons);
@@ -184,7 +264,7 @@ public class PartsEditorForm : Form
     {
         int keepSelected = selectedIndex;
         dgvList.Rows.Clear();
-        foreach (var p in parts) dgvList.Rows.Add(p.id, p.hp, p.zOrder);
+        foreach (var p in parts) dgvList.Rows.Add(GetPartThumb(p), p.id, p.hp, p.zOrder);
         if (parts.Count > 0)
         {
             int idx = Math.Clamp(keepSelected < 0 ? 0 : keepSelected, 0, parts.Count - 1);
@@ -210,6 +290,7 @@ public class PartsEditorForm : Form
         parts.Add(new PartDef { id = newId, offsetX = 0, offsetY = 0 });
         selectedIndex = parts.Count - 1;
         RefreshList();
+        PushHistory();
     }
 
     private void DeleteSelectedPart()
@@ -220,6 +301,7 @@ public class PartsEditorForm : Form
         parts.RemoveAt(selectedIndex);
         selectedIndex = Math.Min(selectedIndex, parts.Count - 1);
         RefreshList();
+        PushHistory();
     }
 
     private void MoveSelectedPart(int dir)
@@ -230,6 +312,7 @@ public class PartsEditorForm : Form
         (parts[selectedIndex], parts[newIdx]) = (parts[newIdx], parts[selectedIndex]);
         selectedIndex = newIdx;
         RefreshList();
+        PushHistory();
     }
 
     private void ApplyScriptToAllParts()
@@ -238,8 +321,105 @@ public class PartsEditorForm : Form
         if (selectedIndex < 0) { MessageBox.Show("コピー元にするパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var srcScript = (JArray)parts[selectedIndex].script.DeepClone();
         foreach (var p in parts) p.script = (JArray)srcScript.DeepClone();
+        PushHistory();
+
+        _highlightedParts.Clear();
+        foreach (var p in parts) _highlightedParts.Add(p);
+        pnlComposer.Invalidate();
+        _highlightTimer?.Stop();
+        _highlightTimer = new System.Windows.Forms.Timer { Interval = 900 };
+        _highlightTimer.Tick += (s, e) => { _highlightedParts.Clear(); _highlightTimer!.Stop(); pnlComposer.Invalidate(); };
+        _highlightTimer.Start();
+
         MessageBox.Show($"「{parts[selectedIndex].id}」のスクリプトを全{parts.Count}パーツに適用しました。\n（PartIndexレポーターを使えば、同じスクリプトのままパーツごとに異なる位相・動きを表現できます）",
             "適用完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // Feature: UI改善（提案書 PT-3）— 選択中パーツをそのまま複製する（画像/当たり判定/スクリプトを全てコピー、位置だけ少しずらす）
+    private void DuplicatePart()
+    {
+        if (selectedIndex < 0) { MessageBox.Show("複製したいパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        var src = parts[selectedIndex];
+        var copy = ClonePart(src);
+        copy.id = MakeUniquePartId(src.id + "_copy");
+        copy.offsetX += 16;
+        copy.offsetY += 16;
+        parts.Insert(selectedIndex + 1, copy);
+        selectedIndex += 1;
+        RefreshList();
+        PushHistory();
+    }
+
+    private string MakeUniquePartId(string baseId)
+    {
+        var existing = new HashSet<string>(parts.Select(p => p.id));
+        if (!existing.Contains(baseId)) return baseId;
+        int n = 2;
+        string id;
+        do { id = $"{baseId}{n}"; n++; } while (existing.Contains(id));
+        return id;
+    }
+
+    // Feature: UI改善（提案書 PT-2）— 選択中パーツを左右反転して複製する。棘やツノなど左右対称の装飾を
+    // 片側だけ作ってワンクリックでもう片方を得られるようにする。静的なoffsetXだけでなく、
+    // 挙動スクリプト内のSetLocalOffset(dx)/SetLocalOffsetPolar(angle)も再帰的に反転させるため、
+    // 回転する棒/振り子/公転のいずれで生成したパーツでも正しく鏡写しになる。
+    private void MirrorSelectedPart()
+    {
+        if (selectedIndex < 0) { MessageBox.Show("反転複製したいパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        var src = parts[selectedIndex];
+        var copy = ClonePart(src);
+        string mirroredBaseId =
+            src.id.EndsWith("_L", StringComparison.Ordinal) ? src.id[..^2] + "_R" :
+            src.id.EndsWith("_R", StringComparison.Ordinal) ? src.id[..^2] + "_L" :
+            src.id + "_mirror";
+        copy.id = MakeUniquePartId(mirroredBaseId);
+        copy.offsetX = -copy.offsetX;
+        copy.hitboxOffsetX = -copy.hitboxOffsetX;
+        MirrorScriptHorizontalInPlace(copy.script);
+        parts.Insert(selectedIndex + 1, copy);
+        selectedIndex += 1;
+        RefreshList();
+        PushHistory();
+        MessageBox.Show($"「{src.id}」を左右反転して「{copy.id}」として複製しました。",
+            "反転複製完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private static void MirrorScriptHorizontalInPlace(JArray script)
+    {
+        foreach (var tok in script)
+        {
+            if (tok is not JObject hat) continue;
+            if (hat["body"] is JArray body) MirrorSequence(body);
+        }
+    }
+
+    private static void MirrorSequence(JArray seq)
+    {
+        foreach (var tok in seq)
+        {
+            if (tok is not JObject node) continue;
+            string op = node["op"]?.ToString() ?? "";
+            switch (op)
+            {
+                case "SetLocalOffset":
+                    if (node["dx"] is JToken dx) node["dx"] = new JObject { ["op"] = "Mul", ["a"] = -1, ["b"] = dx.DeepClone() };
+                    break;
+                case "SetLocalOffsetPolar":
+                    if (node["angle"] is JToken angle) node["angle"] = new JObject { ["op"] = "Sub", ["a"] = Math.PI, ["b"] = angle.DeepClone() };
+                    break;
+                case "Forever":
+                case "Repeat":
+                case "RepeatUntil":
+                    if (node["body"] is JArray innerBody) MirrorSequence(innerBody);
+                    break;
+                case "If":
+                case "IfElse":
+                    if (node["body"] is JArray thenBody) MirrorSequence(thenBody);
+                    if (node["else"] is JArray elseBody) MirrorSequence(elseBody);
+                    break;
+            }
+        }
     }
 
     // ==== 中央: 合成プレビューキャンバス ====
@@ -248,15 +428,57 @@ public class PartsEditorForm : Form
     {
         var pnl = new Panel { Dock = DockStyle.Fill };
         var lblTitle = new Label { Dock = DockStyle.Top, Height = 24, Text = "🖼 合成プレビュー（パーツをドラッグして配置）", Font = new Font(Font, FontStyle.Bold), Padding = new Padding(4, 4, 0, 0) };
+
+        // Feature: UI改善（提案書 PT-1）— 保存してゲームを起動しなくても、その場で動きを確認できる再生バー
+        var pnlPlayback = new Panel { Dock = DockStyle.Top, Height = 30 };
+        var flowPlayback = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4, 2, 4, 2) };
+        _btnPlayToggle = new Button { Text = "▶ 再生", AutoSize = true, Padding = new Padding(8, 2, 8, 2) };
+        _btnPlayToggle.Click += (s, e) => TogglePreviewPlayback();
+        var btnResetTime = new Button { Text = "⏮ 0に戻す", AutoSize = true, Padding = new Padding(6, 2, 6, 2) };
+        btnResetTime.Click += (s, e) => { _previewTime = 0f; pnlComposer.Invalidate(); };
+        var lblPreviewHint = new Label
+        {
+            AutoSize = true,
+            Text = "挙動スクリプトの動きをここで確認できます（停止中はドラッグで配置換えできます）",
+            ForeColor = Color.Gray,
+            Font = new Font(Font.FontFamily, 7.5f),
+            Margin = new Padding(10, 8, 0, 0),
+        };
+        flowPlayback.Controls.AddRange(new Control[] { _btnPlayToggle, btnResetTime, lblPreviewHint });
+        pnlPlayback.Controls.Add(flowPlayback);
+
         pnlComposer = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(50, 50, 55) };
         pnlComposer.Paint += PnlComposer_Paint;
         pnlComposer.MouseDown += PnlComposer_MouseDown;
         pnlComposer.MouseMove += PnlComposer_MouseMove;
-        pnlComposer.MouseUp += (s, e) => _draggingIndex = -1;
+        pnlComposer.MouseUp += (s, e) => { if (_draggingIndex >= 0) PushHistory(); _draggingIndex = -1; };
         pnlComposer.Resize += (s, e) => pnlComposer.Invalidate();
+
         pnl.Controls.Add(pnlComposer);
         pnl.Controls.Add(lblTitle);
+        pnl.Controls.Add(pnlPlayback);
         return pnl;
+    }
+
+    private void TogglePreviewPlayback()
+    {
+        _isPlaying = !_isPlaying;
+        if (_isPlaying)
+        {
+            _btnPlayToggle.Text = "⏸ 停止";
+            if (_previewTimer == null)
+            {
+                _previewTimer = new System.Windows.Forms.Timer { Interval = 16 }; // 実機と同じ約60fps相当でTimeを進める
+                _previewTimer.Tick += (s, e) => { _previewTime += 1.0f; pnlComposer.Invalidate(); };
+            }
+            _previewTimer.Start();
+        }
+        else
+        {
+            _btnPlayToggle.Text = "▶ 再生";
+            _previewTimer?.Stop();
+        }
+        pnlComposer.Invalidate();
     }
 
     private void LoadBaseSprite()
@@ -330,22 +552,49 @@ public class PartsEditorForm : Form
         foreach (int i in order)
         {
             var p = parts[i];
-            var pos = WorldToScreen(baseRect, scale, p.offsetX, p.offsetY);
+            float ox = p.offsetX, oy = p.offsetY, angleRad = 0f;
+            if (_isPlaying)
+            {
+                var pose = ScriptPreviewEvaluator.Evaluate(p.script, _previewTime, i);
+                if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
+                if (pose.HasAngle) angleRad = pose.Angle;
+            }
+            var pos = WorldToScreen(baseRect, scale, ox, oy);
             var thumb = GetPartThumb(p);
             int pw = Math.Max((int)((thumb?.Width ?? 24) * scale * p.scale), 10);
             int ph = Math.Max((int)((thumb?.Height ?? 24) * scale * p.scale), 10);
             var rect = new Rectangle((int)pos.X - pw / 2, (int)pos.Y - ph / 2, pw, ph);
 
+            var savedState = angleRad != 0f ? e.Graphics.Save() : null;
+            if (angleRad != 0f)
+            {
+                e.Graphics.TranslateTransform(pos.X, pos.Y);
+                e.Graphics.RotateTransform(angleRad * 180f / MathF.PI);
+                e.Graphics.TranslateTransform(-pos.X, -pos.Y);
+            }
             if (thumb != null) e.Graphics.DrawImage(thumb, rect);
             else
             {
                 using var b = new SolidBrush(Color.FromArgb(160, 255, 140, 0));
                 e.Graphics.FillEllipse(b, rect);
             }
+            if (savedState != null) e.Graphics.Restore(savedState);
+
+            if (_highlightedParts.Contains(p))
+            {
+                using var glowPen = new Pen(Color.Lime, 3f);
+                e.Graphics.DrawRectangle(glowPen, rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6);
+            }
             using var pen = new Pen(i == selectedIndex ? Color.Yellow : Color.FromArgb(200, 255, 255, 255), i == selectedIndex ? 2.5f : 1.2f);
             e.Graphics.DrawRectangle(pen, rect);
             using var smallFont = new Font(Font.FontFamily, 7.5f);
             e.Graphics.DrawString(p.id, smallFont, Brushes.White, rect.X, rect.Bottom + 1);
+        }
+
+        if (_isPlaying)
+        {
+            using var playFont = new Font(Font.FontFamily, 8f, FontStyle.Bold);
+            e.Graphics.DrawString($"再生中... t={_previewTime:0}", playFont, Brushes.LightGreen, 6, 6);
         }
 
         if (parts.Count == 0)
@@ -377,6 +626,7 @@ public class PartsEditorForm : Form
 
     private void PnlComposer_MouseDown(object? sender, MouseEventArgs e)
     {
+        if (_isPlaying) return; // 再生中は「今どこにいるか」が動的に変わるため、配置換えは停止してから行う
         int idx = FindPartMarkerAt(e.Location);
         if (idx < 0) return;
         _draggingIndex = idx;
@@ -447,6 +697,8 @@ public class PartsEditorForm : Form
 
         txtId = new TextBox { Width = 180 };
         txtId.TextChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].id = txtId.Text; dgvList.Rows[selectedIndex].Cells["id"].Value = txtId.Text; pnlComposer.Invalidate(); } };
+        // IDはキー入力のたびに履歴を積むと1文字ごとにUndo項目が増えてしまうため、確定タイミング(フォーカスを外した時)でのみ記録する
+        txtId.Leave += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) PushHistory(); };
         AddRow("パーツID", txtId);
 
         var spritePanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
@@ -457,26 +709,26 @@ public class PartsEditorForm : Form
         AddRow("画像", spritePanel);
 
         nudOffsetX = MakeNumeric(-4000, 4000, 0);
-        nudOffsetX.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetX = (float)nudOffsetX.Value; pnlComposer.Invalidate(); } };
+        nudOffsetX.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetX = (float)nudOffsetX.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("offsetX(横位置)", nudOffsetX);
 
         nudOffsetY = MakeNumeric(-4000, 4000, 0);
-        nudOffsetY.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetY = (float)nudOffsetY.Value; pnlComposer.Invalidate(); } };
+        nudOffsetY.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetY = (float)nudOffsetY.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("offsetY(縦位置)", nudOffsetY);
 
         nudScale = MakeNumeric(0.1m, 10m, 2, 1m);
-        nudScale.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].scale = (float)nudScale.Value; pnlComposer.Invalidate(); } };
+        nudScale.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].scale = (float)nudScale.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("表示スケール", nudScale);
 
         nudHp = MakeNumeric(0, 999, 0);
-        nudHp.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].hp = (int)nudHp.Value; dgvList.Rows[selectedIndex].Cells["hp"].Value = (int)nudHp.Value; UpdateHpHint(); } };
+        nudHp.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].hp = (int)nudHp.Value; dgvList.Rows[selectedIndex].Cells["hp"].Value = (int)nudHp.Value; UpdateHpHint(); PushHistory(); } };
         AddRow("HP", nudHp);
 
         lblHpHint = new Label { Text = "", AutoSize = true, ForeColor = Color.Gray, Font = new Font(Font.FontFamily, 7.5f), Anchor = AnchorStyles.Left };
         AddRow("", lblHpHint);
 
         nudZOrder = MakeNumeric(-100, 100, 0);
-        nudZOrder.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].zOrder = (int)nudZOrder.Value; dgvList.Rows[selectedIndex].Cells["zOrder"].Value = (int)nudZOrder.Value; pnlComposer.Invalidate(); } };
+        nudZOrder.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].zOrder = (int)nudZOrder.Value; dgvList.Rows[selectedIndex].Cells["zOrder"].Value = (int)nudZOrder.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("zOrder(奥-/手前+)", nudZOrder);
 
         var flowActions = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(6), Margin = new Padding(0) };
@@ -540,6 +792,7 @@ public class PartsEditorForm : Form
         InvalidatePartThumb(p);
         lblSpriteValue.Text = relPath;
         pnlComposer.Invalidate();
+        PushHistory();
     }
 
     private void EditHitboxForSelected()
@@ -554,6 +807,7 @@ public class PartsEditorForm : Form
             p.hitboxOffsetY = form.HitboxOffsetY;
             p.hitboxWidth = form.HitboxWidth;
             p.hitboxHeight = form.HitboxHeight;
+            PushHistory();
         }
     }
 
@@ -562,7 +816,7 @@ public class PartsEditorForm : Form
         if (selectedIndex < 0) { MessageBox.Show("先にパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var p = parts[selectedIndex];
         using var form = new BehaviorScriptEditorForm($"パーツ: {p.id}", p.script);
-        if (form.ShowDialog() == DialogResult.OK) p.script = form.ResultScript;
+        if (form.ShowDialog() == DialogResult.OK) { p.script = form.ResultScript; PushHistory(); }
     }
 
     // ==== 🌀 回転する棒として配置（ジェネレータ）／🔧 既存の棒を編集 ====
@@ -628,6 +882,7 @@ public class PartsEditorForm : Form
         parts.AddRange(newParts);
         selectedIndex = parts.Count - newParts.Count;
         RefreshList();
+        PushHistory();
         MessageBox.Show($"{newParts.Count}個のパーツを「回転する棒」として配置しました。\n（半径はパーツの並び順(PartIndex)に応じて自動的に増えていくため、全て同じスクリプトを共有しても一直線に並んで回転します）",
             "生成完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
@@ -658,16 +913,8 @@ public class PartsEditorForm : Form
         return info.Indices.Count > 0 ? info : null;
     }
 
-    private void OpenRodEditor()
+    private void EditRodGroup(RodGroupInfo group)
     {
-        if (selectedIndex < 0) { MessageBox.Show("編集したい「回転する棒」のパーツをどれか1つ選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-        var group = DetectRodGroup(selectedIndex);
-        if (group == null)
-        {
-            MessageBox.Show("選択中のパーツは「回転する棒」として認識できませんでした。\n（「🌀 回転する棒として配置」で作成したパーツのみ、この機能で編集できます）", "認識できません", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
         using var form = new RodGeneratorForm(projectRoot, group);
         if (form.ShowDialog() != DialogResult.OK) return;
 
@@ -677,8 +924,250 @@ public class PartsEditorForm : Form
         parts.AddRange(newParts);
         selectedIndex = parts.Count - newParts.Count;
         RefreshList();
+        PushHistory();
         MessageBox.Show($"「回転する棒」を{newParts.Count}個のパーツに更新しました。\n（更新後はパーツ一覧の末尾に移動しています）",
             "更新完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // ==== 🕰 振り子として配置（ジェネレータ）/編集 ====
+    // Feature: UI改善（提案書 PT-2）— 回転する棒と同じ「同じスクリプトを共有し、PartIndexで半径だけ変える」
+    // 仕組みを流用し、角度を Time*速さ ではなく 基準角度 + sin(Time*速さ)*振れ幅 にすることで、
+    // 一直線に並んだまま行ったり来たり揺れる振り子（吊り橋の重り・シャンデリア等）を表現する。
+
+    private List<PartDef> GeneratePendulumParts(PendulumGeneratorForm form, int startIndexForPhase)
+    {
+        var existing = new HashSet<string>(parts.Select(p => p.id));
+        var newParts = new List<PartDef>();
+        for (int i = 0; i < form.Count; i++)
+        {
+            string baseId = form.IdPrefix;
+            string id = $"{baseId}{i}";
+            int n = 1;
+            while (existing.Contains(id)) { id = $"{baseId}{i}_{n}"; n++; }
+            existing.Add(id);
+
+            var pd = new PartDef
+            {
+                id = id,
+                sprite = form.SpritePath,
+                width = form.PartSize,
+                height = form.PartSize,
+                hitboxWidth = form.PartSize,
+                hitboxHeight = form.PartSize,
+                hp = form.Hp,
+                zOrder = form.ZOrder,
+            };
+            int overallIndex = startIndexForPhase + i;
+            // t=0時点の静止姿勢に近い値を初期値としておく（実際の位置は再生開始と同時にスクリプトが上書きする）
+            float restRadius = form.Spacing * (overallIndex + 1);
+            pd.offsetX = MathF.Cos(form.BaseAngleRad) * restRadius;
+            pd.offsetY = MathF.Sin(form.BaseAngleRad) * restRadius;
+
+            var swingExpr = new JObject
+            {
+                ["op"] = "Mul",
+                ["a"] = new JObject { ["op"] = "Sin", ["a"] = new JObject { ["op"] = "Mul", ["a"] = new JObject { ["op"] = "Time" }, ["b"] = form.Speed } },
+                ["b"] = form.AmplitudeRad,
+            };
+            var angleExpr = new JObject { ["op"] = "Add", ["a"] = form.BaseAngleRad, ["b"] = swingExpr };
+            var radiusExpr = new JObject
+            {
+                ["op"] = "Mul",
+                ["a"] = new JObject { ["op"] = "Add", ["a"] = new JObject { ["op"] = "PartIndex" }, ["b"] = 1 },
+                ["b"] = form.Spacing,
+            };
+            var body = new JArray {
+                new JObject {
+                    ["op"] = "Forever",
+                    ["body"] = new JArray {
+                        new JObject { ["op"] = "SetLocalOffsetPolar", ["angle"] = angleExpr, ["radius"] = radiusExpr },
+                        new JObject { ["op"] = "Wait", ["frames"] = 1 },
+                    }
+                }
+            };
+            pd.script = new JArray { new JObject { ["hat"] = "OnSpawn", ["body"] = body } };
+            newParts.Add(pd);
+        }
+        return newParts;
+    }
+
+    private void OpenPendulumGenerator()
+    {
+        using var form = new PendulumGeneratorForm(projectRoot);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        var newParts = GeneratePendulumParts(form, parts.Count);
+        parts.AddRange(newParts);
+        selectedIndex = parts.Count - newParts.Count;
+        RefreshList();
+        PushHistory();
+        MessageBox.Show($"{newParts.Count}個のパーツを「振り子」として配置しました。",
+            "生成完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private PendulumGroupInfo? DetectPendulumGroup(int fromIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= parts.Count) return null;
+        var seed = parts[fromIndex];
+        if (!PendulumGroupInfo.TryParsePendulumScript(seed.script, out float baseAngle, out float amplitude, out float speed, out float spacing)) return null;
+
+        string id = seed.id;
+        int cut = id.Length;
+        while (cut > 0 && char.IsDigit(id[cut - 1])) cut--;
+        string prefix = id.Substring(0, cut);
+        if (string.IsNullOrEmpty(prefix)) return null;
+
+        var info = new PendulumGroupInfo { IdPrefix = prefix, Spacing = spacing, Speed = speed, Amplitude = amplitude, BaseAngle = baseAngle, Hp = seed.hp, ZOrder = seed.zOrder, PartSize = seed.width > 0 ? seed.width : 12, SpritePath = seed.sprite };
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var p = parts[i];
+            if (!p.id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (!PendulumGroupInfo.TryParsePendulumScript(p.script, out float ba2, out float am2, out float sp2, out float spc2)) continue;
+            if (Math.Abs(ba2 - baseAngle) > 0.0001f || Math.Abs(am2 - amplitude) > 0.0001f || Math.Abs(sp2 - speed) > 0.0001f || Math.Abs(spc2 - spacing) > 0.0001f) continue;
+            info.Indices.Add(i);
+        }
+        return info.Indices.Count > 0 ? info : null;
+    }
+
+    private void EditPendulumGroup(PendulumGroupInfo group)
+    {
+        using var form = new PendulumGeneratorForm(projectRoot, group);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
+        var newParts = GeneratePendulumParts(form, parts.Count);
+        parts.AddRange(newParts);
+        selectedIndex = parts.Count - newParts.Count;
+        RefreshList();
+        PushHistory();
+        MessageBox.Show($"「振り子」を{newParts.Count}個のパーツに更新しました。\n（更新後はパーツ一覧の末尾に移動しています）",
+            "更新完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // ==== 🛰 公転として配置（ジェネレータ）/編集 ====
+    // Feature: UI改善（提案書 PT-2）— 複数のパーツが同じ半径の円周上を、PartIndexに応じた位相差を
+    // 保ったまま回り続ける（衛星/取り巻きのような動き）。回転する棒との違いは「半径が一定で
+    // 角度がPartIndexごとにずれる」点（回転する棒は逆に「角度が共通で半径がPartIndexごとにずれる」）。
+
+    private List<PartDef> GenerateOrbitParts(OrbitGeneratorForm form, int startIndexForPhase)
+    {
+        var existing = new HashSet<string>(parts.Select(p => p.id));
+        var newParts = new List<PartDef>();
+        float phaseStep = (2f * MathF.PI) / Math.Max(form.Count, 1);
+        for (int i = 0; i < form.Count; i++)
+        {
+            string baseId = form.IdPrefix;
+            string id = $"{baseId}{i}";
+            int n = 1;
+            while (existing.Contains(id)) { id = $"{baseId}{i}_{n}"; n++; }
+            existing.Add(id);
+
+            var pd = new PartDef
+            {
+                id = id,
+                sprite = form.SpritePath,
+                width = form.PartSize,
+                height = form.PartSize,
+                hitboxWidth = form.PartSize,
+                hitboxHeight = form.PartSize,
+                hp = form.Hp,
+                zOrder = form.ZOrder,
+            };
+            int overallIndex = startIndexForPhase + i;
+            float restAngle = overallIndex * phaseStep; // t=0時点の静止姿勢（各パーツごとに位相がずれる）
+            pd.offsetX = MathF.Cos(restAngle) * form.Radius;
+            pd.offsetY = MathF.Sin(restAngle) * form.Radius;
+
+            var angleExpr = new JObject
+            {
+                ["op"] = "Add",
+                ["a"] = new JObject { ["op"] = "Mul", ["a"] = new JObject { ["op"] = "Time" }, ["b"] = form.Speed },
+                ["b"] = new JObject { ["op"] = "Mul", ["a"] = new JObject { ["op"] = "PartIndex" }, ["b"] = phaseStep },
+            };
+            var body = new JArray {
+                new JObject {
+                    ["op"] = "Forever",
+                    ["body"] = new JArray {
+                        new JObject { ["op"] = "SetLocalOffsetPolar", ["angle"] = angleExpr, ["radius"] = (double)form.Radius },
+                        new JObject { ["op"] = "Wait", ["frames"] = 1 },
+                    }
+                }
+            };
+            pd.script = new JArray { new JObject { ["hat"] = "OnSpawn", ["body"] = body } };
+            newParts.Add(pd);
+        }
+        return newParts;
+    }
+
+    private void OpenOrbitGenerator()
+    {
+        using var form = new OrbitGeneratorForm(projectRoot);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        var newParts = GenerateOrbitParts(form, parts.Count);
+        parts.AddRange(newParts);
+        selectedIndex = parts.Count - newParts.Count;
+        RefreshList();
+        PushHistory();
+        MessageBox.Show($"{newParts.Count}個のパーツを「公転」として配置しました。\n（PartIndexに応じて位相がずれるため、同じスクリプトを共有しても円周上に等間隔で並んで回り続けます）",
+            "生成完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private OrbitGroupInfo? DetectOrbitGroup(int fromIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= parts.Count) return null;
+        var seed = parts[fromIndex];
+        if (!OrbitGroupInfo.TryParseOrbitScript(seed.script, out float speed, out float phaseStep, out float radius)) return null;
+
+        string id = seed.id;
+        int cut = id.Length;
+        while (cut > 0 && char.IsDigit(id[cut - 1])) cut--;
+        string prefix = id.Substring(0, cut);
+        if (string.IsNullOrEmpty(prefix)) return null;
+
+        var info = new OrbitGroupInfo { IdPrefix = prefix, Speed = speed, PhaseStep = phaseStep, Radius = radius, Hp = seed.hp, ZOrder = seed.zOrder, PartSize = seed.width > 0 ? seed.width : 12, SpritePath = seed.sprite };
+        for (int i = 0; i < parts.Count; i++)
+        {
+            var p = parts[i];
+            if (!p.id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (!OrbitGroupInfo.TryParseOrbitScript(p.script, out float sp2, out float ph2, out float r2)) continue;
+            if (Math.Abs(sp2 - speed) > 0.0001f || Math.Abs(ph2 - phaseStep) > 0.0001f || Math.Abs(r2 - radius) > 0.0001f) continue;
+            info.Indices.Add(i);
+        }
+        return info.Indices.Count > 0 ? info : null;
+    }
+
+    private void EditOrbitGroup(OrbitGroupInfo group)
+    {
+        using var form = new OrbitGeneratorForm(projectRoot, group);
+        if (form.ShowDialog() != DialogResult.OK) return;
+
+        foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
+        var newParts = GenerateOrbitParts(form, parts.Count);
+        parts.AddRange(newParts);
+        selectedIndex = parts.Count - newParts.Count;
+        RefreshList();
+        PushHistory();
+        MessageBox.Show($"「公転」を{newParts.Count}個のパーツに更新しました。\n（更新後はパーツ一覧の末尾に移動しています）",
+            "更新完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // 選択中のパーツが「回転する棒」「振り子」「公転」のいずれかとして認識できるかを順に試し、
+    // 一致した種類の編集ダイアログを開く（種類ごとにボタンを分けず、利用者は用途を意識しなくてよい）
+    private void OpenMotionEditor()
+    {
+        if (selectedIndex < 0) { MessageBox.Show("編集したい動きのパーツをどれか1つ選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+
+        var rodGroup = DetectRodGroup(selectedIndex);
+        if (rodGroup != null) { EditRodGroup(rodGroup); return; }
+
+        var pendulumGroup = DetectPendulumGroup(selectedIndex);
+        if (pendulumGroup != null) { EditPendulumGroup(pendulumGroup); return; }
+
+        var orbitGroup = DetectOrbitGroup(selectedIndex);
+        if (orbitGroup != null) { EditOrbitGroup(orbitGroup); return; }
+
+        MessageBox.Show("選択中のパーツは「回転する棒」「振り子」「公転」のいずれとしても認識できませんでした。\n（対応するウィザードから生成したパーツのみ、この機能で編集できます）", "認識できません", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     // ==== 下部ボタン ====
@@ -695,13 +1184,28 @@ public class PartsEditorForm : Form
         flow.Controls.Add(btnOk);
         AcceptButton = btnOk;
         CancelButton = btnCancel;
+
+        // Feature: UI改善（提案書 CUT-1）— このパーツエディタ内での操作ミスを、ダイアログ全体の
+        // キャンセルに頼らず1手ずつ戻せるようにするUndo/Redo（Ctrl+Z/Ctrl+Yでも操作可能）。
+        var flowHistory = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8), AutoSize = true };
+        _btnUndo = new Button { Text = "↩ 元に戻す (Ctrl+Z)", AutoSize = true, Padding = new Padding(8, 5, 8, 5), Enabled = false };
+        _btnUndo.Click += (s, e) => PartsUndo();
+        _btnRedo = new Button { Text = "↪ やり直す (Ctrl+Y)", AutoSize = true, Padding = new Padding(8, 5, 8, 5), Enabled = false };
+        _btnRedo.Click += (s, e) => PartsRedo();
+        flowHistory.Controls.AddRange(new Control[] { _btnUndo, _btnRedo });
+
         pnl.Controls.Add(flow);
+        pnl.Controls.Add(flowHistory);
         return pnl;
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         base.OnFormClosed(e);
+        _previewTimer?.Stop();
+        _previewTimer?.Dispose();
+        _highlightTimer?.Stop();
+        _highlightTimer?.Dispose();
         baseSprite?.Dispose();
         foreach (var img in _partThumbCache.Values) img?.Dispose();
     }
@@ -861,6 +1365,341 @@ public class RodGroupInfo
             if (radius?["op"]?.ToString() != "Mul") return false;
             speed = angle["b"]!.Value<float>();
             spacing = radius["b"]!.Value<float>();
+            return true;
+        }
+        catch { return false; }
+    }
+}
+
+// ======================================================
+// PendulumGeneratorForm - 「🕰 振り子として配置」の設定ダイアログ
+// Feature: UI改善（提案書 PT-2）
+// ======================================================
+public class PendulumGeneratorForm : Form
+{
+    private readonly string projectRoot;
+    private NumericUpDown nudCount = null!, nudSpacing = null!, nudAmplitudeDeg = null!, nudSpeed = null!, nudBaseAngleDeg = null!, nudHp = null!, nudZOrder = null!, nudSize = null!;
+    private TextBox txtIdPrefix = null!;
+    private Label lblSprite = null!;
+    private string spritePath = "";
+
+    public int Count => (int)nudCount.Value;
+    public float Spacing => (float)nudSpacing.Value;
+    public float Speed => (float)nudSpeed.Value;
+    public float AmplitudeRad => (float)((double)nudAmplitudeDeg.Value * Math.PI / 180.0);
+    public float BaseAngleRad => (float)((double)nudBaseAngleDeg.Value * Math.PI / 180.0);
+    public int Hp => (int)nudHp.Value;
+    public int ZOrder => (int)nudZOrder.Value;
+    public int PartSize => (int)nudSize.Value;
+    public string IdPrefix => string.IsNullOrWhiteSpace(txtIdPrefix.Text) ? "pendulum" : txtIdPrefix.Text.Trim();
+    public string SpritePath => spritePath;
+
+    public PendulumGeneratorForm(string projectRoot, PendulumGroupInfo? initial = null)
+    {
+        this.projectRoot = projectRoot;
+        bool isEdit = initial != null;
+        Text = isEdit ? "🔧 振り子を編集" : "🕰 振り子として配置";
+        Size = new Size(480, 480);
+        MinimumSize = new Size(420, 420);
+        StartPosition = FormStartPosition.CenterParent;
+        Font = new Font("Meiryo UI", 9);
+
+        var lblExplain = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            Padding = new Padding(8),
+            Text = isEdit
+                ? "現在の「振り子」のパラメータを変更して更新します。長さ・振れ幅・速さ・向きを調整できます。"
+                : "中心から一直線に並んだ球が、基準角度を中心に左右（または上下）へ振り子のように揺れる\n" +
+                  "パーツ一式を自動生成します。吊り橋の重りやシャンデリアなどに使えます。",
+            Font = new Font(Font.FontFamily, 8f),
+            ForeColor = Color.DarkSlateGray,
+        };
+
+        var table = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Padding = new Padding(10), AutoSize = true };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        void AddRow(string label, Control control)
+        {
+            int r = table.RowCount;
+            table.RowCount = r + 1;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) }, 0, r);
+            control.Margin = new Padding(3, 4, 3, 4);
+            table.Controls.Add(control, 1, r);
+        }
+
+        double initBaseAngleDeg = (initial?.BaseAngle ?? MathF.PI / 2f) * 180.0 / Math.PI;
+        double initAmplitudeDeg = (initial?.Amplitude ?? MathF.PI / 6f) * 180.0 / Math.PI;
+
+        nudCount = new NumericUpDown { Minimum = 1, Maximum = 40, Value = initial?.Indices.Count ?? 5, Width = 100 };
+        AddRow("球の数（増減で伸縮）", nudCount);
+
+        nudSpacing = new NumericUpDown { Minimum = 2, Maximum = 500, Value = (decimal)(initial?.Spacing ?? 14f), Width = 100 };
+        AddRow("間隔(px)＝振り子の長さ", nudSpacing);
+
+        nudBaseAngleDeg = new NumericUpDown { Minimum = -180, Maximum = 180, Value = (decimal)Math.Clamp(initBaseAngleDeg, -180, 180), Width = 100 };
+        AddRow("基準角度(度)　90=真下", nudBaseAngleDeg);
+
+        nudAmplitudeDeg = new NumericUpDown { Minimum = 1, Maximum = 179, Value = (decimal)Math.Clamp(initAmplitudeDeg, 1, 179), Width = 100 };
+        AddRow("振れ幅(度)", nudAmplitudeDeg);
+
+        nudSpeed = new NumericUpDown { Minimum = 0.001m, Maximum = 1m, DecimalPlaces = 3, Increment = 0.005m, Value = (decimal)Math.Abs(initial?.Speed ?? 0.03f), Width = 100 };
+        AddRow("揺れる速さ", nudSpeed);
+
+        nudSize = new NumericUpDown { Minimum = 2, Maximum = 200, Value = initial?.PartSize ?? 12, Width = 100 };
+        AddRow("球の表示/当たり判定サイズ(px)", nudSize);
+
+        nudHp = new NumericUpDown { Minimum = 0, Maximum = 999, Value = initial?.Hp ?? 0, Width = 100 };
+        AddRow("HP(0=不滅)", nudHp);
+
+        nudZOrder = new NumericUpDown { Minimum = -100, Maximum = 100, Value = initial?.ZOrder ?? 1, Width = 100 };
+        AddRow("zOrder", nudZOrder);
+
+        txtIdPrefix = new TextBox { Text = initial?.IdPrefix ?? "pendulum", Width = 150 };
+        AddRow("パーツID接頭辞", txtIdPrefix);
+
+        spritePath = initial?.SpritePath ?? "";
+        var spritePanel = new FlowLayoutPanel { AutoSize = true };
+        lblSprite = new Label { Text = string.IsNullOrEmpty(spritePath) ? "(画像なし)" : spritePath, AutoSize = true, MaximumSize = new Size(220, 0), Margin = new Padding(3, 6, 6, 3) };
+        var btnPick = new Button { Text = "📁 画像選択", AutoSize = true, Padding = new Padding(4, 2, 4, 2) };
+        btnPick.Click += (s, e) =>
+        {
+            using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "球の画像を選択" };
+            if (ofd.ShowDialog() != DialogResult.OK) return;
+            spritePath = ImageImportHelper.CopyIntoImgFolder(projectRoot, ofd.FileName);
+            lblSprite.Text = spritePath;
+        };
+        spritePanel.Controls.AddRange(new Control[] { lblSprite, btnPick });
+        AddRow("球の画像", spritePanel);
+
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        var btnOk = new Button { Text = isEdit ? "更新" : "生成", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        flow.Controls.Add(btnCancel);
+        flow.Controls.Add(btnOk);
+        AcceptButton = btnOk;
+        CancelButton = btnCancel;
+        pnlBottom.Controls.Add(flow);
+
+        var pnlScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        pnlScroll.Controls.Add(table);
+
+        Controls.Add(pnlScroll);
+        Controls.Add(pnlBottom);
+        Controls.Add(lblExplain);
+    }
+}
+
+// ======================================================
+// PendulumGroupInfo - 「振り子」として検出済みのパーツ群の共有パラメータ
+// Feature: UI改善（提案書 PT-2）
+// ======================================================
+public class PendulumGroupInfo
+{
+    public List<int> Indices = new();
+    public string IdPrefix = "pendulum";
+    public float Spacing;
+    public float Speed;
+    public float Amplitude; // ラジアン
+    public float BaseAngle; // ラジアン
+    public int Hp;
+    public int ZOrder;
+    public int PartSize;
+    public string SpritePath = "";
+
+    // scriptが「SetLocalOffsetPolar(angle:Add(baseAngle,Mul(Sin(Mul(Time,speed)),amplitude)), radius:Mul(Add(PartIndex,1),spacing))」
+    // の形になっているかを判定する。回転する棒(角度がMul)・公転(angle.aがMul)とは形が異なるため誤検出しない。
+    public static bool TryParsePendulumScript(JArray script, out float baseAngle, out float amplitude, out float speed, out float spacing)
+    {
+        baseAngle = 0; amplitude = 0; speed = 0; spacing = 0;
+        try
+        {
+            var hat = script.FirstOrDefault(t => t["hat"]?.ToString() == "OnSpawn") as JObject;
+            var body = hat?["body"] as JArray;
+            var forever = body?.FirstOrDefault(t => t["op"]?.ToString() == "Forever") as JObject;
+            var fbody = forever?["body"] as JArray;
+            var setOp = fbody?.FirstOrDefault(t => t["op"]?.ToString() == "SetLocalOffsetPolar") as JObject;
+            if (setOp == null) return false;
+            var angle = setOp["angle"] as JObject;
+            var radius = setOp["radius"] as JObject;
+            if (angle?["op"]?.ToString() != "Add") return false;
+            if (radius?["op"]?.ToString() != "Mul") return false;
+            baseAngle = angle["a"]!.Value<float>(); // Orbit(angle.aがMulのJObject)ならここで例外→falseになる
+            var swing = angle["b"] as JObject;
+            if (swing?["op"]?.ToString() != "Mul") return false;
+            var sin = swing["a"] as JObject;
+            if (sin?["op"]?.ToString() != "Sin") return false;
+            var innerMul = sin["a"] as JObject;
+            if (innerMul?["op"]?.ToString() != "Mul") return false;
+            speed = innerMul["b"]!.Value<float>();
+            amplitude = swing["b"]!.Value<float>();
+            spacing = radius["b"]!.Value<float>();
+            return true;
+        }
+        catch { return false; }
+    }
+}
+
+// ======================================================
+// OrbitGeneratorForm - 「🛰 公転として配置」の設定ダイアログ
+// Feature: UI改善（提案書 PT-2）
+// ======================================================
+public class OrbitGeneratorForm : Form
+{
+    private readonly string projectRoot;
+    private NumericUpDown nudCount = null!, nudRadius = null!, nudSpeed = null!, nudHp = null!, nudZOrder = null!, nudSize = null!;
+    private CheckBox chkReverse = null!;
+    private TextBox txtIdPrefix = null!;
+    private Label lblSprite = null!;
+    private string spritePath = "";
+
+    public int Count => (int)nudCount.Value;
+    public float Radius => (float)nudRadius.Value;
+    public float Speed => (float)nudSpeed.Value * (chkReverse.Checked ? -1f : 1f);
+    public int Hp => (int)nudHp.Value;
+    public int ZOrder => (int)nudZOrder.Value;
+    public int PartSize => (int)nudSize.Value;
+    public string IdPrefix => string.IsNullOrWhiteSpace(txtIdPrefix.Text) ? "orbit" : txtIdPrefix.Text.Trim();
+    public string SpritePath => spritePath;
+
+    public OrbitGeneratorForm(string projectRoot, OrbitGroupInfo? initial = null)
+    {
+        this.projectRoot = projectRoot;
+        bool isEdit = initial != null;
+        Text = isEdit ? "🔧 公転を編集" : "🛰 公転として配置";
+        Size = new Size(480, 460);
+        MinimumSize = new Size(420, 400);
+        StartPosition = FormStartPosition.CenterParent;
+        Font = new Font("Meiryo UI", 9);
+
+        var lblExplain = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 70,
+            Padding = new Padding(8),
+            Text = isEdit
+                ? "現在の「公転」のパラメータを変更して更新します。数・半径・速さ・向きを調整できます。"
+                : "同じ半径の円周上を、等間隔に並んだまま回り続けるパーツ一式を自動生成します。\n" +
+                  "衛星や取り巻きのような動きに使えます（回転する棒と違い、パーツどうしの間隔は円周上の弧の長さになります）。",
+            Font = new Font(Font.FontFamily, 8f),
+            ForeColor = Color.DarkSlateGray,
+        };
+
+        var table = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Padding = new Padding(10), AutoSize = true };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+
+        void AddRow(string label, Control control)
+        {
+            int r = table.RowCount;
+            table.RowCount = r + 1;
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 8, 3, 3) }, 0, r);
+            control.Margin = new Padding(3, 4, 3, 4);
+            table.Controls.Add(control, 1, r);
+        }
+
+        nudCount = new NumericUpDown { Minimum = 1, Maximum = 40, Value = initial?.Indices.Count ?? 3, Width = 100 };
+        AddRow("衛星の数", nudCount);
+
+        nudRadius = new NumericUpDown { Minimum = 2, Maximum = 1000, Value = (decimal)(initial?.Radius ?? 60f), Width = 100 };
+        AddRow("公転半径(px)", nudRadius);
+
+        nudSpeed = new NumericUpDown { Minimum = 0.001m, Maximum = 1m, DecimalPlaces = 3, Increment = 0.005m, Value = (decimal)Math.Abs(initial?.Speed ?? 0.04f), Width = 100 };
+        AddRow("回転速度", nudSpeed);
+
+        chkReverse = new CheckBox { Text = "逆回転（反時計回り）にする", AutoSize = true, Checked = (initial?.Speed ?? 0f) < 0f };
+        AddRow("回転方向", chkReverse);
+
+        nudSize = new NumericUpDown { Minimum = 2, Maximum = 200, Value = initial?.PartSize ?? 12, Width = 100 };
+        AddRow("衛星の表示/当たり判定サイズ(px)", nudSize);
+
+        nudHp = new NumericUpDown { Minimum = 0, Maximum = 999, Value = initial?.Hp ?? 0, Width = 100 };
+        AddRow("HP(0=不滅)", nudHp);
+
+        nudZOrder = new NumericUpDown { Minimum = -100, Maximum = 100, Value = initial?.ZOrder ?? 1, Width = 100 };
+        AddRow("zOrder", nudZOrder);
+
+        txtIdPrefix = new TextBox { Text = initial?.IdPrefix ?? "orbit", Width = 150 };
+        AddRow("パーツID接頭辞", txtIdPrefix);
+
+        spritePath = initial?.SpritePath ?? "";
+        var spritePanel = new FlowLayoutPanel { AutoSize = true };
+        lblSprite = new Label { Text = string.IsNullOrEmpty(spritePath) ? "(画像なし)" : spritePath, AutoSize = true, MaximumSize = new Size(220, 0), Margin = new Padding(3, 6, 6, 3) };
+        var btnPick = new Button { Text = "📁 画像選択", AutoSize = true, Padding = new Padding(4, 2, 4, 2) };
+        btnPick.Click += (s, e) =>
+        {
+            using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "衛星の画像を選択" };
+            if (ofd.ShowDialog() != DialogResult.OK) return;
+            spritePath = ImageImportHelper.CopyIntoImgFolder(projectRoot, ofd.FileName);
+            lblSprite.Text = spritePath;
+        };
+        spritePanel.Controls.AddRange(new Control[] { lblSprite, btnPick });
+        AddRow("衛星の画像", spritePanel);
+
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        var btnOk = new Button { Text = isEdit ? "更新" : "生成", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        flow.Controls.Add(btnCancel);
+        flow.Controls.Add(btnOk);
+        AcceptButton = btnOk;
+        CancelButton = btnCancel;
+        pnlBottom.Controls.Add(flow);
+
+        var pnlScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        pnlScroll.Controls.Add(table);
+
+        Controls.Add(pnlScroll);
+        Controls.Add(pnlBottom);
+        Controls.Add(lblExplain);
+    }
+}
+
+// ======================================================
+// OrbitGroupInfo - 「公転」として検出済みのパーツ群の共有パラメータ
+// Feature: UI改善（提案書 PT-2）
+// ======================================================
+public class OrbitGroupInfo
+{
+    public List<int> Indices = new();
+    public string IdPrefix = "orbit";
+    public float Speed;
+    public float PhaseStep; // ラジアン。パーツ間の位相差(2π/個数)がベイクされた値
+    public float Radius;
+    public int Hp;
+    public int ZOrder;
+    public int PartSize;
+    public string SpritePath = "";
+
+    // scriptが「SetLocalOffsetPolar(angle:Add(Mul(Time,speed),Mul(PartIndex,phaseStep)), radius:<定数>)」
+    // の形になっているかを判定する。半径が単純な数値であることを要求し、回転する棒/振り子と区別する。
+    public static bool TryParseOrbitScript(JArray script, out float speed, out float phaseStep, out float radius)
+    {
+        speed = 0; phaseStep = 0; radius = 0;
+        try
+        {
+            var hat = script.FirstOrDefault(t => t["hat"]?.ToString() == "OnSpawn") as JObject;
+            var body = hat?["body"] as JArray;
+            var forever = body?.FirstOrDefault(t => t["op"]?.ToString() == "Forever") as JObject;
+            var fbody = forever?["body"] as JArray;
+            var setOp = fbody?.FirstOrDefault(t => t["op"]?.ToString() == "SetLocalOffsetPolar") as JObject;
+            if (setOp == null) return false;
+            var angle = setOp["angle"] as JObject;
+            var radiusTok = setOp["radius"];
+            if (angle?["op"]?.ToString() != "Add") return false;
+            var timeTerm = angle["a"] as JObject;
+            var phaseTerm = angle["b"] as JObject;
+            if (timeTerm?["op"]?.ToString() != "Mul") return false;
+            if (phaseTerm?["op"]?.ToString() != "Mul") return false;
+            if (radiusTok == null || radiusTok.Type == JTokenType.Object) return false; // 半径が式(回転する棒/振り子)なら対象外
+            speed = timeTerm["b"]!.Value<float>();
+            phaseStep = phaseTerm["b"]!.Value<float>();
+            radius = radiusTok.Value<float>();
             return true;
         }
         catch { return false; }

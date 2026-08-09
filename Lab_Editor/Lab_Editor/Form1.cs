@@ -57,6 +57,17 @@ public partial class Form1 : Form
         RefreshStageList();
         if (Directory.GetFiles(stagesPath, "*.json").Length == 0) CreateNewStage("stage_01");
         UpdateStatus();
+        ShowFirstRunGuideIfNeeded();
+    }
+
+    // Feature: UI改善（提案書 MW-1）— 初めて開いたときだけ使い方ガイドを自動表示する。
+    // 一度表示したらマーカーファイルを作り、以後は「ヘルプ」メニューから任意で開く形に切り替える。
+    private void ShowFirstRunGuideIfNeeded()
+    {
+        string marker = Path.Combine(AppPaths.LogsDir, "first_run_guide_shown.flag");
+        if (File.Exists(marker)) return;
+        try { File.WriteAllText(marker, DateTime.Now.ToString("o")); } catch { }
+        new HelpForm().ShowDialog(this);
     }
 
     // ===== ステージリスト =====
@@ -149,13 +160,23 @@ public partial class Form1 : Form
             {
                 Text = $"{t.id}:{t.name}",
                 Tag = t.id,
-                Size = new Size(90, 28),
+                Size = new Size(104, 34),
                 BackColor = c,
                 ForeColor = c.GetBrightness() < 0.5f ? Color.White : Color.Black,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Meiryo UI", 7),
-                TextAlign = ContentAlignment.MiddleLeft
+                TextAlign = ContentAlignment.MiddleRight,
+                Padding = new Padding(0, 0, 3, 0),
             };
+            // Feature: UI改善（提案書 MP-1）— タイルボタンが単色の四角のみで見た目が分からなかったため、
+            // スプライトが設定されていれば実際の画像を小さいアイコンとして添える（無ければ従来通り色のみ）。
+            var icon = LoadTileIcon(t.sprite, 24);
+            if (icon != null)
+            {
+                btn.Image = icon;
+                btn.ImageAlign = ContentAlignment.MiddleLeft;
+                btn.TextImageRelation = TextImageRelation.ImageBeforeText;
+            }
             btn.Click += TileBtn_Click;
             flpTiles.Controls.Add(btn);
         }
@@ -168,6 +189,24 @@ public partial class Form1 : Form
 
         lstItems.Items.Clear();
         foreach (var i in assets.Items) lstItems.Items.Add($"{i.name}");
+    }
+
+    private static Image? LoadTileIcon(string spritePath, int size)
+    {
+        if (string.IsNullOrEmpty(spritePath)) return null;
+        string full = Path.Combine(AppPaths.ProjectRoot, spritePath.Replace('/', '\\'));
+        if (!File.Exists(full)) return null;
+        try
+        {
+            using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var src = Image.FromStream(fs);
+            var bmp = new Bitmap(size, size);
+            using var g = Graphics.FromImage(bmp);
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            g.DrawImage(src, 0, 0, size, size);
+            return bmp;
+        }
+        catch { return null; }
     }
 
     private void TileBtn_Click(object? sender, EventArgs e)

@@ -15,6 +15,10 @@ public class TileEditorForm : Form
     private Panel pnlPreview;
     private TextBox txtSearch = null!;
 
+    // Feature: UI改善（提案書 MP-3）— タイル定義の追加/削除/編集にもUndo/Redoを効かせる
+    private readonly HistoryManager<List<TileDef>> _history = new();
+    private Button _btnUndo = null!, _btnRedo = null!;
+
     public List<TileDef> ResultTiles => tiles;
 
     public TileEditorForm(string assetsPath, List<TileDef> currentTiles)
@@ -28,6 +32,7 @@ public class TileEditorForm : Form
 
         InitUI();
         LoadGrid();
+        PushHistory();
     }
 
     private void InitUI()
@@ -72,7 +77,11 @@ public class TileEditorForm : Form
         btnDel.Click += BtnDel_Click;
         var btnDuplicate = new Button { Text = "⧉ 複製", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
         btnDuplicate.Click += BtnDuplicate_Click;
-        flowLeft.Controls.AddRange(new Control[] { btnAdd, btnDel, btnDuplicate });
+        _btnUndo = new Button { Text = "↩ 元に戻す (Ctrl+Z)", AutoSize = true, Padding = new Padding(8, 5, 8, 5), Enabled = false };
+        _btnUndo.Click += (s, e) => TilesUndo();
+        _btnRedo = new Button { Text = "↪ やり直す (Ctrl+Y)", AutoSize = true, Padding = new Padding(8, 5, 8, 5), Enabled = false };
+        _btnRedo.Click += (s, e) => TilesRedo();
+        flowLeft.Controls.AddRange(new Control[] { btnAdd, btnDel, btnDuplicate, _btnUndo, _btnRedo });
         pnlBottom.Controls.Add(flowRight);
         pnlBottom.Controls.Add(flowLeft);
 
@@ -103,11 +112,71 @@ public class TileEditorForm : Form
 
         dgv.CellContentClick += Dgv_CellContentClick;
         dgv.SelectionChanged += Dgv_SelectionChanged;
+        dgv.CellValueChanged += (s, e) => PushHistory();
 
         Controls.Add(dgv);
         Controls.Add(pnlPreview);
         Controls.Add(pnlBottom);
         Controls.Add(pnlSearch);
+    }
+
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z)) { TilesUndo(); return true; }
+        if (keyData == (Keys.Control | Keys.Y)) { TilesRedo(); return true; }
+        return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    private List<TileDef> ReadTilesFromGrid()
+    {
+        var result = new List<TileDef>();
+        foreach (DataGridViewRow row in dgv.Rows)
+        {
+            if (!int.TryParse(row.Cells["id"].Value?.ToString(), out int id)) continue;
+            result.Add(new TileDef
+            {
+                id = id,
+                name = row.Cells["name"].Value?.ToString() ?? "",
+                color = row.Cells["color"].Value?.ToString() ?? "#CCCCCC",
+                collidable = row.Cells["collidable"].Value is true,
+                deadly = row.Cells["deadly"].Value is true,
+                sprite = row.Cells["sprite"].Value?.ToString() ?? ""
+            });
+        }
+        return result;
+    }
+
+    private void PushHistory()
+    {
+        _history.Push(ReadTilesFromGrid());
+        UpdateUndoRedoButtons();
+    }
+
+    private void TilesUndo()
+    {
+        if (!_history.CanUndo) return;
+        var restored = _history.Undo();
+        if (restored == null) return;
+        tiles = restored;
+        LoadGrid();
+        UpdateUndoRedoButtons();
+    }
+
+    private void TilesRedo()
+    {
+        if (!_history.CanRedo) return;
+        var restored = _history.Redo();
+        if (restored == null) return;
+        tiles = restored;
+        LoadGrid();
+        UpdateUndoRedoButtons();
+    }
+
+    private void UpdateUndoRedoButtons()
+    {
+        if (_btnUndo == null! || _btnRedo == null!) return;
+        _btnUndo.Enabled = _history.CanUndo;
+        _btnRedo.Enabled = _history.CanRedo;
     }
 
     private void LoadGrid()
@@ -171,6 +240,7 @@ public class TileEditorForm : Form
         tiles.Add(new TileDef { id = newId, name = $"新タイル{newId}", color = "#888888" });
         LoadGrid();
         dgv.Rows[dgv.Rows.Count - 1].Selected = true;
+        PushHistory();
     }
 
     private void BtnDel_Click(object? sender, EventArgs e)
@@ -181,6 +251,7 @@ public class TileEditorForm : Form
         if (id == 0) { MessageBox.Show("ID=0 のタイルは削除できません", "エラー"); return; }
         tiles.RemoveAll(t => t.id == id);
         LoadGrid();
+        PushHistory();
     }
 
     private void ApplySearchFilter()
@@ -212,25 +283,12 @@ public class TileEditorForm : Form
         tiles.Add(src);
         LoadGrid();
         dgv.Rows[dgv.Rows.Count - 1].Selected = true;
+        PushHistory();
     }
 
     private void BtnSave_Click(object? sender, EventArgs e)
     {
-        // DataGridView → tiles リストに書き戻す
-        tiles.Clear();
-        foreach (DataGridViewRow row in dgv.Rows)
-        {
-            if (!int.TryParse(row.Cells["id"].Value?.ToString(), out int id)) continue;
-            tiles.Add(new TileDef
-            {
-                id = id,
-                name = row.Cells["name"].Value?.ToString() ?? "",
-                color = row.Cells["color"].Value?.ToString() ?? "#CCCCCC",
-                collidable = row.Cells["collidable"].Value is true,
-                deadly = row.Cells["deadly"].Value is true,
-                sprite = row.Cells["sprite"].Value?.ToString() ?? ""
-            });
-        }
+        tiles = ReadTilesFromGrid();
         string path = Path.Combine(assetsPath, "tiles.json");
         File.WriteAllText(path, JsonConvert.SerializeObject(tiles, Formatting.Indented));
         MessageBox.Show("タイル定義を保存しました！", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);

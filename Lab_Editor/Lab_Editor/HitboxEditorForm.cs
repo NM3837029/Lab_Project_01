@@ -26,6 +26,11 @@ public class HitboxEditorForm : Form
     private int dragMode = 0;
     private const int HANDLE_SIZE = 6;
 
+    // Feature: UI改善（提案書 HB-2）— 小さいスプライトを1px単位で調整しやすいよう、ホイールでズームできるようにする
+    private float _zoomFactor = 1.0f;
+    // Feature: UI改善（提案書 HB-3）— ドラッグ操作を1回分だけCtrl+Zで戻せるようにする
+    private Rectangle _previousRect;
+
     public HitboxEditorForm(string imagePath, int ox, int oy, int w, int h)
     {
         Text = "当たり判定(Hitbox)エディタ";
@@ -64,8 +69,9 @@ public class HitboxEditorForm : Form
         pb.MouseDown += Pb_MouseDown;
         pb.MouseMove += Pb_MouseMove;
         pb.MouseUp += Pb_MouseUp;
+        pb.MouseWheel += Pb_MouseWheel;
 
-        lblInfo = new Label { Location = new Point(10, 500), Size = new Size(300, 20), Text = "ドラッグで当たり判定を設定してください" };
+        lblInfo = new Label { Location = new Point(10, 500), Size = new Size(560, 20), Text = "ドラッグで当たり判定を設定してください（ホイールでズーム、Ctrl+Zで直前の操作を1回戻す）" };
 
         btnSave = new Button { Text = "保存", Location = new Point(400, 500), Size = new Size(80, 30) };
         btnSave.Click += (s, e) => {
@@ -89,6 +95,7 @@ public class HitboxEditorForm : Form
         float scale = Math.Min((float)pb.Width / sprite.Width, (float)pb.Height / sprite.Height);
         if (scale > 10) scale = 10; // 小さい画像を拡大しすぎない上限
         // 下限は設けない：ウィンドウより大きい画像は縮小してウィンドウ内に収める
+        scale *= _zoomFactor; // Feature: UI改善（提案書 HB-2）— ホイールズームを反映する
         int drawW = (int)(sprite.Width * scale);
         int drawH = (int)(sprite.Height * scale);
         int drawX = (pb.Width - drawW) / 2;
@@ -149,9 +156,18 @@ public class HitboxEditorForm : Form
         return 0;
     }
 
+    private void Pb_MouseWheel(object? sender, MouseEventArgs e)
+    {
+        if (sprite == null) return;
+        _zoomFactor += e.Delta > 0 ? 0.25f : -0.25f;
+        _zoomFactor = Math.Clamp(_zoomFactor, 1.0f, 8.0f);
+        pb.Invalidate();
+    }
+
     private void Pb_MouseDown(object? sender, MouseEventArgs e)
     {
         if (sprite == null) return;
+        _previousRect = hitboxRect; // Feature: UI改善（提案書 HB-3）— この操作を始める直前の状態を1件だけ覚えておく
         dragMode = GetHandleUnderCursor(e.X, e.Y);
         if (dragMode == 0)
         {
@@ -239,6 +255,19 @@ public class HitboxEditorForm : Form
     {
         isDragging = false;
         dragMode = 0;
+    }
+
+    // Feature: UI改善（提案書 HB-3）
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    {
+        if (keyData == (Keys.Control | Keys.Z))
+        {
+            hitboxRect = _previousRect;
+            lblInfo.Text = $"直前の操作を戻しました: X={hitboxRect.X}, Y={hitboxRect.Y}, W={hitboxRect.Width}, H={hitboxRect.Height}";
+            pb.Invalidate();
+            return true;
+        }
+        return base.ProcessCmdKey(ref msg, keyData);
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

@@ -62,5 +62,21 @@
     "collidable": true,
     "deadly": false,
     "sprite": "img/stage1/platform_block.png"
+  },
+  {
+    "id": 8,
+    "name": "kiiro",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/29_20260809212741.png"
+  },
+  {
+    "id": 9,
+    "name": "kiiro2",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/2.png"
   }
 ]

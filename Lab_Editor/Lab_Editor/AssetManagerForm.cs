@@ -109,39 +109,41 @@ public partial class AssetManagerForm : Form
         (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
         (20, "20 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
     };
-    private static readonly (int type, string desc)[] GimmickTypes =
+    // Feature: UI改善（提案書 CUT-2/AM-1）— 敵タイプ(EnemyTypes)には既にあった「plain-languageの説明文(detail)」を
+    // ギミック/アイテムのタイプにも同様に用意し、type_enumという数字だけでなく実際の挙動が分かるようにする。
+    private static readonly (int type, string desc, string detail)[] GimmickTypes =
     {
-        (0, "0 = ポータル"),
-        (1, "1 = 回転橋(自動)"),
-        (2, "2 = 回転橋(手動)"),
-        (3, "3 = 破壊ブロック"),
-        (4, "4 = 落下リフト"),
-        (5, "5 = 反射鏡"),
-        (6, "6 = 重量スイッチ"),
-        (7, "7 = スケールボックス"),
-        (8, "8 = ゲート扉"),
-        (9, "9 = 棘床"),
-        (10, "10 = スケール地面"),
-        (11, "11 = ちくわブロック"),
-        (12, "12 = 時間フィールド"),
-        (13, "13 = 食らいギミック"),
-        (14, "14 = 動く足場 (Moving Platform)"),
-        (15, "15 = 岩 (Pushable Rock)"),
-        (16, "16 = 早送りゲート (Fastforward Gate)"),
-        (17, "17 = コマ送りリフト (Framestep Lift)"),
-        (18, "18 = 明暗ゾーン (Brightness Zone)"),
-        (19, "19 = 色調ゾーン (Color Zone)"),
-        (20, "20 = ズームレンズ (Zoom Lens)"),
-        (21, "21 = スローフィールド (Slowmo Field)"),
-        (22, "22 = 色ロック足場 (Color Lock Platform)"),
-        (23, "23 = 明暗ロック足場 (Brightness Lock Platform)"),
-        (24, "24 = カスタムスクリプト (Custom Script)"),
+        (0, "0 = ポータル", "同じparam値を持つポータルを2つ配置すると対になり、片方に触れるともう片方の位置へワープします。"),
+        (1, "1 = 回転橋(自動)", "常に一定速度で回転し続ける橋です。橋が水平に近い向きの間だけプレイヤーが乗れます。"),
+        (2, "2 = 回転橋(手動)", "初期状態は縦向き(通行不可)。プレイヤーがRキー+ドラッグで回転させ、水平にすると渡れるようになります。"),
+        (3, "3 = 破壊ブロック", "左クリックで壊せるブロックです。壊すとその場所を通行できるようになります。"),
+        (4, "4 = 落下リフト", "プレイヤーが乗ると少しずつ沈み込んでいく足場です。"),
+        (5, "5 = 反射鏡", "触れた弾やプレイヤーを跳ね返します。"),
+        (6, "6 = 重量スイッチ", "同じparam値のスケールボックスがtriggerWidthThreshold以上に広がると起動し、同じparam値のゲート扉を開きます。"),
+        (7, "7 = スケールボックス", "Sキー+ドラッグで横幅を伸縮できる箱です。重量スイッチを起動するために使います。"),
+        (8, "8 = ゲート扉", "対応する重量スイッチが起動している間だけ通行できる扉です。param未指定なら最初に見つかったスイッチと連動します。"),
+        (9, "9 = 棘床", "触れるとダメージを受ける固定の棘です。"),
+        (10, "10 = スケール地面", "Sキー+ドラッグで大きさを変えられる足場です。"),
+        (11, "11 = ちくわブロック", "乗ってからstandDelayFrames経つと崩れ落ち、respawnDelayFrames後に元へ戻ります。Rキー巻き戻しで復旧できます。"),
+        (12, "12 = 時間フィールド", "範囲内の時間の流れを操作する装置です（一時停止/反・一時停止の演出に使用）。"),
+        (13, "13 = 食らいギミック", "触れると即座にダメージを与える障害物です。"),
+        (14, "14 = 動く足場 (Moving Platform)", "配置した位置を中心に、travelDistanceで指定した距離だけ上下に周期的に往復する足場です。"),
+        (15, "15 = 岩 (Pushable Rock)", "プレイヤーが横から押して動かせる岩です。"),
+        (16, "16 = 早送りゲート (Fastforward Gate)", "触れている間、ゲーム内時間の進みを早めます（Fキーの効果と同種の演出）。"),
+        (17, "17 = コマ送りリフト (Framestep Lift)", "Spaceキーで一時停止した状態から→キーを押すたびに1段ずつ移動するリフトです。"),
+        (18, "18 = 明暗ゾーン (Brightness Zone)", "範囲内に入っている間、画面の明るさをbrightLevel/darkLevelの間で変化させる演出ゾーンです。"),
+        (19, "19 = 色調ゾーン (Color Zone)", "範囲内に入っている間、画面の色調をtintR/G/Bへ変化させる演出ゾーンです。"),
+        (20, "20 = ズームレンズ (Zoom Lens)", "範囲内に入っている間、カメラをzoomLevelの倍率までズームさせる演出ゾーンです。"),
+        (21, "21 = スローフィールド (Slowmo Field)", "範囲内に入っている間、スローモーション+暗転効果をかけるゾーンです。"),
+        (22, "22 = 色ロック足場 (Color Lock Platform)", "paramで指定した色(Tキーの色フィルタ)とプレイヤーの現在の色が一致している間だけ実体化する足場です。"),
+        (23, "23 = 明暗ロック足場 (Brightness Lock Platform)", "paramで指定した明暗状態(Xキー)とプレイヤーの現在の状態が一致している間だけ実体化する足場です。"),
+        (24, "24 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
     };
-    private static readonly (int type, string desc)[] ItemTypes =
+    private static readonly (int type, string desc, string detail)[] ItemTypes =
     {
-        (0, "0 = なし"),
-        (1, "1 = コイン"),
-        (2, "2 = 回復アイテム"),
+        (0, "0 = なし", "特に効果を持たない、装飾・プレースホルダー用のアイテムです。"),
+        (1, "1 = コイン", "取得するとスコア/所持コイン数が増えます。"),
+        (2, "2 = 回復アイテム", "取得するとプレイヤーのHPを回復します。"),
     };
 
     public AssetManagerForm(string assetsPath, AssetDefinitions assets)
@@ -273,7 +275,11 @@ public partial class AssetManagerForm : Form
         // Feature: Puzzle-like Behavior Scripting (M4) — ブロックエディタを開く
         var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
-        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript });
+        // Feature: UI改善（提案書 CUT-2/AM-1）— type_enumを数字の羅列から選ぶのではなく、
+        // アイコン・名前・説明が並んだカード一覧から選べるようにする
+        var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
+        btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
+        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnTypeCardPicker });
 
         pnlBottom.Controls.Add(flowBottomLeft);
         pnlBottom.Controls.Add(flowBottomRight);
@@ -801,6 +807,39 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
+    // Feature: UI改善（提案書 CUT-2/AM-1）— コンボボックスの数字入り文字列から選ぶのではなく、
+    // アイコン・名前・plain-languageの説明が並んだカード一覧をクリックしてタイプを選べるようにする。
+    // 選択結果は既存のtype_enumコンボボックス列(desc文字列で管理)へそのまま書き戻すため、
+    // ステージ側の読み込み/保存ロジックには一切手を入れていない。
+    private void BtnTypeCardPicker_Click()
+    {
+        var kind = GetActiveKind();
+        DataGridView? dgv = kind switch { AssetKind.Enemy => dgvEnemies, AssetKind.Gimmick => dgvGimmicks, AssetKind.Item => dgvItems, _ => null };
+        if (dgv == null || dgv.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("タイプ選択は「敵」「ギミック」「アイテム」のいずれかの行を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var row = dgv.SelectedRows[0];
+        if (row.Cells["type_enum"] is not DataGridViewComboBoxCell combo) return;
+
+        var options = kind switch
+        {
+            AssetKind.Enemy => EnemyTypes.Select(t => (t.type, t.desc, t.detail, icon: AssetIcons.ForEnemy(t.type))).ToList(),
+            AssetKind.Gimmick => GimmickTypes.Select(t => (t.type, t.desc, t.detail, icon: AssetIcons.ForGimmick(t.type))).ToList(),
+            _ => ItemTypes.Select(t => (t.type, t.desc, t.detail, icon: AssetIcons.ForItem(t.type))).ToList(),
+        };
+        int current = GetSelectedTypeEnum(row);
+        using var picker = new TypeCardPickerForm(options, current);
+        if (picker.ShowDialog() != DialogResult.OK || picker.SelectedType < 0) return;
+
+        var vals = (string[]?)combo.DataSource;
+        if (vals == null || picker.SelectedType >= vals.Length) return;
+        combo.Value = vals[picker.SelectedType];
+        UpdateBehaviorParamsPanel(dgv, isEnemy: kind == AssetKind.Enemy);
+        RefreshIconCell(dgv, row.Index, isEnemy: kind == AssetKind.Enemy, isGimmick: kind == AssetKind.Gimmick);
+    }
+
     // 選択中の敵/ギミック行のtype_enumに応じて、挙動パラメータの入力欄を動的に組み立てる。
     // 該当タイプに調整可能なパラメータが無い場合は非表示にし、従来のタイプ一覧説明を見せる。
     private void UpdateBehaviorParamsPanel(DataGridView dgv, bool isEnemy)
@@ -876,11 +915,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 break;
             case AssetKind.Gimmick:
                 rtbTypeHint.AppendText("【ギミックタイプ一覧】\n\n");
-                foreach (var (type, desc) in GimmickTypes)
+                foreach (var (type, desc, detailG) in GimmickTypes)
                 {
                     rtbTypeHint.SelectionFont = new Font("Meiryo UI", 8, FontStyle.Bold);
                     rtbTypeHint.SelectionColor = Color.DarkGreen;
                     rtbTypeHint.AppendText(desc + "\n");
+                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
+                    rtbTypeHint.SelectionColor = Color.DarkGray;
+                    rtbTypeHint.AppendText(detailG + "\n\n");
                 }
                 rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
                 rtbTypeHint.SelectionColor = Color.DarkGray;
@@ -892,11 +934,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 break;
             case AssetKind.Item:
                 rtbTypeHint.AppendText("【アイテムタイプ一覧】\n\n");
-                foreach (var (type, desc) in ItemTypes)
+                foreach (var (type, desc, detailI) in ItemTypes)
                 {
                     rtbTypeHint.SelectionFont = new Font("Meiryo UI", 8, FontStyle.Bold);
                     rtbTypeHint.SelectionColor = Color.DarkRed;
                     rtbTypeHint.AppendText(desc + "\n");
+                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
+                    rtbTypeHint.SelectionColor = Color.DarkGray;
+                    rtbTypeHint.AppendText(detailI + "\n\n");
                 }
                 rtbTypeHint.AppendText("\n【grant_ability フィールド】\n");
                 rtbTypeHint.AppendText("取得時にプレイヤーに付与する能力名を入力。\n例: canDoubleJump, canDash, canShootFireball\n");
@@ -1098,11 +1143,18 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         => float.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
 
     // ===== コモンイベント =====
+    // Feature: UI改善（提案書 AM-4）— 件数だけでなく「何をするイベントか」がタイトルだけで
+    // 一目で分かるよう、実行内容(アクション種別)を矢印でつないだ要約を添える。
     private void RefreshCommonEventsList()
     {
         lstCommonEvents.Items.Clear();
         foreach (var ce in _commonEvents)
-            lstCommonEvents.Items.Add($"{ce.id} : {ce.name} ({ce.actions.Count}件)");
+        {
+            string summary = ce.actions.Count == 0
+                ? "(実行内容が未設定)"
+                : string.Join("→", ce.actions.Take(4).Select(a => a.action)) + (ce.actions.Count > 4 ? "…" : "");
+            lstCommonEvents.Items.Add($"🔔 {ce.id} : {ce.name}  【{summary}】");
+        }
     }
 
     private void AddCommonEvent()
@@ -1273,5 +1325,110 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             actions = src.actions.Select(a => new EventActionEntry { action = a.action, param1 = a.param1, param2 = a.param2, delay = a.delay }).ToList()
         });
         RefreshCommonEventsList();
+    }
+}
+
+// ======================================================
+// TypeCardPickerForm - type_enumを数字ではなくカード形式で選ぶダイアログ
+// Feature: UI改善（提案書 CUT-2/AM-1）
+// ======================================================
+public class TypeCardPickerForm : Form
+{
+    public int SelectedType { get; private set; } = -1;
+
+    public TypeCardPickerForm(List<(int type, string desc, string detail, string icon)> options, int currentType)
+    {
+        Text = "🔍 タイプをカードから選ぶ";
+        Size = new Size(560, 640);
+        MinimumSize = new Size(420, 360);
+        StartPosition = FormStartPosition.CenterParent;
+        Font = new Font("Meiryo UI", 9);
+
+        var lblHint = new Label
+        {
+            Dock = DockStyle.Top,
+            Height = 30,
+            Padding = new Padding(8, 6, 8, 0),
+            Text = "カードをクリックすると、そのタイプを選んで閉じます。",
+            Font = new Font(Font.FontFamily, 8f),
+            ForeColor = Color.DarkSlateGray,
+        };
+
+        var pnlList = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            AutoScroll = true,
+            Padding = new Padding(8),
+        };
+
+        foreach (var opt in options)
+        {
+            bool isCurrent = opt.type == currentType;
+            var card = new Panel
+            {
+                Width = 500,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                BorderStyle = BorderStyle.FixedSingle,
+                BackColor = isCurrent ? Color.FromArgb(255, 248, 220) : Color.White,
+                Margin = new Padding(2, 2, 2, 6),
+                Padding = new Padding(8),
+                Cursor = Cursors.Hand,
+            };
+            var inner = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+            var lblHead = new Label
+            {
+                AutoSize = true,
+                Text = $"{opt.icon}  {opt.desc}" + (isCurrent ? "　（現在選択中）" : ""),
+                Font = new Font(Font, FontStyle.Bold),
+            };
+            var lblDetail = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(470, 0),
+                Text = opt.detail,
+                ForeColor = Color.DimGray,
+                Font = new Font(Font.FontFamily, 8f),
+                Margin = new Padding(0, 4, 0, 0),
+            };
+            inner.Controls.Add(lblHead);
+            inner.Controls.Add(lblDetail);
+            card.Controls.Add(inner);
+
+            int capturedType = opt.type;
+            void Choose()
+            {
+                SelectedType = capturedType;
+                DialogResult = DialogResult.OK;
+                Close();
+            }
+            card.Click += (s, e) => Choose();
+            foreach (var c in AllDescendants(card)) c.Click += (s, e) => Choose();
+            foreach (var c in AllDescendants(card)) c.Cursor = Cursors.Hand;
+
+            pnlList.Controls.Add(card);
+        }
+
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        flow.Controls.Add(btnCancel);
+        pnlBottom.Controls.Add(flow);
+        CancelButton = btnCancel;
+
+        Controls.Add(pnlList);
+        Controls.Add(pnlBottom);
+        Controls.Add(lblHint);
+    }
+
+    private static IEnumerable<Control> AllDescendants(Control root)
+    {
+        foreach (Control c in root.Controls)
+        {
+            yield return c;
+            foreach (var d in AllDescendants(c)) yield return d;
+        }
     }
 }
