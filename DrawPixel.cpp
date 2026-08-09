@@ -533,13 +533,13 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
-void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, bool wantBehindParent) {
+void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent) {
     for (const auto& part : parts) {
         if (!part.isActive) continue;
         if ((part.zOrder < 0) != wantBehindParent) continue;
         if (part.handle < 0) continue;
         int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
-        int pcy = (int)(part.y + (part.height * part.scale) / 2.0f);
+        int pcy = (int)(part.y + (part.height * part.scale) / 2.0f - cameraY);
         DrawRotaGraph(pcx, pcy, part.scale, part.angle, part.handle, TRUE);
     }
 }
@@ -1568,7 +1568,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     
     
     float cameraX = 0.0f;
+    float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
     float STAGE_WIDTH = 2560.0f; // 現在のステージの実際のマップ幅に応じて毎フレーム更新される。下記メインループ参照。
+    float STAGE_HEIGHT = 480.0f; // 現在のステージの実際のマップ高さに応じて毎フレーム更新される。下記メインループ参照。
 
     // プレイヤーが能動的に使う「編集ツール」の状態
     int playerColorFilter = 0; // 0=なし, 1=赤, 2=緑, 3=青（Tキーで巡回）
@@ -1911,7 +1913,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         player.isJumping = false;
         player.history.clear();
         cameraX = 0.0f;
-        
+        cameraY = 0.0f;
+
         player.anim.LoadForAsset("player", "assets");
         
         enemies = stage.enemies;
@@ -2111,9 +2114,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
     {
-        // ステージ全体の横幅は固定80タイル決め打ちではなく、現在のステージの実際のマップ幅から算出する
+        // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
             STAGE_WIDTH = (float)stages[currentStageIdx].map[0].size() * TILE_SIZE;
+            STAGE_HEIGHT = (float)stages[currentStageIdx].map.size() * TILE_SIZE;
         }
 
         // 十字キー全押しでゲームを閉じる（エディタへ戻る）
@@ -2123,7 +2127,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         int mx, my;
         GetMousePoint(&mx, &my);
         float gx = (float)mx, gy = (float)my;
-        if (isEditMode) { gx = (float)(mx - monitorX) + cameraX; gy = (float)(my - monitorY); }
+        if (isEditMode) { gx = (float)(mx - monitorX) + cameraX; gy = (float)(my - monitorY) + cameraY; }
 
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
@@ -2333,8 +2337,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 
                 float selX1 = (float)(min(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
                 float selX2 = (float)(max(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
-                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY);
-                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY);
+                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY) + cameraY;
+                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY) + cameraY;
 
                 selectedPlayers.clear();
                 selectedEnemies.clear();
@@ -2608,7 +2612,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 選択されたすべてのオブジェクトに一斉に変形を適用
                 if (isDragging && selectedType != SELECT_NONE) {
                     float prevGx = (float)(lastMouseX - monitorX) + cameraX;
-                    float prevGy = (float)(lastMouseY - monitorY);
+                    float prevGy = (float)(lastMouseY - monitorY) + cameraY;
                     float dx = gx - prevGx;
                     float dy = gy - prevGy;
 
@@ -3643,7 +3647,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             // 画面外チェック（Y方向も拡張）
-                            if (bullets[i].isActive && (bullets[i].x < -50 || bullets[i].x > STAGE_WIDTH + 50 || bullets[i].y < -50 || bullets[i].y > SCREEN_HEIGHT + 50)) {
+                            // 縦スクロール対応: 弾の消滅範囲もSCREEN_HEIGHT固定ではなくSTAGE_HEIGHTを使う
+                            if (bullets[i].isActive && (bullets[i].x < -50 || bullets[i].x > STAGE_WIDTH + 50 || bullets[i].y < -50 || bullets[i].y > STAGE_HEIGHT + 50)) {
                                 bullets[i].isActive = false;
                             }
 
@@ -3959,6 +3964,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (targetCamX < 0.0f) targetCamX = 0.0f;
             if (targetCamX > STAGE_WIDTH - 640.0f) targetCamX = STAGE_WIDTH - 640.0f;
             cameraX += (targetCamX - cameraX) * 0.1f;
+
+            // Feature: 縦スクロール対応 — cameraXと全く同じ考え方でY方向もプレイヤーへ追従させる。
+            // ただしマップの高さが画面(480px)以下の場合（従来の全ステージがこれに該当）は
+            // maxCamYが負になるため0にクランプし、cameraYが常に0のまま＝従来通りの固定カメラになる。
+            float maxCamY = STAGE_HEIGHT - 480.0f;
+            if (maxCamY < 0.0f) maxCamY = 0.0f;
+            float targetCamY = player.y - 240.0f;
+            if (targetCamY < 0.0f) targetCamY = 0.0f;
+            if (targetCamY > maxCamY) targetCamY = maxCamY;
+            cameraY += (targetCamY - cameraY) * 0.1f;
         }
 
         // --- 戦闘衝突判定 ＆ ヒット検出 ---
@@ -3968,7 +3983,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             float ph_scaled = (float)player.height * player.scale;
 
             // プレイヤーの落下死判定
-            if (player.y > SCREEN_HEIGHT + 50.0f) {
+            // Feature: 縦スクロール対応 — 従来は「画面の下端(SCREEN_HEIGHT=480固定)を越えたら死」だったため、
+            // カメラが縦にスクロールして画面より下までマップが続く場合に成立しなくなる。
+            // 「ステージ実際の高さ(STAGE_HEIGHT)を越えたら死」に変更する。
+            // 15タイル(480px)以下の既存ステージでは STAGE_HEIGHT==SCREEN_HEIGHT のため挙動は変わらない。
+            if (player.y > STAGE_HEIGHT + 50.0f) {
                 ResetStage();
             }
 
@@ -4211,7 +4230,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             const auto& curStage = stages[currentStageIdx];
             if (curStage.goalX >= 0) {
                 int gx = (int)(curStage.goalX - cameraX);
-                int gy = (int)curStage.goalY;
+                int gy = (int)(curStage.goalY - cameraY);
                 // 目印の光柱（ゴールの位置を遠くからでも分かるようにする）
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 40);
                 DrawBox(gx + 10, 0, gx + TILE_SIZE - 10, gy + TILE_SIZE, GetColor(255, 240, 120), TRUE);
@@ -4247,15 +4266,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // 空中足場の描画
         for (const auto& plat : platforms) {
-            DrawBox((int)(plat.x1 - cameraX), (int)plat.y1, (int)(plat.x2 - cameraX), (int)plat.y2, GetColor(100, 80, 60), TRUE);
-            DrawBox((int)(plat.x1 - cameraX), (int)plat.y1, (int)(plat.x2 - cameraX), (int)plat.y2, GetColor(160, 130, 90), FALSE);
+            DrawBox((int)(plat.x1 - cameraX), (int)(plat.y1 - cameraY), (int)(plat.x2 - cameraX), (int)(plat.y2 - cameraY), GetColor(100, 80, 60), TRUE);
+            DrawBox((int)(plat.x1 - cameraX), (int)(plat.y1 - cameraY), (int)(plat.x2 - cameraX), (int)(plat.y2 - cameraY), GetColor(160, 130, 90), FALSE);
         }
 
         // ステージギミックの描画
         for (const auto& gim : gimmicks) {
             if (!gim.isActive) continue;
 
-            DrawPartsPass(gim.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
+            DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
             if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
                 // 橋を画像で描画 (回転とスケーリング)。カスタムスプライトが設定されていればそちらを優先する
@@ -4269,31 +4288,31 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (extRateY < 1.0) extRateY = 20.0 / imgH; // 薄すぎる場合は最低限の厚みを持たせる
 
                 // DrawRotaGraph3 を使用して縦横別スケールで中心回転描画
-                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
+                DrawRotaGraph3((int)(gcx - cameraX), (int)(gcy - cameraY), imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
 
                 // 回転軸を描画
-                DrawCircle((int)(gcx - cameraX), (int)gcy, 5, GetColor(255, 255, 255), TRUE);
+                DrawCircle((int)(gcx - cameraX), (int)(gcy - cameraY), 5, GetColor(255, 255, 255), TRUE);
 
                 // 一時停止/巻き戻し中の橋の頭上インジケータ
-                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)gim.y - 20, "|| PAUSE", GetColor(255, 255, 100));
-                else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)gim.y - 20, "<< REW", GetColor(255, 100, 100));
+                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
+                else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
                 // ヒビの入った石ブロック画像をスケーリングして描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : breakableBlockHandle;
                 int bx1 = (int)(gim.x - cameraX);
-                int by1 = (int)gim.y;
+                int by1 = (int)(gim.y - cameraY);
                 int bx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int by2 = (int)(gim.y + gim.spriteHeight);
+                int by2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(bx1, by1, bx2, by2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_FALLING_LIFT) {
                 // リフト画像を描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : liftHandle;
                 int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
+                int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
                 else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
@@ -4308,17 +4327,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 double extRateX = (double)gim.spriteWidth / imgW;
                 double extRateY = 24.0 / imgH; // ミラーの厚み
 
-                DrawRotaGraph3((int)(gcx - cameraX), (int)gcy, imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
-                DrawCircle((int)(gcx - cameraX), (int)gcy, 4, GetColor(255, 255, 0), TRUE);
-                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)gim.y - 35, "|| PAUSE", GetColor(255, 255, 100));
+                DrawRotaGraph3((int)(gcx - cameraX), (int)(gcy - cameraY), imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
+                DrawCircle((int)(gcx - cameraX), (int)(gcy - cameraY), 4, GetColor(255, 255, 0), TRUE);
+                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 35, "|| PAUSE", GetColor(255, 255, 100));
             }
             else if (gim.type == GIMMICK_WEIGHT_SWITCH) {
                 // 重量スイッチ画像を描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : switchHandle;
                 int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
+                int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
 
                 bool isActiveState = false;
                 for (const auto& other : gimmicks) {
@@ -4336,9 +4355,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 拡大可能ブロック画像を描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : boxHandle;
                 int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
+                int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
                 else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
@@ -4347,9 +4366,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // ゲートドア画像を描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : doorHandle;
                 int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
+                int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_CUT_PORTAL) {
@@ -4357,18 +4376,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 他のギミックと同じくgim.x/gim.yに基づいて通常のスプライト描画を行う
                 int useHandle = gim.handle >= 0 ? gim.handle : portalHandle;
                 int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
+                int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SPIKES) {
                 // トゲトゲ画像を描画（カスタムスプライト優先）
                 int useHandle = gim.handle >= 0 ? gim.handle : spikesHandle;
                 int sx1 = (int)(gim.x - cameraX);
-                int sy1 = (int)gim.y;
+                int sy1 = (int)(gim.y - cameraY);
                 int sx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int sy2 = (int)(gim.y + gim.spriteHeight);
+                int sy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(sx1, sy1, sx2, sy2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SCALABLE_GROUND) {
@@ -4379,8 +4398,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float tileW = gim.spriteHeight * ((float)imgW / imgH);
                 
                 int startX = (int)(gim.x - cameraX);
-                int y1 = (int)gim.y;
-                int y2 = (int)(gim.y + gim.spriteHeight);
+                int y1 = (int)(gim.y - cameraY);
+                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 
                 for (float x = 0; x < gim.spriteWidth; x += tileW) {
                     float drawW = tileW;
@@ -4401,9 +4420,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (gim.customTimer > 0 && gim.angle == 0.0f) shakeX = sinf(gim.customTimer * 1.0f) * 3.0f;
                 
                 int cx1 = (int)(gim.x + shakeX - cameraX);
-                int cy1 = (int)gim.y;
+                int cy1 = (int)(gim.y - cameraY);
                 int cx2 = (int)(gim.x + gim.spriteWidth + shakeX - cameraX);
-                int cy2 = (int)(gim.y + gim.spriteHeight);
+                int cy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
                     DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
                 } else {
@@ -4418,7 +4437,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 使うことで、「この一時停止装置の中だけ時間が流れ続ける」というギミックの意味と一致させる。
                 float radius = gim.val1 > 0 ? gim.val1 : 100.0f;
                 int centerX = (int)(gim.x - cameraX);
-                int centerY = (int)gim.y;
+                int centerY = (int)(gim.y - cameraY);
 
                 // 範囲全体のうっすらとした塗り（従来通り範囲を把握しやすくする）
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 25);
@@ -4447,18 +4466,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             else if (gim.type == GIMMICK_CHOMPER) {
                 // 敵食いギミックの描画（紫色のボックス）
                 int cx1 = (int)(gim.x - cameraX);
-                int cy1 = (int)gim.y;
+                int cy1 = (int)(gim.y - cameraY);
                 int cx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int cy2 = (int)(gim.y + gim.spriteHeight);
+                int cy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
                 else DrawBox(cx1, cy1, cx2, cy2, GetColor(128, 0, 128), TRUE);
             }
             else if (gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT) {
                 // 動く足場／コマ送りリフトの描画（カスタムスプライト優先、無ければ木目調の板）
                 int mx1 = (int)(gim.x - cameraX);
-                int my1 = (int)gim.y;
+                int my1 = (int)(gim.y - cameraY);
                 int mx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int my2 = (int)(gim.y + gim.spriteHeight);
+                int my2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
                     DrawExtendGraph(mx1, my1, mx2, my2, gim.handle, TRUE);
                 } else {
@@ -4470,9 +4489,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
                 // 岩（固定障害物）の描画（カスタムスプライト優先）
                 int rx1 = (int)(gim.x - cameraX);
-                int ry1 = (int)gim.y;
+                int ry1 = (int)(gim.y - cameraY);
                 int rx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int ry2 = (int)(gim.y + gim.spriteHeight);
+                int ry2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
                     DrawExtendGraph(rx1, ry1, rx2, ry2, gim.handle, TRUE);
                 } else {
@@ -4483,9 +4502,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             else if (gim.type == GIMMICK_FASTFORWARD_GATE) {
                 // 早送りゲート：非アクティブ（通過可能＝早送り中）の間は半透明に（カスタムスプライト優先）
                 int fx1 = (int)(gim.x - cameraX);
-                int fy1 = (int)gim.y;
+                int fy1 = (int)(gim.y - cameraY);
                 int fx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int fy2 = (int)(gim.y + gim.spriteHeight);
+                int fy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 90);
                 if (gim.handle >= 0) DrawExtendGraph(fx1, fy1, fx2, fy2, gim.handle, TRUE);
                 else DrawBox(fx1, fy1, fx2, fy2, GetColor(0, 200, 255), TRUE);
@@ -4499,9 +4518,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                : requiredColor == 3 ? GetColor(80, 140, 255)
                                                      : GetColor(255, 90, 90);
                 int lx1 = (int)(gim.x - cameraX);
-                int ly1 = (int)gim.y;
+                int ly1 = (int)(gim.y - cameraY);
                 int lx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int ly2 = (int)(gim.y + gim.spriteHeight);
+                int ly2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.isActive) {
                     DrawBox(lx1, ly1, lx2, ly2, lockColor, TRUE);
                     DrawBox(lx1, ly1, lx2, ly2, GetColor(255, 255, 255), FALSE);
@@ -4516,9 +4535,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool wantsBright = (gim.param == "bright");
                 int lockColor = wantsBright ? GetColor(255, 240, 150) : GetColor(60, 60, 90);
                 int bx1 = (int)(gim.x - cameraX);
-                int by1 = (int)gim.y;
+                int by1 = (int)(gim.y - cameraY);
                 int bx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int by2 = (int)(gim.y + gim.spriteHeight);
+                int by2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.isActive) {
                     DrawBox(bx1, by1, bx2, by2, lockColor, TRUE);
                     DrawBox(bx1, by1, bx2, by2, GetColor(255, 255, 255), FALSE);
@@ -4532,9 +4551,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                      || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
                 // 画面エフェクトゾーンの範囲を半透明の枠で可視化
                 int zx1 = (int)(gim.x - cameraX);
-                int zy1 = (int)gim.y;
+                int zy1 = (int)(gim.y - cameraY);
                 int zx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int zy2 = (int)(gim.y + gim.spriteHeight);
+                int zy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 int zoneColor = gim.type == GIMMICK_BRIGHTNESS_ZONE ? GetColor(255, 255, 150)
                                : gim.type == GIMMICK_COLOR_ZONE     ? GetColor(220, 120, 255)
                                : gim.type == GIMMICK_ZOOM_LENS      ? GetColor(120, 220, 255)
@@ -4547,9 +4566,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             else if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
                 // Feature: Puzzle-like Behavior Scripting (M2) — カスタムスプライトがあればそれを、無ければ簡易プレースホルダーを描画
                 int cx1 = (int)(gim.x - cameraX);
-                int cy1 = (int)gim.y;
+                int cy1 = (int)(gim.y - cameraY);
                 int cx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int cy2 = (int)(gim.y + gim.spriteHeight);
+                int cy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
                     DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
                 } else {
@@ -4571,7 +4590,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
-            DrawPartsPass(gim.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder>=0のパーツを後に描画
+            DrawPartsPass(gim.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder>=0のパーツを後に描画
         }
 
         // 共通レイヤー描画ラムダ
@@ -4584,8 +4603,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
                     if (tileDefs[tid].handle < 0) continue;
                     int drawX = tx * TILE_SIZE - (int)cameraX;
-                    int drawY = ty * TILE_SIZE;
-                    if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH) {
+                    int drawY = ty * TILE_SIZE - (int)cameraY;
+                    if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
                         DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
                     }
                 }
@@ -4599,8 +4618,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 GetGraphSize(bl.handle, &imgW, &imgH);
                 if (imgW > 0 && imgH > 0) {
                     float parallaxCamX = cameraX * bl.scrollRate;
+                    float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
                     float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
-                    float drawY = bl.offsetY;
+                    float drawY = -parallaxCamY + bl.offsetY;
                     DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
                     if (bl.loop) {
                         DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
@@ -4622,8 +4642,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
                 if (tileDefs[tid].handle < 0) continue;
                 int drawX = tx * TILE_SIZE - (int)cameraX;
-                int drawY = ty * TILE_SIZE;
-                if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH) {
+                int drawY = ty * TILE_SIZE - (int)cameraY;
+                if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
                     DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
                     if (isDebugDrawMode && tileDefs[tid].isCollidable) {
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
@@ -4640,29 +4660,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // アイテムの描画（assetIdごとのスプライトがあればそれを使い、無ければcoinHandleにフォールバック）
         for (const auto& item : items) {
             if (item.isActive && !item.isCollected) {
-                DrawPartsPass(item.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(item.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int icx = (int)(item.x - cameraX);
-                int icy = (int)item.y;
+                int icy = (int)(item.y - cameraY);
                 int useHandle = item.handle >= 0 ? item.handle : coinHandle;
                 DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
-                DrawPartsPass(item.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(item.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 
         // 敵の描画
         for (const auto& enemy : enemies) {
             if (enemy.isActive) {
-                DrawPartsPass(enemy.parts, cameraX, true); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(enemy.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
                 int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
-                int ecy = (int)(enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f);
+                int ecy = (int)(enemy.y - cameraY + (enemy.hitboxHeight * enemy.scale) / 2.0f);
                 if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
                 else SetDrawBright(255, 120, 120);
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
-                    int animCy = (int)(enemy.y + (animH * enemy.scale) / 2.0f);
+                    int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
                     enemy.anim.DrawAt(ecx, animCy, enemy.scale, enemy.angle, enemy.direction != 0);
                 } else if (enemy.direction == 0) {
                     DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
@@ -4672,40 +4692,40 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
                 if (isDebugDrawMode) {
-                    DrawBox((int)(enemy.x - cameraX), (int)enemy.y, (int)(enemy.x + enemy.hitboxWidth * enemy.scale - cameraX), (int)(enemy.y + enemy.hitboxHeight * enemy.scale), GetColor(0, 255, 0), FALSE); // 当たり判定
+                    DrawBox((int)(enemy.x - cameraX), (int)(enemy.y - cameraY), (int)(enemy.x + enemy.hitboxWidth * enemy.scale - cameraX), (int)(enemy.y + enemy.hitboxHeight * enemy.scale - cameraY), GetColor(0, 255, 0), FALSE); // 当たり判定
                     DrawBox((int)(ecx - (imgW * enemy.scale) / 2.0f), (int)(ecy - (imgH * enemy.scale) / 2.0f), (int)(ecx + (imgW * enemy.scale) / 2.0f), (int)(ecy + (imgH * enemy.scale) / 2.0f), GetColor(255, 0, 0), FALSE); // 描画枠
                 }
 
                 bool isThisEnemyRew = enemy.isRewinding || (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
-                if (isThisEnemyRew) DrawString((int)(enemy.x - cameraX), (int)enemy.y - 20, "<< REW", GetColor(255, 100, 100));
-                else if (enemy.isPaused) DrawString((int)(enemy.x - cameraX), (int)enemy.y - 20, "|| PAUSE", GetColor(255, 255, 100));
+                if (isThisEnemyRew) DrawString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "<< REW", GetColor(255, 100, 100));
+                else if (enemy.isPaused) DrawString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
                 
                 // 敵HP表示
                 if (enemy.hp > 0) {
-                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
+                    DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
                 }
 
                 // Feature: Puzzle-like Behavior Scripting (M2/M7) — スクリプト実行状態の表示
                 if (isDebugDrawMode && enemy.type == ENEMY_CUSTOM_SCRIPT) {
                     const char* status = enemy.scriptState.faulted ? "FAULT" : enemy.scriptState.finished ? "DONE" : "RUN";
-                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 56, GetColor(0, 255, 255),
+                    DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 56, GetColor(0, 255, 255),
                         "SCRIPT:%s stack=%d wait=%d", status, (int)enemy.scriptState.callStack.size(), enemy.scriptState.waitFramesRemaining);
                     if (enemy.scriptState.faulted) {
-                        DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - 72, GetColor(255, 60, 60), "ERR: %s", enemy.scriptState.faultMsg.c_str());
+                        DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 72, GetColor(255, 60, 60), "ERR: %s", enemy.scriptState.faultMsg.c_str());
                     }
                 }
                 // デバッグモードでなくても、Faulted状態の敵は常に警告マークを出す（M7）
                 if (enemy.type == ENEMY_CUSTOM_SCRIPT && enemy.scriptState.faulted) {
-                    DrawFormatString((int)(enemy.x - cameraX), (int)enemy.y - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
+                    DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
 
-                DrawPartsPass(enemy.parts, cameraX, false); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(enemy.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 
         // プレイヤーの描画
         int cx = (int)(player.x + (player.width * player.scale) / 2.0f - cameraX);
-        int cy = (int)(player.y + (player.height * player.scale));
+        int cy = (int)(player.y - cameraY + (player.height * player.scale));
         
         int pImgW = 0, pImgH = 0;
         if (player.anim.HasClip(player.anim.currentClip)) {
@@ -4720,41 +4740,41 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         
         if (isDebugDrawMode) {
-            DrawBox((int)(player.x - cameraX), (int)player.y, (int)(player.x + player.width * player.scale - cameraX), (int)(player.y + player.height * player.scale), GetColor(0, 255, 0), FALSE);
+            DrawBox((int)(player.x - cameraX), (int)(player.y - cameraY), (int)(player.x + player.width * player.scale - cameraX), (int)(player.y + player.height * player.scale - cameraY), GetColor(0, 255, 0), FALSE);
             if (pImgH > 0) {
                 int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
                 DrawBox((int)(cx - (pImgW > 0 ? pImgW : pImgH) * player.scale / 2.0f), (int)(drawCy - (pImgH * player.scale) / 2.0f), 
                         (int)(cx + (pImgW > 0 ? pImgW : pImgH) * player.scale / 2.0f), (int)(drawCy + (pImgH * player.scale) / 2.0f), GetColor(255, 0, 0), FALSE);
             }
         }
-        if (isPlayerRewinding) DrawString((int)(player.x - cameraX), (int)player.y - 20, "<< REW", GetColor(100, 255, 100));
-        else if (player.isPaused) DrawString((int)(player.x - cameraX), (int)player.y - 20, "|| PAUSE", GetColor(255, 255, 100));
+        if (isPlayerRewinding) DrawString((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "<< REW", GetColor(100, 255, 100));
+        else if (player.isPaused) DrawString((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
         
         // プレイヤーHP表示
         if (player.hp > 0) {
-            DrawFormatString((int)(player.x - cameraX), (int)player.y - 40, GetColor(0, 255, 0), "HP:%d", player.hp);
+            DrawFormatString((int)(player.x - cameraX), (int)(player.y - cameraY) - 40, GetColor(0, 255, 0), "HP:%d", player.hp);
         }
 
         // 選択枠の描画
         if (isEditMode) {
             for (auto* p : selectedPlayers) {
-                DrawBox((int)(p->x - cameraX), (int)p->y, (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale), GetColor(255, 255, 0), FALSE);
+                DrawBox((int)(p->x - cameraX), (int)(p->y - cameraY), (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale - cameraY), GetColor(255, 255, 0), FALSE);
             }
             for (auto* e : selectedEnemies) {
                 if (e->isActive) {
-                    DrawBox((int)(e->x - cameraX), (int)e->y, (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale), GetColor(255, 255, 0), FALSE);
+                    DrawBox((int)(e->x - cameraX), (int)(e->y - cameraY), (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale - cameraY), GetColor(255, 255, 0), FALSE);
                 }
             }
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
-                    DrawBox((int)(g->x - cameraX), (int)g->y, (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight), GetColor(255, 255, 0), FALSE);
+                    DrawBox((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), GetColor(255, 255, 0), FALSE);
                 }
             }
         }
 
         // 弾の描画
         for (int i = 0; i < MAX_BULLETS; i++) {
-            if (bullets[i].isActive) DrawGraph((int)(bullets[i].x - cameraX), (int)bullets[i].y, bullets[i].handle, TRUE);
+            if (bullets[i].isActive) DrawGraph((int)(bullets[i].x - cameraX), (int)(bullets[i].y - cameraY), bullets[i].handle, TRUE);
         }
 
         // OSD：コインカウント（正しくプレビューされるようにgameScreen内に描画）
