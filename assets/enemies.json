@@ -283,7 +283,7 @@
     "scale": 1.0,
     "moveSpeed": -1.0,
     "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
+    "actionInterval": 11.0,
     "jumpPowerMult": -1.0,
     "triggerRange": -1.0,
     "detectionRangeY": -1.0,
@@ -2730,6 +2730,7 @@
     "cooldownTime": -1.0,
     "fallDelay": -1.0,
     "spreadAngle": -1.0,
+    "spreadCount": -1,
     "floatAmplitude": -1.0,
     "floatFrequency": -1.0,
     "teleportRangeMin": -1.0,
@@ -2749,7 +2750,6 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
-    "spreadCount": -1,
     "script": [],
     "parts": []
   },
@@ -2783,6 +2783,7 @@
     "cooldownTime": -1.0,
     "fallDelay": -1.0,
     "spreadAngle": -1.0,
+    "spreadCount": -1,
     "floatAmplitude": -1.0,
     "floatFrequency": -1.0,
     "teleportRangeMin": -1.0,
@@ -2802,7 +2803,6 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
-    "spreadCount": -1,
     "script": [],
     "parts": []
   },
@@ -2836,6 +2836,7 @@
     "cooldownTime": 150.0,
     "fallDelay": 24.0,
     "spreadAngle": -1.0,
+    "spreadCount": -1,
     "floatAmplitude": -1.0,
     "floatFrequency": -1.0,
     "teleportRangeMin": -1.0,
@@ -2855,7 +2856,6 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
-    "spreadCount": -1,
     "script": [],
     "parts": []
   }
