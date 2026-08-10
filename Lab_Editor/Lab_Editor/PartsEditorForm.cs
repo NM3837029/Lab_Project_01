@@ -1177,8 +1177,21 @@ public class PartsEditorForm : Form
         var pnl = new Panel { Dock = DockStyle.Bottom, Height = 46 };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
-        var btnOk = new Button { Text = "💾 OK", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
-        btnOk.Click += (s, e) => { ResultParts = parts; };
+        // Feature: UI改善（提案書 CUT-3）— パーツIDが重複していると一覧上で区別できなくなるため保存前に警告する。
+        // DialogResultはボタンに持たせず、検証を通ってから手動でCloseする。
+        var btnOk = new Button { Text = "💾 OK", AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        btnOk.Click += (s, e) =>
+        {
+            var dupIds = parts.GroupBy(p => p.id).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            if (dupIds.Count > 0)
+            {
+                string msg = $"パーツIDが重複しています: {string.Join(", ", dupIds)}\n\nこのまま保存しますか？";
+                if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            }
+            ResultParts = parts;
+            DialogResult = DialogResult.OK;
+            Close();
+        };
         // RightToLeftのFlowLayoutPanelは追加順が右から並ぶため、先にCancelを追加すると右端になる。OKを一番右(先頭追加)にしたいため逆順で追加する。
         flow.Controls.Add(btnCancel);
         flow.Controls.Add(btnOk);

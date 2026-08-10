@@ -80,6 +80,12 @@ public class CommonEventEditorForm : Form
             MessageBox.Show("コモンイベントIDを入力してください。", "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
+        // Feature: UI改善（提案書 CUT-3）
+        if (_actionEditor.GetActions().Count == 0)
+        {
+            if (MessageBox.Show("実行内容が1つも設定されていません。呼び出しても何も起きません。\n\nこのまま保存しますか？",
+                "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
 
         ResultEvent = new CommonEventDef
         {

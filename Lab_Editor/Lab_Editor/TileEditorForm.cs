@@ -286,9 +286,31 @@ public class TileEditorForm : Form
         PushHistory();
     }
 
+    // Feature: UI改善（提案書 CUT-3）— IDの重複や名前未入力のまま保存すると、後から配置したステージ側で
+    // 見た目や意図しないタイル参照になり気づきにくいため、保存前に警告する。
+    private static List<string> ValidateTiles(List<TileDef> list)
+    {
+        var warnings = new List<string>();
+        var dupIds = list.GroupBy(t => t.id).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (dupIds.Count > 0)
+            warnings.Add($"IDが重複しています: {string.Join(", ", dupIds)}（後に定義した方だけが有効になります）。");
+        var emptyNames = list.Where(t => string.IsNullOrWhiteSpace(t.name)).Select(t => t.id).ToList();
+        if (emptyNames.Count > 0)
+            warnings.Add($"名前が未入力のタイルがあります (ID: {string.Join(", ", emptyNames)})。");
+        return warnings;
+    }
+
     private void BtnSave_Click(object? sender, EventArgs e)
     {
         tiles = ReadTilesFromGrid();
+
+        var warnings = ValidateTiles(tiles);
+        if (warnings.Count > 0)
+        {
+            string msg = "保存前に確認してください:\n\n" + string.Join("\n", warnings) + "\n\nこのまま保存しますか？";
+            if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
+
         string path = Path.Combine(assetsPath, "tiles.json");
         File.WriteAllText(path, JsonConvert.SerializeObject(tiles, Formatting.Indented));
         MessageBox.Show("タイル定義を保存しました！", "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);

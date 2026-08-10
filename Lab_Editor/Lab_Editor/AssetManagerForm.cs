@@ -1003,12 +1003,50 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
+    // Feature: UI改善（提案書 CUT-3）— ID重複や画像未設定のまま保存すると、ステージ側からの参照が
+    // 意図せず別の定義を指してしまったり、ゲーム内で表示されないままになったりして気づきにくい。
+    private static List<string> ValidateAssets(List<EnemyDef> enemies, List<GimmickDef> gimmicks, List<ItemDef> items, List<CommonEventDef> commonEvents)
+    {
+        var warnings = new List<string>();
+
+        void CheckDup<T>(List<T> list, Func<T, string> idSel, string kind)
+        {
+            var dups = list.GroupBy(idSel).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+            if (dups.Count > 0)
+                warnings.Add($"{kind}のIDが重複しています: {string.Join(", ", dups)}（後に定義した方だけが有効になります）。");
+        }
+        CheckDup(enemies, e => e.id, "敵");
+        CheckDup(gimmicks, g => g.id, "ギミック");
+        CheckDup(items, i => i.id, "アイテム");
+        CheckDup(commonEvents, c => c.id, "コモンイベント");
+
+        var noSpriteEnemies = enemies.Where(e => string.IsNullOrWhiteSpace(e.sprite)).Select(e => e.id).ToList();
+        if (noSpriteEnemies.Count > 0)
+            warnings.Add($"画像が未設定の敵があります (ID: {string.Join(", ", noSpriteEnemies)})。ゲーム内で表示されません。");
+
+        return warnings;
+    }
+
     // ===== 保存 =====
     private void BtnSave_Click(object? sender, EventArgs e)
     {
-        assets.Enemies = ReadEnemies();
-        assets.Gimmicks = ReadGimmicks();
-        assets.Items = ReadItems();
+        var enemies = ReadEnemies();
+        var gimmicks = ReadGimmicks();
+        var items = ReadItems();
+
+        var warnings = ValidateAssets(enemies, gimmicks, items, _commonEvents);
+        if (warnings.Count > 0)
+        {
+            string msg = "保存前に確認してください:\n\n" +
+                string.Join("\n", warnings.Take(8)) +
+                (warnings.Count > 8 ? $"\n…他{warnings.Count - 8}件" : "") +
+                "\n\nこのまま保存しますか？";
+            if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
+
+        assets.Enemies = enemies;
+        assets.Gimmicks = gimmicks;
+        assets.Items = items;
         assets.CommonEvents = _commonEvents;
         assets.SaveToFolder(assetsPath);
         MessageBox.Show("アセット定義を保存しました！\n\n※画像はimgフォルダへコピー済みです。\nゲームを再ビルドすると新しいスプライトが反映されます。",

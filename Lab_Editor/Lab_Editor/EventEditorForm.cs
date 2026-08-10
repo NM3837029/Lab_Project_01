@@ -169,9 +169,34 @@ public class EventEditorForm : Form
         _actionEditor.LoadActions(t.actions);
     }
 
+    // Feature: UI改善（提案書 CUT-3）— 保存前チェックをBehaviorScriptEditorFormと同様の考え方で
+    // トリガー編集にも広げる。発動しても意味を持たない/正しく判定できない設定を検知して警告する。
+    private List<string> ValidateTrigger()
+    {
+        var warnings = new List<string>();
+        if (string.IsNullOrWhiteSpace(_txtId.Text)) warnings.Add("トリガーIDが未入力です。");
+        if (_nudW.Value <= 0 || _nudH.Value <= 0) warnings.Add("Width/Heightが0以下です。判定範囲が存在しないため発動しません。");
+
+        var selectedCond = _cmbCondition.SelectedItem as ConditionOption;
+        if ((selectedCond?.Key == "SwitchOn" || selectedCond?.Key == "ItemCollected") && string.IsNullOrWhiteSpace(_txtCondParam.Text))
+            warnings.Add($"条件「{selectedCond.Label}」にはパラメータの指定が必要です（未入力のままだと正しく判定できません）。");
+
+        if (_actionEditor.GetActions().Count == 0)
+            warnings.Add("実行内容（アクション）が1つも設定されていません。トリガーが発動しても何も起きません。");
+
+        return warnings;
+    }
+
     // ── 保存 ──────────────────────────────────
     private void BtnOk_Click(object? sender, EventArgs e)
     {
+        var warnings = ValidateTrigger();
+        if (warnings.Count > 0)
+        {
+            string msg = "保存前に確認してください:\n\n" + string.Join("\n", warnings) + "\n\nこのまま保存しますか？";
+            if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
+
         ResultTrigger = new EventTrigger
         {
             id             = _txtId.Text,

@@ -295,6 +295,24 @@ public class BlockCanvasControl : Panel
 
     // ==== インライン編集（リテラル欄。M7） ================================
 
+    private static readonly HashSet<string> VariableArgOps = new() { "SetVar", "ChangeVar", "GetVar" };
+
+    // 現在のスクリプト全体（ネストした引数ソケットの中も含む）を辿り、既に使われている変数名を収集する
+    private List<string> CollectKnownVariableNames()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        void Visit(BlockInstance b)
+        {
+            if (VariableArgOps.Contains(b.Def.Op) && b.ArgValues.TryGetValue("name", out var v) && v is string s && !string.IsNullOrWhiteSpace(s))
+                names.Add(s);
+            foreach (var nested in b.ArgBlocks.Values) Visit(nested);
+            if (b.Def.HasBody) foreach (var c in b.Body) Visit(c);
+            if (b.Def.HasElse) foreach (var c in b.Else) Visit(c);
+        }
+        foreach (var hat in TopLevel) Visit(hat);
+        return names.ToList();
+    }
+
     private void OpenLiteralEditor(BlockInstance owner, BlockArgSpec arg, Rectangle contentRect)
     {
         CloseLiteralEditor(commit: false);
@@ -328,6 +346,17 @@ public class BlockCanvasControl : Panel
             Text = owner.ArgValues.TryGetValue(arg.Name, out var v) ? v?.ToString() ?? "" : "",
             BorderStyle = BorderStyle.FixedSingle,
         };
+        // Feature: UI改善（提案書 BS-2）— SetVar/ChangeVar/GetVarの変数名は自由入力のため、
+        // 綴りミスに気づけず「別の変数」として扱われてしまう。既に使われている変数名を
+        // ネイティブのオートコンプリートで候補提示する。
+        if (arg.Name == "name" && VariableArgOps.Contains(owner.Def.Op))
+        {
+            var src = new AutoCompleteStringCollection();
+            src.AddRange(CollectKnownVariableNames().ToArray());
+            _editBox.AutoCompleteMode = AutoCompleteMode.SuggestAppend;
+            _editBox.AutoCompleteSource = AutoCompleteSource.CustomSource;
+            _editBox.AutoCompleteCustomSource = src;
+        }
         _editingOwner = owner;
         _editingArg = arg;
         _editBox.KeyDown += (s, e) =>

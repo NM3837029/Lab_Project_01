@@ -25,6 +25,13 @@ public class BackgroundSettingsForm : Form
     private Button       _btnSave    = null!;
     private Button       _btnCancel  = null!;
 
+    // Feature: UI改善（提案書 SD-2）— scrollRateの数値だけでは奥行きの出方が分からないため、
+    // 全レイヤーを合成して自動スクロールさせるミニプレビューを追加する。
+    private Panel _parallaxPreview = null!;
+    private System.Windows.Forms.Timer? _parallaxTimer;
+    private float _simCameraX = 0f;
+    private readonly Dictionary<string, Image?> _parallaxImgCache = new();
+
     // ── コンストラクタ ─────────────────────────
     public BackgroundSettingsForm(string projectRoot, List<BackgroundLayer> layers)
     {
@@ -70,8 +77,30 @@ public class BackgroundSettingsForm : Form
             BorderStyle = BorderStyle.FixedSingle,
         };
 
+        var lblParallax = new Label
+        {
+            Text = "🎬 パララックスプレビュー（自動スクロール）",
+            Location = new Point(10, 238),
+            Size = new Size(200, 16),
+            Font = new Font(Font.FontFamily, 7.5f),
+        };
+        _parallaxPreview = new Panel
+        {
+            Location = new Point(10, 256),
+            Size = new Size(200, 130),
+            BorderStyle = BorderStyle.FixedSingle,
+            BackColor = Color.FromArgb(140, 190, 230),
+        };
+        _parallaxPreview.Paint += ParallaxPreview_Paint;
+
+        _parallaxTimer = new System.Windows.Forms.Timer { Interval = 30 };
+        _parallaxTimer.Tick += (s, e) => { _simCameraX += 1.5f; _parallaxPreview.Invalidate(); };
+        _parallaxTimer.Start();
+
         pnlRight.Controls.Add(lblPreview);
         pnlRight.Controls.Add(_preview);
+        pnlRight.Controls.Add(lblParallax);
+        pnlRight.Controls.Add(_parallaxPreview);
 
         // ── DataGridView ────────────────────────
         _grid = new DataGridView
@@ -278,6 +307,61 @@ public class BackgroundSettingsForm : Form
         }
     }
 
+    // ── パララックスプレビュー ─────────────────
+    private void ParallaxPreview_Paint(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+
+        var rows = new List<DataGridViewRow>();
+        foreach (DataGridViewRow row in _grid.Rows) if (!row.IsNewRow) rows.Add(row);
+        rows.Sort((a, b) => GetInt(a, "colOrder").CompareTo(GetInt(b, "colOrder")));
+
+        foreach (var row in rows)
+        {
+            string sprite = row.Cells["colSprite"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(sprite)) continue;
+            var img = LoadParallaxImage(sprite);
+            if (img == null) continue;
+
+            float scrollRate = GetFloat(row, "colScrollRate", 0.5f);
+            bool loop = row.Cells["colLoop"].Value is bool lb && lb;
+            float offsetX = GetFloat(row, "colOffsetX", 0f);
+            float offsetY = GetFloat(row, "colOffsetY", 0f);
+
+            float scale = (float)_parallaxPreview.Height / img.Height;
+            int drawW = Math.Max(1, (int)(img.Width * scale));
+            int drawH = _parallaxPreview.Height;
+
+            // 0.3f はプレビュー画面内で動きが分かりやすくなるよう調整した表示用の速度係数（実機の速度そのものではない）
+            float scrollPx = (_simCameraX * scrollRate + offsetX) * scale * 0.3f;
+            int baseX = -(int)(scrollPx % drawW);
+            if (baseX > 0) baseX -= drawW;
+
+            if (loop)
+            {
+                for (int x = baseX; x < _parallaxPreview.Width; x += drawW)
+                    g.DrawImage(img, x, (int)(offsetY * scale), drawW, drawH);
+            }
+            else
+            {
+                g.DrawImage(img, baseX, (int)(offsetY * scale), drawW, drawH);
+            }
+        }
+    }
+
+    private Image? LoadParallaxImage(string relPath)
+    {
+        if (_parallaxImgCache.TryGetValue(relPath, out var cached)) return cached;
+        string full = Path.Combine(_projectRoot, relPath.Replace('/', '\\'));
+        Image? img = null;
+        if (File.Exists(full)) { try { img = Image.FromFile(full); } catch { img = null; } }
+        _parallaxImgCache[relPath] = img;
+        return img;
+    }
+
+    private static int GetInt(DataGridViewRow row, string col) => int.TryParse(row.Cells[col].Value?.ToString(), out int v) ? v : 0;
+    private static float GetFloat(DataGridViewRow row, string col, float fallback) => float.TryParse(row.Cells[col].Value?.ToString(), out float v) ? v : fallback;
+
     // ── 保存 ──────────────────────────────────
     private void BtnSave_Click(object? sender, EventArgs e)
     {
@@ -323,6 +407,9 @@ public class BackgroundSettingsForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _preview.Image?.Dispose();
+        _parallaxTimer?.Stop();
+        _parallaxTimer?.Dispose();
+        foreach (var img in _parallaxImgCache.Values) img?.Dispose();
         base.OnFormClosed(e);
     }
 }
