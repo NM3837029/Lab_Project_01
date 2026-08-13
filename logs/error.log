@@ -1573,3 +1573,14 @@
 [2026-08-10 22:41:50] [System::WinMain] INFO: [Init] StageLoader Success
 [2026-08-10 22:41:50] [System::WinMain] INFO: [Init] stages.json parsing finished
 [2026-08-10 22:41:51] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 19:03:55] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 19:03:56] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 19:03:56] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 19:03:56] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_05 volume=1.000000
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_06 volume=1.000000
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_07 volume=1.000000
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_08 volume=1.000000
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_09 volume=1.000000
+[2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=jump volume=0.300000
+[2026-08-13 19:03:56] [System::ResetStage] INFO: Begin ResetStage

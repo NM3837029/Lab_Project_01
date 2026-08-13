@@ -87,8 +87,11 @@ partial class Form1
         var miTile = new System.Windows.Forms.ToolStripMenuItem("タイルエディタ", null, btnTileEditor_Click);
         var miAnim = new System.Windows.Forms.ToolStripMenuItem("アニメーションエディタ", null, btnAnimEditor_Click);
         var miSound = new System.Windows.Forms.ToolStripMenuItem("サウンド管理", null, btnSoundMgr_Click);
+        // Feature: サウンド・アセット管理の刷新 — カタログ登録済みのBGM/SEを敵/ギミック/アイテム/ステージへ
+        // 割り当てる専用画面。「サウンド管理」のすぐ下に配置する。
+        var miSoundAssign = new System.Windows.Forms.ToolStripMenuItem("サウンド割り当て", null, btnSoundAssign_Click);
         var miBg = new System.Windows.Forms.ToolStripMenuItem("背景設定", null, btnBgSettings_Click);
-        menuData.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miAsset, miTile, miAnim, miSound, miBg });
+        menuData.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miAsset, miTile, miAnim, miSound, miSoundAssign, miBg });
 
         var menuPlay = new System.Windows.Forms.ToolStripMenuItem("プレイ(&P)");
         var miPlay = new System.Windows.Forms.ToolStripMenuItem("テストプレイ", null, btnPlay_Click) { ShortcutKeys = System.Windows.Forms.Keys.F5 };

@@ -679,14 +679,36 @@ public partial class Form1 : Form
     // Feature 3: サウンド管理
     private void btnSoundMgr_Click(object? sender, EventArgs e)
     {
-        var form = new SoundManagerForm(projectRoot, assets.Bgm, assets.Se, assets.UiSe);
+        var form = new SoundManagerForm(projectRoot, assets.Bgm, assets.Se, assets.UiSe,
+            assets.Enemies, assets.Gimmicks, assets.Items, assets.CommonEvents);
         if (form.ShowDialog() == DialogResult.OK)
         {
             assets.Bgm = form.ResultBgm;
             assets.Se = form.ResultSe;
             assets.UiSe = form.ResultUiSe;
             assets.SaveToFolder(assetsPath);
-            // ステージのBGM選択UIを更新（必要に応じて）
+        }
+    }
+
+    // Feature: サウンド・アセット管理の刷新 — カタログのBGM/SE IDを敵/ギミック/アイテム/現在のステージへ割り当てる
+    private void btnSoundAssign_Click(object? sender, EventArgs e)
+    {
+        string? stageName = currentStage != null && !string.IsNullOrEmpty(currentStageFile) ? currentStageFile : null;
+        string stageBgmId = currentStage?.BgmId ?? "";
+        var form = new SoundAssignmentForm(assets.Enemies, assets.Gimmicks, assets.Items,
+            assets.Se, assets.UiSe, assets.Bgm, stageName, stageBgmId);
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            assets.Enemies = form.ResultEnemies;
+            assets.Gimmicks = form.ResultGimmicks;
+            assets.Items = form.ResultItems;
+            assets.SaveToFolder(assetsPath);
+
+            if (form.ResultStageBgmId != null && currentStage != null)
+            {
+                currentStage.BgmId = form.ResultStageBgmId;
+                SaveCurrentStage();
+            }
         }
     }
 

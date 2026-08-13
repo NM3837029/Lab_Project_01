@@ -58,6 +58,8 @@ public class SoundDef
     public string name { get; set; } = "";
     public string file { get; set; } = "";
     public bool isLoop { get; set; } = false;
+    // Feature: サウンド・アセット管理の刷新 — 0.0〜1.0の音量。C++側でDxLibの0〜255スケールへ変換して適用する。
+    public float volume { get; set; } = 1.0f;
 }
 
 // ===== イベント・トリガー定義 (Feature 5) =====

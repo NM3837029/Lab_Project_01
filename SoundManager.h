@@ -18,6 +18,9 @@ struct SoundEntry {
     std::string file;
     bool isLoop = false;
     int handle = -1;
+    // Feature: サウンド・アセット管理の刷新 — 0.0〜1.0の音量（Lab_Editor側のSoundDef.volumeと対応）。
+    // 再生時にDxLibの0〜255スケールへ変換して ChangeVolumeSoundMem に渡す。
+    float volume = 1.0f;
 };
 
 class SoundManager {
@@ -44,6 +47,7 @@ public:
 
         StopBgm();
         currentBgmId = id;
+        ChangeVolumeSoundMem((int)(it->second.volume * 255), h);
         PlaySoundMem(h, DX_PLAYTYPE_LOOP, TRUE);
     }
 
@@ -65,6 +69,9 @@ public:
         if (it == seMap.end() || it->second.handle < 0) return;
         int dup = DuplicateSoundMem(it->second.handle);
         if (dup >= 0) {
+            // 音量は複製後の再生用ハンドル(dup)に適用する（元のit->second.handleに適用すると
+            // 以降ロードし直すまで全ての複製に影響してしまうため）
+            ChangeVolumeSoundMem((int)(it->second.volume * 255), dup);
             PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
             tempHandles.push_back(dup);
         }
@@ -139,6 +146,9 @@ private:
             entry.id   = e.value("id", "");
             entry.file = e.value("file", "");
             entry.isLoop = e.value("isLoop", false);
+            entry.volume = e.value("volume", 1.0f);
+            if (entry.volume < 0.0f) entry.volume = 0.0f;
+            if (entry.volume > 1.0f) entry.volume = 1.0f;
 
             if (!entry.id.empty() && !entry.file.empty()) {
                 entry.handle = LoadSoundMem(entry.file.c_str());
