@@ -27,7 +27,8 @@ public class TileEditorForm : Form
         tiles = currentTiles.Select(t => new TileDef
         {
             id = t.id, name = t.name, color = t.color,
-            collidable = t.collidable, deadly = t.deadly, sprite = t.sprite
+            collidable = t.collidable, deadly = t.deadly, sprite = t.sprite,
+            srcX = t.srcX, srcY = t.srcY, srcW = t.srcW, srcH = t.srcH,
         }).ToList();
 
         InitUI();
@@ -54,12 +55,17 @@ public class TileEditorForm : Form
         pnlSearch.Controls.AddRange(new Control[] { lblSearch, txtSearch });
 
         // ==== 右側: プレビューパネル ====
+        // Feature: タイル表示範囲調整機能 — 従来は選択中タイルの色を塗りつぶすだけだったが、
+        // 実際のスプライト画像を「表示範囲」で切り出した状態でそのまま描画し、ゲーム内で
+        // 実際にどう見えるかをそのまま確認できるようにする。
         pnlPreview = new Panel
         {
             Dock = DockStyle.Right,
-            Width = 120,
+            Width = 140,
             BorderStyle = BorderStyle.FixedSingle,
+            BackColor = Color.FromArgb(40, 40, 40),
         };
+        pnlPreview.Paint += PnlPreview_Paint;
 
         // ==== 下部: ボタン（右詰めFlowLayoutPanelで自動配置、はみ出す心配がない） ====
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
@@ -103,12 +109,21 @@ public class TileEditorForm : Form
         dgv.Columns.Add(new DataGridViewCheckBoxColumn { Name = "deadly", HeaderText = "即死", FillWeight = 40 });
         dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "sprite", HeaderText = "画像パス", FillWeight = 120 });
 
+        // Feature: タイル表示範囲調整機能 — spriteがタイルセット画像の場合に、そのうちどの矩形を使うか
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcX", HeaderText = "範囲X", FillWeight = 30, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcY", HeaderText = "範囲Y", FillWeight = 30, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcW", HeaderText = "範囲W", FillWeight = 30, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcH", HeaderText = "範囲H", FillWeight = 30, ValueType = typeof(int) });
+
         // ボタン列: 色選択
         var colColor = new DataGridViewButtonColumn { Name = "btnColor", HeaderText = "色選択", Text = "🎨", UseColumnTextForButtonValue = true, FillWeight = 40 };
         dgv.Columns.Add(colColor);
         // ボタン列: ファイル選択
         var colFile = new DataGridViewButtonColumn { Name = "btnFile", HeaderText = "画像選択", Text = "📁", UseColumnTextForButtonValue = true, FillWeight = 40 };
         dgv.Columns.Add(colFile);
+        // ボタン列: 表示範囲をドラッグで選択
+        var colRegion = new DataGridViewButtonColumn { Name = "btnRegion", HeaderText = "表示範囲", Text = "🖼 範囲", UseColumnTextForButtonValue = true, FillWeight = 45 };
+        dgv.Columns.Add(colRegion);
 
         dgv.CellContentClick += Dgv_CellContentClick;
         dgv.SelectionChanged += Dgv_SelectionChanged;
@@ -127,6 +142,8 @@ public class TileEditorForm : Form
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
+    private static int IntCell(DataGridViewRow row, string col) => int.TryParse(row.Cells[col].Value?.ToString(), out int v) ? v : 0;
+
     private List<TileDef> ReadTilesFromGrid()
     {
         var result = new List<TileDef>();
@@ -140,7 +157,11 @@ public class TileEditorForm : Form
                 color = row.Cells["color"].Value?.ToString() ?? "#CCCCCC",
                 collidable = row.Cells["collidable"].Value is true,
                 deadly = row.Cells["deadly"].Value is true,
-                sprite = row.Cells["sprite"].Value?.ToString() ?? ""
+                sprite = row.Cells["sprite"].Value?.ToString() ?? "",
+                srcX = IntCell(row, "srcX"),
+                srcY = IntCell(row, "srcY"),
+                srcW = IntCell(row, "srcW"),
+                srcH = IntCell(row, "srcH"),
             });
         }
         return result;
@@ -184,7 +205,7 @@ public class TileEditorForm : Form
         dgv.Rows.Clear();
         foreach (var t in tiles)
         {
-            int rowIdx = dgv.Rows.Add(t.id, t.name, t.color, t.collidable, t.deadly, t.sprite, "🎨", "📁");
+            int rowIdx = dgv.Rows.Add(t.id, t.name, t.color, t.collidable, t.deadly, t.sprite, t.srcX, t.srcY, t.srcW, t.srcH, "🎨", "📁", "🖼 範囲");
             // セルの背景色
             try { dgv.Rows[rowIdx].Cells["color"].Style.BackColor = ColorTranslator.FromHtml(t.color); } catch { }
         }
@@ -192,15 +213,59 @@ public class TileEditorForm : Form
 
     private void Dgv_SelectionChanged(object? sender, EventArgs e)
     {
+        pnlPreview.Invalidate();
+    }
+
+    // Feature: タイル表示範囲調整機能 — 選択中タイルのスプライトを、表示範囲(srcX/Y/W/H)で
+    // 切り出した状態でそのまま描画する。範囲が未設定(0)なら画像全体を使う（従来互換）。
+    private void PnlPreview_Paint(object? sender, PaintEventArgs e)
+    {
         if (dgv.SelectedRows.Count == 0) return;
         var row = dgv.SelectedRows[0];
         string colorStr = row.Cells["color"].Value?.ToString() ?? "#CCCCCC";
+        Color fallback;
+        try { fallback = ColorTranslator.FromHtml(colorStr); } catch { fallback = Color.Gray; }
+
+        string spritePath = row.Cells["sprite"].Value?.ToString() ?? "";
+        string full = string.IsNullOrEmpty(spritePath) ? "" : Path.Combine(Path.GetDirectoryName(assetsPath)!, spritePath.Replace('/', '\\'));
+
+        if (string.IsNullOrEmpty(full) || !File.Exists(full))
+        {
+            using var b = new SolidBrush(fallback);
+            e.Graphics.FillRectangle(b, 4, 4, pnlPreview.Width - 8, 100);
+            return;
+        }
+
         try
         {
-            var c = ColorTranslator.FromHtml(colorStr);
-            pnlPreview.BackColor = c;
+            using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var img = Image.FromStream(fs);
+            int sx = IntCell(row, "srcX"), sy = IntCell(row, "srcY"), sw = IntCell(row, "srcW"), sh = IntCell(row, "srcH");
+            if (sw <= 0 || sh <= 0) { sx = 0; sy = 0; sw = img.Width; sh = img.Height; }
+            sx = Math.Clamp(sx, 0, Math.Max(0, img.Width - 1));
+            sy = Math.Clamp(sy, 0, Math.Max(0, img.Height - 1));
+            sw = Math.Clamp(sw, 1, img.Width - sx);
+            sh = Math.Clamp(sh, 1, img.Height - sy);
+
+            float scale = Math.Min((float)(pnlPreview.Width - 16) / sw, 140f / sh);
+            if (scale <= 0) scale = 1;
+            int drawW = Math.Max(1, (int)(sw * scale));
+            int drawH = Math.Max(1, (int)(sh * scale));
+            int drawX = (pnlPreview.Width - drawW) / 2;
+            int drawY = 8;
+
+            e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            e.Graphics.DrawImage(img, new Rectangle(drawX, drawY, drawW, drawH), new Rectangle(sx, sy, sw, sh), GraphicsUnit.Pixel);
+            e.Graphics.DrawRectangle(Pens.DimGray, drawX, drawY, drawW, drawH);
+
+            using var hint = new Font(Font.FontFamily, 7.5f);
+            e.Graphics.DrawString($"表示範囲:\n{sw}x{sh}px", hint, Brushes.LightGray, 6, drawY + drawH + 8);
         }
-        catch { pnlPreview.BackColor = Color.Gray; }
+        catch
+        {
+            using var b = new SolidBrush(fallback);
+            e.Graphics.FillRectangle(b, 4, 4, pnlPreview.Width - 8, 100);
+        }
     }
 
     private void Dgv_CellContentClick(object? sender, DataGridViewCellEventArgs e)
@@ -217,7 +282,7 @@ public class TileEditorForm : Form
                 string hex = $"#{cd.Color.R:X2}{cd.Color.G:X2}{cd.Color.B:X2}";
                 row.Cells["color"].Value = hex;
                 row.Cells["color"].Style.BackColor = cd.Color;
-                pnlPreview.BackColor = cd.Color;
+                pnlPreview.Invalidate();
             }
         }
         else if (dgv.Columns[e.ColumnIndex].Name == "btnFile")
@@ -230,6 +295,37 @@ public class TileEditorForm : Form
                     Path.GetDirectoryName(assetsPath)!,
                     ofd.FileName).Replace('\\', '/');
                 row.Cells["sprite"].Value = rel;
+                // 新しい画像を選んだ場合、表示範囲は一旦リセットして画像全体を使う状態に戻す
+                row.Cells["srcX"].Value = 0;
+                row.Cells["srcY"].Value = 0;
+                row.Cells["srcW"].Value = 0;
+                row.Cells["srcH"].Value = 0;
+                pnlPreview.Invalidate();
+            }
+        }
+        else if (dgv.Columns[e.ColumnIndex].Name == "btnRegion")
+        {
+            string spritePath = row.Cells["sprite"].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(spritePath))
+            {
+                MessageBox.Show("先に画像を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            string full = Path.Combine(Path.GetDirectoryName(assetsPath)!, spritePath.Replace('/', '\\'));
+            if (!File.Exists(full))
+            {
+                MessageBox.Show("画像ファイルが見つかりません:\n" + full, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            using var form = new TileRegionEditorForm(full, IntCell(row, "srcX"), IntCell(row, "srcY"), IntCell(row, "srcW"), IntCell(row, "srcH"));
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                row.Cells["srcX"].Value = form.SrcX;
+                row.Cells["srcY"].Value = form.SrcY;
+                row.Cells["srcW"].Value = form.SrcWidth;
+                row.Cells["srcH"].Value = form.SrcHeight;
+                pnlPreview.Invalidate();
+                PushHistory();
             }
         }
     }
@@ -278,7 +374,11 @@ public class TileEditorForm : Form
             color = row.Cells["color"].Value?.ToString() ?? "#CCCCCC",
             collidable = row.Cells["collidable"].Value is true,
             deadly = row.Cells["deadly"].Value is true,
-            sprite = row.Cells["sprite"].Value?.ToString() ?? ""
+            sprite = row.Cells["sprite"].Value?.ToString() ?? "",
+            srcX = IntCell(row, "srcX"),
+            srcY = IntCell(row, "srcY"),
+            srcW = IntCell(row, "srcW"),
+            srcH = IntCell(row, "srcH"),
         };
         tiles.Add(src);
         LoadGrid();

@@ -12,6 +12,13 @@ public class TileDef
     public bool collidable { get; set; } = true;
     public bool deadly { get; set; } = false;
     public string sprite { get; set; } = "";
+    // Feature: タイルセット切り出し（表示範囲）機能 — spriteが単一の絵ではなく複数タイルをまとめた
+    // タイルセット画像である場合に、そのうちどの矩形部分を表示に使うかを指定する。
+    // 全て0（既定値）の場合は画像全体を使う（従来互換）。
+    public int srcX { get; set; } = 0;
+    public int srcY { get; set; } = 0;
+    public int srcW { get; set; } = 0;
+    public int srcH { get; set; } = 0;
 }
 
 // ===== 背景レイヤー定義 (Feature 1) =====

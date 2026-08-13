@@ -581,6 +581,10 @@ struct TileDefinition {
     bool isCollidable;
     bool deadly = false;   // 返った場合ただちゲームオーバー
     const char* name;
+    // Feature: タイル表示範囲調整機能 — spriteが複数タイルをまとめたタイルセット画像の場合に、
+    // そのうちどの矩形部分を表示に使うかを指定する。srcW/srcHが0のままなら画像全体を使う
+    // （tileDefs構築直後の解決ループで画像サイズへ解決される。従来互換）。
+    int srcX = 0, srcY = 0, srcW = 0, srcH = 0;
 };
 
 // 履歴上限
@@ -1250,7 +1254,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bool deadly = t.value("deadly", false);
                     bool collidable = t.value("collidable", true);
                     std::string spritePath = t.value("sprite", "");
-                    
+                    // Feature: タイル表示範囲調整機能 — 0のままなら後段の解決ループで画像全体に解決される
+                    int srcX = t.value("srcX", 0);
+                    int srcY = t.value("srcY", 0);
+                    int srcW = t.value("srcW", 0);
+                    int srcH = t.value("srcH", 0);
+
                     int handle = -1;
                     if (!spritePath.empty()) {
                         handle = LoadGraph(("assets/" + spritePath).c_str());
@@ -1264,6 +1273,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         tileDefs[tid].deadly = deadly;
                         tileDefs[tid].isCollidable = collidable;
                         if (handle != -1) tileDefs[tid].handle = handle;
+                        tileDefs[tid].srcX = srcX; tileDefs[tid].srcY = srcY;
+                        tileDefs[tid].srcW = srcW; tileDefs[tid].srcH = srcH;
                     } else if (tid >= (int)tileDefs.size()) {
                         // 新規タイルを追加
                         TileDefinition newTile;
@@ -1272,9 +1283,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         newTile.isCollidable = collidable;
                         newTile.deadly = deadly;
                         newTile.name = "Custom";
+                        newTile.srcX = srcX; newTile.srcY = srcY;
+                        newTile.srcW = srcW; newTile.srcH = srcH;
                         tileDefs.push_back(newTile);
                     }
                 }
+            }
+        }
+
+        // Feature: タイル表示範囲調整機能 — srcW/srcHが未設定(0)のタイルは、画像全体を使うように解決する
+        for (auto& td : tileDefs) {
+            if (td.handle >= 0 && (td.srcW <= 0 || td.srcH <= 0)) {
+                int iw = 0, ih = 0;
+                GetGraphSize(td.handle, &iw, &ih);
+                td.srcX = 0; td.srcY = 0; td.srcW = iw; td.srcH = ih;
             }
         }
     }
@@ -4605,7 +4627,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int drawX = tx * TILE_SIZE - (int)cameraX;
                     int drawY = ty * TILE_SIZE - (int)cameraY;
                     if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
-                        DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
+                        // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
+                        DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
+                            tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
+                            tileDefs[tid].handle, TRUE);
                     }
                 }
             }
@@ -4644,7 +4669,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int drawX = tx * TILE_SIZE - (int)cameraX;
                 int drawY = ty * TILE_SIZE - (int)cameraY;
                 if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
-                    DrawExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].handle, TRUE);
+                    // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
+                    DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
+                        tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
+                        tileDefs[tid].handle, TRUE);
                     if (isDebugDrawMode && tileDefs[tid].isCollidable) {
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
                     }
