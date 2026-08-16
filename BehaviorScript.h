@@ -37,6 +37,11 @@ struct ScriptActor {
     bool* invincible = nullptr; // 同上
     float* angle = nullptr;     // 見た目の回転角（Parts-M2で新設。ドアのパネルや砲塔の向きなど）
 
+    // 呼び出し側が毎フレーム計算して渡す、このフレームのタイムスケール（globalTimeScale等）。
+    // 早送り/スローモーション中にネイティブ実装の敵/ギミックと体感速度を揃えるため、
+    // 移動量やWaitのフレーム消費に反映する。既定の1.0なら従来と同じ挙動になる。
+    float timeScale = 1.0f;
+
     // センシング用に呼び出し側が毎フレーム計算して渡すスナップショット
     float playerX = 0.0f, playerY = 0.0f;
     bool isGrounded = false;
@@ -79,7 +84,7 @@ struct ScriptState {
     // 所有権はそのままEnemy/Gimmickインスタンスのライフタイムに一致する。
     json ownedProgram = json::array();
     std::vector<ScriptFrame> callStack;
-    int waitFramesRemaining = 0;
+    float waitFramesRemaining = 0.0f; // timeScale分ずつ減算するためfloatで保持する
     std::unordered_map<std::string, float> vars;
     bool started = false;
     bool finished = false;
@@ -98,9 +103,14 @@ public:
     // メインループの先頭で毎フレーム0にリセットすること。
     static inline int globalOpsThisFrame = 0;
 
-    // Feature: Composite Multi-Part Objects (Parts-M2) — Timeレポーター用のグローバル経過フレーム数。
+    // Feature: Composite Multi-Part Objects (Parts-M2) — グローバル経過フレーム数。
     // リセットせず、毎フレーム加算し続けるだけ（Waitのフレームカウントとは無関係の「時計」）。
+    // ポーズ中も止まらないため、GIMMICK_TIME_FIELDの「ポーズ中も動き続ける」演出はこちらを直接参照する。
     static inline float globalFrameCounter = 0.0f;
+
+    // スクリプトの Time レポーターが参照する時計。globalFrameCounterと異なりポーズ中は増加しないため、
+    // ポーズ解除直後にTime依存の回転/振動パーツが不連続にジャンプすることがない。
+    static inline float scriptTimeCounter = 0.0f;
 
     // program（enemies.json等の"script"フィールド）からhatNameのハット（"OnSpawn"等）を探し、
     // 見つかればその本体から実行を開始する。見つからなければ何もしない（finished=trueのまま）。
@@ -126,7 +136,7 @@ public:
     // 1フレーム分だけ実行を進める。Wait系に達するか、安全装置の上限に達するとその場で戻る。
     static void Tick(ScriptState& state, ScriptActor& actor) {
         if (state.faulted || state.finished || !state.started) return;
-        if (state.waitFramesRemaining > 0) { state.waitFramesRemaining--; return; }
+        if (state.waitFramesRemaining > 0.0f) { state.waitFramesRemaining -= (actor.timeScale > 0.0f ? actor.timeScale : 1.0f); return; }
 
         int opsThisTick = 0;
         while (!state.callStack.empty()) {
@@ -242,7 +252,7 @@ private:
         // Feature: Composite Multi-Part Objects (Parts-M2) — 汎用の三角関数・時計・親座標・パーツ位相
         if (op == "Sin") return sinf(GetNumberArg(expr, "a", 0.0f, actor, state));
         if (op == "Cos") return cosf(GetNumberArg(expr, "a", 0.0f, actor, state));
-        if (op == "Time") return BehaviorInterpreter::globalFrameCounter;
+        if (op == "Time") return BehaviorInterpreter::scriptTimeCounter;
         if (op == "ParentX") return actor.parentX;
         if (op == "ParentY") return actor.parentY;
         if (op == "PartIndex") return (float)actor.partIndex;
@@ -300,7 +310,7 @@ private:
             return false;
         }
         if (op == "Wait") {
-            state.waitFramesRemaining = (std::max)(0, (int)GetNumberArg(block, "frames", 0.0f, actor, state));
+            state.waitFramesRemaining = (std::max)(0.0f, GetNumberArg(block, "frames", 0.0f, actor, state));
             return true;
         }
         if (op == "WaitUntil") {
@@ -323,12 +333,13 @@ private:
                 vx = towardLeft ? -speed : speed;
                 if (actor.direction) *actor.direction = towardLeft ? 1 : 0;
             }
-            *actor.vx = vx;
+            *actor.vx = vx * actor.timeScale;
             return false;
         }
         if (op == "ApplyImpulse") {
-            if (actor.vx) *actor.vx = GetNumberArg(block, "vx", *actor.vx, actor, state);
-            if (actor.vy) *actor.vy = GetNumberArg(block, "vy", *actor.vy, actor, state);
+            // 明示的に指定された成分だけタイムスケールを反映する（省略時は現在値を維持する既存仕様を壊さないため）
+            if (actor.vx && block.contains("vx")) *actor.vx = GetNumberArg(block, "vx", 0.0f, actor, state) * actor.timeScale;
+            if (actor.vy && block.contains("vy")) *actor.vy = GetNumberArg(block, "vy", 0.0f, actor, state) * actor.timeScale;
             return false;
         }
         if (op == "SetPosition") {
@@ -377,7 +388,7 @@ private:
             float mx = GetNumberArg(block, "max", 1.0f, actor, state);
             float periodFrames = GetNumberArg(block, "periodFrames", 60.0f, actor, state);
             float& phase = state.vars["__oscPhase"];
-            phase += (periodFrames > 0.0f ? (2.0f * 3.14159265f / periodFrames) : 0.0f);
+            phase += (periodFrames > 0.0f ? (2.0f * 3.14159265f / periodFrames) : 0.0f) * actor.timeScale;
             float t = (sinf(phase) + 1.0f) * 0.5f;
             if (actor.y) *actor.y = mn + (mx - mn) * t;
             return false;

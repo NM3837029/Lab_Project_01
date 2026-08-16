@@ -1493,13 +1493,28 @@
                 "frames": 30
               },
               {
+                "op": "SetVar",
+                "name": "dashAngle",
+                "value": { "op": "DirectionToPlayer" }
+              },
+              {
+                "op": "SetVar",
+                "name": "dashVX",
+                "value": { "op": "Mul", "a": { "op": "Cos", "a": { "op": "GetVar", "name": "dashAngle" } }, "b": 12 }
+              },
+              {
+                "op": "SetVar",
+                "name": "dashVY",
+                "value": { "op": "Mul", "a": { "op": "Sin", "a": { "op": "GetVar", "name": "dashAngle" } }, "b": 12 }
+              },
+              {
                 "op": "Repeat",
                 "count": 40,
                 "body": [
                   {
-                    "op": "MoveDirection",
-                    "dir": "Toward",
-                    "speed": 12
+                    "op": "ApplyImpulse",
+                    "vx": { "op": "GetVar", "name": "dashVX" },
+                    "vy": { "op": "GetVar", "name": "dashVY" }
                   }
                 ]
               },
