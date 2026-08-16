@@ -58,11 +58,9 @@ public class AnimationEditorForm : Form
     {
         Text            = "アニメーションエディタ";
         Size            = new Size(900, 540);
-        Font            = new Font("Meiryo UI", 9f);
+        Font            = UiTheme.Base;
         StartPosition   = FormStartPosition.CenterParent;
-        MinimizeBox     = false;
-        MaximizeBox     = false;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        UiTheme.ApplyResizableChrome(this);
 
         // ── 上部：assetId ───────────────────────
         var lblAsset = new Label
@@ -130,10 +128,8 @@ public class AnimationEditorForm : Form
         _btnSave   = MakeButton("💾 保存して閉じる", 620, 470, 160);
         _btnCancel = MakeButton("キャンセル",         788, 470, 100);
 
-        _btnSave.BackColor   = Color.FromArgb(70, 130, 180);
-        _btnSave.ForeColor   = Color.White;
-        _btnSave.FlatStyle   = FlatStyle.Flat;
-        _btnCancel.FlatStyle = FlatStyle.Flat;
+        UiTheme.StylePrimaryButton(_btnSave);
+        UiTheme.StyleSecondaryButton(_btnCancel);
 
         _btnAdd.Click    += (_, _) => AddEmptyRow();
         _btnSave.Click   += BtnSave_Click;
@@ -476,13 +472,7 @@ public class AnimationEditorForm : Form
     }
 
     private static Button MakeButton(string text, int x, int y, int w) =>
-        new Button
-        {
-            Text     = text,
-            Location = new Point(x, y),
-            Size     = new Size(w, 30),
-            Font     = new Font("Meiryo UI", 9f)
-        };
+        UiTheme.CreateButton(text, new Point(x, y), new Size(w, 30));
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

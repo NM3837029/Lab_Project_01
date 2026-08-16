@@ -3,30 +3,35 @@
     "id": "bgm_editing_05",
     "name": "Game Editing 05",
     "file": "sound/BGM-Game_Editing05.wav",
-    "isLoop": true
+    "isLoop": true,
+    "volume": 1.0
   },
   {
     "id": "bgm_editing_06",
     "name": "Game Editing 06",
     "file": "sound/BGM-Game_Editing06.wav",
-    "isLoop": true
+    "isLoop": true,
+    "volume": 1.0
   },
   {
     "id": "bgm_editing_07",
     "name": "Game Editing 07",
     "file": "sound/BGM-Game_Editing07.wav",
-    "isLoop": true
+    "isLoop": true,
+    "volume": 1.0
   },
   {
     "id": "bgm_editing_08",
     "name": "Game Editing 08",
     "file": "sound/BGM-Game_Editing08.wav",
-    "isLoop": true
+    "isLoop": true,
+    "volume": 1.0
   },
   {
     "id": "bgm_editing_09",
     "name": "Game Editing 09",
     "file": "sound/BGM-Game_Editing09.wav",
-    "isLoop": true
+    "isLoop": true,
+    "volume": 1.0
   }
 ]

@@ -8,11 +8,22 @@ partial class Form1
     // ===== メニュー・ツールバー =====
     private System.Windows.Forms.MenuStrip menuStrip1 = null!;
     private System.Windows.Forms.ToolStrip toolStrip1 = null!;
-    
+
     // ===== コントロール宣言 =====
     private MapCanvas mapCanvas = null!;
     private System.Windows.Forms.HScrollBar hScrollMap = null!;
     private System.Windows.Forms.VScrollBar vScrollMap = null!;
+
+    // Feature: UI改善（構造改修フェーズ2）— 絶対座標配置だと最大化/リサイズ時に
+    // レイアウトが崩れる（PropertyGridがtabRightの裏に隠れる等）ため、
+    // SplitContainer/TableLayoutPanelによるDockベースの構成に置き換える。
+    // 外側: 左パネル | それ以外。中: 中央キャンバス | 右パネル。右: タイル/配置タブ | プロパティグリッド。
+    private System.Windows.Forms.SplitContainer splitOuter = null!;
+    private System.Windows.Forms.SplitContainer splitCenterRight = null!;
+    private System.Windows.Forms.SplitContainer splitRightVertical = null!;
+    private System.Windows.Forms.TableLayoutPanel tlpCanvas = null!;
+    private System.Windows.Forms.Panel pnlInfoBar = null!;
+    private System.Windows.Forms.Panel pnlStatusBar = null!;
 
     // 左パネル (TabControlで整理)
     private System.Windows.Forms.TabControl tabLeft = null!;
@@ -57,7 +68,7 @@ partial class Form1
     // イベントパレット（敵・ギミック・アイテム）
     private System.Windows.Forms.ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;
     private System.Windows.Forms.RadioButton rbTrigger = null!, rbPlayerStart = null!, rbGoal = null!;
-    
+
     // イベントリスト (配置済み)
     private System.Windows.Forms.ListBox lstPlacedEvents = null!;
 
@@ -106,12 +117,12 @@ partial class Form1
 
         // ===== ツールバー =====
         toolStrip1 = new System.Windows.Forms.ToolStrip();
-        
+
         tsbLayer1 = new System.Windows.Forms.ToolStripButton("Layer 1 (遠景)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbLayer2 = new System.Windows.Forms.ToolStripButton("Layer 2 (メイン)") { CheckOnClick = true, Checked = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbLayer3 = new System.Windows.Forms.ToolStripButton("Layer 3 (近景)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbLayer4 = new System.Windows.Forms.ToolStripButton("Layer 4 (イベント)") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
-        
+
         tsbLayer1.Click += TsbLayer_Click;
         tsbLayer2.Click += TsbLayer_Click;
         tsbLayer3.Click += TsbLayer_Click;
@@ -122,7 +133,7 @@ partial class Form1
         tsbPen = new System.Windows.Forms.ToolStripButton("🖊ペン") { CheckOnClick = true, Checked = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbEraser = new System.Windows.Forms.ToolStripButton("⬜消しゴム") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbSelect = new System.Windows.Forms.ToolStripButton("🔍選択") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
-        
+
         tsbPen.Click += TsbTool_Click;
         tsbEraser.Click += TsbTool_Click;
         tsbSelect.Click += TsbTool_Click;
@@ -142,7 +153,7 @@ partial class Form1
         });
 
         // ===== 左パネル (TabControl) =====
-        tabLeft = new System.Windows.Forms.TabControl { Location = new System.Drawing.Point(0, 50), Size = new System.Drawing.Size(200, 630), Font = F };
+        tabLeft = new System.Windows.Forms.TabControl { Dock = System.Windows.Forms.DockStyle.Fill, Font = F };
         tabStages = new System.Windows.Forms.TabPage("ステージ");
         tabMapProps = new System.Windows.Forms.TabPage("マップ設定");
 
@@ -156,7 +167,7 @@ partial class Form1
         btnDeleteStage.Click += btnDeleteStage_Click;
         btnImportCsv = new System.Windows.Forms.Button { Text = "CSVインポート", Location = new System.Drawing.Point(5, 275), Size = new System.Drawing.Size(180, 26) };
         btnImportCsv.Click += btnImportCsv_Click;
-        
+
         tabStages.Controls.AddRange(new System.Windows.Forms.Control[] { lstStages, txtNewStage, btnCreateStage, btnDeleteStage, btnImportCsv });
 
         // マップ設定タブ
@@ -203,7 +214,7 @@ partial class Form1
         tabLeft.Controls.Add(tabMapProps);
 
         // ===== 右パネル (TabControl) =====
-        tabRight = new System.Windows.Forms.TabControl { Location = new System.Drawing.Point(890, 50), Size = new System.Drawing.Size(220, 630), Font = F };
+        tabRight = new System.Windows.Forms.TabControl { Dock = System.Windows.Forms.DockStyle.Fill, Font = F };
         tabTilePalette = new System.Windows.Forms.TabPage("タイル");
         tabEventPalette = new System.Windows.Forms.TabPage("配置対象");
         tabEventList = new System.Windows.Forms.TabPage("イベントリスト");
@@ -250,49 +261,87 @@ partial class Form1
         tabRight.Controls.Add(tabEventPalette);
         tabRight.Controls.Add(tabEventList);
 
-        // ===== 共通プロパティグリッド (右パネルの下部) =====
-        propertyGrid = new System.Windows.Forms.PropertyGrid { Location = new System.Drawing.Point(890, 480), Size = new System.Drawing.Size(220, 200), HelpVisible = false, ToolbarVisible = false, Font = F };
+        // ===== 共通プロパティグリッド =====
+        propertyGrid = new System.Windows.Forms.PropertyGrid { Dock = System.Windows.Forms.DockStyle.Fill, HelpVisible = false, ToolbarVisible = false, Font = F };
 
         // ===== 情報ラベル =====
-        lblCurrentStage = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9, System.Drawing.FontStyle.Bold), Text = "編集中: ---", Location = new System.Drawing.Point(210, 50), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkBlue };
-        lblLayerInfo = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9), Text = "", Location = new System.Drawing.Point(520, 50), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkGreen };
-        lblStatus = new System.Windows.Forms.Label { Location = new System.Drawing.Point(210, 660), Size = new System.Drawing.Size(300, 20) };
+        lblCurrentStage = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9, System.Drawing.FontStyle.Bold), Text = "編集中: ---", Location = new System.Drawing.Point(6, 6), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkBlue };
+        lblLayerInfo = new System.Windows.Forms.Label { Font = new System.Drawing.Font("Meiryo UI", 9), Text = "", Location = new System.Drawing.Point(316, 6), Size = new System.Drawing.Size(300, 16), ForeColor = System.Drawing.Color.DarkGreen };
+        lblStatus = new System.Windows.Forms.Label { Dock = System.Windows.Forms.DockStyle.Fill, TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new System.Windows.Forms.Padding(6, 0, 0, 0) };
+
+        // Feature: UI改善（構造改修フェーズ2）— ステージ名/レイヤー情報を表示する帯をキャンバス上部に固定表示する。
+        pnlInfoBar = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Top, Height = 26 };
+        pnlInfoBar.Controls.Add(lblCurrentStage);
+        pnlInfoBar.Controls.Add(lblLayerInfo);
+
+        // 画面下端の全幅ステータスバー（以前は地図領域の下、幅300pxのみだった）
+        pnlStatusBar = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Bottom, Height = 24, BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle };
+        pnlStatusBar.Controls.Add(lblStatus);
 
         // ===== マップキャンバス =====
-        mapCanvas = new MapCanvas { Location = new System.Drawing.Point(210, 70), Size = new System.Drawing.Size(650, 580), BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle };
+        mapCanvas = new MapCanvas { Dock = System.Windows.Forms.DockStyle.Fill, BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle };
         mapCanvas.ObjectSelected += mapCanvas_ObjectSelected;
         mapCanvas.StageModified += mapCanvas_StageModified;
         mapCanvas.EditCompleted += mapCanvas_EditCompleted;
         mapCanvas.TestPlayClicked += mapCanvas_TestPlayClicked;
         mapCanvas.TriggerPlaced += mapCanvas_TriggerPlaced;
 
-        hScrollMap = new System.Windows.Forms.HScrollBar { Location = new System.Drawing.Point(210, 650), Size = new System.Drawing.Size(650, 18), Minimum = 0, Maximum = 1800, LargeChange = 200 };
+        hScrollMap = new System.Windows.Forms.HScrollBar { Dock = System.Windows.Forms.DockStyle.Fill, Minimum = 0, Maximum = 1800, LargeChange = 200 };
         hScrollMap.Scroll += hScrollMap_Scroll;
-        vScrollMap = new System.Windows.Forms.VScrollBar { Location = new System.Drawing.Point(860, 70), Size = new System.Drawing.Size(18, 580), Minimum = 0, Maximum = 500, LargeChange = 100 };
+        vScrollMap = new System.Windows.Forms.VScrollBar { Dock = System.Windows.Forms.DockStyle.Fill, Minimum = 0, Maximum = 500, LargeChange = 100 };
         vScrollMap.Scroll += vScrollMap_Scroll;
+
+        // キャンバス+スクロールバーを2x2グリッドで配置（右列/下段はスクロールバー分の固定幅）
+        tlpCanvas = new System.Windows.Forms.TableLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, ColumnCount = 2, RowCount = 2 };
+        tlpCanvas.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100f));
+        tlpCanvas.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Absolute, 18f));
+        tlpCanvas.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100f));
+        tlpCanvas.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 18f));
+        tlpCanvas.Controls.Add(mapCanvas, 0, 0);
+        tlpCanvas.Controls.Add(vScrollMap, 1, 0);
+        tlpCanvas.Controls.Add(hScrollMap, 0, 1);
+
+        // 中央エリア = 情報バー(上) + キャンバスグリッド(残り全部)
+        var pnlCenterArea = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill };
+        pnlCenterArea.Controls.Add(tlpCanvas);
+        pnlCenterArea.Controls.Add(pnlInfoBar);
+
+        // 右側: タイル/配置タブ(上) | プロパティグリッド(下)
+        splitRightVertical = new System.Windows.Forms.SplitContainer { Dock = System.Windows.Forms.DockStyle.Fill, Orientation = System.Windows.Forms.Orientation.Horizontal, SplitterWidth = 6 };
+        splitRightVertical.Panel1.Controls.Add(tabRight);
+        splitRightVertical.Panel2.Controls.Add(propertyGrid);
+
+        // 中央: キャンバスエリア | 右パネル
+        splitCenterRight = new System.Windows.Forms.SplitContainer { Dock = System.Windows.Forms.DockStyle.Fill, Orientation = System.Windows.Forms.Orientation.Vertical, SplitterWidth = 6 };
+        splitCenterRight.Panel1.Controls.Add(pnlCenterArea);
+        splitCenterRight.Panel2.Controls.Add(splitRightVertical);
+
+        // 最外: 左パネル | それ以外
+        splitOuter = new System.Windows.Forms.SplitContainer { Dock = System.Windows.Forms.DockStyle.Fill, Orientation = System.Windows.Forms.Orientation.Vertical, SplitterWidth = 6 };
+        splitOuter.Panel1.Controls.Add(tabLeft);
+        splitOuter.Panel2.Controls.Add(splitCenterRight);
+
+        // SplitterDistanceはコントロールがDockされ実サイズが確定してから設定する
+        // （PartsEditorForm等と同じ理由：先に設定すると無視/例外になることがある）
+        this.Shown += (s, e) =>
+        {
+            splitOuter.SplitterDistance = System.Math.Max(160, (int)(splitOuter.Width * 0.18));
+            splitCenterRight.SplitterDistance = System.Math.Max(400, splitCenterRight.Width - 230);
+            splitRightVertical.SplitterDistance = System.Math.Max(280, splitRightVertical.Height - 210);
+        };
 
         // Form 設定
         this.ClientSize = new System.Drawing.Size(1120, 690);
-        this.Controls.Add(menuStrip1);
+        this.MinimumSize = new System.Drawing.Size(900, 640);
+        this.Controls.Add(splitOuter);
+        this.Controls.Add(pnlStatusBar);
         this.Controls.Add(toolStrip1);
-        this.Controls.Add(tabLeft);
-        this.Controls.Add(tabRight);
-        this.Controls.Add(propertyGrid);
-        this.Controls.Add(lblCurrentStage);
-        this.Controls.Add(lblLayerInfo);
-        this.Controls.Add(lblStatus);
-        this.Controls.Add(mapCanvas);
-        this.Controls.Add(hScrollMap);
-        this.Controls.Add(vScrollMap);
+        this.Controls.Add(menuStrip1);
         this.MainMenuStrip = menuStrip1;
         this.Name = "Form1";
         this.Text = "Lab Editor";
         this.Load += new System.EventHandler(this.Form1_Load);
-        
-        // 修正：プロパティグリッドの表示順を調整（タブの裏に隠れないように）
-        propertyGrid.BringToFront();
-        tabRight.Height = 420; // プロパティグリッドのスペースを空ける
-        
+
         this.ResumeLayout(false);
         this.PerformLayout();
     }

@@ -47,11 +47,9 @@ public class BackgroundSettingsForm : Form
     {
         Text            = "背景レイヤー設定";
         Size            = new Size(860, 500);
-        Font            = new Font("Meiryo UI", 9f);
+        Font            = UiTheme.Base;
         StartPosition   = FormStartPosition.CenterParent;
-        MinimizeBox     = false;
-        MaximizeBox     = false;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        UiTheme.ApplyResizableChrome(this);
 
         // ── 右パネル（プレビュー） ───────────────
         var pnlRight = new Panel
@@ -82,7 +80,7 @@ public class BackgroundSettingsForm : Form
             Text = "🎬 パララックスプレビュー（自動スクロール）",
             Location = new Point(10, 238),
             Size = new Size(200, 16),
-            Font = new Font(Font.FontFamily, 7.5f),
+            Font = UiTheme.Small,
         };
         _parallaxPreview = new Panel
         {
@@ -183,10 +181,8 @@ public class BackgroundSettingsForm : Form
         _btnSave   = MakeButton("💾 保存して閉じる", 530, 6, 160);
         _btnCancel = MakeButton("キャンセル",        700, 6, 100);
 
-        _btnSave.BackColor   = Color.FromArgb(70, 130, 180);
-        _btnSave.ForeColor   = Color.White;
-        _btnSave.FlatStyle   = FlatStyle.Flat;
-        _btnCancel.FlatStyle = FlatStyle.Flat;
+        UiTheme.StylePrimaryButton(_btnSave);
+        UiTheme.StyleSecondaryButton(_btnCancel);
 
         _btnAdd.Click    += (_, _) => AddEmptyRow();
         _btnSave.Click   += BtnSave_Click;
@@ -396,13 +392,7 @@ public class BackgroundSettingsForm : Form
 
     // ── ヘルパー ──────────────────────────────
     private static Button MakeButton(string text, int x, int y, int w) =>
-        new Button
-        {
-            Text     = text,
-            Location = new Point(x, y),
-            Size     = new Size(w, 30),
-            Font     = new Font("Meiryo UI", 9f)
-        };
+        UiTheme.CreateButton(text, new Point(x, y), new Size(w, 30));
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {

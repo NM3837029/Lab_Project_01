@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
 
@@ -752,10 +753,75 @@ public partial class Form1 : Form
     }
 
     // ===== アセット管理 =====
+    // UI改善（構造改修フェーズ5e）— 唯一の挙動変更コミット。以前はここから
+    // AssetManagerForm→PartsEditorForm→BehaviorScriptEditorForm/HitboxEditorForm と
+    // 最大3重にShowDialog()が積み重なっていた。ここではWorkbenchShellFormを1つだけ開き、
+    // アセット管理・パーツ編集・挙動スクリプト/当たり判定/サイズ/コモンイベント編集を
+    // すべて同じウィンドウ内のページ遷移（パンくず＋戻るボタン）に置き換える。
+    // 各PageControlの「編集を頼む」イベント自体はフェーズ5b～5dで既に用意済みで、
+    // AssetManagerForm/PartsEditorForm（薄いラッパー）は引き続きShowDialog()で
+    // 応じているため、このメソッドが「shell.NavigateToで応じる」別の応じ方を
+    // 提供するだけで済む。
     private void btnAssetManager_Click(object? sender, EventArgs e)
     {
-        var form = new AssetManagerForm(assetsPath, assets);
-        if (form.ShowDialog() == DialogResult.OK)
+        var shell = new WorkbenchShellForm();
+
+        void HandleHitboxRequest(string fullPath, int ox, int oy, int w, int h, Action<int, int, int, int> onSaved)
+        {
+            var page = new HitboxEditorPageControl(fullPath, ox, oy, w, h);
+            page.Saved += (s, ev) => { onSaved(page.HitboxOffsetX, page.HitboxOffsetY, page.HitboxWidth, page.HitboxHeight); shell.GoBack(); };
+            page.Cancelled += (s, ev) => shell.GoBack();
+            shell.NavigateTo(page, "当たり判定編集", page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
+        void HandleSizeRequest(string fullPath, float curScale, Action<float> onSaved)
+        {
+            var page = new SizeEditorPageControl(fullPath, curScale);
+            page.Saved += (s, ev) => { onSaved(page.ResultScale); shell.GoBack(); };
+            page.Cancelled += (s, ev) => shell.GoBack();
+            shell.NavigateTo(page, "サイズ編集", page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
+        void HandleBehaviorScriptRequest(string label, JArray initialScript, Action<JArray> onSaved)
+        {
+            var page = new BehaviorScriptEditorPageControl(label, initialScript);
+            page.Saved += (s, script) => { onSaved(script); shell.GoBack(); };
+            page.Cancelled += (s, ev) => shell.GoBack();
+            shell.NavigateTo(page, label, page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
+        void HandlePartsEditRequest(string label, List<PartDef> initialParts, string baseSpritePath, Action<List<PartDef>> onSaved)
+        {
+            var page = new PartsEditorPageControl(label, initialParts, projectRoot, baseSpritePath);
+            page.Saved += (s, parts) => { onSaved(parts); shell.GoBack(); };
+            page.Cancelled += (s, ev) => shell.GoBack();
+            // パーツ編集の中からさらに当たり判定/挙動スクリプトを開く場合も、同じシェル内でページ遷移する
+            // （ここが以前の3重ネストのうち最も深い階層。ここもGoBack一発で親のパーツ編集に戻れる）。
+            page.HitboxEditRequested += HandleHitboxRequest;
+            page.BehaviorScriptEditRequested += HandleBehaviorScriptRequest;
+            shell.NavigateTo(page, label, page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
+        void HandleCommonEventRequest(AssetManagerPageControl rootPage, CommonEventDef ev, Action<CommonEventDef> onSaved)
+        {
+            var page = new CommonEventEditorPageControl(ev, assets, rootPage.GetStageFileNames());
+            page.Saved += (s, result) => { onSaved(result); shell.GoBack(); };
+            page.Cancelled += (s, ev2) => shell.GoBack();
+            shell.NavigateTo(page, "コモンイベント編集", page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
+        var rootPage = new AssetManagerPageControl(assetsPath, assets);
+        rootPage.Saved += (s, ev) => { shell.DialogResult = DialogResult.OK; shell.Close(); };
+        rootPage.Cancelled += (s, ev) => { shell.DialogResult = DialogResult.Cancel; shell.Close(); };
+        rootPage.HitboxEditRequested += HandleHitboxRequest;
+        rootPage.SizeEditRequested += HandleSizeRequest;
+        rootPage.BehaviorScriptEditRequested += HandleBehaviorScriptRequest;
+        rootPage.PartsEditRequested += HandlePartsEditRequest;
+        rootPage.CommonEventEditRequested += (ev, onSaved) => HandleCommonEventRequest(rootPage, ev, onSaved);
+
+        shell.NavigateTo(rootPage, "アセット管理", rootPage.PrimaryActionButton, rootPage.SecondaryActionButton);
+
+        if (shell.ShowDialog(this) == DialogResult.OK)
         { assets = AssetDefinitions.LoadFromFolder(assetsPath); RefreshPalette(); if (currentStage != null) { mapCanvas.Assets = assets; mapCanvas.RefreshTileColors(); } }
     }
 

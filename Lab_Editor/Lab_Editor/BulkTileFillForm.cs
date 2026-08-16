@@ -17,10 +17,10 @@ public class BulkTileFillForm : Form
         Size = new Size(320, 260);
         MinimumSize = new Size(280, 240);
         StartPosition = FormStartPosition.CenterParent;
-        Font = new Font("Meiryo UI", 9);
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        Font = UiTheme.Base;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MaximizeBox = true;
+        MinimizeBox = true;
 
         var table = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true, Padding = new Padding(12) };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
@@ -50,7 +50,7 @@ public class BulkTileFillForm : Form
             Height = 40,
             Text = "現在パレットで選択中のタイルで、指定した矩形範囲を一括で塗りつぶします。",
             ForeColor = Color.DarkGray,
-            Font = new Font("Meiryo UI", 7.5f),
+            Font = UiTheme.Small,
             Padding = new Padding(12, 0, 12, 0)
         };
 
@@ -58,7 +58,8 @@ public class BulkTileFillForm : Form
         var flowRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
         btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-        var btnOk = new Button { Text = "✅ 配置", AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        var btnOk = new Button { Text = "✅ 配置", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
+        UiTheme.StylePrimaryButton(btnOk);
         btnOk.Click += BtnOk_Click;
         flowRight.Controls.Add(btnCancel);
         flowRight.Controls.Add(btnOk);

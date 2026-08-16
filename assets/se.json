@@ -3,6 +3,7 @@
     "id": "jump",
     "name": "Jump",
     "file": "sound/jump01.wav",
-    "isLoop": false
+    "isLoop": false,
+    "volume": 1.0
   }
 ]

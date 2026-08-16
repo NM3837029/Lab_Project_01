@@ -1,7 +1,6 @@
 {
   "map_w": 500,
   "map_h": 15,
-  "bgm_id": "bgm_editing_07",
   "player_start": {
     "x": 48.0,
     "y": 320.0
@@ -14,6 +13,7 @@
     "baseJumpPower": -15,
     "baseSpeed": 4.0
   },
+  "bgm_id": "bgm_editing_07",
   "map": [
     [
       0,
@@ -22623,14 +22623,9 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_5",
-      "x": 416.0,
-      "y": 192.0
-    },
-    {
-      "id": "enemy_5",
-      "x": 288.0,
-      "y": 288.0
+      "id": "enemy_6",
+      "x": 512.0,
+      "y": 224.0
     }
   ],
   "gimmicks": [],

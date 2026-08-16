@@ -1584,3 +1584,44 @@
 [2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=bgm_editing_09 volume=1.000000
 [2026-08-13 19:03:56] [SoundManager::LoadEntries] INFO: id=jump volume=0.300000
 [2026-08-13 19:03:56] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:30:24] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:30:25] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:30:25] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:30:25] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:30:25] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:31:04] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:31:05] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:31:05] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:31:05] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:31:05] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:31:14] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:31:15] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:31:15] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:31:15] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:31:15] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:38:46] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:38:47] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:38:47] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:38:47] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:38:47] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:39:05] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:39:06] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:39:06] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:39:06] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:39:06] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:39:21] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:53:20] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:53:21] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:53:21] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:53:21] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:53:21] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:54:40] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:54:40] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:54:40] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:54:40] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:54:40] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-13 21:55:04] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-13 21:55:05] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-13 21:55:05] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-13 21:55:05] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-13 21:55:05] [System::ResetStage] INFO: Begin ResetStage

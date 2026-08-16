@@ -44,7 +44,7 @@ public class TileRegionEditorForm : Form
         Size = new Size(600, 620);
         MinimumSize = new Size(600, 620);
         StartPosition = FormStartPosition.CenterParent;
-        Font = new Font("Meiryo UI", 9);
+        Font = UiTheme.Base;
 
         if (File.Exists(imagePath))
         {

@@ -65,11 +65,9 @@ public class EventEditorForm : Form
     {
         Text            = "イベント・トリガー編集";
         Size            = new Size(720, 600);
-        Font            = new Font("Meiryo UI", 9f);
+        Font            = UiTheme.Base;
         StartPosition   = FormStartPosition.CenterParent;
-        MinimizeBox     = false;
-        MaximizeBox     = false;
-        FormBorderStyle = FormBorderStyle.FixedDialog;
+        UiTheme.ApplyResizableChrome(this);
 
         int y = 10;
 
@@ -142,10 +140,8 @@ public class EventEditorForm : Form
         _btnOk     = MakeButton("💾 OK",    480, y, 100);
         _btnCancel = MakeButton("キャンセル", 590, y, 100);
 
-        _btnOk.BackColor     = Color.FromArgb(70, 130, 180);
-        _btnOk.ForeColor     = Color.White;
-        _btnOk.FlatStyle     = FlatStyle.Flat;
-        _btnCancel.FlatStyle = FlatStyle.Flat;
+        UiTheme.StylePrimaryButton(_btnOk);
+        UiTheme.StyleSecondaryButton(_btnCancel);
 
         _btnOk.Click     += BtnOk_Click;
         _btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
@@ -217,46 +213,17 @@ public class EventEditorForm : Form
     // ── ヘルパー ──────────────────────────────
     private void AddLabel(string text, int x, int y, bool bold = false)
     {
-        var lbl = new Label
-        {
-            Text      = text,
-            Location  = new Point(x, y + 3),
-            AutoSize  = true,
-            Font      = bold
-                ? new Font("Meiryo UI", 9f, FontStyle.Bold)
-                : new Font("Meiryo UI", 9f),
-        };
-        Controls.Add(lbl);
+        Controls.Add(UiTheme.CreateLabel(text, new Point(x, y + 3), bold));
     }
 
     private void AddSeparator(int y)
     {
-        var sep = new Panel
-        {
-            Location  = new Point(10, y),
-            Size      = new Size(680, 1),
-            BackColor = Color.Silver,
-        };
-        Controls.Add(sep);
+        Controls.Add(UiTheme.CreateSeparator(new Point(10, y), 680));
     }
 
     private NumericUpDown MakeNud(int x, int y) =>
-        new NumericUpDown
-        {
-            Location      = new Point(x, y),
-            Width         = 80,
-            DecimalPlaces = 2,
-            Minimum       = -99999,
-            Maximum       = 99999,
-            Increment     = 1m,
-        };
+        UiTheme.CreateNumericUpDown(new Point(x, y));
 
     private static Button MakeButton(string text, int x, int y, int w) =>
-        new Button
-        {
-            Text     = text,
-            Location = new Point(x, y),
-            Size     = new Size(w, 30),
-            Font     = new Font("Meiryo UI", 9f)
-        };
+        UiTheme.CreateButton(text, new Point(x, y), new Size(w, 30));
 }
