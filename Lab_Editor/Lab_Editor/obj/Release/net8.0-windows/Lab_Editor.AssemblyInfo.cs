@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7cce7becff3e0f1c1503e887b2d4f157c642eb64")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ce74004369ec5f024adcc16c0ca75a2607f6572c")]
 [assembly: System.Reflection.AssemblyProductAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -219,6 +219,7 @@ public partial class Form1 : Form
                 mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerFront)
                 mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
             mapCanvas.SelectedTileId = id;
+            SyncToolButtonsToPen();
             foreach (Control c in flpTiles.Controls)
                 if (c is Button b) b.FlatStyle = b == btn ? FlatStyle.Standard : FlatStyle.Flat;
         }
@@ -256,6 +257,7 @@ public partial class Form1 : Form
             mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
             mapCanvas.SelectedAssetId = assets.Enemies[lstEnemies.SelectedIndex].id;
             lstGimmicks.ClearSelected(); lstItems.ClearSelected();
+            SyncToolButtonsToPen();
             UpdateLayerInfo();
         }
     }
@@ -267,6 +269,7 @@ public partial class Form1 : Form
             mapCanvas.CurrentMode = MapCanvas.EditMode.Gimmick;
             mapCanvas.SelectedAssetId = assets.Gimmicks[lstGimmicks.SelectedIndex].id;
             lstEnemies.ClearSelected(); lstItems.ClearSelected();
+            SyncToolButtonsToPen();
             UpdateLayerInfo();
         }
     }
@@ -278,6 +281,7 @@ public partial class Form1 : Form
             mapCanvas.CurrentMode = MapCanvas.EditMode.Item;
             mapCanvas.SelectedAssetId = assets.Items[lstItems.SelectedIndex].id;
             lstEnemies.ClearSelected(); lstGimmicks.ClearSelected();
+            SyncToolButtonsToPen();
             UpdateLayerInfo();
         }
     }
@@ -336,12 +340,24 @@ public partial class Form1 : Form
 
         if (tsbEraser.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Eraser;
         else if (tsbSelect.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Select;
-        else if (tsbPen.Checked) 
+        else if (tsbPen.Checked)
         {
             // ペンに戻す際、現在のレイヤーに合わせたモードに戻す
             TsbLayer_Click(tsbLayer1.Checked ? tsbLayer1 : (tsbLayer2.Checked ? tsbLayer2 : (tsbLayer3.Checked ? tsbLayer3 : tsbLayer4)), EventArgs.Empty);
         }
         UpdateLayerInfo();
+    }
+
+    // Bugfix: タイル/敵/ギミック/アイテムをパレットから選ぶと mapCanvas.CurrentMode が
+    // 配置モードへ強制的に切り替わる（TileBtn_Click・lstEnemies/lstGimmicks/lstItems_SelectedIndexChanged）が、
+    // ツールバーの 消しゴム/選択 ボタンはチェックされたまま残っていた。そのため「消しゴムを選んだのに
+    // パレットを触った後クリックすると消えずに置かれる（＝消しゴムが効かないように見える）」という
+    // 状態不整合が発生していた。パレット選択時は必ずペンツールへ表示上も同期させる。
+    private void SyncToolButtonsToPen()
+    {
+        tsbPen.Checked = true;
+        tsbEraser.Checked = false;
+        tsbSelect.Checked = false;
     }
 
     private void EventModeItem_CheckedChanged(object? sender, EventArgs e)

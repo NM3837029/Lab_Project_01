@@ -604,34 +604,26 @@ public class MapCanvas : Panel
         }
     }
 
-    // Feature: 選択/削除ロジックの改善 — オブジェクトの実際のhitbox(なければGAME_TILE四方にフォールバック)で
-    // 判定するようにし、複数重なっている場合はクリック位置に最も近い中心を持つものを優先する
+    // Feature: 選択/削除ロジックの改善 — 複数重なっている場合はクリック位置に最も近い中心を持つものを優先する
     // （従来は敵→ギミック→アイテム→トリガーの固定順で最初に見つかったものを機械的に採用していた）。
+    //
+    // Bugfix: 敵/ギミック/アイテムは DrawMarker() により常に (X, Y) 起点の GAME_TILE 四方の
+    // 固定サイズアイコンとして描画される（実データのhitboxWidth/Height/Offsetはゲーム内の当たり判定用で、
+    // エディタ上の見た目とは無関係）。以前はここで実際のhitboxを判定範囲に使っていたため、
+    // hitboxWidth/Heightが0のアセット（enemies.jsonの約半数）は判定矩形の面積がゼロになり
+    // クリックでは絶対に選択/削除できず、hitboxOffsetが大きいアセットは判定範囲が見えているアイコンの
+    // 位置から大きくズレてしまい、「アイコンをクリックしても消しゴム/選択が反応しない」原因になっていた。
+    // 見た目のアイコンと判定範囲を一致させるため、常にマーカーと同じ固定footprintを使う。
     private (float x, float y, float w, float h) GetFootprint(object obj)
     {
         switch (obj)
         {
             case PlacedEnemy pe:
-                {
-                    var def = Assets?.Enemies.FirstOrDefault(d => d.id == pe.Id);
-                    return def != null
-                        ? (pe.X + def.hitboxOffsetX, pe.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
-                        : (pe.X, pe.Y, GAME_TILE, GAME_TILE);
-                }
+                return (pe.X, pe.Y, GAME_TILE, GAME_TILE);
             case PlacedGimmick pg:
-                {
-                    var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == pg.Id);
-                    return def != null
-                        ? (pg.X + def.hitboxOffsetX, pg.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
-                        : (pg.X, pg.Y, GAME_TILE, GAME_TILE);
-                }
+                return (pg.X, pg.Y, GAME_TILE, GAME_TILE);
             case PlacedItem pi:
-                {
-                    var def = Assets?.Items.FirstOrDefault(d => d.id == pi.Id);
-                    return def != null
-                        ? (pi.X + def.hitboxOffsetX, pi.Y + def.hitboxOffsetY, def.hitboxWidth, def.hitboxHeight)
-                        : (pi.X, pi.Y, GAME_TILE, GAME_TILE);
-                }
+                return (pi.X, pi.Y, GAME_TILE, GAME_TILE);
             case EventTrigger t:
                 return (t.x, t.y, t.width, t.height);
             default:
