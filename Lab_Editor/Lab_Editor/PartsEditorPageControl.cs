@@ -18,67 +18,105 @@ namespace Lab_Editor;
 // ======================================================
 public class PartsEditorPageControl : UserControl
 {
-    // UserControlにはDialogResult/Close()がないため、保存/キャンセルはイベントで伝える。
+    // UserControlにはDialogResult/Close()というプロパティ・メソッドが存在しない（これらはFormクラス専用）。
+    // そのため「保存されたこと」「キャンセルされたこと」を呼び出し元(親ページ)に伝える手段として、
+    // イベントを自前で用意している。呼び出し元はSaved/Cancelledを購読し、発火したタイミングで
+    // 画面遷移（前のページに戻るなど）を行う。
     public event EventHandler<List<PartDef>>? Saved;
     public event EventHandler? Cancelled;
+    // 下部のOK/キャンセルボタンを外部（シェル側のフッターなど）からも参照できるように公開している。
     public Button PrimaryActionButton => _btnOk;
     public Button SecondaryActionButton => _btnCancel;
     private Button _btnOk = null!, _btnCancel = null!;
 
-    // ドリルダウン系の編集要求。AssetManagerPageControlと同じ考え方（PageEditRequests.cs参照）。
+    // 「当たり判定編集」「挙動スクリプト編集」は、このページの中では完結せず別ページへ一時的に
+    // 移動して編集させる（ドリルダウン）。その要求をイベントとして親に伝える。
+    // AssetManagerPageControlも同じ設計を採用している（詳細はPageEditRequests.csを参照）。
     public event HitboxEditRequestHandler? HitboxEditRequested;
     public event BehaviorScriptEditRequestHandler? BehaviorScriptEditRequested;
 
+    // プロジェクトのルートフォルダ（画像の相対パスを絶対パスに解決するために使う）
     private readonly string projectRoot;
+    // 編集対象の敵/ギミック本体が持つ基準スプライト（合成プレビューの中心に薄く表示する目印用）
     private readonly string baseSpritePath;
     private Image? baseSprite;
+    // パーツごとのサムネイル画像のキャッシュ。毎回ファイルを読み直すと重いため、一度読み込んだら
+    // PartDefインスタンスをキーにして保持しておく（画像が変わった時はInvalidatePartThumbで明示的に破棄する）。
     private readonly Dictionary<PartDef, Image?> _partThumbCache = new();
 
+    // 編集中のパーツ一覧本体。コンストラクタで渡された初期値をクローンして持つため、
+    // キャンセルされても呼び出し元の元データは書き換わらない。
     private List<PartDef> parts;
+    // OKが押された後、確定した編集結果を呼び出し元が読み取るための公開プロパティ。
     public List<PartDef> ResultParts { get; private set; } = new();
 
+    // 現在選択中のパーツのインデックス（未選択時は-1）
     private int selectedIndex = -1;
+    // 詳細パネルの値をコードから設定している最中に、その変更をユーザー操作と誤認して
+    // 余計なイベント処理（Undo履歴の記録など）が走らないようにするためのフラグ。
     private bool _suppressEvents = false;
 
     // ドラッグ状態（合成キャンバス上でのパーツ移動）
+    // どのパーツをドラッグ中か（-1はドラッグしていない状態）
     private int _draggingIndex = -1;
+    // ドラッグ開始時のマウス座標（差分を計算する基準点）
     private Point _dragMouseStart;
+    // ドラッグ開始時点でのパーツのoffsetX/offsetY（マウス移動量をこの値に加算していく）
     private float _dragOffsetStartX, _dragOffsetStartY;
 
     // Feature: UI改善（提案書 PT-1）— 挙動スクリプトによる動きをその場で確認する再生プレビュー
+    // 再生中に一定間隔でTickイベントを発生させ、経過時間(_previewTime)を進めるタイマー
     private System.Windows.Forms.Timer? _previewTimer;
+    // 再生プレビューの現在時刻（スクリプト評価に渡すTime値。フレーム数相当のカウンタ）
     private float _previewTime = 0f;
+    // 再生中かどうか（true=再生中。ドラッグでの位置調整は再生中は無効にする）
     private bool _isPlaying = false;
     private Button _btnPlayToggle = null!;
 
     // Feature: UI改善（提案書 CUT-1）— パーツ編集画面自体のUndo/Redo（マップ編集限定だった仕組みの拡張）
+    // パーツ一覧のスナップショットを積み重ねて保持する履歴管理オブジェクト
     private readonly HistoryManager<List<PartDef>> _history = new();
     private Button _btnUndo = null!, _btnRedo = null!;
 
     // Feature: UI改善（提案書 PT-6）— 「このスクリプトを全パーツへ」適用後、どのパーツが変わったか
     // 一目で分かるよう、対象パーツの枠を一瞬光らせる
+    // 現在ハイライト表示すべきパーツの集合（描画時にこの集合に含まれるパーツだけ緑枠を追加で描く）
     private readonly HashSet<PartDef> _highlightedParts = new();
+    // ハイライトを一定時間後に自動的に消すためのワンショットタイマー
     private System.Windows.Forms.Timer? _highlightTimer;
 
     // ==== コントロール ====
+    // パーツの簡易一覧を表示するグリッド（左側パネル）
     private DataGridView dgvList = null!;
+    // 合成プレビューを描画するキャンバス（中央パネル）
     private Panel pnlComposer = null!;
+    // 以下、選択中パーツの詳細編集パネル（右下）で使う各入力コントロール
     private TextBox txtId = null!;
     private Label lblSpriteValue = null!;
     private NumericUpDown nudOffsetX = null!, nudOffsetY = null!, nudScale = null!, nudHp = null!, nudZOrder = null!;
     private Label lblHpHint = null!;
 
+    // コンストラクタ。
+    // subjectLabel   : 編集対象（敵/ギミック/アイテムの名前など）を表す文字列。将来的な見出し表示用に受け取っている。
+    // initialParts   : 編集開始時点でのパーツ一覧。ここではクローンして保持するため、このリスト自体は変更されない。
+    // projectRoot    : プロジェクトのルートフォルダ。画像パスの解決に使う。
+    // baseSpritePath : 本体の基準スプライトのパス。合成プレビューの中心目印として表示する。
     public PartsEditorPageControl(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath)
     {
         this.projectRoot = projectRoot;
         this.baseSpritePath = baseSpritePath;
+        // 渡されたパーツ一覧をそのまま参照すると、キャンセルしても呼び出し元のデータが
+        // 書き換わってしまう恐れがあるため、1件ずつクローンして独立したリストとして保持する。
         parts = initialParts.Select(ClonePart).ToList();
 
+        // ページ全体を親コンテナいっぱいに広げ、共通のUIテーマフォントを適用する。
         Dock = DockStyle.Fill;
         Font = UiTheme.Base;
 
+        // 本体の基準スプライト画像を読み込んでおく（合成プレビューの中心に表示するため）。
         LoadBaseSprite();
 
+        // 画面上部に表示する操作ヒントのラベル。
         var lblHint = new Label
         {
             Dock = DockStyle.Top,
@@ -90,9 +128,11 @@ public class PartsEditorPageControl : UserControl
             BackColor = Color.FromArgb(230, 240, 255),
         };
 
+        // 下部の「OK/キャンセル」「Undo/Redo」ボタン群を組み立てる。
         var pnlBottom = BuildBottomButtons();
 
         // ルート: 左(一覧) | 右(プレビュー+詳細)
+        // 画面全体をユーザーがドラッグで比率調整できるSplitContainerで左右に分割する。
         var rootSplit = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterWidth = 6 };
         var pnlListSide = BuildListSide();
 
@@ -101,6 +141,7 @@ public class PartsEditorPageControl : UserControl
         var pnlComposerSide = BuildComposerSide();
         var pnlDetailSide = BuildDetailSide();
 
+        // 各パーツをコントロールツリーに配置していく。
         Controls.Add(rootSplit);
         Controls.Add(pnlBottom);
         Controls.Add(lblHint);
@@ -115,18 +156,26 @@ public class PartsEditorPageControl : UserControl
         // 発火するLoadイベントを使う。
         Load += (s, e) =>
         {
+            // 左側パネルの幅は「画面幅の24%」を基準にしつつ、狭くなりすぎないよう最低280pxを確保する。
             rootSplit.SplitterDistance = Math.Max(280, (int)(ClientSize.Width * 0.24));
+            // 右側上段（プレビュー）の高さは「右側全体の55%」を基準にしつつ、最低300pxを確保する。
             rightSplit.SplitterDistance = Math.Max(300, (int)(rightSplit.Height * 0.55));
         };
 
+        // 初期状態を履歴に1件積んでおく（これがないとUndoで「何もない状態」へ戻れなくなる）。
         PushHistory();
+        // 一覧グリッドと詳細パネルを最新状態に合わせて表示する。
         RefreshList();
     }
 
+    // キーボードショートカット（Ctrl+Z=元に戻す、Ctrl+Y=やり直す）をこのページ内で捕まえて処理する。
+    // WinFormsの標準ではメニューやツールバーのショートカットキーとして登録しないと拾えないため、
+    // ProcessCmdKeyをオーバーライドして直接キー入力を検知している。
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
         if (keyData == (Keys.Control | Keys.Z)) { PartsUndo(); return true; }
         if (keyData == (Keys.Control | Keys.Y)) { PartsRedo(); return true; }
+        // 該当しないキーは基底クラスの処理に委ねる（他のショートカットやフォーカス移動を妨げないため）。
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
@@ -136,21 +185,29 @@ public class PartsEditorPageControl : UserControl
     // 個別配線し直さずに済むようにしている。
     private void PushHistory()
     {
+        // 現在のパーツ一覧をディープクローンしてから履歴スタックに積む。
+        // クローンしない場合、後から同じPartDefインスタンスを書き換えると過去の履歴まで
+        // 一緒に変わってしまい、Undo/Redoが正しく機能しなくなる。
         _history.Push(parts.Select(ClonePart).ToList());
+        // ボタンの有効/無効状態（これ以上戻れない/進めない場合はグレーアウト）を更新する。
         UpdateUndoRedoButtons();
     }
 
+    // 「元に戻す」処理。履歴スタックから1つ前の状態を取り出し、現在のパーツ一覧を置き換える。
     private void PartsUndo()
     {
         if (!_history.CanUndo) return;
         var restored = _history.Undo();
         if (restored == null) return;
         parts = restored;
+        // 選択中インデックスが復元後の件数を超えていたら、範囲内に収まるよう補正する。
         selectedIndex = Math.Clamp(selectedIndex, -1, parts.Count - 1);
+        // 一覧・プレビュー・詳細パネルを復元後の内容で再描画する。
         RefreshList();
         UpdateUndoRedoButtons();
     }
 
+    // 「やり直す」処理。PartsUndoの逆方向で、履歴スタックから1つ先の状態を取り出す。
     private void PartsRedo()
     {
         if (!_history.CanRedo) return;
@@ -162,13 +219,20 @@ public class PartsEditorPageControl : UserControl
         UpdateUndoRedoButtons();
     }
 
+    // Undo/Redoボタンの有効・無効状態を、履歴管理オブジェクトの現在の状態に合わせて更新する。
     private void UpdateUndoRedoButtons()
     {
+        // コンストラクタの初期化順序によっては、ボタンがまだ生成されていない段階で
+        // PushHistoryが呼ばれる可能性があるため、nullチェックしてから触る。
         if (_btnUndo == null! || _btnRedo == null!) return;
         _btnUndo.Enabled = _history.CanUndo;
         _btnRedo.Enabled = _history.CanRedo;
     }
 
+    // PartDefの全フィールドを1つずつコピーして独立したインスタンスを作る（ディープクローン）。
+    // scriptフィールドはJArray（参照型・入れ子構造）なので、単純代入だと元と同じオブジェクトを
+    // 共有してしまう。DeepClone()を使うことで、複製後にスクリプトを書き換えても元のパーツに
+    // 影響しないようにしている。
     private static PartDef ClonePart(PartDef p) => new PartDef
     {
         id = p.id,
@@ -189,11 +253,13 @@ public class PartsEditorPageControl : UserControl
 
     // ==== 左: パーツ一覧 ====
 
+    // 左側パネル（パーツ一覧グリッドと操作ボタン群）を組み立てて返す。
     private Panel BuildListSide()
     {
         var pnl = new Panel { Dock = DockStyle.Fill };
         var lblTitle = new Label { Dock = DockStyle.Top, Height = 24, Text = "📋 パーツ一覧", Font = new Font(Font, FontStyle.Bold), Padding = new Padding(4, 4, 0, 0) };
 
+        // パーツ一覧を表示するグリッド本体の設定。
         dgvList = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -217,6 +283,8 @@ public class PartsEditorPageControl : UserControl
             new DataGridViewTextBoxColumn { Name = "hp", HeaderText = "HP", FillWeight = 18, ReadOnly = true },
             new DataGridViewTextBoxColumn { Name = "zOrder", HeaderText = "Z", FillWeight = 18, ReadOnly = true },
         });
+        // 一覧グリッドで選択行が変わったら、選択インデックスを更新し、詳細パネルと
+        // 合成プレビュー（選択中パーツの枠を黄色く強調表示するため）を最新状態に合わせる。
         dgvList.SelectionChanged += (s, e) =>
         {
             selectedIndex = dgvList.SelectedRows.Count > 0 ? dgvList.SelectedRows[0].Index : -1;
@@ -236,14 +304,19 @@ public class PartsEditorPageControl : UserControl
             WrapContents = true,
             Padding = new Padding(2),
         };
+        // 新規パーツを1つ追加するボタン。
         var btnAdd = new Button { Text = "＋ 追加", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnAdd.Click += (s, e) => AddPart();
+        // 選択中のパーツを削除するボタン。
         var btnDel = new Button { Text = "🗑 削除", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnDel.Click += (s, e) => DeleteSelectedPart();
+        // 選択中のパーツを一覧内で1つ上（描画順・重なり順の基準にもなる並び）に移動するボタン。
         var btnUp = new Button { Text = "▲ 上へ", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnUp.Click += (s, e) => MoveSelectedPart(-1);
+        // 選択中のパーツを一覧内で1つ下に移動するボタン。
         var btnDown = new Button { Text = "▼ 下へ", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnDown.Click += (s, e) => MoveSelectedPart(1);
+        // 選択中パーツの挙動スクリプトを、他の全パーツへコピーして一括適用するボタン。
         var btnApplyScript = new Button { Text = "🧩 このスクリプトを全パーツへ", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnApplyScript.Click += (s, e) => ApplyScriptToAllParts();
         // Feature: UI改善（提案書 PT-3）— よく似たパーツをゼロから作り直さずに済むよう、複製ボタンを追加。
@@ -271,13 +344,19 @@ public class PartsEditorPageControl : UserControl
         return pnl;
     }
 
+    // パーツ一覧グリッドの中身を、現在のpartsリストの内容で全面的に描き直す。
+    // 一覧に変更を加える操作（追加/削除/並び替え等）は、最後に必ずこのメソッドを呼んで
+    // 画面表示を最新状態に同期させている。
     private void RefreshList()
     {
+        // 再描画後もできるだけ同じ行の選択状態を保つため、現在の選択インデックスを退避しておく。
         int keepSelected = selectedIndex;
         dgvList.Rows.Clear();
+        // 各パーツについて、サムネイル画像・ID・HP・zOrderの4列分の行を追加する。
         foreach (var p in parts) dgvList.Rows.Add(GetPartThumb(p), p.id, p.hp, p.zOrder);
         if (parts.Count > 0)
         {
+            // 退避しておいた選択インデックスが範囲内であればそれを、そうでなければ先頭(0)を選択する。
             int idx = Math.Clamp(keepSelected < 0 ? 0 : keepSelected, 0, parts.Count - 1);
             dgvList.ClearSelection();
             dgvList.Rows[idx].Selected = true;
@@ -285,58 +364,80 @@ public class PartsEditorPageControl : UserControl
         }
         else
         {
+            // パーツが1つもない場合は「未選択」状態にする。
             selectedIndex = -1;
         }
+        // 選択状態が変わった可能性があるため、詳細パネルと合成プレビューも合わせて更新する。
         LoadDetailFromSelection();
         pnlComposer.Invalidate();
     }
 
+    // 新規パーツを1つ追加する。
     private void AddPart()
     {
+        // "part1", "part2", ... のように、既存IDと重複しない連番のIDを自動生成する。
         string baseId = "part";
         int n = 1;
         var existing = new HashSet<string>(parts.Select(p => p.id));
         string newId;
         do { newId = $"{baseId}{n}"; n++; } while (existing.Contains(newId));
+        // 位置は原点(0,0)のまま追加する。あとでユーザーがドラッグや数値入力で調整する想定。
         parts.Add(new PartDef { id = newId, offsetX = 0, offsetY = 0 });
+        // 追加したパーツを自動的に選択状態にし、すぐに詳細編集に移れるようにする。
         selectedIndex = parts.Count - 1;
         RefreshList();
         PushHistory();
     }
 
+    // 選択中のパーツを、確認ダイアログを挟んで削除する。
     private void DeleteSelectedPart()
     {
         if (selectedIndex < 0 || selectedIndex >= parts.Count) { MessageBox.Show("削除するパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        // 誤操作による削除を防ぐため、必ず確認ダイアログを挟む。
         if (MessageBox.Show($"パーツ「{parts[selectedIndex].id}」を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        // サムネイルキャッシュに残ったままだとメモリリークになるため、削除前に破棄しておく。
         InvalidatePartThumb(parts[selectedIndex]);
         parts.RemoveAt(selectedIndex);
+        // 削除後の件数を超えないよう選択インデックスを補正する（末尾のパーツを削除した場合など）。
         selectedIndex = Math.Min(selectedIndex, parts.Count - 1);
         RefreshList();
         PushHistory();
     }
 
+    // 選択中のパーツを一覧内で上下に1つ移動する（並び順を入れ替える）。
+    // dir : -1で上へ、+1で下へ移動する。
     private void MoveSelectedPart(int dir)
     {
         if (selectedIndex < 0 || selectedIndex >= parts.Count) return;
         int newIdx = selectedIndex + dir;
+        // 移動先が一覧の範囲外（先頭より上、末尾より下）になる場合は何もしない。
         if (newIdx < 0 || newIdx >= parts.Count) return;
+        // タプルの分解代入を使い、選択中パーツと移動先のパーツの位置を入れ替える。
         (parts[selectedIndex], parts[newIdx]) = (parts[newIdx], parts[selectedIndex]);
         selectedIndex = newIdx;
         RefreshList();
         PushHistory();
     }
 
+    // 選択中パーツの挙動スクリプトを、丸ごと複製して全パーツに上書き適用する。
+    // 例えば「回転する棒」のように、複数パーツが同じスクリプトを共有しつつPartIndexで
+    // 個々の見た目を変える、という構成をまとめて設定したいときに使う。
     private void ApplyScriptToAllParts()
     {
         if (parts.Count == 0) { MessageBox.Show("パーツがありません。", "情報", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         if (selectedIndex < 0) { MessageBox.Show("コピー元にするパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        // コピー元のスクリプトを1回だけディープクローンして取得する。
         var srcScript = (JArray)parts[selectedIndex].script.DeepClone();
+        // 各パーツへは、それぞれ独立したインスタンスになるよう毎回改めてディープクローンして代入する
+        // （同じJArrayインスタンスを複数パーツで共有すると、1パーツの編集が他パーツにも影響してしまうため）。
         foreach (var p in parts) p.script = (JArray)srcScript.DeepClone();
         PushHistory();
 
+        // 適用結果が視覚的に分かるよう、全パーツの枠を一瞬（900ミリ秒）緑色に光らせる演出。
         _highlightedParts.Clear();
         foreach (var p in parts) _highlightedParts.Add(p);
         pnlComposer.Invalidate();
+        // 前回のハイライト用タイマーが動いていれば止めてから、新しいワンショットタイマーを開始する。
         _highlightTimer?.Stop();
         _highlightTimer = new System.Windows.Forms.Timer { Interval = 900 };
         _highlightTimer.Tick += (s, e) => { _highlightedParts.Clear(); _highlightTimer!.Stop(); pnlComposer.Invalidate(); };
@@ -351,16 +452,23 @@ public class PartsEditorPageControl : UserControl
     {
         if (selectedIndex < 0) { MessageBox.Show("複製したいパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var src = parts[selectedIndex];
+        // 画像/当たり判定/スクリプトなど全フィールドをまるごとコピーする。
         var copy = ClonePart(src);
+        // IDは元と同じままだと一覧上で区別できなくなるため、"_copy"を付けた重複しないIDに変更する。
         copy.id = MakeUniquePartId(src.id + "_copy");
+        // 複製直後に元パーツと完全に重なって見えなくならないよう、少しだけ位置をずらす。
         copy.offsetX += 16;
         copy.offsetY += 16;
+        // 元パーツのすぐ下（一覧上で隣）に挿入する。
         parts.Insert(selectedIndex + 1, copy);
         selectedIndex += 1;
         RefreshList();
         PushHistory();
     }
 
+    // baseIdを基準に、現在のパーツ一覧内で重複しないIDを生成する。
+    // baseId自体が未使用ならそのまま返し、既に使われていれば "baseId2", "baseId3", ... の
+    // ように末尾へ連番を付けて重複しなくなるまで探す。
     private string MakeUniquePartId(string baseId)
     {
         var existing = new HashSet<string>(parts.Select(p => p.id));
@@ -380,13 +488,19 @@ public class PartsEditorPageControl : UserControl
         if (selectedIndex < 0) { MessageBox.Show("反転複製したいパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var src = parts[selectedIndex];
         var copy = ClonePart(src);
+        // IDの命名規則: 元IDが"_L"で終わっていれば"_R"に、"_R"で終わっていれば"_L"に付け替える
+        // （左右のペアだと分かりやすくするため）。どちらでもなければ単純に"_mirror"を付ける。
         string mirroredBaseId =
             src.id.EndsWith("_L", StringComparison.Ordinal) ? src.id[..^2] + "_R" :
             src.id.EndsWith("_R", StringComparison.Ordinal) ? src.id[..^2] + "_L" :
             src.id + "_mirror";
         copy.id = MakeUniquePartId(mirroredBaseId);
+        // 静的な位置（offsetX）と当たり判定のオフセットを左右反転する。
         copy.offsetX = -copy.offsetX;
         copy.hitboxOffsetX = -copy.hitboxOffsetX;
+        // 静的な値だけでなく、挙動スクリプト内で動的に位置を決めている部分（SetLocalOffset系）も
+        // 再帰的に反転させる。これにより回転する棒/振り子/公転のいずれで生成したパーツでも、
+        // 動きまで含めて正しく鏡写しになる。
         MirrorScriptHorizontalInPlace(copy.script);
         parts.Insert(selectedIndex + 1, copy);
         selectedIndex += 1;
@@ -396,6 +510,7 @@ public class PartsEditorPageControl : UserControl
             "反転複製完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
+    // 挙動スクリプトの最上位（各"hat"ブロック）をたどり、その本体(body)を反転処理にかける。
     private static void MirrorScriptHorizontalInPlace(JArray script)
     {
         foreach (var tok in script)
@@ -405,6 +520,9 @@ public class PartsEditorPageControl : UserControl
         }
     }
 
+    // 命令列を1つずつ調べ、位置を横方向に決めている命令（SetLocalOffset/SetLocalOffsetPolar）を
+    // 見つけたら、その式を書き換えて左右反転させる。制御構文（Forever/Repeat/If等）の中身も
+    // 再帰的に処理することで、ネストした命令列の奥深くにある位置指定も漏れなく反転する。
     private static void MirrorSequence(JArray seq)
     {
         foreach (var tok in seq)
@@ -414,18 +532,23 @@ public class PartsEditorPageControl : UserControl
             switch (op)
             {
                 case "SetLocalOffset":
+                    // dx（横方向の距離）に -1 を掛ける式でラップし、常に元の値と符号が逆になるようにする。
                     if (node["dx"] is JToken dx) node["dx"] = new JObject { ["op"] = "Mul", ["a"] = -1, ["b"] = dx.DeepClone() };
                     break;
                 case "SetLocalOffsetPolar":
+                    // 極座標（角度＋半径）の場合は、角度を「π - 元の角度」に置き換えることで
+                    // 横方向（X軸）を軸にした鏡写しの角度になる。
                     if (node["angle"] is JToken angle) node["angle"] = new JObject { ["op"] = "Sub", ["a"] = Math.PI, ["b"] = angle.DeepClone() };
                     break;
                 case "Forever":
                 case "Repeat":
                 case "RepeatUntil":
+                    // ループ構文の中身にも同じ反転処理を再帰適用する。
                     if (node["body"] is JArray innerBody) MirrorSequence(innerBody);
                     break;
                 case "If":
                 case "IfElse":
+                    // 分岐構文は then節・else節の両方を反転対象にする。
                     if (node["body"] is JArray thenBody) MirrorSequence(thenBody);
                     if (node["else"] is JArray elseBody) MirrorSequence(elseBody);
                     break;
@@ -435,6 +558,7 @@ public class PartsEditorPageControl : UserControl
 
     // ==== 中央: 合成プレビューキャンバス ====
 
+    // 中央パネル（合成プレビューのキャンバスと再生バー）を組み立てて返す。
     private Panel BuildComposerSide()
     {
         var pnl = new Panel { Dock = DockStyle.Fill };
@@ -443,8 +567,10 @@ public class PartsEditorPageControl : UserControl
         // Feature: UI改善（提案書 PT-1）— 保存してゲームを起動しなくても、その場で動きを確認できる再生バー
         var pnlPlayback = new Panel { Dock = DockStyle.Top, Height = 30 };
         var flowPlayback = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(4, 2, 4, 2) };
+        // 再生/停止を切り替えるトグルボタン。
         _btnPlayToggle = new Button { Text = "▶ 再生", AutoSize = true, Padding = new Padding(8, 2, 8, 2) };
         _btnPlayToggle.Click += (s, e) => TogglePreviewPlayback();
+        // 経過時間を0に巻き戻すボタン（再生を止めずに巻き戻すことも可能）。
         var btnResetTime = new Button { Text = "⏮ 0に戻す", AutoSize = true, Padding = new Padding(6, 2, 6, 2) };
         btnResetTime.Click += (s, e) => { _previewTime = 0f; pnlComposer.Invalidate(); };
         var lblPreviewHint = new Label
@@ -458,11 +584,16 @@ public class PartsEditorPageControl : UserControl
         flowPlayback.Controls.AddRange(new Control[] { _btnPlayToggle, btnResetTime, lblPreviewHint });
         pnlPlayback.Controls.Add(flowPlayback);
 
+        // 合成プレビューを実際に描画するキャンバス。背景をダークグレーにして、
+        // 明るい色のパーツ画像が見やすいようにしている。
         pnlComposer = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(50, 50, 55) };
         pnlComposer.Paint += PnlComposer_Paint;
         pnlComposer.MouseDown += PnlComposer_MouseDown;
         pnlComposer.MouseMove += PnlComposer_MouseMove;
+        // マウスを離した時点でドラッグ中だった場合のみ、その配置変更を履歴に1件記録する
+        // （ドラッグ中の1フレームごとに記録すると履歴が大量に積まれてしまうため、確定時のみ記録する）。
         pnlComposer.MouseUp += (s, e) => { if (_draggingIndex >= 0) PushHistory(); _draggingIndex = -1; };
+        // パネルのサイズが変わったら（ウィンドウリサイズ・スプリッター調整など）再描画する。
         pnlComposer.Resize += (s, e) => pnlComposer.Invalidate();
 
         pnl.Controls.Add(pnlComposer);
@@ -471,15 +602,18 @@ public class PartsEditorPageControl : UserControl
         return pnl;
     }
 
+    // 再生バーの「▶ 再生」/「⏸ 停止」ボタンが押されたときに、再生状態を反転させる。
     private void TogglePreviewPlayback()
     {
         _isPlaying = !_isPlaying;
         if (_isPlaying)
         {
             _btnPlayToggle.Text = "⏸ 停止";
+            // タイマーが未作成であれば、ここで初めて生成する（初回再生時に1度だけ作られる）。
             if (_previewTimer == null)
             {
                 _previewTimer = new System.Windows.Forms.Timer { Interval = 16 }; // 実機と同じ約60fps相当でTimeを進める
+                // Tickのたびに経過時間を1フレーム分進めて、キャンバスを再描画する。
                 _previewTimer.Tick += (s, e) => { _previewTime += 1.0f; pnlComposer.Invalidate(); };
             }
             _previewTimer.Start();
@@ -492,6 +626,8 @@ public class PartsEditorPageControl : UserControl
         pnlComposer.Invalidate();
     }
 
+    // 本体の基準スプライト画像をファイルから読み込む。合成プレビューの中心に薄く表示し、
+    // 各パーツの位置関係を把握しやすくするための目印として使う。
     private void LoadBaseSprite()
     {
         if (string.IsNullOrEmpty(baseSpritePath)) return;
@@ -499,12 +635,16 @@ public class PartsEditorPageControl : UserControl
         if (!File.Exists(full)) return;
         try
         {
+            // 他プロセス（ゲーム本体等）が同じファイルを開いていても読み込めるよう、
+            // 共有読み取り(FileShare.Read)モードでストリームを開いてから画像化する。
             using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
             baseSprite = Image.FromStream(fs);
         }
-        catch { baseSprite = null; }
+        catch { baseSprite = null; } // 画像が壊れている等で読み込みに失敗しても、致命的エラーにはせず「画像なし」として続行する
     }
 
+    // 指定パーツのサムネイル画像を取得する。一度読み込んだ画像はキャッシュされ、
+    // 同じパーツについて2回目以降はファイルI/Oを行わずキャッシュから即座に返す。
     private Image? GetPartThumb(PartDef p)
     {
         if (_partThumbCache.TryGetValue(p, out var cached)) return cached;
@@ -519,63 +659,91 @@ public class PartsEditorPageControl : UserControl
                     using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
                     img = Image.FromStream(fs);
                 }
-                catch { img = null; }
+                catch { img = null; } // 読み込み失敗時はサムネイルなし（後述の描画側でオレンジの丸に代替表示される）
             }
         }
+        // 画像が見つからなかった場合も含めて、結果（nullでも）をキャッシュしておくことで
+        // 存在しない画像パスに対して毎回無駄なファイルアクセスを繰り返さないようにする。
         _partThumbCache[p] = img;
         return img;
     }
 
+    // 指定パーツのサムネイルキャッシュを破棄する。画像を差し替えた時や、パーツ自体を削除する時に
+    // 呼び出し、古い画像リソースをDisposeしてメモリを解放する。
     private void InvalidatePartThumb(PartDef p)
     {
         if (_partThumbCache.TryGetValue(p, out var old)) { old?.Dispose(); _partThumbCache.Remove(p); }
     }
 
+    // 合成プレビューキャンバス内で、本体の基準スプライトを描画すべき矩形（位置とサイズ）を計算する。
+    // キャンバスの中央に、幅・高さそれぞれの50%に収まるようアスペクト比を保ったまま拡大縮小する。
     private Rectangle GetBaseDrawRect()
     {
+        // キャンバスがまだ実サイズを持っていない（レイアウト確定前）場合は、ダミーの極小矩形を返す。
         if (pnlComposer.Width <= 0 || pnlComposer.Height <= 0) return new Rectangle(0, 0, 1, 1);
+        // 基準スプライトが存在しない場合は、中央に小さな点（8x8）だけを描く位置を返す。
         if (baseSprite == null) return new Rectangle(pnlComposer.Width / 2 - 4, pnlComposer.Height / 2 - 4, 8, 8);
+        // 横方向・縦方向それぞれで「キャンバスの半分に収まる倍率」を計算し、小さい方（＝両方に収まる倍率）を採用する。
         float scale = Math.Min((float)pnlComposer.Width * 0.5f / baseSprite.Width, (float)pnlComposer.Height * 0.5f / baseSprite.Height);
+        // 極端に小さい画像を拡大しすぎてぼやけないよう、倍率の上限を10倍に制限する。
         if (scale > 10) scale = 10;
+        // 万一マイナスや0になった場合は等倍にフォールバックする（安全策）。
         if (scale <= 0) scale = 1;
         int drawW = Math.Max((int)(baseSprite.Width * scale), 1);
         int drawH = Math.Max((int)(baseSprite.Height * scale), 1);
+        // キャンバスの中央に配置されるよう、左上座標を計算する。
         int drawX = (pnlComposer.Width - drawW) / 2;
         int drawY = (pnlComposer.Height - drawH) / 2;
         return new Rectangle(drawX, drawY, drawW, drawH);
     }
 
+    // ワールド座標（パーツのoffsetX/offsetY、本体中心を原点とする論理座標）を、
+    // 画面上の実ピクセル座標に変換する。baseRectの左上を原点とし、scale倍して加算する。
     private PointF WorldToScreen(Rectangle baseRect, float scale, float ox, float oy)
         => new PointF(baseRect.X + ox * scale, baseRect.Y + oy * scale);
 
+    // 合成プレビューキャンバスの描画本体。毎フレーム（Invalidateされるたび）呼び出され、
+    // 「本体の基準スプライト → 各パーツ（zOrder順）→ 再生中の場合の情報表示 → パーツ0件時の案内」
+    // の順に描き重ねていく。
     private void PnlComposer_Paint(object? sender, PaintEventArgs e)
     {
+        // ドット絵をぼかさずくっきり拡大表示するため、補間モードを最近傍法にする。
         e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
         var baseRect = GetBaseDrawRect();
+        // 基準スプライトの実サイズに対する表示倍率。以降、全パーツの座標変換にもこの倍率を使う。
         float scale = baseSprite != null ? (float)baseRect.Width / baseSprite.Width : 1.0f;
 
+        // 本体の基準スプライトを薄く表示し、外枠と原点（水色の点）を描いて位置の目安にする。
         if (baseSprite != null) e.Graphics.DrawImage(baseSprite, baseRect);
         e.Graphics.DrawRectangle(Pens.DimGray, baseRect);
         using var originBrush = new SolidBrush(Color.FromArgb(200, 0, 255, 255));
         e.Graphics.FillEllipse(originBrush, baseRect.X - 3, baseRect.Y - 3, 6, 6);
 
+        // zOrderの小さい順（奥から手前へ）に描画することで、値が大きいパーツが上に重なって見えるようにする。
         var order = Enumerable.Range(0, parts.Count).OrderBy(i => parts[i].zOrder).ToList();
         foreach (int i in order)
         {
             var p = parts[i];
+            // 通常時（停止中）はパーツに設定された固定のoffsetX/offsetYをそのまま使う。
             float ox = p.offsetX, oy = p.offsetY, angleRad = 0f;
             if (_isPlaying)
             {
+                // 再生中は挙動スクリプトを現在時刻(_previewTime)とパーツ番号(i=PartIndex)で評価し、
+                // スクリプトが位置や角度を動的に変えている場合はその評価結果で上書きする。
                 var pose = ScriptPreviewEvaluator.Evaluate(p.script, _previewTime, i);
                 if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
                 if (pose.HasAngle) angleRad = pose.Angle;
             }
+            // ワールド座標を画面座標に変換し、サムネイル画像のサイズ（画像自体のサイズ×表示倍率×パーツのscale値）から
+            // 描画矩形を中心合わせで計算する。
             var pos = WorldToScreen(baseRect, scale, ox, oy);
             var thumb = GetPartThumb(p);
             int pw = Math.Max((int)((thumb?.Width ?? 24) * scale * p.scale), 10);
             int ph = Math.Max((int)((thumb?.Height ?? 24) * scale * p.scale), 10);
             var rect = new Rectangle((int)pos.X - pw / 2, (int)pos.Y - ph / 2, pw, ph);
 
+            // 回転角度がある場合は、パーツの中心を軸に回転描画するため一時的に座標系を
+            // 「中心へ平行移動→回転→元に戻す」という変換にしてから描き、描画後に元の座標系へ復元する。
             var savedState = angleRad != 0f ? e.Graphics.Save() : null;
             if (angleRad != 0f)
             {
@@ -583,6 +751,7 @@ public class PartsEditorPageControl : UserControl
                 e.Graphics.RotateTransform(angleRad * 180f / MathF.PI);
                 e.Graphics.TranslateTransform(-pos.X, -pos.Y);
             }
+            // サムネイル画像があればそれを描画し、なければ「画像未設定」を表すオレンジ色の丸で代替表示する。
             if (thumb != null) e.Graphics.DrawImage(thumb, rect);
             else
             {
@@ -591,23 +760,30 @@ public class PartsEditorPageControl : UserControl
             }
             if (savedState != null) e.Graphics.Restore(savedState);
 
+            // 「このスクリプトを全パーツへ」適用直後などにハイライト対象になっているパーツは、
+            // 通常の枠の外側にもう一段太い緑の枠を追加で描いて目立たせる。
             if (_highlightedParts.Contains(p))
             {
                 using var glowPen = new Pen(Color.Lime, 3f);
                 e.Graphics.DrawRectangle(glowPen, rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6);
             }
+            // 選択中のパーツは黄色の太枠、それ以外は白っぽい細枠で囲む。
             using var pen = new Pen(i == selectedIndex ? Color.Yellow : Color.FromArgb(200, 255, 255, 255), i == selectedIndex ? 2.5f : 1.2f);
             e.Graphics.DrawRectangle(pen, rect);
+            // パーツの直下にIDを小さな文字で表示し、どのマーカーがどのパーツかを一覧と対応づけやすくする。
             using var smallFont = new Font(Font.FontFamily, 7.5f);
             e.Graphics.DrawString(p.id, smallFont, Brushes.White, rect.X, rect.Bottom + 1);
         }
 
+        // 再生中であることと現在の経過時間を、キャンバス左上に文字で表示する。
         if (_isPlaying)
         {
             using var playFont = new Font(Font.FontFamily, 8f, FontStyle.Bold);
             e.Graphics.DrawString($"再生中... t={_previewTime:0}", playFont, Brushes.LightGreen, 6, 6);
         }
 
+        // パーツが1つもない場合は、空のキャンバスのままだと何をすればいいか分からないため、
+        // 操作方法を案内するメッセージを表示する。
         if (parts.Count == 0)
         {
             using var f = new Font(Font.FontFamily, 10f);
@@ -617,6 +793,9 @@ public class PartsEditorPageControl : UserControl
         }
     }
 
+    // 画面座標ptの位置にあるパーツマーカーを探し、そのパーツのインデックスを返す（見つからなければ-1）。
+    // zOrderが大きい（手前に描かれている）パーツから優先的に判定することで、パーツ同士が重なっている
+    // 場合でも「見た目上、一番手前にあるもの」がクリックされたと判定されるようにしている。
     private int FindPartMarkerAt(Point pt)
     {
         var baseRect = GetBaseDrawRect();
@@ -635,37 +814,46 @@ public class PartsEditorPageControl : UserControl
         return -1;
     }
 
+    // キャンバス上でマウスボタンが押された時の処理。クリックされた位置にパーツがあれば、
+    // そのパーツを選択状態にしつつドラッグ開始の準備（開始座標とその時点でのoffset値を記録）を行う。
     private void PnlComposer_MouseDown(object? sender, MouseEventArgs e)
     {
         if (_isPlaying) return; // 再生中は「今どこにいるか」が動的に変わるため、配置換えは停止してから行う
         int idx = FindPartMarkerAt(e.Location);
-        if (idx < 0) return;
+        if (idx < 0) return; // パーツのない場所をクリックした場合は何もしない（ドラッグ開始しない）
         _draggingIndex = idx;
         _dragMouseStart = e.Location;
         _dragOffsetStartX = parts[idx].offsetX;
         _dragOffsetStartY = parts[idx].offsetY;
+        // クリックしたパーツを一覧側でも選択状態にし、詳細パネルにも反映させる（一覧とキャンバスの選択状態を同期させる）。
         selectedIndex = idx;
         dgvList.ClearSelection();
         if (idx < dgvList.Rows.Count) dgvList.Rows[idx].Selected = true;
         LoadDetailFromSelection();
     }
 
+    // マウスがドラッグされている間、ドラッグ中のパーツの位置をマウス移動量に応じて更新し続ける。
     private void PnlComposer_MouseMove(object? sender, MouseEventArgs e)
     {
-        if (_draggingIndex < 0) return;
+        if (_draggingIndex < 0) return; // ドラッグ中でなければ何もしない
         var baseRect = GetBaseDrawRect();
         float scale = baseSprite != null ? (float)baseRect.Width / baseSprite.Width : 1.0f;
         if (scale <= 0) return;
+        // 画面上のマウス移動量（ピクセル）を、表示倍率で割ってワールド座標系での移動量に変換する。
         float dx = (e.Location.X - _dragMouseStart.X) / scale;
         float dy = (e.Location.Y - _dragMouseStart.Y) / scale;
+        // ドラッグ開始時点のoffset値に移動量を加算する（開始位置からの差分方式にすることで、
+        // ドラッグ中に微小なずれが累積することなく正確に追従する）。
         parts[_draggingIndex].offsetX = _dragOffsetStartX + dx;
         parts[_draggingIndex].offsetY = _dragOffsetStartY + dy;
+        // ドラッグ中のパーツが選択中パーツと同じであれば、詳細パネルの数値表示もリアルタイムに更新する。
         if (_draggingIndex == selectedIndex) LoadDetailFromSelection();
         pnlComposer.Invalidate();
     }
 
     // ==== 右下: 選択中パーツの詳細編集パネル ====
 
+    // 右下パネル（選択中パーツの詳細編集フォーム）を組み立てて返す。
     private Panel BuildDetailSide()
     {
         // AutoScroll付きのPanel＋TopDown方向のFlowLayoutPanelで縦積みにすることで、
@@ -695,6 +883,8 @@ public class PartsEditorPageControl : UserControl
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
+        // ラベル＋入力コントロールを1行としてtableに追加するローカル関数。
+        // 呼び出すたびに行を1つ増やし、左列にラベル・右列にコントロールを配置する。
         void AddRow(string label, Control control)
         {
             int r = table.RowCount;
@@ -706,12 +896,15 @@ public class PartsEditorPageControl : UserControl
             table.Controls.Add(control, 1, r);
         }
 
+        // --- パーツID ---
         txtId = new TextBox { Width = 180 };
+        // 入力中はリアルタイムでID・一覧・プレビューに反映するが、履歴には積まない（下記コメント参照）。
         txtId.TextChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].id = txtId.Text; dgvList.Rows[selectedIndex].Cells["id"].Value = txtId.Text; pnlComposer.Invalidate(); } };
         // IDはキー入力のたびに履歴を積むと1文字ごとにUndo項目が増えてしまうため、確定タイミング(フォーカスを外した時)でのみ記録する
         txtId.Leave += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) PushHistory(); };
         AddRow("パーツID", txtId);
 
+        // --- 画像（スプライト） ---
         var spritePanel = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
         lblSpriteValue = new Label { Text = "(画像なし)", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 6, 3), MaximumSize = new Size(220, 0) };
         var btnPickSprite = new Button { Text = "📁 画像選択", AutoSize = true, Padding = new Padding(4, 2, 4, 2) };
@@ -719,29 +912,36 @@ public class PartsEditorPageControl : UserControl
         spritePanel.Controls.AddRange(new Control[] { lblSpriteValue, btnPickSprite });
         AddRow("画像", spritePanel);
 
+        // --- 横位置(offsetX) --- 値を変更するたびに即座にプレビューへ反映し、履歴にも記録する。
         nudOffsetX = MakeNumeric(-4000, 4000, 0);
         nudOffsetX.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetX = (float)nudOffsetX.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("offsetX(横位置)", nudOffsetX);
 
+        // --- 縦位置(offsetY) ---
         nudOffsetY = MakeNumeric(-4000, 4000, 0);
         nudOffsetY.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].offsetY = (float)nudOffsetY.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("offsetY(縦位置)", nudOffsetY);
 
+        // --- 表示スケール（画像の拡大縮小率。1.0が等倍） ---
         nudScale = MakeNumeric(0.1m, 10m, 2, 1m);
         nudScale.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].scale = (float)nudScale.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("表示スケール", nudScale);
 
+        // --- HP（このパーツ単体の耐久力。本体のHP/生死とは別枠） ---
         nudHp = MakeNumeric(0, 999, 0);
         nudHp.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].hp = (int)nudHp.Value; dgvList.Rows[selectedIndex].Cells["hp"].Value = (int)nudHp.Value; UpdateHpHint(); PushHistory(); } };
         AddRow("HP", nudHp);
 
+        // HPの意味（0=不滅か、何発で壊れるか）を文章で説明する補助ラベル。ラベル列は空にして値だけ全幅で表示する。
         lblHpHint = new Label { Text = "", AutoSize = true, ForeColor = Color.Gray, Font = new Font(Font.FontFamily, 7.5f), Anchor = AnchorStyles.Left };
         AddRow("", lblHpHint);
 
+        // --- zOrder（描画の重なり順。値が大きいほど手前に表示される） ---
         nudZOrder = MakeNumeric(-100, 100, 0);
         nudZOrder.ValueChanged += (s, e) => { if (!_suppressEvents && selectedIndex >= 0) { parts[selectedIndex].zOrder = (int)nudZOrder.Value; dgvList.Rows[selectedIndex].Cells["zOrder"].Value = (int)nudZOrder.Value; pnlComposer.Invalidate(); PushHistory(); } };
         AddRow("zOrder(奥-/手前+)", nudZOrder);
 
+        // --- ドリルダウン系の編集ボタン（当たり判定・挙動スクリプトは別画面で編集する） ---
         var flowActions = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Padding = new Padding(6), Margin = new Padding(0) };
         var btnHitbox = new Button { Text = "🎯 当たり判定を編集", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnHitbox.Click += (s, e) => EditHitboxForSelected();
@@ -756,18 +956,27 @@ public class PartsEditorPageControl : UserControl
         return pnl;
     }
 
+    // NumericUpDownコントロールを、最小値・最大値・小数桁数・初期値を指定して1行で生成するヘルパー。
+    // 同じような設定を何度も書かずに済ませるためのショートカット。
     private static NumericUpDown MakeNumeric(decimal min, decimal max, int decimals, decimal value = 0)
         => new NumericUpDown { Minimum = min, Maximum = max, DecimalPlaces = decimals, Value = value, Width = 120 };
 
+    // 選択中パーツ(parts[selectedIndex])の値を、詳細パネルの各入力コントロールに反映する。
+    // 一覧やキャンバスでの選択が変わるたびに呼ばれ、右下パネルの表示をその場で選ばれたパーツの内容に合わせる。
     private void LoadDetailFromSelection()
     {
         bool hasSel = selectedIndex >= 0 && selectedIndex < parts.Count;
+        // ここでコントロールの値を設定すると各種ValueChanged/TextChangedイベントが発火してしまうが、
+        // これはユーザー操作ではなく「表示の同期」のためだけなので、履歴に積んだり二重更新したりしないよう
+        // 一時的にイベント処理を抑制するフラグを立てる。
         _suppressEvents = true;
         if (hasSel)
         {
             var p = parts[selectedIndex];
             txtId.Text = p.id;
             lblSpriteValue.Text = string.IsNullOrEmpty(p.sprite) ? "(画像なし)" : p.sprite;
+            // NumericUpDownのMinimum/Maximumを超える値を設定しようとすると例外になるため、
+            // Math.Clampで必ず範囲内に収めてから代入する（パーツ側の値が想定外に大きい場合の保険）。
             nudOffsetX.Value = (decimal)Math.Clamp(p.offsetX, (float)nudOffsetX.Minimum, (float)nudOffsetX.Maximum);
             nudOffsetY.Value = (decimal)Math.Clamp(p.offsetY, (float)nudOffsetY.Minimum, (float)nudOffsetY.Maximum);
             nudScale.Value = (decimal)Math.Clamp(p.scale, (float)nudScale.Minimum, (float)nudScale.Maximum);
@@ -777,40 +986,54 @@ public class PartsEditorPageControl : UserControl
         }
         else
         {
+            // パーツが選択されていない場合は、全項目を初期値表示にリセットする。
             txtId.Text = "";
             lblSpriteValue.Text = "(パーツ未選択)";
             nudOffsetX.Value = 0; nudOffsetY.Value = 0; nudScale.Value = 1; nudHp.Value = 0; nudZOrder.Value = 0;
             lblHpHint.Text = "";
         }
+        // 未選択の間は編集しても意味がないため、全ての入力コントロールを無効化してユーザーに
+        // 「まずパーツを選んでください」という状態を視覚的に伝える。
         txtId.Enabled = lblSpriteValue.Enabled = nudOffsetX.Enabled = nudOffsetY.Enabled = nudScale.Enabled = nudHp.Enabled = nudZOrder.Enabled = hasSel;
         _suppressEvents = false;
     }
 
+    // 現在のHP入力値に応じて、その意味を説明する補助テキストを更新する。
+    // HP=0は「常時存在する破壊不能な障害物」、それ以外は「弾を何発当てれば壊れるか」を表す。
     private void UpdateHpHint()
     {
         int hp = (int)nudHp.Value;
         lblHpHint.Text = hp == 0 ? "0 = 破壊不能な常在ハザード" : $"{hp} = 弾{hp}発で破壊可能（本体のHP/生死には影響しません）";
     }
 
+    // 選択中パーツの画像ファイルをファイル選択ダイアログで選ばせ、プロジェクトのimg/フォルダへ
+    // コピーした上でパーツに設定する。
     private void PickSpriteForSelected()
     {
         if (selectedIndex < 0) { MessageBox.Show("先にパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "パーツ画像を選択" };
         if (ofd.ShowDialog() != DialogResult.OK) return;
+        // プロジェクト外のファイルを直接参照すると後で場所を移動された時に壊れるため、
+        // 必ずimg/フォルダにコピーしてから、その相対パスをパーツに記録する。
         string relPath = ImageImportHelper.CopyIntoImgFolder(projectRoot, ofd.FileName);
         var p = parts[selectedIndex];
         p.sprite = relPath;
+        // 画像を差し替えたので、古いサムネイルキャッシュは無効化して次回描画時に再読み込みさせる。
         InvalidatePartThumb(p);
         lblSpriteValue.Text = relPath;
         pnlComposer.Invalidate();
         PushHistory();
     }
 
+    // 「当たり判定を編集」ボタンの処理。このページ内では編集せず、専用の当たり判定編集画面へ
+    // ドリルダウンするようイベントで要求する。編集完了時のコールバックでパーツに値を書き戻す。
     private void EditHitboxForSelected()
     {
         if (selectedIndex < 0) { MessageBox.Show("先にパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
         var p = parts[selectedIndex];
         string full = string.IsNullOrEmpty(p.sprite) ? "" : Path.Combine(projectRoot, p.sprite.Replace('/', '\\'));
+        // 現在の当たり判定の値を渡して編集画面を開いてもらい、確定されたらコールバックで
+        // 新しい値を受け取ってパーツに反映し、履歴に記録する。
         HitboxEditRequested?.Invoke(full, p.hitboxOffsetX, p.hitboxOffsetY, p.hitboxWidth, p.hitboxHeight, (ox, oy, w, h) =>
         {
             p.hitboxOffsetX = ox;
@@ -821,6 +1044,8 @@ public class PartsEditorPageControl : UserControl
         });
     }
 
+    // 「挙動スクリプトを編集」ボタンの処理。当たり判定編集と同様、専用のスクリプト編集画面へ
+    // ドリルダウンし、確定されたスクリプトをパーツに書き戻す。
     private void EditScriptForSelected()
     {
         if (selectedIndex < 0) { MessageBox.Show("先にパーツを選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }

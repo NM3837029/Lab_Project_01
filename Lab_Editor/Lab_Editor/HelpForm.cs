@@ -14,6 +14,7 @@ public class HelpForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
+        // ガイド本文を表示するためのリッチテキストボックス（読み取り専用、枠線なしで背景に馴染ませる）
         var rtb = new RichTextBox
         {
             Dock = DockStyle.Fill,
@@ -23,24 +24,31 @@ public class HelpForm : Form
             BackColor = Color.White,
         };
 
+        // 大見出しを1行追記するローカル関数（青系の太字・大きめフォントで強調する）
         void Heading(string text)
         {
             rtb.SelectionFont = new Font("Meiryo UI", 12, FontStyle.Bold);
             rtb.SelectionColor = Color.FromArgb(30, 90, 160);
             rtb.AppendText(text + "\n");
         }
+        // 小見出しを1行追記するローカル関数（黒の太字でHeadingより控えめに強調する）
         void SubHeading(string text)
         {
             rtb.SelectionFont = new Font("Meiryo UI", 10, FontStyle.Bold);
             rtb.SelectionColor = Color.Black;
             rtb.AppendText(text + "\n");
         }
+        // 本文段落を追記するローカル関数（通常フォント・グレー寄りの文字色。末尾に空行を1つ加えて段落間隔を作る）
         void Body(string text)
         {
             rtb.SelectionFont = new Font("Meiryo UI", 9.5f);
             rtb.SelectionColor = Color.FromArgb(50, 50, 50);
             rtb.AppendText(text + "\n\n");
         }
+
+        // 以下、ガイド本文を見出し・小見出し・本文の組み合わせで順番に流し込んでいく。
+        // 文言（日本語の説明文そのもの）はユーザー向けの表示テキストであり、
+        // 各Heading/SubHeading/Body呼び出しの構造自体がガイドの章立てを表している。
 
         Heading("はじめての方へ：基本の流れ");
         Body(
@@ -73,12 +81,15 @@ public class HelpForm : Form
         Heading("困ったときは");
         Body("各編集画面の入力欄にマウスを乗せると、説明のツールチップが出る箇所があります。ブロックエディタのパレットは検索欄で絞り込めます。それでも分からない場合は、似た既存の敵/ギミック/コモンイベントを複製して手を加えるところから始めるのも近道です。");
 
+        // 画面下部に「閉じる」ボタンを配置するための領域（右揃えで表示する）
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        // 「閉じる」ボタン。保存系ボタンと同じ緑色スタイルを直接指定して統一感を出している
         var btnClose = new Button { Text = "閉じる", AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
         btnClose.Click += (s, e) => Close();
         flow.Controls.Add(btnClose);
         pnlBottom.Controls.Add(flow);
+        // Enterキーでも閉じられるよう、既定のAcceptButtonとして登録する
         AcceptButton = btnClose;
 
         Controls.Add(rtb);

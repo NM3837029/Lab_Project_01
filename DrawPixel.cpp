@@ -16,16 +16,27 @@
 
 
 
+// ImGui(Dear ImGui)側が提供しているWin32用メッセージハンドラの宣言。
+// DxLibが作成したウィンドウに届くWindowsメッセージ（マウス/キーボード入力等）を
+// ImGuiにも渡してあげないと、ImGuiで作ったUI（デバッグ用エディタ画面など）が操作できなくなるため必要。
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+// このゲームが使う独自のウィンドウプロシージャ（Windowsからのメッセージを受け取る窓口関数）。
+// DxLibのデフォルトの処理の前に、まずImGuiへメッセージを渡してUI操作を成立させている。
+// ImGui側がメッセージを「自分が処理した」と判断した場合はtrue相当の値を返し、
+// そうでなければ0を返して後続の通常処理に委ねる。
 LRESULT CALLBACK CustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
         return true;
     return 0;
 }
 
+// true の場合、このプログラムを「ゲーム本編」ではなく「Lab_Editor専用のアセット編集モード」として起動する。
+// 起動時の引数やモード判定によって切り替えられ、ゲームループと編集用UIの挙動を分岐させるために使う。
 bool isDedicatedEditorMode = false;
 
+// 警告番号26800（「ムーブ済みの可能性があるオブジェクトの使用」等、C++コアガイドラインの警告）を無効化する。
+// このプロジェクトでは意図的にムーブ後の変数を再利用する箇所があるため、誤検知の警告を抑制している。
 #pragma warning(disable: 26800)
 #include "SoundManager.h"
 #include "EventManager.h"
@@ -39,17 +50,17 @@ bool isDedicatedEditorMode = false;
 // parts配列が空のままなら既存のenemies.json/gimmicks.json/items.jsonは完全に無変更で動作する。
 // ======================================================
 struct PartDef {
-    std::string id = "";
-    std::string sprite_path = "";
-    int graphHandle = -1;
+    std::string id = "";           // このパーツを識別するための名前（スクリプトから参照する際のキーにもなる）
+    std::string sprite_path = "";  // パーツの見た目に使う画像ファイルのパス
+    int graphHandle = -1;          // sprite_pathをLoadGraphした結果のハンドル（読み込み前は-1のまま）
     float offsetX = 0.0f, offsetY = 0.0f; // 親からの初期相対オフセット（見た目のアンカー）
     int width = 0, height = 0;             // 既定=画像サイズ
-    int hitboxOffsetX = 0, hitboxOffsetY = 0;
-    int hitboxWidth = 32, hitboxHeight = 32;
-    float scale = 1.0f;
+    int hitboxOffsetX = 0, hitboxOffsetY = 0; // パーツ座標から当たり判定矩形までのオフセット
+    int hitboxWidth = 32, hitboxHeight = 32;  // 当たり判定矩形のサイズ
+    float scale = 1.0f;   // 表示倍率（1.0=等倍）
     int hp = 0;      // 0=破壊不能(常在ハザード) / 1以上=個別に破壊可能
     int zOrder = 0;  // 負=親より奥に描画、正=親より手前
-    json script = json::array();
+    json script = json::array(); // このパーツ専用の行動スクリプト（JSON形式のAST。未使用なら空配列のまま）
 };
 
 // ランタイム側のパーツ状態。PartDefへのポインタは持たず、スポーン時に値をコピーする
@@ -57,36 +68,39 @@ struct PartDef {
 //   毎フレームdefを再検索する慣習に合わせるため。詳細はプラン文書を参照）。
 struct PartInstance {
     float x = 0.0f, y = 0.0f; // 見た目のアンカー座標（世界座標）。hitboxOffsetは焼き込まず判定のたびに加算する
-    int handle = -1;
-    float scale = 1.0f;
-    float angle = 0.0f;
-    int hp = 0;
-    bool isActive = true;
-    int hitboxOffsetX = 0, hitboxOffsetY = 0, hitboxWidth = 32, hitboxHeight = 32;
-    int width = 0, height = 0;
-    int zOrder = 0;
+    int handle = -1;          // 描画に使う画像ハンドル（PartDef.graphHandleをコピーしたもの）
+    float scale = 1.0f;       // 表示倍率
+    float angle = 0.0f;       // 回転角度（ラジアン）。スクリプト等で動的に変化させる
+    int hp = 0;                // 残り耐久力（0のままなら破壊不能パーツ）
+    bool isActive = true;      // falseになったら破壊済み扱いで描画・当たり判定の対象から外す
+    int hitboxOffsetX = 0, hitboxOffsetY = 0, hitboxWidth = 32, hitboxHeight = 32; // 当たり判定用の矩形情報（PartDefからコピー）
+    int width = 0, height = 0; // 表示サイズ（PartDefからコピー）
+    int zOrder = 0;            // 描画順（負=親より奥、正=親より手前）
     int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
     ScriptState scriptState;   // OnSpawn用
     ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
 };
 
+// 敵1種類分の「定義データ」。enemies.jsonから読み込まれる、いわば敵の設計図。
+// 実際にステージへ配置された1体1体の状態はPlacedEnemy／実行時のEnemyクラス側が持ち、
+// このEnemyDefはあくまで「この種類の敵は何ができるか」を表す共通データとして参照される。
 struct EnemyDef {
-    std::string id = "";
-    std::string name = "";
-    int type_enum = 0;
-    int hp = 0;
-    int width = 0;
-    int height = 0;
-    std::string sprite_path = "";
-    int graphHandle = -1;
-    std::string seSpawn = "";
-    std::string seAttack = "";
-    std::string seDamage = "";
-    std::string seDeath = "";
-    int hitboxOffsetX = 0;
-    int hitboxOffsetY = 0;
-    int hitboxWidth = 32;
-    int hitboxHeight = 32;
+    std::string id = "";           // 敵の種類を一意に識別するID文字列（ステージデータからの参照キー）
+    std::string name = "";         // エディタ上に表示する人間向けの名前
+    int type_enum = 0;             // 敵の行動タイプ（PATROL/JUMPER/CHASER等）を表す番号。AssetManagerForm.csの並び順と対応
+    int hp = 0;                    // 初期HP（耐久力）
+    int width = 0;                 // 表示幅（画像読み込み後に実サイズへ上書きされる）
+    int height = 0;                // 表示高さ（画像読み込み後に実サイズへ上書きされる）
+    std::string sprite_path = "";  // 見た目に使う画像ファイルのパス
+    int graphHandle = -1;          // sprite_pathをLoadGraphした結果のハンドル（未読込時は-1）
+    std::string seSpawn = "";      // 出現時に鳴らす効果音ファイル名
+    std::string seAttack = "";     // 攻撃時に鳴らす効果音ファイル名
+    std::string seDamage = "";     // 被ダメージ時に鳴らす効果音ファイル名
+    std::string seDeath = "";      // 撃破時に鳴らす効果音ファイル名
+    int hitboxOffsetX = 0;         // 表示座標から当たり判定矩形までのXオフセット
+    int hitboxOffsetY = 0;         // 表示座標から当たり判定矩形までのYオフセット
+    int hitboxWidth = 32;          // 当たり判定矩形の幅
+    int hitboxHeight = 32;         // 当たり判定矩形の高さ
     float scale = 1.0f; // Visual Size Editor で設定される表示スケール倍率
 
     // ==== Feature: Configurable Behavior Parameters (M1) ====
@@ -139,17 +153,18 @@ struct EnemyDef {
     std::vector<PartDef> parts;
 };
 
+// ギミック（回転する橋、沈むリフト、ワープ床など）1種類分の定義データ。gimmicks.jsonから読み込まれる。
 struct GimmickDef {
-    std::string id = "";
-    std::string name = "";
-    int type_enum = 0;
-    std::string sprite_path = "";
-    int graphHandle = -1;
-    int hitboxOffsetX = 0;
-    int hitboxOffsetY = 0;
-    int hitboxWidth = 32;
-    int hitboxHeight = 32;
-    std::string seActivate = "";
+    std::string id = "";           // ギミックの種類を一意に識別するID文字列
+    std::string name = "";         // エディタ上に表示する人間向けの名前
+    int type_enum = 0;             // ギミックの種類（ROTATING_BRIDGE/FALLING_LIFT等）を表す番号
+    std::string sprite_path = "";  // 見た目に使う画像ファイルのパス
+    int graphHandle = -1;          // sprite_pathをLoadGraphした結果のハンドル
+    int hitboxOffsetX = 0;         // 表示座標から当たり判定矩形までのXオフセット
+    int hitboxOffsetY = 0;         // 表示座標から当たり判定矩形までのYオフセット
+    int hitboxWidth = 32;          // 当たり判定矩形の幅
+    int hitboxHeight = 32;         // 当たり判定矩形の高さ
+    std::string seActivate = "";   // 作動時（起動・接触時など）に鳴らす効果音ファイル名
 
     // ==== Feature: Configurable Behavior Parameters (M1) ====
     // 各フィールドは既定値 -1 (未設定) の場合、そのtype_enumの従来のハードコード挙動を
@@ -179,81 +194,94 @@ struct GimmickDef {
     std::vector<PartDef> parts;
 };
 
-std::vector<EnemyDef> enemyDefs;
-std::vector<GimmickDef> gimmickDefs;
+std::vector<EnemyDef> enemyDefs;     // 読み込み済みの敵定義（enemies.json由来）を全種類分保持する一覧
+std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義（gimmicks.json由来）を全種類分保持する一覧
+
+// ステージ上に実際に配置された「敵1体分」の情報。どの定義(EnemyDef)を使うか、どこに置くかだけを持つ軽量な構造体。
 struct PlacedEnemy {
-    int def_idx;
-    float x, y;
+    int def_idx;  // enemyDefs配列内でのインデックス（この敵がどの種類の敵かを指す）
+    float x, y;   // ステージ内でのスポーン座標（ワールド座標）
 };
+// ステージ上に実際に配置された「ギミック1個分」の情報。
 struct PlacedGimmick {
-    int def_idx;
-    float x, y;
+    int def_idx;  // gimmickDefs配列内でのインデックス
+    float x, y;   // ステージ内でのスポーン座標
     std::string stringParam = ""; // ポータルの遷移先など
 };
-std::vector<PlacedEnemy> editorPlacedEnemies;
-std::vector<PlacedGimmick> editorPlacedGimmicks;
+std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
+std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
 #include <filesystem>
 namespace fs = std::filesystem;
-std::string currentStageFileName = "stage_01.json";
+std::string currentStageFileName = "stage_01.json"; // 現在読み込み・保存対象になっているステージファイル名
+
+// アイテム1種類分の定義データ。items.jsonから読み込まれる。
 struct ItemDef {
-    std::string id = "";
-    std::string name = "";
-    int type_enum = 0;
-    std::string sprite_path = "";
-    std::string grant_ability = "";
-    int graphHandle = -1;
-    int hitboxOffsetX = 0;
-    int hitboxOffsetY = 0;
-    int hitboxWidth = 32;
-    int hitboxHeight = 32;
-    std::string seCollect = "";
+    std::string id = "";             // アイテムの種類を一意に識別するID文字列
+    std::string name = "";           // エディタ上に表示する人間向けの名前
+    int type_enum = 0;               // アイテムの種類を表す番号
+    std::string sprite_path = "";    // 見た目に使う画像ファイルのパス
+    std::string grant_ability = "";  // 取得したプレイヤーに付与する能力名（例: "canDoubleJump"）
+    int graphHandle = -1;            // sprite_pathをLoadGraphした結果のハンドル
+    int hitboxOffsetX = 0;           // 表示座標から当たり判定矩形までのXオフセット
+    int hitboxOffsetY = 0;           // 表示座標から当たり判定矩形までのYオフセット
+    int hitboxWidth = 32;            // 当たり判定矩形の幅
+    int hitboxHeight = 32;           // 当たり判定矩形の高さ
+    std::string seCollect = "";      // 取得時に鳴らす効果音ファイル名
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
 };
 
+// プレイヤーが現在使える能力（アイテムで解禁されるアクション）をまとめた構造体。
+// ステージ側の設定や取得済みアイテムによって書き換えられ、Player側の入力処理が参照する。
 struct PlayerCapabilities {
-    bool canDoubleJump = false;
-    bool canDash = false;
-    bool canShootFireball = false;
-    bool canFly = false;
-    int baseJumpPower = -12;
-    float baseSpeed = 4.0f;
+    bool canDoubleJump = false;      // 二段ジャンプができるか
+    bool canDash = false;            // ダッシュができるか
+    bool canShootFireball = false;   // 火の玉を撃てるか
+    bool canFly = false;             // 飛行（滞空）ができるか
+    int baseJumpPower = -12;         // 基本ジャンプ力（負の値ほど高く跳ぶ、Y速度への初期値）
+    float baseSpeed = 4.0f;          // 基本移動速度
 };
-PlayerCapabilities editorPlayerCaps;
+PlayerCapabilities editorPlayerCaps; // 現在のステージ/プレイ中に有効なプレイヤー能力の実体
 
 // ===== Feature: 編集コストゲージ (Edit Cost Gauge) =====
+// プレイ中にプレイヤーが使える「編集系ツール」（巻き戻し・一時停止・早送り・画面エフェクト・
+// オブジェクト個別編集）それぞれについて、そもそも使用を許可するかどうかを表すフラグ集。
+// ステージ側の設定で一部の操作を封印したり、アイテム取得で解禁したりするのに使う。
 struct EditToolFlags {
-    bool rewindEnabled = true;
-    bool pauseEnabled = true;
-    bool fastForwardEnabled = true;
+    bool rewindEnabled = true;       // 時間巻き戻し操作を許可するか
+    bool pauseEnabled = true;        // 一時停止操作を許可するか
+    bool fastForwardEnabled = true;  // 早送り操作を許可するか
     bool screenEffectEnabled = true; // Z/X/C（ズーム・明暗）+ T（色フィルタ）をまとめた「画面エフェクト」
     bool objectEditEnabled = true;   // 右クリックによる個別オブジェクト編集（選択・コンテキストメニュー全体）
 };
 
+// 編集系ツールを使い続けるための「コストゲージ」に関する数値設定。
+// ゲージは時間経過で回復し、各操作を使うたびに消費される。値が尽きるとその操作が使えなくなる。
 struct EditCostSettings {
-    float maxCost = 100.0f;
-    float regenPerSec = 6.0f;
-    float drainRewindPerSec = 18.0f;
-    float drainPausePerSec = 4.0f;
-    float drainFastForwardPerSec = 10.0f;
+    float maxCost = 100.0f;              // ゲージの最大値
+    float regenPerSec = 6.0f;            // 何も使っていない間、1秒あたりに自然回復する量
+    float drainRewindPerSec = 18.0f;     // 巻き戻し操作を保持している間、1秒あたりに消費する量
+    float drainPausePerSec = 4.0f;       // 一時停止を保持している間、1秒あたりに消費する量
+    float drainFastForwardPerSec = 10.0f;// 早送りを保持している間、1秒あたりに消費する量
     float drainScreenEffectPerSec = 8.0f; // Z/X/C保持中 or 色フィルタ非ゼロ中に加算
-    float flatColorCycle = 5.0f;
+    float flatColorCycle = 5.0f;         // 色フィルタを1段階切り替えるたびに一括で消費する固定量
     float flatMenuToggle = 8.0f;     // コンテキストメニューの巻き戻し/一時停止トグル、複数選択の一括トグルも同額
-    float flatSpeedChange = 6.0f;
-    float flatDirectionFlip = 4.0f;
-    float flatResetAll = 10.0f;
+    float flatSpeedChange = 6.0f;        // 速度変更操作1回あたりの固定消費量
+    float flatDirectionFlip = 4.0f;      // 向き反転操作1回あたりの固定消費量
+    float flatResetAll = 10.0f;          // 全リセット操作1回あたりの固定消費量
 };
 
 // アイテムで恒久解禁された操作（セッション永続。editorPlayerCapsと同じ扱いでResetStageではクリアしない）
 EditToolFlags unlockedEditTools = { false, false, false, false, false };
 
-std::vector<ItemDef> itemDefs;
+std::vector<ItemDef> itemDefs; // 読み込み済みのアイテム定義（items.json由来）を全種類分保持する一覧
+// ステージ上に実際に配置された「アイテム1個分」の情報。
 struct PlacedItem {
-    int def_idx;
-    float x, y;
+    int def_idx;  // itemDefs配列内でのインデックス（このアイテムがどの種類かを指す）
+    float x, y;   // ステージ内でのスポーン座標
 };
-std::vector<PlacedItem> editorPlacedItems;
+std::vector<PlacedItem> editorPlacedItems; // 現在編集中/プレイ中のステージに配置されているアイテムの一覧
 
 // ==== Feature: Configurable Behavior Parameters (M1) ====
 // EnemyDef/GimmickDefの新パラメータのうち -1 (未設定) のままのフィールドに、
@@ -261,7 +289,11 @@ std::vector<PlacedItem> editorPlacedItems;
 // これにより既存のenemies.json/gimmicks.jsonを一切変更せずに挙動が完全に維持される。
 // type_enumの数値は AssetManagerForm.cs の EnemyTypes/GimmickTypes 一覧の並び順と対応する。
 void ApplyEnemyDefaultParams(EnemyDef& def) {
+    // fill: 対象フィールドがまだ-1.0f（=JSONで未指定）のときだけ、legacyDefaultで上書きする補助関数。
+    // 既にJSON側で値が指定されていれば(0以上なら)何もしないので、既存ステージの調整値を壊さない。
     auto fill = [](float& field, float legacyDefault) { if (field < 0.0f) field = legacyDefault; };
+    // type_enum（敵の行動タイプ）ごとに、そのタイプが従来ハードコードで使っていた既定値を補完する。
+    // 各case行末のコメントはAssetManagerForm.cs側のEnemyTypes一覧に対応するタイプ名。
     switch (def.type_enum) {
         case 0: fill(def.moveSpeed, 0.4f); break; // PATROL
         case 1: fill(def.actionInterval, 90.0f); fill(def.jumpPowerMult, 0.7f); break; // JUMPER
@@ -298,7 +330,9 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
 }
 
 void ApplyGimmickDefaultParams(GimmickDef& def) {
+    // ApplyEnemyDefaultParamsと同じ考え方：未指定(-1.0f)のフィールドにのみ従来の既定値を補完する。
     auto fill = [](float& field, float legacyDefault) { if (field < 0.0f) field = legacyDefault; };
+    // type_enum（ギミックの種類）ごとに既定値を補完する。case行末のコメントはギミックタイプ名。
     switch (def.type_enum) {
         case 1: fill(def.rotationSpeed, 0.015f); break; // ROTATING_BRIDGE
         case 4: fill(def.sinkSpeed, 1.5f); fill(def.maxDepthOffset, 20.0f); break; // FALLING_LIFT
@@ -318,11 +352,15 @@ void ApplyGimmickDefaultParams(GimmickDef& def) {
 }
 
 // Feature: Composite Multi-Part Objects (Parts-M1) — 敵/ギミック/アイテム共通の「parts」テンプレート配列パーサー
+// parentObj（敵/ギミック/アイテム1件分のJSONオブジェクト）に"parts"配列があれば、その各要素を
+// PartDefへ変換してoutPartsに積んでいく。"parts"が無い/配列でない場合は何もしない
+// （＝既存のparts無し定義はこれまで通りの見た目・挙動を保つ）。
 void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts) {
     if (!parentObj.contains("parts") || !parentObj["parts"].is_array()) return;
     for (const auto& p : parentObj["parts"]) {
         if (!p.is_object()) continue;
         PartDef part;
+        // JSONの各キーをPartDefのフィールドへ読み込む。キーが存在しなければ第2引数の既定値を使う。
         part.id = p.value("id", "");
         part.sprite_path = p.value("sprite", "");
         part.offsetX = p.value("offsetX", 0.0f);
@@ -337,6 +375,8 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
         part.hp = p.value("hp", 0);
         part.zOrder = p.value("zOrder", 0);
         if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
+        // 画像パスが指定されていれば実際に読み込み、幅・高さ・当たり判定サイズが
+        // JSONで未指定（0のまま）だった場合は画像の実サイズで補完する。
         if (!part.sprite_path.empty()) {
             part.graphHandle = LoadGraph(part.sprite_path.c_str());
             if (part.graphHandle >= 0) {
@@ -352,7 +392,12 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
     }
 }
 
+// ゲーム起動時（およびエディタ起動時）に1度だけ呼ばれ、assets/enemies.json・assets/items.json・
+// assets/gimmicks.json をそれぞれ読み込んで、enemyDefs／itemDefs／gimmickDefsの3つの一覧を構築する。
+// ここで作られる定義データは「敵/アイテム/ギミックの種類ごとの共通設定」であり、
+// ステージ内の個別配置情報（PlacedEnemy等）とは別物なので注意。
 void LoadAssetDefinitions() {
+    // ---- 敵定義(enemies.json)の読み込み ----
     {
         std::ifstream ef("assets/enemies.json");
         if (ef.is_open()) {
@@ -361,6 +406,7 @@ void LoadAssetDefinitions() {
                 for (const auto& e : ej) {
                     if (!e.is_object()) continue;
                     EnemyDef def;
+                    // 基本情報（各フィールドの意味はEnemyDef構造体側のコメントを参照）
                     def.id = e.value("id", "");
                     def.name = e.value("name", "");
                     def.type_enum = e.value("type_enum", 0);
@@ -377,6 +423,8 @@ void LoadAssetDefinitions() {
                     def.hitboxWidth = e.value("hitboxWidth", def.width);
                     def.hitboxHeight = e.value("hitboxHeight", def.height);
                     def.scale = e.value("scale", 1.0f);
+                    // 画像を読み込み、幅・高さは画像の実サイズで必ず上書きする（JSON側のwidth/heightより優先）。
+                    // 当たり判定サイズが0（未指定）の場合のみ、画像サイズをそのまま使う。
                     if (!def.sprite_path.empty()) {
                         def.graphHandle = LoadGraph(def.sprite_path.c_str());
                         int gw, gh;
@@ -387,6 +435,8 @@ void LoadAssetDefinitions() {
                         if (def.hitboxHeight == 0) def.hitboxHeight = gh;
                     }
                     // Feature: Configurable Behavior Parameters (M1)
+                    // 行動パラメータ群をJSONから読み込む。未指定のキーは-1.0f(未設定)のままにしておき、
+                    // 後でApplyEnemyDefaultParams()がtype_enumに応じた既定値を補完する。
                     def.moveSpeed = e.value("moveSpeed", -1.0f);
                     def.enragedMoveSpeed = e.value("enragedMoveSpeed", -1.0f);
                     def.actionInterval = e.value("actionInterval", -1.0f);
@@ -425,17 +475,22 @@ void LoadAssetDefinitions() {
                     def.fastForwardAttackMult = e.value("fastForwardAttackMult", -1.0f);
                     def.diagonalFallSpeed = e.value("diagonalFallSpeed", -1.0f);
                     // Feature: Puzzle-like Behavior Scripting (M2)
+                    // カスタムスクリプト（ブロックのJSON配列）が指定されていれば読み込む
                     if (e.contains("script") && e["script"].is_array()) def.script = e["script"];
+                    // 未設定(-1.0f)のパラメータをtype_enumごとの従来既定値で補完する
                     ApplyEnemyDefaultParams(def);
+                    // 複数パーツで構成される敵の場合、"parts"配列を読み込む
                     ParsePartDefsFromJson(e, def.parts);
                     enemyDefs.push_back(def);
                 }
             } else {
+                // JSONとして解釈できなかった（構文エラー等）場合はログに残して処理を続行する
                 Logger::Error("DrawPixel", "LoadAssetDefinitions", "Failed to parse enemies.json", "assets/enemies.json");
             }
         }
     }
 
+    // ---- アイテム定義(items.json)の読み込み ----
     {
         std::ifstream itf("assets/items.json");
         if (itf.is_open()) {
@@ -470,6 +525,7 @@ void LoadAssetDefinitions() {
         }
     }
 
+    // ---- ギミック定義(gimmicks.json)の読み込み ----
     {
         std::ifstream gf("assets/gimmicks.json");
         if (gf.is_open()) {
@@ -495,6 +551,7 @@ void LoadAssetDefinitions() {
                         }
                     }
                     // Feature: Configurable Behavior Parameters (M1)
+                    // ギミック用の行動パラメータをJSONから読み込む（未指定は-1.0fのまま）
                     def.rotationSpeed = g.value("rotationSpeed", -1.0f);
                     def.sinkSpeed = g.value("sinkSpeed", -1.0f);
                     def.maxDepthOffset = g.value("maxDepthOffset", -1.0f);
@@ -528,14 +585,17 @@ void LoadAssetDefinitions() {
 }
 
 // ===== SE検索ヘルパー (assetId → 各種 Def の効果音IDを引く) =====
+// id文字列からenemyDefs一覧を線形探索し、一致する定義へのポインタを返す。見つからなければnullptr。
 const EnemyDef* FindEnemyDef(const std::string& assetId) {
     for (const auto& d : enemyDefs) if (d.id == assetId) return &d;
     return nullptr;
 }
+// id文字列からgimmickDefs一覧を線形探索し、一致する定義へのポインタを返す。見つからなければnullptr。
 const GimmickDef* FindGimmickDef(const std::string& assetId) {
     for (const auto& d : gimmickDefs) if (d.id == assetId) return &d;
     return nullptr;
 }
+// id文字列からitemDefs一覧を線形探索し、一致する定義へのポインタを返す。見つからなければnullptr。
 const ItemDef* FindItemDef(const std::string& assetId) {
     for (const auto& d : itemDefs) if (d.id == assetId) return &d;
     return nullptr;
@@ -545,9 +605,11 @@ const ItemDef* FindItemDef(const std::string& assetId) {
 // 親(敵/ギミック/アイテム)のResetStage時に呼び、baseX/baseYには親の(既に確定済みの)スポーン座標を渡す。
 std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, float baseX, float baseY) {
     std::vector<PartInstance> result;
+    // parts定義配列の各要素を、親の現在位置(baseX, baseY)を基準にしたランタイム状態(PartInstance)へ変換する
     for (size_t pi = 0; pi < defs.size(); pi++) {
         const PartDef& pd = defs[pi];
         PartInstance inst;
+        // オフセットを親座標に加算して、パーツのワールド座標を確定させる
         inst.x = baseX + pd.offsetX;
         inst.y = baseY + pd.offsetY;
         inst.handle = pd.graphHandle;
@@ -572,9 +634,12 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
 void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent) {
     for (const auto& part : parts) {
-        if (!part.isActive) continue;
+        if (!part.isActive) continue; // 破壊済みのパーツは描画しない
+        // wantBehindParent==trueのパス呼び出し時はzOrder<0（親より奥）のパーツだけ、
+        // wantBehindParent==falseの呼び出し時はzOrder>=0（親より手前）のパーツだけを描画する
         if ((part.zOrder < 0) != wantBehindParent) continue;
-        if (part.handle < 0) continue;
+        if (part.handle < 0) continue; // 画像が読み込まれていないパーツは描画しない
+        // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める
         int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
         int pcy = (int)(part.y + (part.height * part.scale) / 2.0f - cameraY);
         DrawRotaGraph(pcx, pcy, part.scale, part.angle, part.handle, TRUE);
@@ -583,58 +648,62 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
 
 
 
-// 定数
-const int SCREEN_WIDTH = 640;
-const int SCREEN_HEIGHT = 480;
-const int WINDOW_WIDTH = 1280;
-const int WINDOW_HEIGHT = 720;
-const float GRAVITY = 0.5f;
-const int MAX_BULLETS = 40;
-const float BULLET_SPEED = 20.0f;
-const float JUMP_POWER = -12.0f;
-const float WALK_SPEED = 4.0f;
-const float DASH_SPEED = 8.0f;
+// 定数（ゲーム全体で使う基本的な数値設定）
+const int SCREEN_WIDTH = 640;    // ゲーム内部の描画解像度（横）
+const int SCREEN_HEIGHT = 480;   // ゲーム内部の描画解像度（縦）
+const int WINDOW_WIDTH = 1280;   // 実際に表示するウィンドウの幅（内部解像度から拡大表示する）
+const int WINDOW_HEIGHT = 720;   // 実際に表示するウィンドウの高さ
+const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
+const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
+const float BULLET_SPEED = 20.0f;// 弾の基本速度
+const float JUMP_POWER = -12.0f; // プレイヤーの基本ジャンプ力（負の値で上方向）
+const float WALK_SPEED = 4.0f;   // プレイヤーの基本歩行速度
+const float DASH_SPEED = 8.0f;   // プレイヤーの基本ダッシュ速度
 
-const int TILE_SIZE = 32;
+const int TILE_SIZE = 32;        // マップの1タイルあたりのピクセルサイズ
 const int MAP_WIDTH_TILES = 80;  // 2560 / 32 = 80
 const int MAP_HEIGHT_TILES = 15; // 480 / 32 = 15
 
+// マップを構成するタイルの種類。マップデータ(数値配列)の各マスがこの番号で表現される。
 enum TileType {
-    TILE_NONE = 0,
-    TILE_JIMEN = 1,
-    TILE_TUTI = 2,
-    TILE_TYPE_MAX
+    TILE_NONE = 0,  // 何もない（すり抜けられる空間）
+    TILE_JIMEN = 1, // 地面タイル
+    TILE_TUTI = 2,  // 土タイル
+    TILE_TYPE_MAX   // タイル種別数の番兵
 };
 
+// 現在のゲーム全体の進行状態（シーン）。
 enum GameScene {
-    PLAY,
-    RESULT_GAMEOVER,
-    RESULT_VICTORY
+    PLAY,             // 通常プレイ中
+    RESULT_GAMEOVER,  // ゲームオーバー結果画面
+    RESULT_VICTORY    // クリア（勝利）結果画面
 };
 
+// 1種類のタイルの見た目・当たり判定情報をまとめた定義データ。
 struct TileDefinition {
-    TileType type;
-    int handle;
-    bool isCollidable;
+    TileType type;        // このタイル定義がどのTileTypeに対応するか
+    int handle;            // 描画に使う画像ハンドル
+    bool isCollidable;     // trueなら地形として衝突判定の対象になる（プレイヤー・敵が乗れる/ぶつかる）
     bool deadly = false;   // 返った場合ただちゲームオーバー
-    const char* name;
+    const char* name;      // デバッグ表示・エディタ表示用の名前
     // Feature: タイル表示範囲調整機能 — spriteが複数タイルをまとめたタイルセット画像の場合に、
     // そのうちどの矩形部分を表示に使うかを指定する。srcW/srcHが0のままなら画像全体を使う
     // （tileDefs構築直後の解決ループで画像サイズへ解決される。従来互換）。
     int srcX = 0, srcY = 0, srcW = 0, srcH = 0;
 };
 
-// 履歴上限
+// 履歴上限（時間巻き戻し機能のために毎フレーム状態を記録しておく配列の最大長）
 const size_t MAX_HISTORY_FRAMES = 600; // 60fpsで約10秒間
 
-// 個々の履歴ステート
+// 巻き戻し機能のために毎フレーム記録する、プレイヤー1フレーム分のスナップショット。
+// このState構造体を履歴として貯めておき、巻き戻し操作時に過去のものへ丸ごと復元する。
 struct PlayerState {
-    float x, y, vx, vy;
-    int direction;
-    bool isJumping;
-    float scale, angle, speedScale;
-    bool isPaused;
-    int hp;
+    float x, y, vx, vy;    // 座標と速度
+    int direction;         // 向いている方向（左右）
+    bool isJumping;        // ジャンプ中かどうか
+    float scale, angle, speedScale; // 表示スケール・回転角度・行動速度倍率
+    bool isPaused;          // このフレーム時点で一時停止中だったか
+    int hp;                 // このフレーム時点のHP
 };
 
 enum EnemyType {
@@ -665,31 +734,33 @@ enum EnemyType {
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
 
+// 巻き戻し機能のために毎フレーム記録する、敵1体・1フレーム分のスナップショット。
 struct EnemyState {
-    float x, y, vx, vy;
-    int direction;
-    float scale, angle, speedScale;
-    bool isActive;
-    bool isPaused;
-    EnemyType type;
-    int hp;
+    float x, y, vx, vy;      // 座標と速度
+    int direction;            // 向いている方向
+    float scale, angle, speedScale; // 表示スケール・回転角度・行動速度倍率
+    bool isActive;             // 生存しているか（撃破済みならfalse）
+    bool isPaused;              // このフレーム時点で一時停止中だったか
+    EnemyType type;              // 敵の行動タイプ
+    int hp;                      // このフレーム時点のHP
 
     // AI内部状態（巻き戻し時に座標だけでなく状態機械も過去に戻すため保持する）
-    float customTimer;
-    int aiState;
-    float patrolLeft;
-    float patrolRight;
-    float auxF1;
-    float auxF2;
-    int auxState;
-    bool auxFlag;
-    float auxF3;
+    float customTimer; // 行動タイマー（周期的な行動の経過時間管理などに使う汎用カウンタ）
+    int aiState;        // AIの現在の状態（タイプごとに意味が異なる状態遷移番号）
+    float patrolLeft;   // PATROL系の巡回範囲の左端
+    float patrolRight;  // PATROL系の巡回範囲の右端
+    float auxF1;         // 汎用の補助float値その1（意味は敵タイプごとに異なる）
+    float auxF2;         // 汎用の補助float値その2
+    int auxState;         // 汎用の補助状態番号
+    bool auxFlag;          // 汎用の補助フラグ
+    float auxF3;           // 汎用の補助float値その3
 };
 
+// 巻き戻し機能のために毎フレーム記録する、弾1発・1フレーム分のスナップショット。
 struct BulletState {
-    float x, y, vx, vy;
-    bool isActive;
-    bool isPlayerOwned;
+    float x, y, vx, vy;   // 座標と速度
+    bool isActive;         // 存在しているか
+    bool isPlayerOwned;    // プレイヤーが発射した弾か（true）、敵が発射した弾か（false）
 };
 
 enum GimmickType {
@@ -724,63 +795,68 @@ enum GimmickType {
     GIMMICK_CUSTOM_SCRIPT            // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで挙動を自作する
 };
 
+// 巻き戻し機能のために毎フレーム記録する、ギミック1個・1フレーム分のスナップショット。
 struct GimmickState {
-    float x, y;
-    float angle;
-    bool isActive;
+    float x, y;     // 座標
+    float angle;     // 回転角度
+    bool isActive;    // 有効/実体化しているか
 };
 
 // 将来の拡張用のアイテムシステムテンプレート
 enum ItemType {
-    ITEM_NONE,
-    ITEM_COIN,
-    ITEM_HEAL
+    ITEM_NONE, // 未設定
+    ITEM_COIN, // コイン（スコア/収集要素）
+    ITEM_HEAL  // 回復アイテム
 };
 
+// 巻き戻し機能のために毎フレーム記録する、アイテム1個・1フレーム分のスナップショット。
 struct ItemState {
-    float x, y;
-    bool isCollected;
+    float x, y;         // 座標
+    bool isCollected;    // 取得済みかどうか
 };
 
+// ステージ上に実際に存在するアイテム1個分の実行時状態。
 struct Item {
-    ItemType type;
-    float x, y;
-    float width, height;
-    float spriteWidth, spriteHeight;
-    float hitboxOffsetX, hitboxOffsetY;
-    float hitboxWidth, hitboxHeight;
-    bool isActive;
-    bool isCollected;
+    ItemType type;   // アイテムの種類
+    float x, y;       // 現在座標
+    float width, height;              // 表示サイズ
+    float spriteWidth, spriteHeight;  // 元画像のサイズ
+    float hitboxOffsetX, hitboxOffsetY; // 当たり判定オフセット
+    float hitboxWidth, hitboxHeight;    // 当たり判定サイズ
+    bool isActive;      // 有効かどうか（画面外に出た等で無効化されることがある）
+    bool isCollected;    // プレイヤーに取得済みかどうか
 
     // 巻き戻しトラック
-    bool isRewinding;
-    std::vector<ItemState> history;
+    bool isRewinding;              // 現在巻き戻し再生中かどうか
+    std::vector<ItemState> history; // 過去フレームのスナップショット履歴（巻き戻し用）
 
     std::string assetId = ""; // ItemDef.id への参照（SE検索用）
     int handle = -1;          // ItemDef.graphHandle（カスタムスプライト）。-1ならcoinHandleを使う
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
-    std::vector<PartInstance> parts;
+    std::vector<PartInstance> parts; // このアイテムを構成する追加パーツ（無ければ空のまま）
 };
 
 // 主要な構造体
+// マップ上の足場（地形の代わりに使われる線分ベースの当たり判定、または装飾用の直線）を表す。
 struct Platform {
-    float x1, y1;
-    float x2, y2;
+    float x1, y1; // 始点座標
+    float x2, y2; // 終点座標
 };
 
+// プレイヤーキャラクターの実行時状態。
 struct Player {
-    float x, y;
-    float vx, vy;
-    int handle;
-    int direction;
-    bool isJumping;
-    int width, height;
-    float scale;
-    float angle;
-    float speedScale;
-    bool isPaused;
-    int hp;
+    float x, y;       // 現在座標
+    float vx, vy;      // 現在速度
+    int handle;         // 描画に使う画像ハンドル
+    int direction;       // 向いている方向（左右）
+    bool isJumping;       // ジャンプ中かどうか
+    int width, height;    // 表示サイズ
+    float scale;            // 表示スケール倍率
+    float angle;             // 表示回転角度
+    float speedScale;         // 行動速度倍率（スロー/早送り等の影響を受ける）
+    bool isPaused;              // 一時停止中かどうか
+    int hp;                      // 現在HP
 
     // 被ダメージ後の無敵時間（フレーム）。0より大きい間は敵との接触ダメージを受けない
     float invulnTimer = 0.0f;
@@ -789,29 +865,30 @@ struct Player {
     int ridingGimmickIndex = -1;
 
     // 巻き戻しトラック
-    bool isRewinding;
-    std::vector<PlayerState> history;
+    bool isRewinding;                 // 現在巻き戻し再生中かどうか
+    std::vector<PlayerState> history; // 過去フレームのスナップショット履歴（巻き戻し用）
 
     // Feature 2: アニメーション
-    AnimationController anim;
+    AnimationController anim; // スプライトアニメーションの再生状態を管理するコントローラ
 };
 
+// 敵1体分の実行時状態。EnemyDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・HP・AI状態を持つ。
 struct Enemy {
-    EnemyType type;
-    float x, y;
-    float vx, vy;
-    int handle;
-    int direction; 
-    int width, height;
-    int spriteWidth, spriteHeight;
-    int hitboxOffsetX, hitboxOffsetY;
-    int hitboxWidth, hitboxHeight;
-    float scale;
-    float angle;
-    float speedScale;
-    bool isActive;
-    bool isPaused;
-    int hp;
+    EnemyType type;   // 敵の行動タイプ
+    float x, y;        // 現在座標
+    float vx, vy;        // 現在速度
+    int handle;            // 描画に使う画像ハンドル
+    int direction;           // 向いている方向
+    int width, height;        // 表示サイズ
+    int spriteWidth, spriteHeight; // 元画像のサイズ
+    int hitboxOffsetX, hitboxOffsetY; // 当たり判定オフセット
+    int hitboxWidth, hitboxHeight;    // 当たり判定サイズ
+    float scale;   // 表示スケール倍率
+    float angle;    // 表示回転角度
+    float speedScale; // 行動速度倍率
+    bool isActive;      // 生存しているか
+    bool isPaused;        // 一時停止中かどうか
+    int hp;                 // 現在HP
 
     // AI用のパラメータ
     float customTimer;
@@ -845,22 +922,23 @@ struct Enemy {
     std::vector<PartInstance> parts;
 };
 
+// ギミック1個分の実行時状態。GimmickDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・状態を持つ。
 struct Gimmick {
-    GimmickType type;
-    float x, y;
-    float width, height;
-    float spriteWidth, spriteHeight;
-    float hitboxOffsetX, hitboxOffsetY;
-    float hitboxWidth, hitboxHeight;
-    bool isActive;
+    GimmickType type;  // ギミックの種類
+    float x, y;          // 現在座標
+    float width, height;   // 表示サイズ
+    float spriteWidth, spriteHeight; // 元画像のサイズ
+    float hitboxOffsetX, hitboxOffsetY; // 当たり判定オフセット
+    float hitboxWidth, hitboxHeight;    // 当たり判定サイズ
+    bool isActive;    // 有効/実体化しているか
     float val1, val2; // ギミック固有の値 (例: ポータルのワープ先ターゲット比率など)
     float angle;      // 橋の回転角度
-    float customTimer;
+    float customTimer; // ギミック固有のタイマー（周期動作等に使用）
     bool isPaused;    // 個別ギミックの一時停止
 
     // 巻き戻しトラック
-    bool isRewinding;
-    std::vector<GimmickState> history;
+    bool isRewinding;               // 現在巻き戻し再生中かどうか
+    std::vector<GimmickState> history; // 過去フレームのスナップショット履歴（巻き戻し用）
 
     // 末尾に追加（既存の集成初期化リストを壊さないようデフォルト値を持たせる）
     std::string assetId = "";  // GimmickDef.id への参照（SE検索・タイプ判定補助用）
@@ -883,79 +961,86 @@ struct Gimmick {
     float lastDeltaX = 0.0f, lastDeltaY = 0.0f;
 };
 
+// 弾1発分の実行時状態。
 struct Bullet {
-    float x = 0.0f;
-    float y = 0.0f;
-    float vx = 0.0f;
-    float vy = 0.0f;
-    bool isActive = false;
-    int handle = 0;
+    float x = 0.0f;   // 現在X座標
+    float y = 0.0f;   // 現在Y座標
+    float vx = 0.0f;  // X方向速度
+    float vy = 0.0f;  // Y方向速度
+    bool isActive = false; // 発射中/存在しているか
+    int handle = 0;         // 描画に使う画像ハンドル
     bool isPlayerOwned = true; // 弾丸の所有者の追跡用
 
     // 巻き戻しトラック
-    bool isRewinding = false;
-    std::vector<BulletState> history;
+    bool isRewinding = false;          // 現在巻き戻し再生中かどうか
+    std::vector<BulletState> history; // 過去フレームのスナップショット履歴（巻き戻し用）
 };
 
+// タイムライン編集（カット・ポータル）用の「カット地点」情報。
 struct CutPoint {
-    float timePos;
-    float targetTimePos;
+    float timePos;       // このカット地点の元の時間位置
+    float targetTimePos; // ワープ先となる時間位置
 };
 
+// 右クリックメニュー等、画面上に表示するコンテキストメニューの状態。
 struct ContextMenu {
-    bool isOpen;
-    int x, y, width, height;
+    bool isOpen;               // 現在表示中かどうか
+    int x, y, width, height;   // 表示位置とサイズ（画面座標）
 };
 
+// 背景として重ねて描画するレイヤー（視差スクロール背景など）の設定。
 struct BackgroundLayer {
-    std::string sprite;
-    int handle = -1;
-    int drawOrder = 0;
-    float scrollRate = 0.3f;
-    bool loop = true;
-    float offsetX = 0.0f;
-    float offsetY = 0.0f;
+    std::string sprite;      // 背景画像のパス
+    int handle = -1;         // spriteをLoadGraphした結果のハンドル
+    int drawOrder = 0;       // 描画順（値が小さいほど奥に描画）
+    float scrollRate = 0.3f; // カメラ移動に対するスクロール速度の割合（視差効果。1.0でカメラと同速）
+    bool loop = true;        // 画像端に達したときに繰り返し表示するか
+    float offsetX = 0.0f;    // 初期表示位置の水平オフセット
+    float offsetY = 0.0f;    // 初期表示位置の垂直オフセット
 };
 
+// 1ステージ分の全データ（地形マップ、配置物、背景、BGM等）をまとめた構造体。
+// stage_XX.jsonから読み込まれ、ステージ開始時にこの内容をもとに実行時のEnemy/Gimmick/Item等が生成される。
 struct StageData {
-    int id = 0;
-    char name[64] = "";
+    int id = 0;             // ステージ番号
+    char name[64] = "";      // ステージ名（表示用）
     std::string sourceFile = ""; // assets/stages/ 配下のファイル名（GoToStageでの再読み込み判定に使用）
-    std::vector<std::vector<int>> map;
-    
+    std::vector<std::vector<int>> map; // 地形タイルマップ（[行][列]にTileTypeの数値が入る2次元配列）
+
     // Feature 1
-    std::vector<std::vector<int>> decoMapBack;
-    std::vector<std::vector<int>> decoMapFront;
-    std::vector<BackgroundLayer> backgrounds;
-    
+    std::vector<std::vector<int>> decoMapBack;  // プレイヤーより奥に描画される装飾タイルマップ
+    std::vector<std::vector<int>> decoMapFront; // プレイヤーより手前に描画される装飾タイルマップ
+    std::vector<BackgroundLayer> backgrounds;   // 視差スクロール背景レイヤーの一覧
+
     // Feature 3
-    std::string bgmId = "";
-    
+    std::string bgmId = ""; // このステージで再生するBGMの識別子
+
     // Feature 4
-    bool testMode = false;
+    bool testMode = false; // trueの場合、動作確認用の特殊モードでステージを開始する
 
     // Feature 5
-    json triggersJson = json::array();
+    json triggersJson = json::array(); // ステージ内のトリガー（イベント発生条件）定義（JSON配列のまま保持）
 
-    float playerStartX = 0.0f;
-    float playerStartY = 0.0f;
+    float playerStartX = 0.0f; // プレイヤーの初期スポーンX座標
+    float playerStartY = 0.0f; // プレイヤーの初期スポーンY座標
     float goalX = -1.0f;   // -1 = ゴール未設定
-    float goalY = -1.0f;
-    std::vector<Enemy> enemies;
-    std::vector<Gimmick> gimmicks;
-    std::vector<Item> items;
-    std::vector<Platform> platforms;
+    float goalY = -1.0f;   // ゴールのY座標
+    std::vector<Enemy> enemies;     // このステージに配置される敵の実行時状態一覧
+    std::vector<Gimmick> gimmicks;  // このステージに配置されるギミックの実行時状態一覧
+    std::vector<Item> items;        // このステージに配置されるアイテムの実行時状態一覧
+    std::vector<Platform> platforms;// このステージの足場（線分）一覧
 
     // Feature: 編集コストゲージ（ステージ単位設定）
-    EditToolFlags editToolFlags;
-    EditCostSettings editCostSettings;
+    EditToolFlags editToolFlags;         // このステージで許可する編集ツールの設定
+    EditCostSettings editCostSettings;   // このステージでの編集コストゲージの数値設定
 };
 
+// エディタ上で現在何が選択されているかを表す種別。
 enum SelectedType {
-    SELECT_NONE,
-    SELECT_PLAYER,
-    SELECT_ENEMY,
-    SELECT_GIMMICK
+    SELECT_NONE,    // 何も選択していない
+    SELECT_PLAYER,  // プレイヤーを選択中
+    SELECT_ENEMY,   // 敵を選択中
+    SELECT_GIMMICK  // ギミックを選択中
 };
 
 // プラットフォームおよびアクティブな衝突ギミックへの着地衝突判定
@@ -1151,6 +1236,8 @@ bool CheckGridCollisionY(float x, float& y, float& vy, int width, float scale, i
     return isGrounded;
 }
 
+// X方向についての、実体化した地形系ギミック（伸縮ボックス、伸縮地面、岩、早送りゲート、ゲート扉）との衝突判定。
+// タイルマップの衝突とは別に、ギミック側の座標・サイズをもとにX座標を押し戻す。
 void CheckGimmickCollisionX(float& x, float y, int width, float scale, int height, float vx, const std::vector<Gimmick>& gimmicks) {
     float objW = (float)width * scale;
     float objH = (float)height * scale;
@@ -1179,6 +1266,7 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
     }
 }
 
+// Y方向についての、実体化した地形系ギミックとの衝突判定。着地した場合はtrueを返す。
 bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int height, float& vy, const std::vector<Gimmick>& gimmicks) {
     float objW = (float)width * scale;
     float objH = (float)height * scale;
@@ -1212,22 +1300,33 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
 }
 
 
-bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, int width, int height, float scale, 
-                             const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs, 
+// タイルマップとギミック両方を対象にした物理移動＋衝突判定のまとめ関数。
+// X方向とY方向を分けて処理する（先にXを動かして壁判定、その後Yを動かして床/天井判定）ことで、
+// 斜め移動時にも壁・床の判定が正しく効くようにしている。戻り値は「着地したか」。
+bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, int width, int height, float scale,
+                             const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs,
                              const std::vector<Gimmick>& gimmicks) {
+    // 先にX方向へ移動させてから、タイル・ギミック両方の左右衝突を判定して座標を補正する
     x += dx;
     CheckGridCollisionX(x, y, width, scale, height, map, tileDefs, dx);
     CheckGimmickCollisionX(x, y, width, scale, height, dx, gimmicks);
-    
+
+    // 続いてY方向へ移動させてから、タイル・ギミック両方の上下衝突を判定して座標を補正する
     y += dy;
     bool gridGrounded = CheckGridCollisionY(x, y, vy, width, scale, height, map, tileDefs);
     bool gimGrounded = CheckGimmickCollisionY(x, y, width, scale, height, vy, gimmicks);
-    
+
     return gridGrounded || gimGrounded;
 }
 
+// プログラムのエントリーポイント（Windowsアプリケーションのmain関数に相当）。
+// DxLib/ImGuiの初期化、アセット読み込み、全ステージデータの構築、そしてメインループの実行までを行う、
+// このファイルで最も大きな関数。
 int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ int n)
 {
+    // 未処理の例外でstd::terminateが呼ばれた場合のハンドラを登録しておく。
+    // 何も対処しないとプログラムが無言で落ちてしまい原因調査が困難なため、
+    // 例外の内容（何のエラーだったか）を可能な限りログファイルに書き残してからabortする。
     std::set_terminate([]() {
         Logger::Error("System", "terminate_handler", "std::terminate was called! Unhandled exception.");
         try {
@@ -1250,10 +1349,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // なお既存のDrawString呼び出しの文字列は全てASCIIのため、この変更で崩れる表示は無い。
     SetUseCharCodeFormat(DX_CHARCODEFORMAT_UTF8);
 
-    ChangeWindowMode(TRUE);
-    SetGraphMode(WINDOW_WIDTH, WINDOW_HEIGHT, 32);
-    if (DxLib_Init() == -1) return -1;
+    ChangeWindowMode(TRUE); // ウィンドウモードで起動する（フルスクリーンにしない）
+    SetGraphMode(WINDOW_WIDTH, WINDOW_HEIGHT, 32); // ウィンドウの解像度とカラービット数を設定
+    if (DxLib_Init() == -1) return -1; // DxLibの初期化に失敗したら即座に終了する
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
+    // コマンドライン引数でステージファイル名が渡されていれば、起動時に読み込むステージを上書きする
+    // （Lab_Editorから「このステージでテストプレイ」を実行したときに使われる仕組み）
     if (l != nullptr && strlen(l) > 0) {
         currentStageFileName = l;
         // コマンドライン引数の前後に空白/引用符が付くケースへの防御（呼び出し元により混入することがある）
@@ -1263,25 +1364,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             currentStageFileName += ".json";
         }
     }
-    SetDrawScreen(DX_SCREEN_BACK);
+    SetDrawScreen(DX_SCREEN_BACK); // 描画先を裏画面にする（ちらつき防止のダブルバッファリング）
 
     HWND hwnd = GetMainWindowHandle();
-    SetHookWinProc(CustomWndProc);
+    SetHookWinProc(CustomWndProc); // 先ほど定義した独自ウィンドウプロシージャをDxLibに登録する
 
+    // ---- ImGui（デバッグ/エディタ用UIライブラリ）の初期化 ----
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // ウィンドウ同士をドッキング（連結）できるようにする
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // マルチビューポートを有効化（UIを独立したOSウィンドウにできる）
+    // 日本語（メイリオ）フォントを読み込み、日本語グリフ範囲を指定してUI上で日本語表示できるようにする
     io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese());
 
-    ImGui::StyleColorsDark();
+    ImGui::StyleColorsDark(); // UIの配色をダークテーマにする
 
+    // ImGuiをWin32＋DirectX11のバックエンドに接続する（DxLibが内部でDirectX11を使っているため）
     ImGui_ImplWin32_Init(hwnd);
     ImGui_ImplDX11_Init((ID3D11Device*)GetUseDirect3D11Device(), (ID3D11DeviceContext*)GetUseDirect3D11DeviceContext());
 
+    // ゲーム内部解像度(SCREEN_WIDTH x SCREEN_HEIGHT)で描画するための仮想スクリーンを作成する。
+    // 実際のウィンドウサイズ(WINDOW_WIDTH x WINDOW_HEIGHT)へは、この仮想スクリーンを拡大して転送する。
     int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
-    LoadAssetDefinitions();
+    LoadAssetDefinitions(); // 敵/アイテム/ギミックの定義データ(enemies.json等)を読み込む
     {
         // Feature 5: コモンイベント定義の読み込み。CallCommonEventアクションから参照される。
         std::ifstream cef("assets/common_events.json");
@@ -1294,6 +1400,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
     }
+    // 共通で使う画像素材をあらかじめすべて読み込んでおく（毎フレーム読み込むと重いため起動時に一括ロード）
     int playerHandle = LoadGraph("img/player.png");
     int bulletHandle = LoadGraph("img/bullet.png");
     int jimenHandle = LoadGraph("img/jimen.png");
@@ -1339,7 +1446,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (!spritePath.empty()) {
                         handle = LoadGraph(("assets/" + spritePath).c_str());
                         if (handle == -1) {
-                            // Try absolute or relative from executable if not in assets/
+                            // assets/フォルダ内に見つからなかった場合、絶対パスまたは実行ファイルからの
+                            // 相対パスとして再度読み込みを試みる
                             handle = LoadGraph(spritePath.c_str());
                         }
                     }
@@ -1381,13 +1489,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // オブジェクトの仮初期化（ResetStageで正しく設定されます）
     Player player = { 100.0f, 300.0f, 0.0f, 0.0f, playerHandle, 0, false, pw, ph, 1.0f, 0.0f, 1.0f, false, false, {} };
-    std::vector<Enemy> enemies;
-    std::vector<Platform> platforms;
-    std::vector<Gimmick> gimmicks;
-    std::vector<Item> items;
+    std::vector<Enemy> enemies;     // 現在プレイ中のステージの敵一覧（実行時状態）
+    std::vector<Platform> platforms;// 現在プレイ中のステージの足場一覧
+    std::vector<Gimmick> gimmicks;  // 現在プレイ中のステージのギミック一覧
+    std::vector<Item> items;        // 現在プレイ中のステージのアイテム一覧
 
-    std::vector<StageData> stages;
-    
+    std::vector<StageData> stages;  // ゲームに収録されている全ステージのデータ一覧（下でハードコードして構築する）
+
     // =====================================================================
     // --- ステージ 1: 草原の試練 ---
     // 流れ: 平地スタート → 落下リフト谷 → 中間足場地帯（穴あり）→ 回転橋終盤
@@ -1651,6 +1759,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     }
 
     Logger::Info("System", "WinMain", "[Init] StageLoader Success");
+    // 冒頭で登録したものと同様の未処理例外ハンドラを再度登録している（内容はほぼ同じで、
+    // こちらはabort()ではなくexit(1)で終了する点のみ異なる）。後から追加された安全策と思われる。
     std::set_terminate([]() {
         Logger::Error("System", "Terminate", "Unhandled exception occurred");
         try {
@@ -1662,9 +1772,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         exit(1);
     });
-    
-    
-    float cameraX = 0.0f;
+
+
+    float cameraX = 0.0f; // カメラのワールドX座標（プレイヤーを追従して毎フレーム更新される）
     float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
     float STAGE_WIDTH = 2560.0f; // 現在のステージの実際のマップ幅に応じて毎フレーム更新される。下記メインループ参照。
     float STAGE_HEIGHT = 480.0f; // 現在のステージの実際のマップ高さに応じて毎フレーム更新される。下記メインループ参照。

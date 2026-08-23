@@ -1,3 +1,5 @@
+// Newtonsoft.Json（Json.NET）を使用する。挙動パラメータ(EnemyDef/GimmickDef/ItemDef)を
+// ディープコピーする際に、JSONへ一度シリアライズしてから逆シリアライズする手法(DuplicateXxxRow系)で利用している。
 using Newtonsoft.Json;
 
 namespace Lab_Editor;
@@ -12,96 +14,137 @@ namespace Lab_Editor;
 /// </summary>
 public class AssetManagerPageControl : UserControl
 {
-    // UserControlにはDialogResult/Close()がないため、保存/キャンセルはイベントで伝える。
-    // ホスト（AssetManagerFormの薄いラッパー、またはWorkbenchShellForm）側がこれを購読して
-    // Form.Close()やshell.GoBack()に変換する。
+    // このクラスはWinFormsの「UserControl」（Formそのものではなく、他のFormに埋め込んで使う部品）として作られている。
+    // UserControlにはFormが持っているDialogResultプロパティやClose()メソッドが存在しないため、
+    // 「保存された/キャンセルされた」という結果をこのクラスの外へ伝える手段としてイベントを使う。
+    // ホスト側（AssetManagerFormという薄いラッパーFormか、WorkbenchShellFormという新しいシェル画面）が
+    // これらのイベントを購読(subscribe)しておき、Savedが発火したらForm.Close()を呼んだり、
+    // shell.GoBack()を呼んで元の画面に戻ったりする、という形で変換して使う。
     public event EventHandler? Saved;
     public event EventHandler? Cancelled;
+    // ホスト側が「保存ボタン」「閉じる(キャンセル)ボタン」の見た目や配置を扱えるように、
+    // このコントロール内部で生成したボタンそのものを外部へ公開しているプロパティ。
     public Button PrimaryActionButton => btnSave;
     public Button SecondaryActionButton => btnClose;
 
-    // ドリルダウン系の編集要求。ホスト（薄いラッパーFormか、WorkbenchShellForm経由のForm1配線）が
-    // これらを購読して「モーダルFormを開く」か「シェル内でページ遷移する」かを決める。
-    // このクラス自身は「編集を頼んで結果を待つ」以上のことをホストに要求しない。
+    // ここから下は「ドリルダウン編集」、つまりこのページの中だけでは完結せず、
+    // 別の詳細編集画面（当たり判定エディタ、サイズ調整、挙動スクリプトエディタ等）を
+    // 開いてもらう必要がある操作をイベントとして外部（ホスト）に依頼するためのもの。
+    // ホスト側（薄いラッパーFormの場合、またはWorkbenchShellForm経由でForm1が配線している場合）が
+    // これらを購読し、「モーダルFormとしてポップアップで開く」か「シェルの中でページ遷移する」かを
+    // 自分の都合で決める。このクラス自身は「編集をお願いして、結果を待って受け取る」以上のことは
+    // 一切ホストに要求しない（＝どちらの開き方をするかをこのクラスは知らなくてよい）。
     public event HitboxEditRequestHandler? HitboxEditRequested;
     public event SizeEditRequestHandler? SizeEditRequested;
     public event BehaviorScriptEditRequestHandler? BehaviorScriptEditRequested;
     public event PartsEditRequestHandler? PartsEditRequested;
     public event CommonEventEditRequestHandler? CommonEventEditRequested;
 
+    // assets.json等が置かれているアセットフォルダへのパス（コンストラクタで渡され、以後変更しない）
     private readonly string assetsPath;
+    // プロジェクトのルートフォルダへのパス。スプライト画像を「imgフォルダ」へコピーする際の基準になる
     private readonly string projectRoot;
+    // 編集対象のアセット定義データ本体（敵・ギミック・アイテム・コモンイベントのリストをまとめて持つ）
     private AssetDefinitions assets;
 
-    // Feature: UI改善（友人フィードバック対応） — タブを廃止し、1つの縦積みビュー＋
-    // 上部のタグボタン（複数選択可）で絞り込む構成にした。各セクション自体は
-    // 既存のグリッド/リストをそのまま流用する（データの読み書きロジックは無変更）。
+    // 機能追加: UI改善（友人からのフィードバックを受けて対応）— 以前は敵/ギミック/アイテムを
+    // タブで切り替える構成だったが、タブを廃止し、1つの縦積み（縦にスクロールする）ビュー＋
+    // 上部のタグボタン（複数選択可能なチェックボタン）で表示/非表示を絞り込む構成に変更した。
+    // 各セクション自体（中身のグリッドやリスト）は既存のものをそのまま流用しており、
+    // データの読み書きロジック（保存/読み込み処理）は一切変更していない。
+    // sectionEnemy等は「見出し＋中身のグリッド」をひとまとめにしたパネルで、タグボタンでVisibleを切り替える対象。
     private Panel sectionEnemy = null!, sectionGimmick = null!, sectionItem = null!, sectionCommonEvent = null!;
+    // 敵・ギミック・アイテムそれぞれの一覧を表示する表形式コントロール(DataGridView)
     private DataGridView dgvEnemies = null!, dgvGimmicks = null!, dgvItems = null!;
+    // コモンイベント（複数のトリガーから呼び出せる共通処理）の一覧を表示するリストボックス
     private ListBox lstCommonEvents = null!;
+    // コモンイベート定義の実体を保持するリスト。保存時にassets.CommonEventsへ書き戻す
     private List<CommonEventDef> _commonEvents = new();
+    // ID・名前で絞り込むための検索ボックス
     private TextBox txtSearch = null!;
+    // 選択中の行を複製するボタン（複製先の種別は選択されている行の種類に応じて自動判定する）
     private Button btnDuplicate = null!;
+    // 右側パネルに表示するスプライト画像のプレビュー用コントロール
     private PictureBox pbPreview = null!;
+    // プレビュー中の画像のファイルパスを表示するラベル
     private Label lblPreviewPath = null!;
+    // 保存ボタンと閉じる(キャンセル)ボタン
     private Button btnSave = null!, btnClose = null!;
+    // 選択中の種別(敵/ギミック/アイテム/コモンイベント)のtype_enum一覧・説明文を表示するリッチテキストボックス
     private RichTextBox rtbTypeHint = null!;
 
-    // ==== Feature: Configurable Behavior Parameters (M1) ====
-    // 行(DataGridViewRow)ごとに、グリッド列には出さない挙動パラメータ本体を保持する。
-    // idではなく行オブジェクト自体をキーにすることで、id欄のリネームによる不整合を避ける。
+    // ==== 機能: 敵/ギミックごとに調整可能な挙動パラメータ (Configurable Behavior Parameters, 通称 M1) ====
+    // 敵・ギミックのDataGridViewには「ID・名前・タイプ・HP」等の基本項目しか列として出していないが、
+    // それとは別に、選ばれたtype_enumに応じて細かい挙動パラメータ（移動速度係数や射撃間隔など）を
+    // 行(DataGridViewRow)ごとに保持しておく必要がある。この辞書がその保持場所にあたる。
+    // キーには行の"id"文字列ではなく行オブジェクト(DataGridViewRow)自身を使っている。
+    // これは、ユーザーがグリッド上でid欄の文字を書き換えた場合でも、それが原因で
+    // 「どのパラメータがどの行のものか」が食い違ってしまう不整合を避けるための工夫である。
     private readonly Dictionary<DataGridViewRow, EnemyDef> _enemyParams = new();
     private readonly Dictionary<DataGridViewRow, GimmickDef> _gimmickParams = new();
-    // Feature: Composite Multi-Part Objects (Parts-M7) — アイテムも敵/ギミックと同様に、
-    // グリッドに出さない付加情報（parts等）を行に紐づけて保持する
+    // 機能: 複数パーツからなる複合オブジェクト (Composite Multi-Part Objects, 通称 Parts-M7)
+    // — アイテムについても敵/ギミックと同様に、グリッドの列には表示しない付加情報（partsという
+    // 子パーツの配列など）を、対応する行に紐づけて保持しておく必要があるため用意した辞書。
     private readonly Dictionary<DataGridViewRow, ItemDef> _itemParams = new();
+    // 選択中の敵/ギミックの挙動パラメータ入力欄をまとめて表示するパネル（type_enumごとに中身を動的に作り直す）
     private Panel pnlBehaviorParams = null!;
+    // 右側パネルの見出しラベル。「📋 タイプ説明」または「⚙ 挙動パラメータ」のどちらかの文言に切り替わる
     private Label lblTypeHintTitle = null!;
+    // 挙動パラメータ欄(NumericUpDown)の値を「プログラム側から」書き換えている最中かどうかを示すフラグ。
+    // trueの間はValueChangedイベント内の処理をスキップし、ユーザー未操作なのに値が上書きされる無限ループや
+    // 意図しない書き込みを防ぐ（UpdateBehaviorParamsPanel参照）。
     private bool _isUpdatingBehaviorPanel = false;
 
-    // type_enum ごとに表示する挙動パラメータ欄 (フィールド名, ラベル, 小数点以下桁数)
+    // type_enum(敵のタイプ番号)ごとに表示する挙動パラメータ欄の定義一覧。
+    // タプルの中身は (フィールド名: EnemyDefのプロパティ名, ラベル: 画面に表示する日本語名, 小数点以下桁数: NumericUpDownの表示桁数)。
+    // 例えば type_enum=0 (巡回)を選ぶと、"moveSpeed"というプロパティを「移動速度係数」というラベルで、
+    // 小数点以下2桁のNumericUpDownとして自動的に画面へ並べる、という設定になっている。
     private static readonly Dictionary<int, (string Field, string Label, int Decimals)[]> EnemyParamFields = new()
     {
-        [0] = new[] { ("moveSpeed", "移動速度係数", 2) }, // PATROL
-        [1] = new[] { ("actionInterval", "ジャンプ間隔(フレーム)", 0), ("jumpPowerMult", "ジャンプ力係数", 2) }, // JUMPER
-        [2] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // STATIONARY
-        [3] = new[] { ("triggerRange", "索敵X範囲(px)", 0), ("detectionRangeY", "索敵Y範囲(px)", 0), ("moveSpeed", "巡回速度係数", 2), ("cooldownTime", "射撃後クールダウン(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // PATROL_SHOOTER
-        [4] = new[] { ("moveSpeed", "移動速度係数", 2) }, // WALKER
-        [5] = new[] { ("moveSpeed", "移動速度係数", 2), ("jumpPowerMult", "ジャンプ力係数", 2) }, // CHASER
-        [6] = new[] { ("triggerRange", "発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("dashSpeedMult", "突進速度係数", 2), ("dashDuration", "突進継続時間(フレーム)", 0), ("cooldownTime", "クールダウン(フレーム)", 0) }, // DASH_CHARGER
-        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0), ("shockwaveRadius", "着地ショックウェイブ半径(px)", 0), ("fastForwardJitter", "早送り中の落下ジッター量(px)", 0), ("diagonalFallSpeed", "方向反転時の斜め落下速度(px/フレーム)", 2) }, // FALLER
-        [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2) }, // SPREAD_SHOOTER
-        [9] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // AIMED_SHOOTER
-        [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2) }, // FLOATER
-        [11] = new[] { ("actionInterval", "テレポート間隔(フレーム)", 0), ("teleportRangeMin", "オフセット最小(px)", 0), ("teleportRangeMax", "オフセット最大(px)", 0) }, // TELEPORTER
-        [12] = new[] { ("moveSpeed", "通常時速度係数", 2), ("enragedMoveSpeed", "覚醒後速度係数", 2), ("shrinkFactor", "縮小率", 2) }, // SHRINKER
-        [13] = new[] { ("moveSpeed", "移動速度係数", 2), ("shieldOffDuration", "無敵解除継続(フレーム)", 0), ("shieldOnDuration", "無敵継続(フレーム)", 0) }, // SHIELD
-        [14] = new[] { ("mimicDelayFrames", "遅延フレーム数", 0) }, // MIMIC_GHOST
-        [15] = new[] { ("moveSpeed", "移動速度係数", 2), ("sizeAmplitude", "スケール振幅", 2), ("sizeFrequency", "スケール周波数", 3), ("minScale", "最小スケール", 2) }, // SIZE_SHIFTER
-        [16] = new[] { ("moveSpeed", "基準速度係数", 2), ("tempoFrequency", "周波数", 3), ("tempoMin", "speedScale最小", 2), ("tempoMax", "speedScale最大", 2) }, // TEMPO_WARPER
-        [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // BRIGHTNESS_PHANTOM
-        [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // COLOR_SHIFTER
-        [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // ZOOM_DISRUPTOR
+        [0] = new[] { ("moveSpeed", "移動速度係数", 2) }, // type_enum=0: 巡回(Patrol)
+        [1] = new[] { ("actionInterval", "ジャンプ間隔(フレーム)", 0), ("jumpPowerMult", "ジャンプ力係数", 2) }, // type_enum=1: ジャンプ(Jumper)
+        [2] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // type_enum=2: 固定砲台(Stationary)
+        [3] = new[] { ("triggerRange", "索敵X範囲(px)", 0), ("detectionRangeY", "索敵Y範囲(px)", 0), ("moveSpeed", "巡回速度係数", 2), ("cooldownTime", "射撃後クールダウン(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // type_enum=3: 巡回砲台(Patrol+Shoot)
+        [4] = new[] { ("moveSpeed", "移動速度係数", 2) }, // type_enum=4: 歩いてくる(Walker)
+        [5] = new[] { ("moveSpeed", "移動速度係数", 2), ("jumpPowerMult", "ジャンプ力係数", 2) }, // type_enum=5: 追っかけてくる(Chaser)
+        [6] = new[] { ("triggerRange", "発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("dashSpeedMult", "突進速度係数", 2), ("dashDuration", "突進継続時間(フレーム)", 0), ("cooldownTime", "クールダウン(フレーム)", 0) }, // type_enum=6: 突進(Dash Charger)
+        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0), ("shockwaveRadius", "着地ショックウェイブ半径(px)", 0), ("fastForwardJitter", "早送り中の落下ジッター量(px)", 0), ("diagonalFallSpeed", "方向反転時の斜め落下速度(px/フレーム)", 2) }, // type_enum=7: 落ちてくる敵(Faller)
+        [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2) }, // type_enum=8: 拡散弾(Spread Shooter)
+        [9] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // type_enum=9: 照準弾(Aimed Shooter)
+        [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2) }, // type_enum=10: 浮遊敵(Floater)
+        [11] = new[] { ("actionInterval", "テレポート間隔(フレーム)", 0), ("teleportRangeMin", "オフセット最小(px)", 0), ("teleportRangeMax", "オフセット最大(px)", 0) }, // type_enum=11: テレポーター(Teleporter)
+        [12] = new[] { ("moveSpeed", "通常時速度係数", 2), ("enragedMoveSpeed", "覚醒後速度係数", 2), ("shrinkFactor", "縮小率", 2) }, // type_enum=12: 分裂もどき(Shrinker)
+        [13] = new[] { ("moveSpeed", "移動速度係数", 2), ("shieldOffDuration", "無敵解除継続(フレーム)", 0), ("shieldOnDuration", "無敵継続(フレーム)", 0) }, // type_enum=13: シールド(Shield)
+        [14] = new[] { ("mimicDelayFrames", "遅延フレーム数", 0) }, // type_enum=14: 幽霊敵(Mimic Ghost)
+        [15] = new[] { ("moveSpeed", "移動速度係数", 2), ("sizeAmplitude", "スケール振幅", 2), ("sizeFrequency", "スケール周波数", 3), ("minScale", "最小スケール", 2) }, // type_enum=15: 大きさが変わる敵(Size Shifter)
+        [16] = new[] { ("moveSpeed", "基準速度係数", 2), ("tempoFrequency", "周波数", 3), ("tempoMin", "speedScale最小", 2), ("tempoMax", "speedScale最大", 2) }, // type_enum=16: 速さ操作敵(Tempo Warper)
+        [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // type_enum=17: 明るさ操作敵(Brightness Phantom)
+        [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // type_enum=18: 色調整敵(Color Shifter)
+        [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // type_enum=19: ズーム撹乱敵(Zoom Disruptor)
     };
-
+    // type_enum(ギミックのタイプ番号)ごとに表示する挙動パラメータ欄の定義一覧。中身の意味はEnemyParamFieldsと同じ形式。
+    // ここに定義が無いtype_enum（＝配列の添字にキーが存在しない番号）は、そのギミックに調整可能なパラメータが
+    // 無いことを意味し、その場合はUpdateBehaviorParamsPanel側でパラメータ欄を出さずに従来の説明文だけを表示する。
     private static readonly Dictionary<int, (string Field, string Label, int Decimals)[]> GimmickParamFields = new()
     {
-        [0] = new[] { ("warpOffsetPx", "ワープ後オフセット(px)", 1) }, // CUT_PORTAL
-        [1] = new[] { ("rotationSpeed", "回転速度(rad/フレーム)", 3) }, // ROTATING_BRIDGE
-        [4] = new[] { ("sinkSpeed", "降下速度(px/フレーム)", 2), ("maxDepthOffset", "最大沈み込み(px)", 0) }, // FALLING_LIFT
-        [5] = new[] { ("pushOutDistance", "押し出し距離係数", 2) }, // REFLECT_MIRROR
-        [6] = new[] { ("triggerWidthThreshold", "起動に必要な横幅(px)", 0) }, // WEIGHT_SWITCH
-        [11] = new[] { ("standDelayFrames", "乗ってから落下まで(フレーム)", 0), ("standTolerancePx", "乗り判定の許容誤差(px)", 0), ("respawnDelayFrames", "復活までの時間(フレーム)", 0) }, // CHIKUWA_BLOCK
-        [12] = new[] { ("radius", "効果範囲の半径(px)", 0) }, // TIME_FIELD
-        [14] = new[] { ("travelDistance", "可動距離(px)", 0), ("oscillationSpeed", "往復の速さ", 3) }, // MOVING_PLATFORM
-        [17] = new[] { ("travelDistance", "可動距離(px)", 0), ("stepIncrement", "1回あたりの移動割合", 2) }, // FRAMESTEP_LIFT
-        [18] = new[] { ("brightLevel", "明転時の輝度", 2), ("darkLevel", "暗転時の輝度", 2) }, // BRIGHTNESS_ZONE
-        [19] = new[] { ("tintR", "色調R", 2), ("tintG", "色調G", 2), ("tintB", "色調B", 2) }, // COLOR_ZONE
-        [20] = new[] { ("zoomLevel", "ズーム倍率", 2) }, // ZOOM_LENS
-        [21] = new[] { ("zoomLevel", "ズーム倍率", 2), ("brightLevel", "明るさ倍率", 2) }, // SLOWMO_FIELD
+        [0] = new[] { ("warpOffsetPx", "ワープ後オフセット(px)", 1) }, // type_enum=0: ポータル(Cut Portal)
+        [1] = new[] { ("rotationSpeed", "回転速度(rad/フレーム)", 3) }, // type_enum=1: 回転橋・自動(Rotating Bridge)
+        [4] = new[] { ("sinkSpeed", "降下速度(px/フレーム)", 2), ("maxDepthOffset", "最大沈み込み(px)", 0) }, // type_enum=4: 落下リフト(Falling Lift)
+        [5] = new[] { ("pushOutDistance", "押し出し距離係数", 2) }, // type_enum=5: 反射鏡(Reflect Mirror)
+        [6] = new[] { ("triggerWidthThreshold", "起動に必要な横幅(px)", 0) }, // type_enum=6: 重量スイッチ(Weight Switch)
+        [11] = new[] { ("standDelayFrames", "乗ってから落下まで(フレーム)", 0), ("standTolerancePx", "乗り判定の許容誤差(px)", 0), ("respawnDelayFrames", "復活までの時間(フレーム)", 0) }, // type_enum=11: ちくわブロック(Chikuwa Block)
+        [12] = new[] { ("radius", "効果範囲の半径(px)", 0) }, // type_enum=12: 時間フィールド(Time Field)
+        [14] = new[] { ("travelDistance", "可動距離(px)", 0), ("oscillationSpeed", "往復の速さ", 3) }, // type_enum=14: 動く足場(Moving Platform)
+        [17] = new[] { ("travelDistance", "可動距離(px)", 0), ("stepIncrement", "1回あたりの移動割合", 2) }, // type_enum=17: コマ送りリフト(Framestep Lift)
+        [18] = new[] { ("brightLevel", "明転時の輝度", 2), ("darkLevel", "暗転時の輝度", 2) }, // type_enum=18: 明暗ゾーン(Brightness Zone)
+        [19] = new[] { ("tintR", "色調R", 2), ("tintG", "色調G", 2), ("tintB", "色調B", 2) }, // type_enum=19: 色調ゾーン(Color Zone)
+        [20] = new[] { ("zoomLevel", "ズーム倍率", 2) }, // type_enum=20: ズームレンズ(Zoom Lens)
+        [21] = new[] { ("zoomLevel", "ズーム倍率", 2), ("brightLevel", "明るさ倍率", 2) }, // type_enum=21: スローフィールド(Slowmo Field)
     };
 
-    // type_enum の説明
+    // 敵のtype_enum(タイプ番号)ごとの説明一覧。
+    // desc: グリッドのコンボボックスやカード選択画面の見出しに使う短い表示名（"番号 = 名前 (英語名)"の形式）
+    // detail: カード選択画面(TypeCardPickerForm)や右側の説明パネル(rtbTypeHint)に表示する、動作を平易な言葉で説明した文章
     private static readonly (int type, string desc, string detail)[] EnemyTypes =
     {
         (0, "0 = 巡回 (Patrol)", "左右にpatrolLeft～patrolRightの範囲で巡回します。\npatrol_left/patrol_rightをステージJSON配置時に指定可能。"),
@@ -126,8 +169,10 @@ public class AssetManagerPageControl : UserControl
         (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
         (20, "20 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
     };
-    // Feature: UI改善（提案書 CUT-2/AM-1）— 敵タイプ(EnemyTypes)には既にあった「plain-languageの説明文(detail)」を
-    // ギミック/アイテムのタイプにも同様に用意し、type_enumという数字だけでなく実際の挙動が分かるようにする。
+    // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— 敵タイプ(EnemyTypes)には元々あった
+    // 「専門用語を使わない平易な説明文(detail)」を、ギミック/アイテムのタイプにも同じように用意した。
+    // これにより、type_enumという数字の羅列だけを見ても分からなかった実際の挙動が、
+    // 誰が見てもひと目で分かるようになる。
     private static readonly (int type, string desc, string detail)[] GimmickTypes =
     {
         (0, "0 = ポータル", "同じparam値を持つポータルを2つ配置すると対になり、片方に触れるともう片方の位置へワープします。"),
@@ -156,6 +201,7 @@ public class AssetManagerPageControl : UserControl
         (23, "23 = 明暗ロック足場 (Brightness Lock Platform)", "paramで指定した明暗状態(Xキー)とプレイヤーの現在の状態が一致している間だけ実体化する足場です。"),
         (24, "24 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
     };
+    // アイテムのtype_enum(タイプ番号)ごとの説明一覧。敵・ギミックと同じ (番号, 表示名, 詳細説明) の形式
     private static readonly (int type, string desc, string detail)[] ItemTypes =
     {
         (0, "0 = なし", "特に効果を持たない、装飾・プレースホルダー用のアイテムです。"),
@@ -163,74 +209,104 @@ public class AssetManagerPageControl : UserControl
         (2, "2 = 回復アイテム", "取得するとプレイヤーのHPを回復します。"),
     };
 
+    // コンストラクタ。
+    // assetsPath : アセット定義(assets.json等)が置かれているフォルダへのパス
+    // assets     : 既に読み込み済みの敵・ギミック・アイテム・コモンイベント定義データ
     public AssetManagerPageControl(string assetsPath, AssetDefinitions assets)
     {
         this.assetsPath = assetsPath;
+        // プロジェクトルートは、渡されたassetsPathの「1つ上のフォルダ」として求める
+        // （スプライト画像をコピーする先のimgフォルダ等が、ここを基準に決まるため）。
         this.projectRoot = Path.GetDirectoryName(assetsPath)!;
         this.assets = assets;
+        // コモンイベント一覧は、渡されたassetsをそのまま参照するのではなく、
+        // 個々の要素・アクションリストを丸ごと複製(ディープコピーに近い形)して_commonEventsへ持っておく。
+        // これにより、このページ上で編集している最中の内容が保存操作を行うまでassets本体には影響しない。
         _commonEvents = assets.CommonEvents
             .Select(ce => new CommonEventDef { id = ce.id, name = ce.name, actions = new List<EventActionEntry>(ce.actions) })
             .ToList();
+        // 画面上の各コントロール(グリッド・ボタン・プレビュー等)を組み立てる
         InitUI();
+        // assetsの内容を各グリッド/リストへ流し込んで表示する
         LoadData();
     }
 
+    // stagesフォルダに存在するステージJSONファイル名の一覧を返す。
+    // （呼び出し元でステージ選択UI等に使われることを想定している）
     public List<string> GetStageFileNames()
     {
         string stagesPath = Path.Combine(assetsPath, "stages");
+        // stagesフォルダ自体が存在しない場合は、エラーにせず空のリストを返す
         if (!Directory.Exists(stagesPath)) return new List<string>();
         return Directory.GetFiles(stagesPath, "*.json")
             .Select(Path.GetFileName)
+            // "_test_play.json"はテストプレイ専用の一時ファイルなので、通常のステージ一覧からは除外する
             .Where(n => n != null && n != "_test_play.json")
             .Select(n => n!)
             .ToList();
     }
 
+    // このページを構成する全コントロール（検索欄・タグボタン・プレビュー・各グリッド・ボタン類）を
+    // ここで一括して生成し、配置する。コンストラクタから一度だけ呼ばれる、いわば画面の組み立て工程。
     private void InitUI()
     {
+        // このUserControl自体を親(ホストFormやシェル画面)いっぱいに広げる
         Dock = DockStyle.Fill;
+        // アプリ全体で統一されたフォント設定(UiTheme.Base)を適用する
         Font = UiTheme.Base;
 
         // ===== 上部: 検索ボックス + タグ絞り込みボタン =====
-        // Feature: UI改善 — 検索欄と、複数選択可能な種別タグボタン（チェック状態のボタン=Appearance.Button）を
-        // 1つのDock=Topパネルにまとめる。タグはCheckBoxで実装し、押した状態(Checked)がタグON。
-        // Feature: UI改善 — 検索/タグ行もウィンドウ幅次第で折り返しうるため、固定Heightではなく
-        // AutoSizeにして必要な行数ぶん高さが伸びるようにする（下段のグリッド等がはみ出しを防ぐ）。
+        // 機能追加: UI改善 — 検索欄と、複数選択できる種別タグボタン（押し込み状態を持つボタン=Appearance.Button）を
+        // 1つのDock=Top(画面上端に張り付く)パネルにまとめている。タグはCheckBoxコントロールで実装しており、
+        // 押した状態(Checked=true)が「そのタグがON＝該当セクションを表示する」という意味になる。
+        // 機能追加: UI改善 — 検索欄とタグ行はウィンドウの横幅によっては折り返して2行以上になる可能性があるため、
+        // 高さを固定値にせず、AutoSize（中身に合わせて自動で高さが伸縮する設定）にしている。
+        // こうしないと、折り返した分の行が下段のグリッド等に隠れてはみ出してしまう。
         var pnlTop = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
 
+        // 検索アイコン・検索ボックス・複製ボタンを横に並べるツールバー
         var pnlToolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
         var lblSearch = new Label { Text = "🔍", AutoSize = true, Margin = new Padding(2, 6, 0, 0) };
         txtSearch = new TextBox { Width = 240, Margin = new Padding(4, 3, 12, 0), PlaceholderText = "ID・名前で検索..." };
+        // 検索ボックスの文字が変わるたびに、即座に絞り込みを再適用する（ボタン押下等は不要）
         txtSearch.TextChanged += (s, e) => ApplySearchFilter();
         btnDuplicate = new Button { Text = "⧉ 選択行を複製", AutoSize = true, Padding = new Padding(6, 4, 6, 4), Margin = new Padding(4, 1, 0, 0) };
         btnDuplicate.Click += BtnDuplicate_Click;
         pnlToolbar.Controls.AddRange(new Control[] { lblSearch, txtSearch, btnDuplicate });
 
+        // 敵/ギミック/アイテム/コモンイベントの各セクションを表示するかどうかを切り替えるタグボタン群
         var pnlTags = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4, 0, 4, 4) };
+        // 4つのタグボタンはすべて初期状態でChecked=true（＝すべてのセクションを表示した状態で開始する）
         var chkTagEnemy = new CheckBox { Text = "👾 敵", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
         var chkTagGimmick = new CheckBox { Text = "🔧 ギミック", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
         var chkTagItem = new CheckBox { Text = "💎 アイテム", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
         var chkTagCommonEvent = new CheckBox { Text = "🔔 コモンイベント", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
+        // チェック状態が変わるたびに、対応するセクションパネルのVisibleを直接切り替える（単純なON/OFF連動）
         chkTagEnemy.CheckedChanged += (s, e) => sectionEnemy.Visible = chkTagEnemy.Checked;
         chkTagGimmick.CheckedChanged += (s, e) => sectionGimmick.Visible = chkTagGimmick.Checked;
         chkTagItem.CheckedChanged += (s, e) => sectionItem.Visible = chkTagItem.Checked;
         chkTagCommonEvent.CheckedChanged += (s, e) => sectionCommonEvent.Visible = chkTagCommonEvent.Checked;
         pnlTags.Controls.AddRange(new Control[] { chkTagEnemy, chkTagGimmick, chkTagItem, chkTagCommonEvent });
 
+        // タグ行を先に追加し、その下にツールバー行を追加する（Dock=Topなので追加順=画面上での並び順になる）
         pnlTop.Controls.Add(pnlTags);
         pnlTop.Controls.Add(pnlToolbar);
 
-        // ===== 右サイドパネル =====
+        // ===== 右サイドパネル（プレビュー・タイプ説明・挙動パラメータをまとめて表示） =====
         var pnlRight = new Panel { Dock = DockStyle.Right, Width = 260, BorderStyle = BorderStyle.FixedSingle };
+        // 右サイドの中身は縦に並べるFlowLayoutPanel。AutoSizeで必要な高さぶんだけ伸びる
         var flowRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(5) };
 
+        // スプライト画像のプレビュー表示エリア（黒背景の枠+マウスホイールでズーム可能）
         var lblPrev = new Label { Text = "🖼 スプライトプレビュー（ホイールでズーム）", AutoSize = true, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 0, 0, 4) };
         var pnlPreviewHost = new Panel { Width = 238, Height = 180, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black, AutoScroll = true, Margin = new Padding(0, 0, 0, 2) };
         pbPreview = new PictureBox { SizeMode = PictureBoxSizeMode.Normal, BackColor = Color.Black };
         pnlPreviewHost.Controls.Add(pbPreview);
+        // プレビュー枠の上でマウスホイールを回すとズームイン/アウトする（PnlPreviewHost_MouseWheel参照）
         pnlPreviewHost.MouseWheel += PnlPreviewHost_MouseWheel;
         lblPreviewPath = new Label { Width = 238, Height = 40, Font = new Font("Meiryo UI", 7), ForeColor = Color.Gray, Text = "(選択なし)", Margin = new Padding(0, 0, 0, 4) };
 
+        // 「タイプ説明」パネル。選択中の種別のtype_enum一覧・平易な説明文をここに表示する
         lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Width = 238, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 4, 0, 2) };
         rtbTypeHint = new RichTextBox
         {
@@ -243,8 +319,10 @@ public class AssetManagerPageControl : UserControl
             BorderStyle = BorderStyle.None
         };
 
-        // Feature: Configurable Behavior Parameters (M1) — 選択中の敵/ギミック行のtype_enumに応じて
-        // 挙動パラメータの入力欄を動的に切り替えるパネル。rtbTypeHintと同じ場所（表示/非表示切替）。
+        // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 選択中の敵/ギミック行のtype_enumに
+        // 応じて、挙動パラメータの入力欄(NumericUpDown群)を動的に組み立てて表示するためのパネル。
+        // rtbTypeHint（タイプ説明欄）と同じ場所に重ねて配置しておき、状況に応じてどちらか一方だけを
+        // Visible=trueにすることで、あたかも1つの枠の中身が切り替わっているように見せている。
         pnlBehaviorParams = new Panel
         {
             Width = 238,
@@ -253,6 +331,8 @@ public class AssetManagerPageControl : UserControl
             Visible = false
         };
 
+        // 右サイドパネルへ、上から順に「プレビュー見出し→プレビュー枠→パス表示→タイプ説明見出し→
+        // タイプ説明欄→挙動パラメータパネル」の順で追加する（FlowLayoutPanelなのでこの順に縦に並ぶ）
         flowRight.Controls.Add(lblPrev);
         flowRight.Controls.Add(pnlPreviewHost);
         flowRight.Controls.Add(lblPreviewPath);
@@ -261,21 +341,28 @@ public class AssetManagerPageControl : UserControl
         flowRight.Controls.Add(pnlBehaviorParams);
         pnlRight.Controls.Add(flowRight);
 
-        // ===== 下部ボタン（右詰め/左詰めFlowLayoutPanelで自動配置） =====
-        // Feature: UI改善 — 左詰め側はボタン数が多くWrapContentsで折り返しうるため、
-        // 固定Heightだと折り返した行（保存/キャンセルボタンを含む）がパネルの外にはみ出して
-        // 見えなくなっていた。pnlBottom自体をAutoSizeにして必要な行数ぶん高さが伸びるようにする。
+        // ===== 下部ボタン（右詰め=保存/キャンセル、左詰め=追加系ボタン群。FlowLayoutPanelで自動配置） =====
+        // 機能追加: UI改善 — 左詰め側はボタンの数が多く、ウィンドウが狭いとWrapContentsによって
+        // 複数行に折り返される。以前は下段パネルの高さを固定値にしていたため、折り返して増えた行
+        // （保存/キャンセルボタンを含む行）がパネルの外側にはみ出して見えなくなる不具合があった。
+        // そこでpnlBottom自体をAutoSizeにし、必要な行数ぶんだけ自動的に高さが伸びるようにしてある。
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        // 保存ボタン・キャンセルボタンは右詰め(RightToLeft方向に並べる)ことで、右端から順に配置される
         var flowBottomRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 6, 8, 2), AutoSize = true };
+        // 保存ボタン。目立つよう緑色の背景色にしている
         btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 6, 10, 6), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Meiryo UI", 10, FontStyle.Bold) };
         btnSave.Click += BtnSave_Click;
         btnClose = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 6, 10, 6) };
+        // キャンセルボタンは保存処理を一切行わず、Cancelledイベントを発火してホスト側に後始末を任せるだけ
         btnClose.Click += (s, e) => Cancelled?.Invoke(this, EventArgs.Empty);
         flowBottomRight.Controls.Add(btnSave);
         flowBottomRight.Controls.Add(btnClose);
 
+        // 敵/ギミック/アイテム/コモンイベントの「追加」ボタンと、パーツ編集・挙動スクリプト編集・
+        // タイプカード選択の各ボタンを左詰めで並べる行
         var flowBottomLeft = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8, 2, 8, 6), AutoSize = true, WrapContents = true };
         var btnAddEnemy = new Button { Text = "＋ 敵追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
+        // 押すと敵グリッドへ既定値(GetDefaultEnemyRow)の新規行を1行追加する
         btnAddEnemy.Click += (s, e) => AddRow(dgvEnemies, GetDefaultEnemyRow());
         var btnAddGimmick = new Button { Text = "＋ ギミック追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddGimmick.Click += (s, e) => AddRow(dgvGimmicks, GetDefaultGimmickRow());
@@ -283,14 +370,17 @@ public class AssetManagerPageControl : UserControl
         btnAddItem.Click += (s, e) => AddRow(dgvItems, GetDefaultItemRow());
         var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
-        // Feature: Composite Multi-Part Objects (Parts-M7) — 敵/ギミック/アイテム共通。type_enumに関係なく使える
+        // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — 敵/ギミック/アイテムのどのグリッドを
+        // 選択していても共通で使えるボタン。パーツは親オブジェクトのtype_enumとは独立して機能するため、
+        // 挙動スクリプト編集ボタンのような「特定タイプでなければ使えない」という制限は設けていない。
         var btnPartsEditor = new Button { Text = "🧩 パーツを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnPartsEditor.Click += (s, e) => BtnPartsEditor_Click();
-        // Feature: Puzzle-like Behavior Scripting (M4) — ブロックエディタを開く
+        // 機能: ブロック(パズル)組み立て式の挙動スクリプティング (M4) — ブロックエディタ画面を開くボタン
         var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
-        // Feature: UI改善（提案書 CUT-2/AM-1）— type_enumを数字の羅列から選ぶのではなく、
-        // アイコン・名前・説明が並んだカード一覧から選べるようにする
+        // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— コンボボックスの中から数字と文字が
+        // 並んだ選択肢を選ぶのではなく、アイコン・名前・説明文が並んだカード一覧をクリックして
+        // type_enumを選べるようにするためのボタン
         var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
         flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnTypeCardPicker });
@@ -299,28 +389,37 @@ public class AssetManagerPageControl : UserControl
         pnlBottom.Controls.Add(flowBottomRight);
 
         // ===== 中央: 敵/ギミック/アイテム/コモンイベントを1つの縦スクロールビューに集約 =====
-        // Feature: UI改善 — 以前はFlowLayoutPanel(AutoSize)の直接の子にDock=Fillのグリッドを置いており、
-        // 親のサイズが子から逆算される一方で子は親のサイズから逆算しようとする循環に陥り、グリッドが
-        // 極端に狭く潰れていた。ここでは各セクションを「高さ固定・幅は可変(Dock=Top)」のPanelにし、
-        // その内部でグリッドをDock=Fillにする（親の高さが確定しているためDock=Fillが安全に働く）。
-        // これにより、ウィンドウ幅に合わせてグリッドの横幅も正しく追従するようになる。
+        // 機能追加: UI改善 — 以前はFlowLayoutPanel(AutoSize)の直接の子としてDock=Fillのグリッドを
+        // 置いていたが、これだと「親がAutoSizeで子のサイズから逆算しようとする」のに対して
+        // 「子はDock=Fillで親のサイズから逆算しようとする」という、お互いがお互いを基準にして
+        // サイズを決めようとする循環（無限ループのようなもの）に陥ってしまい、結果としてグリッドが
+        // 極端に狭く潰れて表示される不具合の原因になっていた。
+        // ここでは各セクションを「高さは固定値・幅だけウィンドウに合わせて可変(Dock=Top)」のPanelにし、
+        // その内部でグリッドをDock=Fillにする、という構成にしている。親の高さが確定しているため、
+        // 子のDock=Fillが安全に機能する。これにより、ウィンドウ幅の変化にもグリッドの横幅が正しく追従する。
         var pnlSections = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
 
+        // 敵セクション: グリッド生成＋見出し付きパネル化
         dgvEnemies = CreateEnemyGrid();
         sectionEnemy = BuildSection("👾 敵 (Enemies)", dgvEnemies, 300);
 
+        // ギミックセクション
         dgvGimmicks = CreateGimmickGrid();
         sectionGimmick = BuildSection("🔧 ギミック (Gimmicks)", dgvGimmicks, 300);
 
+        // アイテムセクション
         dgvItems = CreateItemGrid();
         sectionItem = BuildSection("💎 アイテム (Items)", dgvItems, 220);
 
         // ===== コモンイベント (RPGツクールMZ風: 複数トリガーから呼び出せる共通処理) =====
         lstCommonEvents = new ListBox { Font = new Font("Meiryo UI", 9) };
+        // ダブルクリックで選択中のコモンイベントを編集画面へ
         lstCommonEvents.DoubleClick += (s, e) => EditSelectedCommonEvent();
+        // 選択が変わったら「今アクティブな種別」をコモンイベントに切り替え、他のグリッドの選択を解除する
         lstCommonEvents.SelectedIndexChanged += (s, e) => { if (lstCommonEvents.SelectedIndex >= 0) ClearOtherSelections(AssetKind.CommonEvent); };
         var pnlCommonEventContent = new Panel();
         lstCommonEvents.Dock = DockStyle.Fill;
+        // リストの下に「編集」「削除」ボタンを並べる行
         var flowCeButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 34, Padding = new Padding(2) };
         var btnCeEdit = new Button { Text = "✎ 編集", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
         btnCeEdit.Click += (s, e) => EditSelectedCommonEvent();
@@ -331,23 +430,34 @@ public class AssetManagerPageControl : UserControl
         pnlCommonEventContent.Controls.Add(flowCeButtons);
         sectionCommonEvent = BuildSection("🔔 コモンイベント", pnlCommonEventContent, 240);
 
-        // Dock=Topは「先に追加したものほど端(上)に近づく」ため、この順番がそのまま表示順になる
+        // Dock=Topの子コントロールは「先に追加したものほど画面の端(この場合は上)に近づく」性質があるため、
+        // ここでのControls.Add呼び出し順が、そのまま画面上でのセクションの表示順（敵→ギミック→アイテム→
+        // コモンイベントの順）になる。
         pnlSections.Controls.Add(sectionEnemy);
         pnlSections.Controls.Add(sectionGimmick);
         pnlSections.Controls.Add(sectionItem);
         pnlSections.Controls.Add(sectionCommonEvent);
 
+        // 最後にこのUserControl自身へ各パネルを追加する。WinFormsのDockでは後から追加したものが
+        // 優先的に外側（画面の端）を占有するため、Dock=Fillのpnlsectionsを最初に追加している。
         Controls.Add(pnlSections);
         Controls.Add(pnlRight);
         Controls.Add(pnlBottom);
         Controls.Add(pnlTop);
+        // コモンイベント一覧の初期表示を反映させる
         RefreshCommonEventsList();
+        // 右側の「タイプ説明」欄の初期表示を反映させる（まだ何も選択されていない状態の表示）
         UpdateTypeHint();
     }
 
-    // 種別セクション1つぶんの見出し+中身をまとめる。
-    // Feature: UI改善 — 高さ固定・幅可変(Dock=Top)のPanelにすることで、中身(グリッド等)をDock=Fillにしても
-    // 安全（親の高さが確定しているため）。ウィンドウ幅に応じて中身の横幅も正しく追従する。
+    // 種別セクション1つぶんの「見出しラベル＋中身のコントロール」をひとまとめのPanelにする補助メソッド。
+    // title         : セクションの見出しに表示する文字列（例:「👾 敵 (Enemies)」）
+    // content       : 見出しの下に配置する中身のコントロール（グリッドやリスト等）
+    // contentHeight : 中身の高さ(px)。セクション全体の高さは、この値+見出しの高さ+上下マージンで決まる
+    //
+    // 機能追加: UI改善 — 高さを固定値にし、幅だけウィンドウに合わせて可変(Dock=Top)にすることで、
+    // 中身(グリッド等)側をDock=Fillにしても安全に働く（親の高さが確定しているため）。
+    // これにより、ウィンドウ幅の変化に応じて中身の横幅も正しく追従するようになる。
     private Panel BuildSection(string title, Control content, int contentHeight)
     {
         const int titleHeight = 24;
