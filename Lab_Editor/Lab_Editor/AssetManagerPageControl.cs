@@ -460,45 +460,64 @@ public class AssetManagerPageControl : UserControl
     // これにより、ウィンドウ幅の変化に応じて中身の横幅も正しく追従するようになる。
     private Panel BuildSection(string title, Control content, int contentHeight)
     {
+        // 見出しラベルの高さと、パネル上下の余白の大きさを定数として定義しておく
         const int titleHeight = 24;
         const int topMargin = 4, bottomMargin = 14;
+        // セクション全体のPanel。高さは「見出し+中身+上下マージン」の合計値で固定する
         var section = new Panel
         {
             Dock = DockStyle.Top,
             Height = titleHeight + contentHeight + topMargin + bottomMargin,
             Padding = new Padding(4, topMargin, 4, bottomMargin),
         };
+        // 見出しラベル。太字にして中身との区別をつけ、下揃え(BottomLeft)にして中身の直上にくっつける
         var lbl = new Label { Dock = DockStyle.Top, Height = titleHeight, Text = title, Font = new Font(Font, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
+        // 中身(グリッド等)はパネルいっぱいに広げ、余白は持たせない
         content.Dock = DockStyle.Fill;
         content.Margin = new Padding(0);
-        // Dock=Fillの子を先に追加し、その後にDock=Topの見出しラベルを追加する（安全なDock順）
+        // WinFormsのDockは「後から追加したコントロールほど優先的に外側の領域を占有する」性質があるため、
+        // Dock=Fillの中身を先に追加し、その後にDock=Topの見出しラベルを追加する（この順番でないと
+        // 見出しの分だけ中身が正しく縮まず、レイアウトが崩れる）。
         section.Controls.Add(content);
         section.Controls.Add(lbl);
         return section;
     }
 
+    // プレビュー枠(pnlPreviewHost)の上でマウスホイールが回された時に呼ばれる。
+    // ホイールを上に回す(Delta>0)と拡大、下に回すと縮小するようにズーム率を段階的に変化させる。
     private void PnlPreviewHost_MouseWheel(object? sender, MouseEventArgs e)
     {
+        // まだ画像が読み込まれていない場合は何もしない
         if (pbPreview.Image == null) return;
+        // ホイール1段階につき約15%ずつ拡大/縮小する係数を求める
         float factor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
+        // ズーム率を現在値に係数を掛けた値にし、極端に小さく/大きくなりすぎないよう0.1倍～8倍の範囲に収める
         _previewZoom = Math.Clamp(_previewZoom * factor, 0.1f, 8f);
+        // 実際にPictureBoxのサイズへ反映する
         ApplyPreviewZoom();
     }
 
+    // プレビュー画像の現在のズーム倍率(1.0が等倍)
     private float _previewZoom = 1f;
 
+    // _previewZoomの値を元に、実際にプレビュー用PictureBoxの表示サイズを計算して適用する
     private void ApplyPreviewZoom()
     {
         if (pbPreview.Image == null) return;
         pbPreview.Size = new Size((int)(pbPreview.Image.Width * _previewZoom), (int)(pbPreview.Image.Height * _previewZoom));
     }
 
+    // 敵一覧を表示するDataGridViewを新規に組み立てて返す。
+    // 列構成: アイコン/ID/名前/タイプ(type_enum)/HP/幅/高さ/(非表示の当たり判定情報)/画像パス/各種操作ボタン
     private DataGridView CreateEnemyGrid()
     {
-        // Feature: UI改善 — Dock=FillはAutoSizeのFlowLayoutPanel(BuildSection内)の直接の子には設定しない。
-        // 親がAutoSizeで子のサイズから逆算する一方、Dock=Fillは親のサイズから子を逆算しようとするため
-        // サイズ計算が循環してしまい、グリッドが極端に狭く潰れる不具合の原因になっていた。
-        // ここでは固定サイズ（BuildSectionでWidth/Heightを明示指定）にする。
+        // 機能追加: UI改善 — Dock=Fillは、AutoSize設定のFlowLayoutPanel(BuildSection呼び出し元)の
+        // 直接の子コントロールには設定しない方がよい。親がAutoSizeで「子のサイズから親のサイズを逆算する」
+        // のに対し、子がDock=Fillだと「親のサイズから自分のサイズを逆算しよう」とするため、
+        // お互いに依存し合ってサイズ計算が循環してしまい、結果としてグリッドが極端に狭く
+        // 潰れて表示される不具合の原因になっていた。
+        // そのため、ここではグリッド自体には固定サイズを持たせず（BuildSection側でWidth/Heightを
+        // 明示的に指定した固定サイズのPanelに入れることで）安全な構成にしている。
         var dgv = new DataGridView
         {
             AllowUserToAddRows = false,
@@ -509,6 +528,12 @@ public class AssetManagerPageControl : UserControl
             RowHeadersWidth = 25
         };
 
+        // グリッドの列を一括で定義する。
+        // icon/id/name/type_enum/hp/width/heightは画面に表示される列。
+        // hitboxOffsetX～scaleまでの4~5列はVisible=falseの「非表示列」で、当たり判定やスケール値を
+        // 内部的にセルの値として保持しておくためだけに使う（Hitbox/Sizeボタンから編集される）。
+        // spriteは画像パスの表示（編集不可、ボタン経由でのみ変更）。
+        // 末尾のbtnHitbox/btnSize/btnSprite/btnDelは、押すと処理が走るボタン列。
         dgv.Columns.AddRange(new DataGridViewColumn[]
         {
             new DataGridViewTextBoxColumn { Name="icon",     HeaderText="",         FillWeight=30, ReadOnly=true },
@@ -535,13 +560,22 @@ public class AssetManagerPageControl : UserControl
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",   Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30, ToolTipText="この行を削除します" },
         });
 
+        // 各種イベントの配線。
+        // CellContentClick: ボタン列(btnHitbox等)がクリックされた時にHandleGridButtonへ処理を委譲する
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
+        // SelectionChanged: 行の選択が変わったら、他グリッドの選択解除・プレビュー更新・
+        // 挙動パラメータパネル更新・タイプ説明欄更新をまとめて行う
         dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Enemy); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: true); UpdateTypeHint(); };
+        // CurrentCellDirtyStateChanged: コンボボックス等、値が変わった瞬間にCommitEditしないと
+        // CellValueChangedが即座には発火しない列があるため、変更中フラグが立ったら即コミットする
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+        // CellValueChanged: type_enum列の値が変わったら、挙動パラメータパネルとアイコン表示を更新する
         dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, isEnemy: true); RefreshIconCell(dgv, e.RowIndex, isEnemy: true, isGimmick: false); } };
         return dgv;
     }
 
+    // ギミック一覧を表示するDataGridViewを新規に組み立てて返す。基本構成はCreateEnemyGridと同様だが、
+    // HP/幅/高さ/スケール列を持たない（ギミックはこれらのパラメータを使わないため）。
     private DataGridView CreateGimmickGrid()
     {
         var dgv = new DataGridView
@@ -575,6 +609,8 @@ public class AssetManagerPageControl : UserControl
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30, ToolTipText="この行を削除します" },
         });
 
+        // イベント配線はCreateEnemyGridとほぼ同様。DataErrorだけ追加で拾っており、
+        // コンボボックスセルで想定外の値が入った際に詳細ログを残す(HandleDataError参照)。
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
         dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Gimmick); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: false); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
@@ -583,6 +619,8 @@ public class AssetManagerPageControl : UserControl
         return dgv;
     }
 
+    // アイテム一覧を表示するDataGridViewを新規に組み立てて返す。
+    // 敵/ギミック向けの挙動パラメータパネル(pnlBehaviorParams)は使わず、grant_ability(付与能力)列を持つ点が特徴。
     private DataGridView CreateItemGrid()
     {
         var dgv = new DataGridView
@@ -617,6 +655,8 @@ public class AssetManagerPageControl : UserControl
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30, ToolTipText="この行を削除します" },
         });
 
+        // アイテムのSelectionChangedでは、敵/ギミックと違いUpdateBehaviorParamsPanelを呼ばない
+        // （アイテムには挙動パラメータの概念が無いため）。
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
         dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Item); UpdatePreview(dgv); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
