@@ -64,12 +64,12 @@ public class AssetManagerPageControl : UserControl
     {
         [0] = new[] { ("moveSpeed", "移動速度係数", 2) }, // PATROL
         [1] = new[] { ("actionInterval", "ジャンプ間隔(フレーム)", 0), ("jumpPowerMult", "ジャンプ力係数", 2) }, // JUMPER
-        [2] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // STATIONARY
-        [3] = new[] { ("triggerRange", "索敵X範囲(px)", 0), ("detectionRangeY", "索敵Y範囲(px)", 0), ("moveSpeed", "巡回速度係数", 2), ("cooldownTime", "射撃後クールダウン(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // PATROL_SHOOTER
+        [2] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // STATIONARY
+        [3] = new[] { ("triggerRange", "索敵X範囲(px)", 0), ("detectionRangeY", "索敵Y範囲(px)", 0), ("moveSpeed", "巡回速度係数", 2), ("cooldownTime", "射撃後クールダウン(フレーム)", 0), ("projectileSpeed", "弾速係数", 2), ("fastForwardAttackMult", "早送り中の攻撃間隔倍率", 2) }, // PATROL_SHOOTER
         [4] = new[] { ("moveSpeed", "移動速度係数", 2) }, // WALKER
         [5] = new[] { ("moveSpeed", "移動速度係数", 2), ("jumpPowerMult", "ジャンプ力係数", 2) }, // CHASER
         [6] = new[] { ("triggerRange", "発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("dashSpeedMult", "突進速度係数", 2), ("dashDuration", "突進継続時間(フレーム)", 0), ("cooldownTime", "クールダウン(フレーム)", 0) }, // DASH_CHARGER
-        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0) }, // FALLER
+        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0), ("shockwaveRadius", "着地ショックウェイブ半径(px)", 0), ("fastForwardJitter", "早送り中の落下ジッター量(px)", 0), ("diagonalFallSpeed", "方向反転時の斜め落下速度(px/フレーム)", 2) }, // FALLER
         [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2) }, // SPREAD_SHOOTER
         [9] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // AIMED_SHOOTER
         [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2) }, // FLOATER

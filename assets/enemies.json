@@ -1,5 +1,19 @@
 [
   {
+    "id": "enemy_shrinker_demo",
+    "name": "縮小敵(実験用)",
+    "type_enum": 12,
+    "hp": 3,
+    "sprite": "img/enemy.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 48,
+    "hitboxHeight": 48,
+    "shrinkFactor": 0.5,
+    "script": [],
+    "parts": []
+  },
+  {
     "id": "enemy_5",
     "name": "発射する敵",
     "type_enum": 3,
@@ -999,7 +1013,7 @@
     "tempoMin": -1.0,
     "tempoMax": -1.0,
     "effectRange": -1.0,
-    "brightnessMin": -1.0,
+    "brightnessMin": 0.08,
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
@@ -1690,8 +1704,8 @@
         "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 16,
-        "hitboxHeight": 16,
+        "hitboxWidth": 0,
+        "hitboxHeight": 0,
         "scale": 1.0,
         "hp": 1,
         "zOrder": -1,
@@ -1707,13 +1721,19 @@
                     "dx": {
                       "op": "Mul",
                       "a": {
-                        "op": "Add",
+                        "op": "Mul",
                         "a": {
-                          "op": "PartIndex"
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
                         },
-                        "b": 1
+                        "b": -18
                       },
-                      "b": -18
+                      "b": {
+                        "op": "ParentDirection"
+                      }
                     },
                     "dy": {
                       "op": "Mul",
@@ -1759,8 +1779,8 @@
         "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 16,
-        "hitboxHeight": 16,
+        "hitboxWidth": 0,
+        "hitboxHeight": 0,
         "scale": 1.0,
         "hp": 1,
         "zOrder": -1,
@@ -1776,13 +1796,19 @@
                     "dx": {
                       "op": "Mul",
                       "a": {
-                        "op": "Add",
+                        "op": "Mul",
                         "a": {
-                          "op": "PartIndex"
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
                         },
-                        "b": 1
+                        "b": -18
                       },
-                      "b": -18
+                      "b": {
+                        "op": "ParentDirection"
+                      }
                     },
                     "dy": {
                       "op": "Mul",
@@ -1828,8 +1854,8 @@
         "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 16,
-        "hitboxHeight": 16,
+        "hitboxWidth": 0,
+        "hitboxHeight": 0,
         "scale": 1.0,
         "hp": 1,
         "zOrder": -1,
@@ -1845,13 +1871,19 @@
                     "dx": {
                       "op": "Mul",
                       "a": {
-                        "op": "Add",
+                        "op": "Mul",
                         "a": {
-                          "op": "PartIndex"
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
                         },
-                        "b": 1
+                        "b": -18
                       },
-                      "b": -18
+                      "b": {
+                        "op": "ParentDirection"
+                      }
                     },
                     "dy": {
                       "op": "Mul",
@@ -1897,8 +1929,8 @@
         "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 16,
-        "hitboxHeight": 16,
+        "hitboxWidth": 0,
+        "hitboxHeight": 0,
         "scale": 1.0,
         "hp": 1,
         "zOrder": -1,
@@ -1914,13 +1946,19 @@
                     "dx": {
                       "op": "Mul",
                       "a": {
-                        "op": "Add",
+                        "op": "Mul",
                         "a": {
-                          "op": "PartIndex"
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
                         },
-                        "b": 1
+                        "b": -18
                       },
-                      "b": -18
+                      "b": {
+                        "op": "ParentDirection"
+                      }
                     },
                     "dy": {
                       "op": "Mul",
@@ -2920,7 +2958,7 @@
     "tempoMin": -1.0,
     "tempoMax": -1.0,
     "effectRange": -1.0,
-    "brightnessMin": -1.0,
+    "brightnessMin": 0.08,
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,

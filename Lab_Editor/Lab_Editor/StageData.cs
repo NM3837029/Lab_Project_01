@@ -111,6 +111,10 @@ public class StageData
     // プレイヤー能力
     public PlayerCapabilities Capabilities { get; set; } = new();
 
+    // 編集ツール許可設定・編集コスト経済設定（ステージ単位）
+    public EditToolFlags EditTools { get; set; } = new();
+    public EditCostSettings EditCost { get; set; } = new();
+
     // タイルマップ（MapH行 × MapW列）
     public int[,] Map { get; set; }
 
@@ -193,6 +197,12 @@ public class StageData
             // プレイヤー能力
             if (j["player_capabilities"] != null)
                 data.Capabilities = j["player_capabilities"]!.ToObject<PlayerCapabilities>() ?? new();
+
+            // 編集ツール許可設定・編集コスト経済設定
+            if (j["allowed_edit_tools"] != null)
+                data.EditTools = j["allowed_edit_tools"]!.ToObject<EditToolFlags>() ?? new();
+            if (j["edit_cost_settings"] != null)
+                data.EditCost = j["edit_cost_settings"]!.ToObject<EditCostSettings>() ?? new();
 
             // サウンド設定 (Feature 3)
             data.BgmId = j["bgm_id"]?.Value<string>() ?? "";
@@ -279,7 +289,9 @@ public class StageData
             ["map_w"] = MapW,
             ["map_h"] = MapH,
             ["player_start"] = new JObject { ["x"] = PlayerStartX, ["y"] = PlayerStartY },
-            ["player_capabilities"] = JToken.FromObject(Capabilities)
+            ["player_capabilities"] = JToken.FromObject(Capabilities),
+            ["allowed_edit_tools"] = JToken.FromObject(EditTools),
+            ["edit_cost_settings"] = JToken.FromObject(EditCost)
         };
 
         // ゴール
@@ -441,6 +453,78 @@ public class PlayerCapabilities
     public float baseSpeed { get; set; } = 4.0f;
 }
 
+// ===== 編集ツール許可設定 =====
+public class EditToolFlags
+{
+    [System.ComponentModel.DisplayName("巻き戻し")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool rewindEnabled { get; set; } = true;
+
+    [System.ComponentModel.DisplayName("一時停止")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool pauseEnabled { get; set; } = true;
+
+    [System.ComponentModel.DisplayName("早送り")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool fastForwardEnabled { get; set; } = true;
+
+    [System.ComponentModel.DisplayName("画面エフェクト(ズーム/明暗/色)")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool screenEffectEnabled { get; set; } = true;
+
+    [System.ComponentModel.DisplayName("個別オブジェクト編集")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool objectEditEnabled { get; set; } = true;
+}
+
+// ===== 編集コスト経済設定 =====
+public class EditCostSettings
+{
+    [System.ComponentModel.DisplayName("最大値")]
+    [System.ComponentModel.Category("コスト")]
+    public float maxCost { get; set; } = 100.0f;
+
+    [System.ComponentModel.DisplayName("自然回復/秒")]
+    [System.ComponentModel.Category("コスト")]
+    public float regenPerSec { get; set; } = 6.0f;
+
+    [System.ComponentModel.DisplayName("巻き戻し消費/秒")]
+    [System.ComponentModel.Category("コスト")]
+    public float drainRewindPerSec { get; set; } = 18.0f;
+
+    [System.ComponentModel.DisplayName("一時停止消費/秒")]
+    [System.ComponentModel.Category("コスト")]
+    public float drainPausePerSec { get; set; } = 4.0f;
+
+    [System.ComponentModel.DisplayName("早送り消費/秒")]
+    [System.ComponentModel.Category("コスト")]
+    public float drainFastForwardPerSec { get; set; } = 10.0f;
+
+    [System.ComponentModel.DisplayName("画面エフェクト消費/秒")]
+    [System.ComponentModel.Category("コスト")]
+    public float drainScreenEffectPerSec { get; set; } = 8.0f;
+
+    [System.ComponentModel.DisplayName("色フィルタ切替")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatColorCycle { get; set; } = 5.0f;
+
+    [System.ComponentModel.DisplayName("メニュートグル")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatMenuToggle { get; set; } = 8.0f;
+
+    [System.ComponentModel.DisplayName("速度変更")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatSpeedChange { get; set; } = 6.0f;
+
+    [System.ComponentModel.DisplayName("向き反転")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatDirectionFlip { get; set; } = 4.0f;
+
+    [System.ComponentModel.DisplayName("すべてリセット")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatResetAll { get; set; } = 10.0f;
+}
+
 // ===== 配置オブジェクト =====
 public class PlacedEnemy
 {
@@ -544,6 +628,12 @@ public class EnemyDef
     public float tintStrength { get; set; } = -1.0f;
     public float zoomAmplitude { get; set; } = -1.0f;
     public float zoomFrequency { get; set; } = -1.0f;
+
+    // ==== 敵の動き大幅改良プラン Phase 1 ====
+    public float shockwaveRadius { get; set; } = -1.0f;
+    public float fastForwardJitter { get; set; } = -1.0f;
+    public float fastForwardAttackMult { get; set; } = -1.0f;
+    public float diagonalFallSpeed { get; set; } = -1.0f;
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();

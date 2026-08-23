@@ -126,6 +126,12 @@ struct EnemyDef {
     float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTORのズーム振幅
     float zoomFrequency = -1.0f;     // ZOOM_DISRUPTORのズーム周波数
 
+    // ==== 敵の動き大幅改良プラン Phase 1 ====
+    float shockwaveRadius = -1.0f;       // FALLERの着地ショックウェイブ半径(px)
+    float fastForwardJitter = -1.0f;     // FALLERが早送り中に落下しているときの左右ジッター量(px)
+    float fastForwardAttackMult = -1.0f; // STATIONARY/PATROL_SHOOTERが早送り中に攻撃間隔を詰める倍率
+    float diagonalFallSpeed = -1.0f;     // FALLERの編集機能(方向反転)連動：向きをスポーン時から変更されたときの斜め落下速度(px/フレーム)
+
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
 
@@ -216,6 +222,32 @@ struct PlayerCapabilities {
 };
 PlayerCapabilities editorPlayerCaps;
 
+// ===== Feature: 編集コストゲージ (Edit Cost Gauge) =====
+struct EditToolFlags {
+    bool rewindEnabled = true;
+    bool pauseEnabled = true;
+    bool fastForwardEnabled = true;
+    bool screenEffectEnabled = true; // Z/X/C（ズーム・明暗）+ T（色フィルタ）をまとめた「画面エフェクト」
+    bool objectEditEnabled = true;   // 右クリックによる個別オブジェクト編集（選択・コンテキストメニュー全体）
+};
+
+struct EditCostSettings {
+    float maxCost = 100.0f;
+    float regenPerSec = 6.0f;
+    float drainRewindPerSec = 18.0f;
+    float drainPausePerSec = 4.0f;
+    float drainFastForwardPerSec = 10.0f;
+    float drainScreenEffectPerSec = 8.0f; // Z/X/C保持中 or 色フィルタ非ゼロ中に加算
+    float flatColorCycle = 5.0f;
+    float flatMenuToggle = 8.0f;     // コンテキストメニューの巻き戻し/一時停止トグル、複数選択の一括トグルも同額
+    float flatSpeedChange = 6.0f;
+    float flatDirectionFlip = 4.0f;
+    float flatResetAll = 10.0f;
+};
+
+// アイテムで恒久解禁された操作（セッション永続。editorPlayerCapsと同じ扱いでResetStageではクリアしない）
+EditToolFlags unlockedEditTools = { false, false, false, false, false };
+
 std::vector<ItemDef> itemDefs;
 struct PlacedItem {
     int def_idx;
@@ -233,10 +265,11 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
     switch (def.type_enum) {
         case 0: fill(def.moveSpeed, 0.4f); break; // PATROL
         case 1: fill(def.actionInterval, 90.0f); fill(def.jumpPowerMult, 0.7f); break; // JUMPER
-        case 2: fill(def.actionInterval, 120.0f); fill(def.projectileSpeed, 0.6f); break; // STATIONARY
+        case 2: fill(def.actionInterval, 120.0f); fill(def.projectileSpeed, 0.6f); fill(def.fastForwardAttackMult, 2.2f); break; // STATIONARY
         case 3: // PATROL_SHOOTER
             fill(def.triggerRange, 300.0f); fill(def.detectionRangeY, 100.0f);
             fill(def.moveSpeed, 0.5f); fill(def.cooldownTime, 60.0f); fill(def.projectileSpeed, 0.5f);
+            fill(def.fastForwardAttackMult, 2.2f);
             break;
         case 4: fill(def.moveSpeed, 0.35f); fill(def.triggerRange, 300.0f); break; // WALKER
         case 5: fill(def.moveSpeed, 0.55f); fill(def.jumpPowerMult, 0.8f); fill(def.triggerRange, 300.0f); break; // CHASER
@@ -244,7 +277,7 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.triggerRange, 260.0f); fill(def.chargeTime, 30.0f);
             fill(def.dashSpeedMult, 1.5f); fill(def.dashDuration, 40.0f); fill(def.cooldownTime, 70.0f);
             break;
-        case 7: fill(def.triggerRange, 24.0f); fill(def.fallDelay, 10.0f); fill(def.cooldownTime, 120.0f); break; // FALLER
+        case 7: fill(def.triggerRange, 24.0f); fill(def.fallDelay, 10.0f); fill(def.cooldownTime, 120.0f); fill(def.shockwaveRadius, 60.0f); fill(def.fastForwardJitter, 30.0f); fill(def.diagonalFallSpeed, 2.5f); break; // FALLER
         case 8: // SPREAD_SHOOTER
             fill(def.actionInterval, 150.0f); fill(def.spreadAngle, 0.35f); fill(def.projectileSpeed, 0.5f);
             if (def.spreadCount < 0) def.spreadCount = 3;
@@ -387,6 +420,10 @@ void LoadAssetDefinitions() {
                     def.tintStrength = e.value("tintStrength", -1.0f);
                     def.zoomAmplitude = e.value("zoomAmplitude", -1.0f);
                     def.zoomFrequency = e.value("zoomFrequency", -1.0f);
+                    def.shockwaveRadius = e.value("shockwaveRadius", -1.0f);
+                    def.fastForwardJitter = e.value("fastForwardJitter", -1.0f);
+                    def.fastForwardAttackMult = e.value("fastForwardAttackMult", -1.0f);
+                    def.diagonalFallSpeed = e.value("diagonalFallSpeed", -1.0f);
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     if (e.contains("script") && e["script"].is_array()) def.script = e["script"];
                     ApplyEnemyDefaultParams(def);
@@ -646,6 +683,7 @@ struct EnemyState {
     float auxF2;
     int auxState;
     bool auxFlag;
+    float auxF3;
 };
 
 struct BulletState {
@@ -794,6 +832,7 @@ struct Enemy {
     float auxF2 = 0.0f;   // 例: テレポート先候補、分裂済みフラグ用の残りHP比
     int   auxState = 0;   // 例: シールドON/OFF、テレポートのクールダウン段階
     bool  auxFlag = false; // 例: 分裂済みかどうか
+    float auxF3 = 0.0f;   // 例: FALLERのスポーン時X座標（復帰先）
 
     // 現在乗っている動くギミックのインデックス（乗っていなければ-1）。ギミックの移動量を追従させるために使う
     int ridingGimmickIndex = -1;
@@ -906,6 +945,10 @@ struct StageData {
     std::vector<Gimmick> gimmicks;
     std::vector<Item> items;
     std::vector<Platform> platforms;
+
+    // Feature: 編集コストゲージ（ステージ単位設定）
+    EditToolFlags editToolFlags;
+    EditCostSettings editCostSettings;
 };
 
 enum SelectedType {
@@ -1641,6 +1684,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
     auto Screen_SetZoom = [&](float z) { fxTargetZoom = z; };
 
+    // ===== Feature: 編集コストゲージ（ステージ単位設定・実行時状態）=====
+    EditToolFlags currentEditTools;   // 現在のステージの許可設定（ResetStageで反映）
+    EditCostSettings currentEditCost; // 現在のステージのコスト経済（ResetStageで反映）
+    auto IsEditToolEnabled = [&](bool stageFlag, bool unlockedFlag) { return stageFlag || unlockedFlag; };
+
     auto Screen_BeginFrame = [&]() {
         fxTargetBright = 1.0f;
         fxTargetTintR = fxTargetTintG = fxTargetTintB = 1.0f;
@@ -1682,6 +1730,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     float groundY = 400.0f;
     bool isPaused = false, isEditMode = true, isFastForward = false, isStepFrame = false, isDebugDrawMode = false;
+    float editCost = 100.0f; // 編集コストゲージ現在値（ResetStageで currentEditCost.maxCost に上書きされる）
     bool lastF3 = false;
     bool isDragging = false, isScaling = false, isScalingHeight = false, isRotating = false;
     bool isInspScale = false, isInspAngle = false, isInspSpeed = false;
@@ -1768,6 +1817,32 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         editorPlayerCaps.canFly = caps.value("canFly", false);
                         editorPlayerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
                         editorPlayerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
+                    }
+
+                    // 編集ツール許可設定（ステージ単位、キー未指定時はデフォルト全部true）
+                    {
+                        auto etf = sj.value("allowed_edit_tools", json::object());
+                        jsonStage.editToolFlags.rewindEnabled       = etf.value("rewind", true);
+                        jsonStage.editToolFlags.pauseEnabled        = etf.value("pause", true);
+                        jsonStage.editToolFlags.fastForwardEnabled  = etf.value("fastForward", true);
+                        jsonStage.editToolFlags.screenEffectEnabled = etf.value("screenEffect", true);
+                        jsonStage.editToolFlags.objectEditEnabled   = etf.value("objectEdit", true);
+                    }
+
+                    // 編集コスト経済設定（ステージ単位、キー未指定時はコード既定値）
+                    {
+                        auto ecs = sj.value("edit_cost_settings", json::object());
+                        jsonStage.editCostSettings.maxCost                 = ecs.value("maxCost", 100.0f);
+                        jsonStage.editCostSettings.regenPerSec             = ecs.value("regenPerSec", 6.0f);
+                        jsonStage.editCostSettings.drainRewindPerSec       = ecs.value("drainRewindPerSec", 18.0f);
+                        jsonStage.editCostSettings.drainPausePerSec        = ecs.value("drainPausePerSec", 4.0f);
+                        jsonStage.editCostSettings.drainFastForwardPerSec  = ecs.value("drainFastForwardPerSec", 10.0f);
+                        jsonStage.editCostSettings.drainScreenEffectPerSec = ecs.value("drainScreenEffectPerSec", 8.0f);
+                        jsonStage.editCostSettings.flatColorCycle          = ecs.value("flatColorCycle", 5.0f);
+                        jsonStage.editCostSettings.flatMenuToggle          = ecs.value("flatMenuToggle", 8.0f);
+                        jsonStage.editCostSettings.flatSpeedChange         = ecs.value("flatSpeedChange", 6.0f);
+                        jsonStage.editCostSettings.flatDirectionFlip       = ecs.value("flatDirectionFlip", 4.0f);
+                        jsonStage.editCostSettings.flatResetAll            = ecs.value("flatResetAll", 10.0f);
                     }
 
                     // サウンド・フラグ
@@ -1860,7 +1935,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
-                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx, y + hy, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            // hitboxOffsetX/Y は元画像のピクセル座標系で指定されるため、hitboxWidth/Height と同様に
+                            // defScaleを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
+                            // scale!=1.0のアセット（例: dossun, 太陽）で当たり判定がスプライトから大きくズレていた）
+                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * defScale, y + hy * defScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
                         }
                     }
 
@@ -1960,6 +2038,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     auto ResetStage = [&]() {
         Logger::Info("System", "ResetStage", "Begin ResetStage");
         const auto& stage = stages[currentStageIdx];
+
+        // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
+        currentEditTools = stage.editToolFlags;
+        currentEditCost = stage.editCostSettings;
+        editCost = currentEditCost.maxCost;
+        // ステージ切替でその場アクティブだった操作が、新ステージで禁止されている場合は強制解除する
+        if (!currentEditTools.pauseEnabled && !unlockedEditTools.pauseEnabled) isPaused = false;
+        if (!currentEditTools.fastForwardEnabled && !unlockedEditTools.fastForwardEnabled) isFastForward = false;
+        if (!currentEditTools.screenEffectEnabled && !unlockedEditTools.screenEffectEnabled) playerColorFilter = 0;
+        if (!currentEditTools.rewindEnabled && !unlockedEditTools.rewindEnabled) player.isRewinding = false;
+        if (!currentEditTools.objectEditEnabled && !unlockedEditTools.objectEditEnabled) { selectedType = SELECT_NONE; menu.isOpen = false; }
+
         player.x = stage.playerStartX;
         player.y = stage.playerStartY;
         player.vx = 0.0f;
@@ -2184,14 +2274,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         float gx = (float)mx, gy = (float)my;
         if (isEditMode) { gx = (float)(mx - monitorX) + cameraX; gy = (float)(my - monitorY) + cameraY; }
 
+        // Feature: 編集コストゲージ — 各操作の「ステージ許可 or アイテム解禁」判定（このフレームの全キー処理の前に確定させる）
+        bool rewindOpEnabled = IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled);
+        bool pauseOpEnabled = IsEditToolEnabled(currentEditTools.pauseEnabled, unlockedEditTools.pauseEnabled);
+        bool fastForwardOpEnabled = IsEditToolEnabled(currentEditTools.fastForwardEnabled, unlockedEditTools.fastForwardEnabled);
+        bool screenEffectOpEnabled = IsEditToolEnabled(currentEditTools.screenEffectEnabled, unlockedEditTools.screenEffectEnabled);
+        bool objectEditOpEnabled = IsEditToolEnabled(currentEditTools.objectEditEnabled, unlockedEditTools.objectEditEnabled);
+
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
-        if (currentMiddleClick && !lastMiddleClick) { isPaused = !isPaused; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
+        if (currentMiddleClick && !lastMiddleClick) {
+            if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
+            else { SoundManager::Get().PlaySe("ui_denied"); }
+        }
         lastMiddleClick = currentMiddleClick;
 
         // Feature: 操作性改善（友人フィードバック対応）— 一時停止をSpaceキーに変更
+        // Feature: 編集コストゲージ — 一時停止は編集コストを消費する継続系操作。停止解除は常に無料
         static bool lastPauseKey = false;
-        if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
+        if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) {
+            if (isPaused) { isPaused = false; SoundManager::Get().PlaySe("ui_pause"); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe("ui_pause"); }
+            else { SoundManager::Get().PlaySe("ui_denied"); }
+        }
         lastPauseKey = (CheckHitKey(KEY_INPUT_SPACE) != 0);
 
         // Feature 5: ShowMessageアクションで表示中のメッセージウィンドウをEnterキーで閉じる
@@ -2200,16 +2306,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (isShowingMessage && currentMsgKey && !lastMsgKey) { isShowingMessage = false; }
         lastMsgKey = currentMsgKey;
 
+        // Feature: 編集コストゲージ — 早送りは継続系操作。解除は常に無料
         static bool lastFFKey = false;
-        if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) { isFastForward = !isFastForward; SoundManager::Get().PlaySe("ui_fastforward"); }
+        if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) {
+            if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySe("ui_fastforward"); }
+            else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySe("ui_fastforward"); }
+            else { SoundManager::Get().PlaySe("ui_denied"); }
+        }
         lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
 
         // Tキー：色フィルタを巡回（なし→赤→緑→青→なし）。クロマキー地形と連動する。
+        // Feature: 編集コストゲージ — 色フィルタは「画面エフェクト」に属する単発コスト操作。「なし」へ戻す遷移は常に無料
         static bool lastColorKey = false;
         bool currentColorKey = CheckHitKey(KEY_INPUT_T) != 0;
         if (currentColorKey && !lastColorKey) {
-            playerColorFilter = (playerColorFilter + 1) % 4;
-            SoundManager::Get().PlaySe("ui_color_cycle");
+            int nextFilter = (playerColorFilter + 1) % 4;
+            bool turningOff = (playerColorFilter != 0 && nextFilter == 0);
+            if (turningOff || (screenEffectOpEnabled && editCost >= currentEditCost.flatColorCycle)) {
+                if (!turningOff) editCost -= currentEditCost.flatColorCycle;
+                playerColorFilter = nextFilter;
+                SoundManager::Get().PlaySe("ui_color_cycle");
+            } else {
+                SoundManager::Get().PlaySe("ui_denied");
+            }
         }
         lastColorKey = currentColorKey;
 
@@ -2238,10 +2357,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         float finalTimeScale = globalTimeScale;
 
         // 選択状態とRキーに基づくアクティブな巻き戻しフラグ
-        bool isRKeyPressed = (CheckHitKey(KEY_INPUT_R) && isEditMode);
+        bool isRKeyPressed = (CheckHitKey(KEY_INPUT_R) && isEditMode && rewindOpEnabled && editCost > 0.0f);
         bool isPlayerRewinding = player.isRewinding || (isRKeyPressed && !isRotating && (selectedType == SELECT_PLAYER || selectedType == SELECT_NONE));
 
-        if (isEditMode) {
+        // 「巻き戻しが今アクティブか」の集約フラグ（コストドレイン計算用）
+        bool isAnyRewindActive = isRKeyPressed || player.isRewinding;
+        if (!isAnyRewindActive) for (auto& e : enemies)  if (e.isRewinding)  { isAnyRewindActive = true; break; }
+        if (!isAnyRewindActive) for (auto& g : gimmicks) if (g.isRewinding)  { isAnyRewindActive = true; break; }
+        if (!isAnyRewindActive) for (auto& b : bullets)  if (b.isRewinding)  { isAnyRewindActive = true; break; }
+        if (!isAnyRewindActive) for (auto& it : items)   if (it.isRewinding) { isAnyRewindActive = true; break; }
+
+        if (isEditMode && objectEditOpEnabled) {
             // コンテキストメニューの有効化
             if (currentRightClick && !lastRightClick) { 
                 // コンテキストメニューの当たり判定・選択のトリガー
@@ -2340,45 +2466,59 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
                 if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
                     {
-                        // 巻き戻しの切り替え
+                        // 巻き戻しの切り替え（Feature: 編集コストゲージ）
                         if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            *targetRewind = !(*targetRewind);
-                            menu.isOpen = false;
-                        } 
-                        // 一時停止の切り替え
-                        else if (my >= menu.y + 31 && my <= menu.y + 55) {
-                            *targetPaused = !(*targetPaused);
+                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetRewind = !(*targetRewind); }
+                            else SoundManager::Get().PlaySe("ui_denied");
                             menu.isOpen = false;
                         }
-                        // 速度 +0.5
-                        else if (my >= menu.y + 56 && my <= menu.y + 80) {
-                            if (selectedType != SELECT_GIMMICK) *targetSpeedScale += 0.5f;
+                        // 一時停止の切り替え（Feature: 編集コストゲージ）
+                        else if (my >= menu.y + 31 && my <= menu.y + 55) {
+                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetPaused = !(*targetPaused); }
+                            else SoundManager::Get().PlaySe("ui_denied");
                             menu.isOpen = false;
-                        } 
-                        // 速度 -0.5
+                        }
+                        // 速度 +0.5（Feature: 編集コストゲージ。ギミック選択時は元々no-opなので課金しない）
+                        else if (my >= menu.y + 56 && my <= menu.y + 80) {
+                            if (selectedType != SELECT_GIMMICK) {
+                                if (editCost >= currentEditCost.flatSpeedChange) { editCost -= currentEditCost.flatSpeedChange; *targetSpeedScale += 0.5f; }
+                                else SoundManager::Get().PlaySe("ui_denied");
+                            }
+                            menu.isOpen = false;
+                        }
+                        // 速度 -0.5（Feature: 編集コストゲージ）
                         else if (my >= menu.y + 81 && my <= menu.y + 105) {
                             if (selectedType != SELECT_GIMMICK) {
-                                *targetSpeedScale -= 0.5f; 
-                                if (*targetSpeedScale < 0) *targetSpeedScale = 0;
+                                if (editCost >= currentEditCost.flatSpeedChange) {
+                                    editCost -= currentEditCost.flatSpeedChange;
+                                    *targetSpeedScale -= 0.5f;
+                                    if (*targetSpeedScale < 0) *targetSpeedScale = 0;
+                                } else SoundManager::Get().PlaySe("ui_denied");
                             }
                             menu.isOpen = false;
-                        } 
-                        // オブジェクトの向きを反転
+                        }
+                        // オブジェクトの向きを反転（Feature: 編集コストゲージ）
                         else if (my >= menu.y + 106 && my <= menu.y + 130) {
-                            if (targetDirection != nullptr) *targetDirection = (*targetDirection == 0 ? 1 : 0);
-                            menu.isOpen = false;
-                        } 
-                        // すべてリセット
-                        else if (my >= menu.y + 131 && my <= menu.y + 155) {
-                            if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
-                                targetGimmick->width = 120.0f;
-                                targetGimmick->spriteWidth = 120.0f; // 描画側(spriteWidth)も併せて戻す
-                                targetGimmick->angle = (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) ? 1.57079f : 0.0f;
-                                targetGimmick->isPaused = false;
-                                targetGimmick->isRewinding = false;
-                            } else {
-                                *targetScale = 1.0f; *targetAngle = 0.0f; *targetSpeedScale = 1.0f; *targetPaused = false; *targetRewind = false;
+                            if (targetDirection != nullptr) {
+                                if (editCost >= currentEditCost.flatDirectionFlip) { editCost -= currentEditCost.flatDirectionFlip; *targetDirection = (*targetDirection == 0 ? 1 : 0); }
+                                else SoundManager::Get().PlaySe("ui_denied");
                             }
+                            menu.isOpen = false;
+                        }
+                        // すべてリセット（Feature: 編集コストゲージ）
+                        else if (my >= menu.y + 131 && my <= menu.y + 155) {
+                            if (editCost >= currentEditCost.flatResetAll) {
+                                editCost -= currentEditCost.flatResetAll;
+                                if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
+                                    targetGimmick->width = 120.0f;
+                                    targetGimmick->spriteWidth = 120.0f; // 描画側(spriteWidth)も併せて戻す
+                                    targetGimmick->angle = (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) ? 1.57079f : 0.0f;
+                                    targetGimmick->isPaused = false;
+                                    targetGimmick->isRewinding = false;
+                                } else {
+                                    *targetScale = 1.0f; *targetAngle = 0.0f; *targetSpeedScale = 1.0f; *targetPaused = false; *targetRewind = false;
+                                }
+                            } else SoundManager::Get().PlaySe("ui_denied");
                             menu.isOpen = false;
                         }
                     }
@@ -2473,7 +2613,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // エディタUI / ドラッグ操作
             if (currentLeftClick && !menu.isOpen) {
                 // 一時停止ボタンのチェック
-                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) { isPaused = !isPaused; SoundManager::Get().PlaySe("ui_pause"); }
+                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) {
+                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySe("ui_pause"); }
+                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe("ui_pause"); }
+                    else { SoundManager::Get().PlaySe("ui_denied"); }
+                }
 
                 // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン上のCtrl+クリックによる
                 // ポータル生成は廃止。ポータルはC#側のLab_Editor（通常のX,Y配置フロー）で作成する。
@@ -2483,17 +2627,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (my >= 80 && my <= 95) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
                     else if (my >= 100 && my <= 115) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
                     else if (my >= 120 && my <= 135) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
-                    else if (my >= 140 && my <= 155) { 
-                        bool nextPaused = !(*targetPaused);
-                        for (auto* p : selectedPlayers) p->isPaused = nextPaused;
-                        for (auto* e : selectedEnemies) e->isPaused = nextPaused;
-                        for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
+                    else if (my >= 140 && my <= 155) {
+                        // Feature: 編集コストゲージ — 複数選択でも定額（対象数に関わらず一発分のコスト）
+                        if (editCost >= currentEditCost.flatMenuToggle) {
+                            editCost -= currentEditCost.flatMenuToggle;
+                            bool nextPaused = !(*targetPaused);
+                            for (auto* p : selectedPlayers) p->isPaused = nextPaused;
+                            for (auto* e : selectedEnemies) e->isPaused = nextPaused;
+                            for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
+                        } else SoundManager::Get().PlaySe("ui_denied");
                     }
-                    else if (my >= 160 && my <= 175) { 
-                        bool nextRewind = !(*targetRewind);
-                        for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
-                        for (auto* e : selectedEnemies) e->isRewinding = nextRewind;
-                        for (auto* g : selectedGimmicks) g->isRewinding = nextRewind;
+                    else if (my >= 160 && my <= 175) {
+                        if (editCost >= currentEditCost.flatMenuToggle) {
+                            editCost -= currentEditCost.flatMenuToggle;
+                            bool nextRewind = !(*targetRewind);
+                            for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
+                            for (auto* e : selectedEnemies) e->isRewinding = nextRewind;
+                            for (auto* g : selectedGimmicks) g->isRewinding = nextRewind;
+                        } else SoundManager::Get().PlaySe("ui_denied");
                     }
                     else if (my >= 180 && my <= 195 && targetEnemyType != nullptr) {
                         // 旧: %3 固定で最初の3種類しか巡回できなかった。ENEMY_TYPE_COUNTで全種別を巡回対象にする
@@ -3025,6 +3176,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     enemy.patrolLeft = s.patrolLeft; enemy.patrolRight = s.patrolRight;
                     enemy.auxF1 = s.auxF1; enemy.auxF2 = s.auxF2;
                     enemy.auxState = s.auxState; enemy.auxFlag = s.auxFlag;
+                    enemy.auxF3 = s.auxF3;
                 }
             } else {
                 bool canEnemyAct = enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.hitboxWidth, (float)enemy.hitboxHeight, enemy.scale, enemy.isPaused);
@@ -3093,22 +3245,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_STATIONARY: {
-                            // 固定AI：定期的な射撃、プレイヤーの方向を向く
+                            // 固定AI：全方位からプレイヤーへ正確に狙い撃つ。発射直前は画面を軽くズームインして溜めを予告する。
+                            // 編集機能連動：早送り中は攻撃間隔がfastForwardAttackMult倍で詰まり、雑に駆け抜けるとリスクが上がる
+                            // （一時停止はCanUpdate経由で既にタイマーごと止まるため、丁寧に近づけば安全という差別化になる）。
                             float shootInterval = edef ? edef->actionInterval : 120.0f;
                             float projSpeed = edef ? edef->projectileSpeed : 0.6f;
+                            float ffAtkMultS = edef ? edef->fastForwardAttackMult : 2.2f;
                             enemy.vx = 0.0f;
-                            if (player.x < enemy.x) enemy.direction = 1;
-                            else enemy.direction = 0;
 
-                            enemy.customTimer += ets;
+                            float pCenterXs = player.x + (player.width * player.scale) / 2.0f;
+                            float pCenterYs = player.y + (player.height * player.scale) / 2.0f;
+                            float eCenterXs = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                            float eCenterYs = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
+                            enemy.direction = (pCenterXs < eCenterXs) ? 1 : 0;
+
+                            enemy.customTimer += ets * (isFastForward ? ffAtkMultS : 1.0f);
+
+                            // 発射直前（残り20フレーム以内）は溜めエフェクトとして画面をわずかにズームインさせる
+                            float remainingS = shootInterval - enemy.customTimer;
+                            float distToPlayerS = sqrtf((pCenterXs - eCenterXs) * (pCenterXs - eCenterXs) + (pCenterYs - eCenterYs) * (pCenterYs - eCenterYs));
+                            if (remainingS <= 20.0f && remainingS > 0.0f && distToPlayerS < 500.0f) {
+                                float chargeTs = 1.0f - (remainingS / 20.0f);
+                                Screen_SetZoom(1.0f + chargeTs * 0.06f);
+                            }
+
                             if (enemy.customTimer >= shootInterval) {
+                                float dxS = pCenterXs - eCenterXs;
+                                float dyS = pCenterYs - eCenterYs;
+                                float distS = sqrtf(dxS * dxS + dyS * dyS);
+                                if (distS < 1.0f) distS = 1.0f;
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
-                                        bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
-                                        bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * projSpeed : -BULLET_SPEED * projSpeed);
-                                        bullets[i].vy = 0.0f;
+                                        bullets[i].x = eCenterXs;
+                                        bullets[i].y = eCenterYs;
+                                        float spdS = BULLET_SPEED * projSpeed;
+                                        bullets[i].vx = dxS / distS * spdS;
+                                        bullets[i].vy = dyS / distS * spdS;
                                         bullets[i].isPlayerOwned = false; // 敵の弾
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
@@ -3120,12 +3293,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_PATROL_SHOOTER: {
-                            // 索敵＆射撃AI（DrawPixel2.cpp準拠）
+                            // 索敵＆射撃AI。索敵後は全方位からプレイヤーへ正確に狙い撃つ（従来は水平のみ）。
+                            // 編集機能連動：早送り中は攻撃間隔がfastForwardAttackMult倍で詰まる（STATIONARYと同様の設計）。
                             float detectX = edef ? edef->triggerRange : 300.0f;
                             float detectY = edef ? edef->detectionRangeY : 100.0f;
                             float patrolSpd = edef ? edef->moveSpeed : 0.5f;
                             float cooldown = edef ? edef->cooldownTime : 60.0f;
                             float projSpeed = edef ? edef->projectileSpeed : 0.5f;
+                            float ffAtkMultP = edef ? edef->fastForwardAttackMult : 2.2f;
                             float pCenterX = player.x + (player.width * player.scale) / 2.0f;
                             float pCenterY = player.y + (player.height * player.scale) / 2.0f;
                             float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
@@ -3148,16 +3323,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             } else if (enemy.aiState == 1) {
                                 enemy.vx = 0.0f;
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                if (enemy.customTimer > 0) enemy.customTimer -= 1.0f * ets;
+                                if (enemy.customTimer > 0) enemy.customTimer -= 1.0f * ets * (isFastForward ? ffAtkMultP : 1.0f);
+
+                                // 発射直前（残り20フレーム以内）は溜めエフェクトとして画面をわずかにズームインさせる
+                                if (enemy.customTimer <= 20.0f && enemy.customTimer > 0.0f && distX < 500.0f && distY < 500.0f) {
+                                    float chargeTp = 1.0f - (enemy.customTimer / 20.0f);
+                                    Screen_SetZoom(1.0f + chargeTp * 0.06f);
+                                }
 
                                 if (enemy.customTimer <= 0) {
+                                    float dxP = pCenterX - eCenterX;
+                                    float dyP = pCenterY - eCenterY;
+                                    float distP = sqrtf(dxP * dxP + dyP * dyP);
+                                    if (distP < 1.0f) distP = 1.0f;
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
-                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
-                                            bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
-                                            bullets[i].vx = (enemy.direction == 0 ? BULLET_SPEED * projSpeed : -BULLET_SPEED * projSpeed);
-                                            bullets[i].vy = 0.0f;
+                                            bullets[i].x = eCenterX;
+                                            bullets[i].y = eCenterY;
+                                            float spdP = BULLET_SPEED * projSpeed;
+                                            bullets[i].vx = dxP / distP * spdP;
+                                            bullets[i].vy = dyP / distP * spdP;
                                             bullets[i].isPlayerOwned = false;
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
@@ -3252,11 +3438,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_FALLER: {
-                            // 待機(0)：静止 → プレイヤーが真下を通ると落下(1) → 着地後クールダウン(2) → 元の高さへ復帰
+                            // 待機(0)：静止 → プレイヤーが真下を通ると落下(1、前半は落下予兆の溜め・後半は実落下) → 着地後クールダウン(2) → 元の高さへ復帰
                             float triggerWidth = edef ? edef->triggerRange : 24.0f;
                             float fallDelay = edef ? edef->fallDelay : 10.0f;
                             float cooldownTime = edef ? edef->cooldownTime : 120.0f;
-                            if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
+                            float shockwaveRadiusF = edef ? edef->shockwaveRadius : 60.0f;
+                            float ffJitter = edef ? edef->fastForwardJitter : 30.0f;
+                            float diagonalSpeedF = edef ? edef->diagonalFallSpeed : 2.5f;
+                            // スポーン（＝ステージ配置）時点のX/Y/向きを一度だけ記録しておく。
+                            // これが「元の場所」＝復帰先の基準になる（配置位置そのものをそのまま復帰先にする）。
+                            // 編集機能連動：向きはauxF1に記録し、以後プレイヤーが「方向反転」編集ツールで
+                            // enemy.directionを変えたかどうかを毎フレーム比較できるようにする。
+                            if (!enemy.auxFlag) {
+                                enemy.auxF1 = (float)enemy.direction;
+                                enemy.auxF2 = enemy.y;
+                                enemy.auxF3 = enemy.x;
+                                enemy.auxFlag = true;
+                            }
+                            bool aimedSideways = ((int)enemy.auxF1) != enemy.direction;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
                                 if (std::abs(player.x - enemy.x) < triggerWidth && player.y > enemy.y) {
@@ -3264,16 +3463,63 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.customTimer = fallDelay;
                                 }
                             } else if (enemy.auxState == 1) {
-                                enemy.vx = 0.0f;
-                                if (enemy.customTimer > 0) enemy.customTimer -= ets;
-                                else if (std::abs(enemy.vy) < 0.5f) {
-                                    enemy.auxState = 2;
-                                    enemy.customTimer = cooldownTime;
+                                if (enemy.customTimer > 0) {
+                                    // 落下予兆（溜め）フェーズ：描画側で影を成長させて見せる
+                                    enemy.vx = 0.0f;
+                                    enemy.customTimer -= ets;
+                                } else {
+                                    // 実落下フェーズ。編集機能連動：
+                                    // ・「方向反転」ツールでスポーン時から向きを変えられていたら、その向きへ斜めに落ちる
+                                    //   （プレイヤーが狙いを付けて誘導し、真下から外れた場所のギミックを起動できるようにする）
+                                    // ・早送り中は左右にジッターして直下を読みにくくする
+                                    //   （スローモーション中はets自体が小さくなるため、自然に予兆がゆっくり見えて見切りやすくなる）
+                                    float diagVx = aimedSideways ? ((enemy.direction == 0 ? 1.0f : -1.0f) * diagonalSpeedF * ets) : 0.0f;
+                                    float jitterVx = isFastForward ? sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f : 0.0f;
+                                    enemy.vx = diagVx + jitterVx;
+                                    if (std::abs(enemy.vy) < 0.5f) {
+                                        // 着地の瞬間：踏みつけだけでなく着地地点周辺にもショックウェイブ判定を発生させる
+                                        float ew_scaledF = (float)enemy.hitboxWidth * enemy.scale;
+                                        float eh_scaledF = (float)enemy.hitboxHeight * enemy.scale;
+                                        float pw_scaledF = (float)player.width * player.scale;
+                                        float ph_scaledF = (float)player.height * player.scale;
+                                        float ecxF = enemy.x + ew_scaledF / 2.0f;
+                                        float ecyF = enemy.y + eh_scaledF;
+                                        float pcxF = player.x + pw_scaledF / 2.0f;
+                                        float pcyF = player.y + ph_scaledF / 2.0f;
+                                        float ddxF = pcxF - ecxF, ddyF = pcyF - ecyF;
+                                        float distF = sqrtf(ddxF * ddxF + ddyF * ddyF);
+                                        if (distF <= shockwaveRadiusF && !isPlayerRewinding && player.invulnTimer <= 0.0f) {
+                                            player.hp--;
+                                            player.invulnTimer = 60.0f;
+                                            float knockDirF = (distF > 0.01f) ? (ddxF / distF) : ((pcxF < ecxF) ? -1.0f : 1.0f);
+                                            player.vx = knockDirF * 6.0f;
+                                            player.vy = -4.0f;
+                                            if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
+                                        }
+                                        // 着地地点周辺の壊せるブロックも一緒に破壊する（斜め誘導で狙って割れるようにするギミック連携）
+                                        for (auto& gimF : gimmicks) {
+                                            if (gimF.type == GIMMICK_BREAKABLE_BLOCK && gimF.isActive) {
+                                                float bgcx = gimF.x + gimF.spriteWidth / 2.0f;
+                                                float bgcy = gimF.y + gimF.spriteHeight / 2.0f;
+                                                float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
+                                                if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
+                                                    gimF.isActive = false;
+                                                    const GimmickDef* gdefFaller = FindGimmickDef(gimF.assetId);
+                                                    if (gdefFaller) SoundManager::Get().PlaySe(gdefFaller->seActivate);
+                                                }
+                                            }
+                                        }
+                                        enemy.auxState = 2;
+                                        enemy.customTimer = cooldownTime;
+                                    }
                                 }
                             } else {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
                                 enemy.customTimer -= ets;
                                 if (enemy.customTimer <= 0) {
+                                    // 元の場所（＝配置位置）へ復帰して待機状態へ。斜め誘導で着地X座標がずれていても
+                                    // X/Yとも配置時の座標へ戻す（従来はYしか戻しておらず、斜め落下後にXがずれたままだった）。
+                                    enemy.x = enemy.auxF3;
                                     enemy.y = enemy.auxF2;
                                     enemy.auxState = 0;
                                 }
@@ -3649,6 +3895,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             partActor.scale = &part.scale; partActor.angle = &part.angle;
                             partActor.hasParent = true;
                             partActor.parentX = enemy.x; partActor.parentY = enemy.y;
+                            partActor.parentDirection = (enemy.direction == 0) ? 1.0f : -1.0f; // 0=右向き, 1=左向き（enemy.directionの規約に合わせる）
                             partActor.partIndex = part.partIndex;
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
@@ -3678,7 +3925,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 if (canEnemyAct) {
                     enemy.history.push_back({ enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.direction, enemy.scale, enemy.angle, enemy.speedScale, enemy.isActive, enemy.isPaused, enemy.type, enemy.hp,
-                                               enemy.customTimer, enemy.aiState, enemy.patrolLeft, enemy.patrolRight, enemy.auxF1, enemy.auxF2, enemy.auxState, enemy.auxFlag });
+                                               enemy.customTimer, enemy.aiState, enemy.patrolLeft, enemy.patrolRight, enemy.auxF1, enemy.auxF2, enemy.auxState, enemy.auxFlag, enemy.auxF3 });
                     if (enemy.history.size() > MAX_HISTORY_FRAMES) enemy.history.erase(enemy.history.begin());
                 }
             }
@@ -3713,6 +3960,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (idef->grant_ability == "DoubleJump") editorPlayerCaps.canDoubleJump = true;
                                 else if (idef->grant_ability == "Dash") editorPlayerCaps.canDash = true;
                                 else if (idef->grant_ability == "ShootFireball") editorPlayerCaps.canShootFireball = true;
+                                else if (idef->grant_ability.rfind("RestoreEditCost:", 0) == 0) {
+                                    float amt = 0.0f;
+                                    try { amt = std::stof(idef->grant_ability.substr(16)); } catch (...) { amt = 0.0f; }
+                                    editCost += amt;
+                                    if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
+                                }
+                                else if (idef->grant_ability.rfind("UnlockEditTool:", 0) == 0) {
+                                    std::string op = idef->grant_ability.substr(15);
+                                    if (op == "Rewind") unlockedEditTools.rewindEnabled = true;
+                                    else if (op == "Pause") unlockedEditTools.pauseEnabled = true;
+                                    else if (op == "FastForward") unlockedEditTools.fastForwardEnabled = true;
+                                    else if (op == "ScreenEffect") unlockedEditTools.screenEffectEnabled = true;
+                                    else if (op == "ObjectEdit") unlockedEditTools.objectEditEnabled = true;
+                                }
                             }
                         }
                     }
@@ -3737,6 +3998,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     if (idef->grant_ability == "DoubleJump") editorPlayerCaps.canDoubleJump = true;
                                     else if (idef->grant_ability == "Dash") editorPlayerCaps.canDash = true;
                                     else if (idef->grant_ability == "ShootFireball") editorPlayerCaps.canShootFireball = true;
+                                    else if (idef->grant_ability.rfind("RestoreEditCost:", 0) == 0) {
+                                        float amt = 0.0f;
+                                        try { amt = std::stof(idef->grant_ability.substr(16)); } catch (...) { amt = 0.0f; }
+                                        editCost += amt;
+                                        if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
+                                    }
+                                    else if (idef->grant_ability.rfind("UnlockEditTool:", 0) == 0) {
+                                        std::string op = idef->grant_ability.substr(15);
+                                        if (op == "Rewind") unlockedEditTools.rewindEnabled = true;
+                                        else if (op == "Pause") unlockedEditTools.pauseEnabled = true;
+                                        else if (op == "FastForward") unlockedEditTools.fastForwardEnabled = true;
+                                        else if (op == "ScreenEffect") unlockedEditTools.screenEffectEnabled = true;
+                                        else if (op == "ObjectEdit") unlockedEditTools.objectEditEnabled = true;
+                                    }
                                 }
                                 break;
                             }
@@ -4116,14 +4391,50 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // プレイヤーが能動的に使う画面エフェクト操作（敵/ギミックの演出より後に適用し、プレイヤーの意図を優先する）
         // Z:ズーム保持, X:暗転保持, C:明転保持, T(上で処理済み)の色フィルタを継続適用
+        // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
+        bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
         if (currentScene == PLAY && canPlayerAct) {
-            if (CheckHitKey(KEY_INPUT_Z)) Screen_SetZoom(1.6f);
-            if (CheckHitKey(KEY_INPUT_X)) Screen_SetBrightness(0.3f);
-            if (CheckHitKey(KEY_INPUT_C)) Screen_SetBrightness(1.7f);
+            zHeldThisFrame = CheckHitKey(KEY_INPUT_Z) != 0;
+            xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
+            cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
+            bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
+            if (zHeldThisFrame && canUseScreenFx) Screen_SetZoom(1.6f);
+            if (xHeldThisFrame && canUseScreenFx) Screen_SetBrightness(0.3f);
+            if (cHeldThisFrame && canUseScreenFx) Screen_SetBrightness(1.7f);
 
             if (playerColorFilter == 1) Screen_SetTint(1.0f, 0.4f, 0.4f);
             else if (playerColorFilter == 2) Screen_SetTint(0.4f, 1.0f, 0.4f);
             else if (playerColorFilter == 3) Screen_SetTint(0.4f, 0.4f, 1.0f);
+        }
+
+        // ===== Feature: 編集コストゲージ：継続系ドレイン／自然回復／ゼロ到達時の強制解除 =====
+        // メインループは実時間で毎フレーム回るため（isPausedはCanUpdateが判定するシミュレーション更新のみを止める）、
+        // ここは ts/globalTimeScale を使わず「1/60秒=1フレーム」の実時間換算で加減算する。
+        {
+            const float perFrame = 1.0f / 60.0f;
+            float drainPerSec = 0.0f;
+            if (isAnyRewindActive)                drainPerSec += currentEditCost.drainRewindPerSec;
+            if (isPaused)                         drainPerSec += currentEditCost.drainPausePerSec;
+            if (isFastForward)                    drainPerSec += currentEditCost.drainFastForwardPerSec;
+            if (zHeldThisFrame || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0)
+                                                   drainPerSec += currentEditCost.drainScreenEffectPerSec;
+
+            if (drainPerSec > 0.0f) editCost -= drainPerSec * perFrame;
+            else                    editCost += currentEditCost.regenPerSec * perFrame;
+            if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
+
+            if (editCost <= 0.0f) {
+                editCost = 0.0f;
+                if (isPaused) isPaused = false;
+                if (isFastForward) isFastForward = false;
+                if (playerColorFilter != 0) playerColorFilter = 0;
+                if (player.isRewinding) player.isRewinding = false;
+                for (auto& e : enemies)  e.isRewinding = false;
+                for (auto& g : gimmicks) g.isRewinding = false;
+                for (auto& b : bullets)  b.isRewinding = false;
+                for (auto& it : items)   it.isRewinding = false;
+                SoundManager::Get().PlaySe("ui_denied");
+            }
         }
 
         Screen_UpdateFrame(ts); // 敵/ギミックがこのフレームで設定した目標値へ滑らかに追従
@@ -4865,6 +5176,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 敵の描画
         for (const auto& enemy : enemies) {
             if (enemy.isActive) {
+                // 敵の動き大幅改良プラン Phase 1-A: FALLER(どっすん)の落下予兆テレグラフ。
+                // 溜めフェーズ(auxState==1かつcustomTimer>0)の間、影を徐々に濃く・大きく表示して
+                // 「もうすぐ落ちる」を視覚化する。スローモーション中はetsが小さくなり自然にゆっくり育つため
+                // 見切りやすくなり、早送り中は左右にジッターさせて正確な読みを難しくする（編集機能との連動）。
+                if (enemy.type == ENEMY_FALLER && enemy.auxState == 1 && enemy.customTimer > 0.0f) {
+                    const EnemyDef* fallerTelDef = FindEnemyDef(enemy.assetId);
+                    float fallDelayTel = fallerTelDef ? fallerTelDef->fallDelay : 10.0f;
+                    if (fallDelayTel < 1.0f) fallDelayTel = 1.0f;
+                    float telProgress = 1.0f - (enemy.customTimer / fallDelayTel);
+                    if (telProgress < 0.0f) telProgress = 0.0f; if (telProgress > 1.0f) telProgress = 1.0f;
+                    float maxShadowR = (fallerTelDef && fallerTelDef->shockwaveRadius > 0.0f) ? fallerTelDef->shockwaveRadius : 60.0f;
+                    int shadowCx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
+                    int shadowCy = (int)(enemy.y + enemy.hitboxHeight * enemy.scale - cameraY);
+                    if (isFastForward) shadowCx += (int)(sinf(BehaviorInterpreter::globalFrameCounter * 0.9f) * 10.0f);
+                    int shadowR = (int)(maxShadowR * telProgress);
+                    if (shadowR > 0) {
+                        SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(160 * telProgress));
+                        DrawCircle(shadowCx, shadowCy, shadowR, GetColor(255, 60, 60), TRUE);
+                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    }
+                }
                 DrawPartsPass(enemy.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
@@ -4980,6 +5312,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         DrawBox(10, 10, 150, 40, GetColor(30, 30, 30), TRUE);
         DrawBox(10, 10, 150, 40, GetColor(255, 215, 0), FALSE);
         DrawString(20, 18, coinStr, GetColor(255, 215, 0));
+
+        // OSD：編集コストゲージ（コインカウンターの直下）
+        {
+            float ratio = editCost / currentEditCost.maxCost;
+            if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
+            bool isLow = ratio < 0.2f;
+            bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
+            int barColor = isLow ? (blinkOn ? GetColor(255, 80, 80) : GetColor(90, 30, 30)) : GetColor(0, 200, 255);
+
+            DrawBox(10, 45, 150, 65, GetColor(30, 30, 30), TRUE);
+            DrawBox(10, 45, (int)(10 + 140 * ratio), 65, barColor, TRUE);
+            DrawBox(10, 45, 150, 65, GetColor(255, 215, 0), FALSE);
+            char editCostStr[32];
+            sprintf_s(editCostStr, sizeof(editCostStr), "EDIT: %d / %d", (int)editCost, (int)currentEditCost.maxCost);
+            DrawString(16, 50, editCostStr, GetColor(255, 255, 255));
+        }
 
         // 編集ツールの状態インジケータ（色フィルタ・ミュート）
         if (playerColorFilter != 0) {

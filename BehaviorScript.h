@@ -50,6 +50,8 @@ struct ScriptActor {
 
     // Feature: Composite Multi-Part Objects (Parts-M2) — パーツ(部品)としての実行時のみ意味を持つ
     float parentX = 0.0f, parentY = 0.0f; // 親(複合体本体)の現在のワールド座標
+    float parentDirection = 1.0f;         // 親の向き（+1=右向き/-1=左向き）。SetLocalOffset等で
+                                           // 進行方向に応じてパーツを反転させたい場合に使う
     bool hasParent = false;               // このアクターがパーツかどうか
     int partIndex = 0;                    // 親のparts[]内インデックス（同一スクリプトを複数パーツで共有し、
                                            // パーツごとに異なる位相をつけるためのPartIndexレポーターに使う）
@@ -255,6 +257,7 @@ private:
         if (op == "Time") return BehaviorInterpreter::scriptTimeCounter;
         if (op == "ParentX") return actor.parentX;
         if (op == "ParentY") return actor.parentY;
+        if (op == "ParentDirection") return actor.parentDirection;
         if (op == "PartIndex") return (float)actor.partIndex;
         return 0.0f;
     }

@@ -122,6 +122,24 @@ public partial class Form1 : Form
             numJumpPower.Value = Math.Clamp(currentStage.Capabilities.baseJumpPower, -30, 0);
             numSpeed.Value = (decimal)Math.Clamp(currentStage.Capabilities.baseSpeed, 0.5f, 20f);
 
+            chkEditRewind.Checked = currentStage.EditTools.rewindEnabled;
+            chkEditPause.Checked = currentStage.EditTools.pauseEnabled;
+            chkEditFastForward.Checked = currentStage.EditTools.fastForwardEnabled;
+            chkEditScreenFx.Checked = currentStage.EditTools.screenEffectEnabled;
+            chkEditObjectEdit.Checked = currentStage.EditTools.objectEditEnabled;
+
+            numEditMaxCost.Value = (decimal)Math.Clamp(currentStage.EditCost.maxCost, 0, 999);
+            numEditRegen.Value = (decimal)Math.Clamp(currentStage.EditCost.regenPerSec, 0, 999);
+            numEditDrainRewind.Value = (decimal)Math.Clamp(currentStage.EditCost.drainRewindPerSec, 0, 999);
+            numEditDrainPause.Value = (decimal)Math.Clamp(currentStage.EditCost.drainPausePerSec, 0, 999);
+            numEditDrainFF.Value = (decimal)Math.Clamp(currentStage.EditCost.drainFastForwardPerSec, 0, 999);
+            numEditDrainScreenFx.Value = (decimal)Math.Clamp(currentStage.EditCost.drainScreenEffectPerSec, 0, 999);
+            numEditFlatColorCycle.Value = (decimal)Math.Clamp(currentStage.EditCost.flatColorCycle, 0, 999);
+            numEditFlatMenuToggle.Value = (decimal)Math.Clamp(currentStage.EditCost.flatMenuToggle, 0, 999);
+            numEditFlatSpeedChange.Value = (decimal)Math.Clamp(currentStage.EditCost.flatSpeedChange, 0, 999);
+            numEditFlatDirectionFlip.Value = (decimal)Math.Clamp(currentStage.EditCost.flatDirectionFlip, 0, 999);
+            numEditFlatResetAll.Value = (decimal)Math.Clamp(currentStage.EditCost.flatResetAll, 0, 999);
+
             numMapW.Value = currentStage.MapW;
             numMapH.Value = currentStage.MapH;
 
@@ -589,6 +607,24 @@ public partial class Form1 : Form
         currentStage.Capabilities.canFly = chkFly.Checked;
         currentStage.Capabilities.baseJumpPower = (int)numJumpPower.Value;
         currentStage.Capabilities.baseSpeed = (float)numSpeed.Value;
+
+        currentStage.EditTools.rewindEnabled = chkEditRewind.Checked;
+        currentStage.EditTools.pauseEnabled = chkEditPause.Checked;
+        currentStage.EditTools.fastForwardEnabled = chkEditFastForward.Checked;
+        currentStage.EditTools.screenEffectEnabled = chkEditScreenFx.Checked;
+        currentStage.EditTools.objectEditEnabled = chkEditObjectEdit.Checked;
+
+        currentStage.EditCost.maxCost = (float)numEditMaxCost.Value;
+        currentStage.EditCost.regenPerSec = (float)numEditRegen.Value;
+        currentStage.EditCost.drainRewindPerSec = (float)numEditDrainRewind.Value;
+        currentStage.EditCost.drainPausePerSec = (float)numEditDrainPause.Value;
+        currentStage.EditCost.drainFastForwardPerSec = (float)numEditDrainFF.Value;
+        currentStage.EditCost.drainScreenEffectPerSec = (float)numEditDrainScreenFx.Value;
+        currentStage.EditCost.flatColorCycle = (float)numEditFlatColorCycle.Value;
+        currentStage.EditCost.flatMenuToggle = (float)numEditFlatMenuToggle.Value;
+        currentStage.EditCost.flatSpeedChange = (float)numEditFlatSpeedChange.Value;
+        currentStage.EditCost.flatDirectionFlip = (float)numEditFlatDirectionFlip.Value;
+        currentStage.EditCost.flatResetAll = (float)numEditFlatResetAll.Value;
 
         currentStage.SaveToFile(Path.Combine(stagesPath, currentStageFile));
     }

@@ -2,12 +2,8 @@
   "map_w": 10,
   "map_h": 30,
   "player_start": {
-    "x": 64,
-    "y": 864
-  },
-  "goal": {
-    "x": 64,
-    "y": 32
+    "x": 64.0,
+    "y": 864.0
   },
   "player_capabilities": {
     "canDoubleJump": false,
@@ -16,6 +12,10 @@
     "canFly": false,
     "baseJumpPower": -13,
     "baseSpeed": 4.0
+  },
+  "goal": {
+    "x": 64.0,
+    "y": 32.0
   },
   "map": [
     [

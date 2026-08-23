@@ -304,5 +304,83 @@
     "hitboxWidth": 24,
     "hitboxHeight": 24,
     "parts": []
+  },
+  {
+    "id": "item_edit_cost_refill",
+    "name": "Splice Battery",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "RestoreEditCost:40",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_unlock_rewind",
+    "name": "Rewind Reel",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "UnlockEditTool:Rewind",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_unlock_pause",
+    "name": "Pause Cartridge",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "UnlockEditTool:Pause",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_unlock_fastforward",
+    "name": "Fast Forward Spool",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "UnlockEditTool:FastForward",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_unlock_screeneffect",
+    "name": "Color Grading Filter",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "UnlockEditTool:ScreenEffect",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
+  },
+  {
+    "id": "item_unlock_objectedit",
+    "name": "Director's Pass",
+    "type_enum": 0,
+    "sprite": "img/bullet.png",
+    "grant_ability": "UnlockEditTool:ObjectEdit",
+    "seCollect": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
   }
 ]
