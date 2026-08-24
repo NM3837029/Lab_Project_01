@@ -1,1 +1,30 @@
-[]
+[
+  {
+    "id": "ui_pause",
+    "name": "UI:一時停止/解除",
+    "file": "se/ItemDash.wav",
+    "isLoop": false,
+    "volume": 0.45
+  },
+  {
+    "id": "ui_fastforward",
+    "name": "UI:早送り切替",
+    "file": "se/ItemDoubleJump.wav",
+    "isLoop": false,
+    "volume": 0.45
+  },
+  {
+    "id": "ui_color_cycle",
+    "name": "UI:色フィルタ切替",
+    "file": "se/ItemFireFlower.wav",
+    "isLoop": false,
+    "volume": 0.45
+  },
+  {
+    "id": "ui_denied",
+    "name": "UI:操作不能(封印中)",
+    "file": "se/shieldCrack.wav",
+    "isLoop": false,
+    "volume": 0.55
+  }
+]

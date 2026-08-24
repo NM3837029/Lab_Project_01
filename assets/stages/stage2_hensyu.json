@@ -13,6 +13,26 @@
     "baseJumpPower": -13,
     "baseSpeed": 4.0
   },
+  "allowed_edit_tools": {
+    "rewindEnabled": true,
+    "pauseEnabled": true,
+    "fastForwardEnabled": true,
+    "screenEffectEnabled": true,
+    "objectEditEnabled": true
+  },
+  "edit_cost_settings": {
+    "maxCost": 100.0,
+    "regenPerSec": 6.0,
+    "drainRewindPerSec": 18.0,
+    "drainPausePerSec": 4.0,
+    "drainFastForwardPerSec": 10.0,
+    "drainScreenEffectPerSec": 8.0,
+    "flatColorCycle": 5.0,
+    "flatMenuToggle": 8.0,
+    "flatSpeedChange": 6.0,
+    "flatDirectionFlip": 4.0,
+    "flatResetAll": 10.0
+  },
   "goal": {
     "x": 3744.0,
     "y": 352.0
@@ -5529,168 +5549,6 @@
           "action": "ShowMessage",
           "param1": "A/Dで移動、Wでジャンプ。Enterで弾を撃てる",
           "param2": "そうさ",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_15",
-      "x": 480.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "床のブロックは左クリックで壊せる",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_25",
-      "x": 800.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "橋をRキー+左ドラッグで回して倒す",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_40",
-      "x": 1280.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "踏むと落ちる床。Rキーを押しっぱなしで時間を巻き戻せる",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_52",
-      "x": 1664.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "Spaceで一時停止し、右矢印キーでリフトを1段ずつ動かす",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_66",
-      "x": 2112.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "箱をドラッグで感圧板へ。Sキー+上下ドラッグで横に伸ばす",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_82",
-      "x": 2624.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "Fキーで早送りにすると、青いゲートをすり抜けられる",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_91",
-      "x": 2912.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "Tキーで色を切替。同じ色の足場だけが実体化する",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_104",
-      "x": 3328.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "Xキーを押しっぱなしで暗くすると、暗い足場が実体化する",
-          "param2": "ヒント",
-          "delay": 0.0
-        }
-      ]
-    },
-    {
-      "id": "hint_111",
-      "x": 3552.0,
-      "y": 0.0,
-      "width": 64.0,
-      "height": 480.0,
-      "condition": "PlayerEnter",
-      "conditionParam": "",
-      "oneShot": true,
-      "actions": [
-        {
-          "action": "ShowMessage",
-          "param1": "敵は右クリック → Pause で止められる",
-          "param2": "ヒント",
           "delay": 0.0
         }
       ]

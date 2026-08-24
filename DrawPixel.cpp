@@ -5446,11 +5446,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // ヘルプガイドのOSDオーバーレイ
+        // 実際のキー割り当てに合わせた表記にしてある（ジャンプは[W]、[SPACE]は一時停止、
+        // 一時停止中の[→]がコマ送り）。ここが実装とズレていると、編集ツール前提のステージが
+        // 「操作が分からないから詰む」だけの理不尽なものになってしまうため、必ず同期させること。
         if (isPaused) {
-            DrawString(10, SCREEN_HEIGHT - 25, "PAUSED (EDITING): Drag, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, [MiddleClick] to Resume", GetColor(200, 200, 200));
+            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]: Step 1 Frame  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
+            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, RightClick for Menu", GetColor(200, 200, 200));
         } else {
-            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]: Move  [SPACE]: Jump  [ENTER]/Click Screen: Shot  [MiddleClick] to Pause", GetColor(50, 255, 50));
-            DrawString(10, SCREEN_HEIGHT - 22, "EDIT TOOLS: [T]:Color Filter  [Z]:Zoom  [X]:Darken  [C]:Brighten  [M]:Mute", GetColor(120, 220, 255));
+            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]:Move  [W]:Jump  [SHIFT]:Dash  [ENTER]/Click Screen:Shot", GetColor(50, 255, 50));
+            DrawString(10, SCREEN_HEIGHT - 22, "EDIT: [R]:Rewind  [SPACE]:Pause  [F]:FastFwd  [T]:Color  [Z]:Zoom  [X]:Dark  [C]:Bright  [M]:Mute", GetColor(120, 220, 255));
         }
 
         // Feature 5: ShowMessageアクションによるメッセージウィンドウ

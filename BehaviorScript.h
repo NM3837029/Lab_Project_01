@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 外部ライブラリ・標準ライブラリのインクルード。
 #include "json.hpp"      // スクリプトAST（JSON）を扱うためのJSONライブラリ（nlohmann::json）
 #include "Logger.h"      // 実行時エラーをログファイルに記録するためのロガー

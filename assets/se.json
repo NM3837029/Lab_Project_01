@@ -5,5 +5,96 @@
     "file": "sound/jump01.wav",
     "isLoop": false,
     "volume": 1.0
+  },
+  {
+    "id": "se_shoot",
+    "name": "射撃",
+    "file": "se/Shooting01.wav",
+    "isLoop": false,
+    "volume": 0.7
+  },
+  {
+    "id": "se_shoot_alt",
+    "name": "射撃(サブ)",
+    "file": "se/shooting.wav",
+    "isLoop": false,
+    "volume": 0.7
+  },
+  {
+    "id": "se_coin",
+    "name": "コイン取得",
+    "file": "se/coin.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_dossun",
+    "name": "どっすん落下",
+    "file": "se/dossun.wav",
+    "isLoop": false,
+    "volume": 0.9
+  },
+  {
+    "id": "se_shield_crack",
+    "name": "シールド破壊",
+    "file": "se/shieldCrack.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_split_01",
+    "name": "分裂01",
+    "file": "se/Spliting01.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_split_02",
+    "name": "分裂02",
+    "file": "se/Spliting02.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_split_attack",
+    "name": "分裂敵の攻撃",
+    "file": "se/SplitingEnemyAttack.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_size_change",
+    "name": "サイズ変化",
+    "file": "se/SizeChangingEnemy.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_item_coin",
+    "name": "アイテム取得(コイン)",
+    "file": "se/ItemCoin.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_item_dash",
+    "name": "アイテム取得(ダッシュ)",
+    "file": "se/ItemDash.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_item_jump",
+    "name": "アイテム取得(ジャンプ)",
+    "file": "se/ItemDoubleJump.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
+    "id": "se_item_power",
+    "name": "アイテム取得(強化)",
+    "file": "se/ItemFireFlower.wav",
+    "isLoop": false,
+    "volume": 0.8
   }
 ]

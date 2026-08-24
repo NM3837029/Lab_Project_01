@@ -1509,17 +1509,39 @@
               {
                 "op": "SetVar",
                 "name": "dashAngle",
-                "value": { "op": "DirectionToPlayer" }
+                "value": {
+                  "op": "DirectionToPlayer"
+                }
               },
               {
                 "op": "SetVar",
                 "name": "dashVX",
-                "value": { "op": "Mul", "a": { "op": "Cos", "a": { "op": "GetVar", "name": "dashAngle" } }, "b": 12 }
+                "value": {
+                  "op": "Mul",
+                  "a": {
+                    "op": "Cos",
+                    "a": {
+                      "op": "GetVar",
+                      "name": "dashAngle"
+                    }
+                  },
+                  "b": 12
+                }
               },
               {
                 "op": "SetVar",
                 "name": "dashVY",
-                "value": { "op": "Mul", "a": { "op": "Sin", "a": { "op": "GetVar", "name": "dashAngle" } }, "b": 12 }
+                "value": {
+                  "op": "Mul",
+                  "a": {
+                    "op": "Sin",
+                    "a": {
+                      "op": "GetVar",
+                      "name": "dashAngle"
+                    }
+                  },
+                  "b": 12
+                }
               },
               {
                 "op": "Repeat",
@@ -1527,8 +1549,14 @@
                 "body": [
                   {
                     "op": "ApplyImpulse",
-                    "vx": { "op": "GetVar", "name": "dashVX" },
-                    "vy": { "op": "GetVar", "name": "dashVY" }
+                    "vx": {
+                      "op": "GetVar",
+                      "name": "dashVX"
+                    },
+                    "vy": {
+                      "op": "GetVar",
+                      "name": "dashVY"
+                    }
                   }
                 ]
               },
@@ -2964,5 +2992,126 @@
     "zoomFrequency": -1.0,
     "script": [],
     "parts": []
+  },
+  {
+    "id": "edit_sentry",
+    "name": "編集室：監視砲台",
+    "type_enum": 2,
+    "hp": 2,
+    "sprite": "img/stage1/turret.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "shrinkFactor": -1.0,
+    "width": 32,
+    "height": 32,
+    "scale": 1.0,
+    "seSpawn": "",
+    "seAttack": "se_shoot",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_split_01",
+    "parts": [],
+    "script": [],
+    "actionInterval": 150.0,
+    "projectileSpeed": 0.35,
+    "fastForwardAttackMult": 2.2
+  },
+  {
+    "id": "edit_stalker",
+    "name": "編集室：追従スライム",
+    "type_enum": 4,
+    "hp": 2,
+    "sprite": "img/stage1/slime.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "shrinkFactor": -1.0,
+    "width": 32,
+    "height": 32,
+    "scale": 1.0,
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_split_02",
+    "parts": [],
+    "script": [],
+    "moveSpeed": 0.35,
+    "triggerRange": 320.0
+  },
+  {
+    "id": "edit_floater",
+    "name": "編集室：漂う監視眼",
+    "type_enum": 10,
+    "hp": 2,
+    "sprite": "img/enemy.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "shrinkFactor": -1.0,
+    "width": 32,
+    "height": 32,
+    "scale": 1.0,
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_split_01",
+    "parts": [],
+    "script": [],
+    "floatAmplitude": 36.0,
+    "floatFrequency": 0.045,
+    "moveSpeed": 0.18,
+    "triggerRange": 320.0
+  },
+  {
+    "id": "edit_phantom",
+    "name": "編集室：過去の自分",
+    "type_enum": 14,
+    "hp": 3,
+    "sprite": "img/enemy.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "shrinkFactor": -1.0,
+    "width": 32,
+    "height": 32,
+    "scale": 1.0,
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_split_02",
+    "parts": [],
+    "script": [],
+    "mimicDelayFrames": 110.0
+  },
+  {
+    "id": "edit_dropper",
+    "name": "編集室：落下ウェイト",
+    "type_enum": 7,
+    "hp": 3,
+    "sprite": "img/stage1/dropper.png",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "shrinkFactor": -1.0,
+    "width": 32,
+    "height": 32,
+    "scale": 1.0,
+    "seSpawn": "",
+    "seAttack": "se_dossun",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_dossun",
+    "parts": [],
+    "script": [],
+    "triggerRange": 28.0,
+    "fallDelay": 22.0,
+    "cooldownTime": 150.0,
+    "shockwaveRadius": 52.0,
+    "diagonalFallSpeed": 2.5,
+    "fastForwardJitter": 30.0
   }
 ]
