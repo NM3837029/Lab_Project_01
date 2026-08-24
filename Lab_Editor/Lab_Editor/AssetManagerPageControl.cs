@@ -666,24 +666,37 @@ public class AssetManagerPageControl : UserControl
     }
 
     // ===== 行操作 =====
+    // 敵/ギミック/アイテムいずれかのグリッドで、末尾のボタン列(btnSprite/btnHitbox/btnSize/btnDel)が
+    // クリックされたときにまとめて呼ばれる共通ハンドラ。CellContentClickイベントから渡されるe.ColumnIndex
+    // の列名を見て、どのボタンが押されたかをif/elseで振り分ける。3つのグリッドすべてで同じメソッドを
+    // 使い回しているため、dgv引数で「今操作されたのはどのグリッドか」を受け取っている。
     private void HandleGridButton(DataGridView dgv, DataGridViewCellEventArgs e)
     {
+        // 列ヘッダー行や行が存在しない位置がクリックされた場合はe.RowIndexが負になるため、その場合は何もしない
         if (e.RowIndex < 0) return;
         string colName = dgv.Columns[e.ColumnIndex].Name;
 
         if (colName == "btnSprite")
         {
+            // スプライト画像選択ボタン。標準のファイル選択ダイアログでpng/jpg/bmp（またはすべてのファイル）を選ばせる
             using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "スプライト画像を選択" };
             if (ofd.ShowDialog() != DialogResult.OK) return;
 
             // imgフォルダへコピー（同名で内容の異なるファイルは連番を付けて別名保存する。Parts-M7）
             string relPath = ImageImportHelper.CopyIntoImgFolder(projectRoot, ofd.FileName);
+            // グリッドのsprite列にはプロジェクトルートからの相対パスを保存する（絶対パスをそのまま保存すると
+            // 開発環境ごとにフォルダ構成が変わったときにパスが壊れてしまうため）
             dgv.Rows[e.RowIndex].Cells["sprite"].Value = relPath;
+            // 選んだ直後にそのままプレビューへ反映し、選び間違いにすぐ気付けるようにする
             ShowPreview(Path.Combine(projectRoot, relPath.Replace('/', '\\')));
             lblPreviewPath.Text = relPath;
         }
         else if (colName == "btnHitbox")
         {
+            // 当たり判定編集ボタン。この行の現在のスプライトパスと当たり判定4値(オフセットX/Y・幅・高さ)を
+            // 読み取り、HitboxEditRequestedイベントとしてホスト側へ「編集を依頼」する。
+            // このクラス自身は当たり判定エディタのUIを持たず、ホスト側が開いた編集画面の結果を
+            // コールバック(第6引数のラムダ式)経由で受け取って、対応するセルへ書き戻すだけの役割に徹している。
             string spritePath = dgv.Rows[e.RowIndex].Cells["sprite"].Value?.ToString() ?? "";
             string fullPath = string.IsNullOrEmpty(spritePath) ? "" : Path.Combine(projectRoot, spritePath);
             int ox = IntCell(dgv.Rows[e.RowIndex], "hitboxOffsetX", 0);
@@ -693,6 +706,8 @@ public class AssetManagerPageControl : UserControl
 
             HitboxEditRequested?.Invoke(fullPath, ox, oy, w, h, (rox, roy, rw, rh) =>
             {
+                // ホスト側の当たり判定エディタで「OK」された結果がここに返ってくる。
+                // 非表示列(hitboxOffsetX等)へそのまま書き戻すことで、保存時にReadEnemies等から拾われる。
                 dgv.Rows[e.RowIndex].Cells["hitboxOffsetX"].Value = rox;
                 dgv.Rows[e.RowIndex].Cells["hitboxOffsetY"].Value = roy;
                 dgv.Rows[e.RowIndex].Cells["hitboxWidth"].Value = rw;
@@ -701,20 +716,28 @@ public class AssetManagerPageControl : UserControl
         }
         else if (colName == "btnSize")
         {
+            // 表示サイズ(拡大率scale)調整ボタン。敵グリッドにしか存在しない列だが、
+            // ハンドラ自体は共通なので、画像が未選択の場合のガードだけここで行っている。
             string spritePath = dgv.Rows[e.RowIndex].Cells["sprite"].Value?.ToString() ?? "";
             if (string.IsNullOrEmpty(spritePath)) { MessageBox.Show("先に画像を選択してください。", "サイズ調整", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             string fullPath = Path.Combine(projectRoot, spritePath);
             float curScale = FloatCell(dgv.Rows[e.RowIndex], "scale", 1.0f);
 
+            // HitboxEditRequestedと同様、実際のサイズ調整UIはホスト側に委ね、結果だけscale列へ反映する
             SizeEditRequested?.Invoke(fullPath, curScale, rScale => dgv.Rows[e.RowIndex].Cells["scale"].Value = rScale);
         }
         else if (colName == "btnDel")
         {
+            // 削除ボタン。誤操作防止のため、必ず確認ダイアログを挟んでからでないと削除しない
             if (MessageBox.Show("この行を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 dgv.Rows.RemoveAt(e.RowIndex);
         }
     }
 
+    // 「＋◯◯追加」ボタン群から呼ばれる、グリッドへの新規行追加の共通処理。
+    // valuesは列の並び順どおりに渡された初期値の配列（GetDefaultEnemyRow等が組み立てる）。
+    // 追加した行を選択状態にし、さらにスクロール位置を追加行が見える位置まで自動で動かすことで、
+    // ユーザーが「今どの行が新しく増えたか」を見失わないようにしている。
     private void AddRow(DataGridView dgv, object[] values)
     {
         dgv.Rows.Add(values);
@@ -722,6 +745,10 @@ public class AssetManagerPageControl : UserControl
         dgv.FirstDisplayedScrollingRowIndex = dgv.Rows.Count - 1;
     }
 
+    // DataGridViewComboBoxColumn(type_enum列)に、コンボボックスの選択肢一覧に存在しない値が
+    // 設定されてしまった場合などに発生するDataErrorイベントのハンドラ。
+    // 本来は起きてはならない状況（バグ調査対象）なので、握りつぶさずに詳細情報をログファイルへ書き出した上で
+    // あえて例外を再送出(throw)し、開発中に気付けるようにしている。
     private void HandleDataError(DataGridView dgv, DataGridViewDataErrorEventArgs e)
     {
         string colName = dgv.Columns[e.ColumnIndex].Name;
@@ -757,7 +784,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         throw new Exception(msg, e.Exception);
     }
 
-    // dgv内の既存id("prefix"+数字)と衝突しない最小の連番idを生成する
+    // dgv内の既存id("prefix"+数字)と衝突しない最小の連番idを生成する。
+    // 例えば既にenemy_1・enemy_2が存在すればenemy_3を返す、という単純な採番方式。
+    // 大文字小文字の違いだけのID重複も衝突とみなすため、HashSetの比較にはOrdinalIgnoreCaseを使っている。
     private static string MakeUniqueSequentialId(DataGridView dgv, string prefix)
     {
         var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -770,18 +799,24 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return candidate;
     }
 
+    // 「＋敵追加」ボタンから呼ばれる、新規敵行の初期値一式を組み立てる。
+    // 戻り値の配列は、CreateEnemyGridで定義した列の並び順(icon/id/name/type_enum/hp/width/height/...)と
+    // 対応させる必要がある点に注意（順序を変えると意図しない列に値が入ってしまう）。
+    // タイプは既定でEnemyTypes[0](type_enum=0: 巡回)を選んだ状態で追加される。
     private object[] GetDefaultEnemyRow()
     {
         string newId = MakeUniqueSequentialId(dgvEnemies, "enemy_");
         return new object[] { AssetIcons.ForEnemy(EnemyTypes[0].type), newId, "新敵", EnemyTypes[0].desc, 3, 32, 32, "", "画像選択", "削除" };
     }
 
+    // 「＋ギミック追加」ボタンから呼ばれる、新規ギミック行の初期値一式。考え方はGetDefaultEnemyRowと同じ
     private object[] GetDefaultGimmickRow()
     {
         string newId = MakeUniqueSequentialId(dgvGimmicks, "gimmick_");
         return new object[] { AssetIcons.ForGimmick(GimmickTypes[0].type), newId, "新しいギミック", GimmickTypes[0].desc, "", "📁", "🗑" };
     }
 
+    // 「＋アイテム追加」ボタンから呼ばれる、新規アイテム行の初期値一式。考え方はGetDefaultEnemyRowと同じ
     private object[] GetDefaultItemRow()
     {
         string newId = MakeUniqueSequentialId(dgvItems, "item_");
@@ -789,28 +824,39 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== プレビュー更新 =====
+    // 引数dgvの選択中の行(1行目のみ)からsprite列の値を読み取り、右側パネルのプレビュー画像を更新する。
+    // 敵/ギミック/アイテムのどのグリッドのSelectionChangedからも共通で呼ばれる想定のため、
+    // sprite列自体が存在しない(＝間違ったグリッドが渡された)場合にも安全に抜けるガードを入れている。
     private void UpdatePreview(DataGridView dgv)
     {
         if (dgv.SelectedRows.Count == 0) return;
         var row = dgv.SelectedRows[0];
         if (!dgv.Columns.Contains("sprite")) return;
         string sp = row.Cells["sprite"].Value?.ToString() ?? "";
+        // まだ画像パスが設定されていない行(新規追加直後など)は、プレビューを空にしてその旨を表示する
         if (string.IsNullOrEmpty(sp)) { pbPreview.Image = null; lblPreviewPath.Text = "(画像なし)"; return; }
         string fullPath = Path.Combine(projectRoot, sp.Replace('/', '\\'));
         ShowPreview(fullPath);
         lblPreviewPath.Text = sp;
     }
 
+    // 指定したフルパスの画像ファイルを実際に読み込み、pbPreview(PictureBox)へ表示する。
+    // UpdatePreview（グリッド選択変更時）とHandleGridButton内のbtnSprite処理（画像を新しく選んだ直後）の
+    // 両方から呼ばれる共通の描画処理。
     private void ShowPreview(string path)
     {
         try
         {
             if (File.Exists(path))
             {
-                // ファイルロックを避けるためにStreamで読む
+                // Image.FromFile()ではなくFileStream経由で読み込んでいるのは、Image.FromFile()だと
+                // 読み込んだ後もファイルへのロックが残ってしまい、同じ画像を別の場所からコピー/上書きしようと
+                // した際に失敗することがあるため。usingでストリームを確実に閉じることでロックを残さない。
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 pbPreview.Image = Image.FromStream(fs);
-                // Feature: UI改善 — プレビューズーム。小さいドット絵は見やすいよう自動的に拡大した初期値にする
+                // 機能追加: UI改善 — プレビューズーム。ドット絵など元の解像度が小さい画像(幅100px未満)は
+                // 等倍のままだと見づらいため、幅が160px相当になるようズーム率を自動計算して初期表示する
+                // （最大8倍まで。あまりに小さい画像で極端な倍率にならないよう上限を設けている）。
                 _previewZoom = 1f;
                 if (pbPreview.Image.Width > 0 && pbPreview.Image.Width < 100)
                     _previewZoom = Math.Min(8f, 160f / pbPreview.Image.Width);
@@ -818,39 +864,51 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             }
             else
             {
+                // ファイルが移動/削除されている等、パスはあるが実体が見つからないケース
                 pbPreview.Image = null;
                 lblPreviewPath.Text = "⚠ ファイルが見つかりません";
             }
         }
+        // 画像として読み込めない壊れたファイル等、予期しない例外はプレビューを空にするだけで握りつぶす
+        // （プレビュー表示に失敗しても編集作業自体は続行できるようにするための意図的なフォールバック）
         catch { pbPreview.Image = null; }
     }
 
-    // ==== Feature: Configurable Behavior Parameters (M1) ====
+    // ==== 機能: 敵/ギミックごとに調整可能な挙動パラメータ (Configurable Behavior Parameters, 通称 M1) ====
 
+    // _enemyParams辞書から、この行に対応するEnemyDefを取り出す。まだ紐づいていない行（例えば
+    // 「＋敵追加」で追加した直後の新規行）の場合は、この場で空のEnemyDefを新規作成して辞書へ登録してから返す。
+    // これにより呼び出し側は「まだ存在するか」を気にせず常に非nullのEnemyDefを受け取れる。
     private EnemyDef GetOrCreateEnemyParams(DataGridViewRow row)
     {
         if (!_enemyParams.TryGetValue(row, out var def)) { def = new EnemyDef(); _enemyParams[row] = def; }
         return def;
     }
 
+    // GetOrCreateEnemyParamsのギミック版。考え方は完全に同じ
     private GimmickDef GetOrCreateGimmickParams(DataGridViewRow row)
     {
         if (!_gimmickParams.TryGetValue(row, out var def)) { def = new GimmickDef(); _gimmickParams[row] = def; }
         return def;
     }
 
-    // Feature: Composite Multi-Part Objects (Parts-M7)
+    // 機能: 複数パーツからなる複合オブジェクト (Composite Multi-Part Objects, 通称 Parts-M7)
+    // GetOrCreateEnemyParamsのアイテム版。考え方は完全に同じ
     private ItemDef GetOrCreateItemParams(DataGridViewRow row)
     {
         if (!_itemParams.TryGetValue(row, out var def)) { def = new ItemDef(); _itemParams[row] = def; }
         return def;
     }
 
-    // Feature: UI改善 — タブ廃止に伴い、「現在操作対象とみなす種別」をタブのインデックスではなく
+    // 機能追加: UI改善 — タブ廃止に伴い、「現在操作対象とみなす種別」をタブのインデックスではなく
     // 「どのグリッド/リストに選択中の行があるか」から判定する（同時に選択できるのは1つのみになるよう
     // 各グリッドのSelectionChangedで他を解除する。ClearOtherSelections参照）。
     private enum AssetKind { None = -1, Enemy = 0, Gimmick = 1, Item = 2, CommonEvent = 3 }
 
+    // 敵/ギミック/アイテムの各グリッドとコモンイベントのリストボックスを順番に見ていき、
+    // 実際に選択行(選択項目)が存在する最初の種別を「現在アクティブな種別」として返す。
+    // どれも選択されていなければAssetKind.Noneを返す。パーツ編集・挙動スクリプト編集・複製・
+    // タイプカード選択など、複数のボタンが「今どの種別を操作対象にすべきか」を判定するために使う。
     private AssetKind GetActiveKind()
     {
         if (dgvEnemies.SelectedRows.Count > 0) return AssetKind.Enemy;
@@ -884,7 +942,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return 0;
     }
 
-    // Feature: UI改善 — グリッドのicon列を、行のtype_enum(選択中の値)に応じたAssetIconsの絵文字で更新する
+    // 機能追加: UI改善 — グリッドのicon列を、行のtype_enum(選択中の値)に応じたAssetIconsの絵文字で更新する。
+    // type_enumコンボボックスの値が変わるたび(CellValueChanged)に呼ばれ、ユーザーがタイプを切り替えたら
+    // 一覧の見た目（先頭の絵文字アイコン）も即座に連動して変わるようにしている。
+    // isEnemy/isGimmickの2つのbool引数で「アイテム」も含めた3種別のどれかを判別している
+    // （isEnemy=false かつ isGimmick=false ならアイテム、という消去法の判定方式）。
     private void RefreshIconCell(DataGridView dgv, int rowIndex, bool isEnemy, bool isGimmick)
     {
         if (rowIndex < 0 || rowIndex >= dgv.Rows.Count) return;
@@ -893,9 +955,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         dgv.Rows[rowIndex].Cells["icon"].Value = icon;
     }
 
-    // Feature: Puzzle-like Behavior Scripting (M6)
+    // 機能: ブロック(パズル)組み立て式の挙動スクリプティング (Puzzle-like Behavior Scripting, 通称 M6)
     // 現在選択中のタブ・行がtype_enum=20(敵)/24(ギミック)＝カスタムスクリプトであれば
     // ブロックエディタを開き、OKで閉じたらそのEnemyDef/GimmickDef.scriptへ書き戻す。
+    // これらの定数は、EnemyTypes/GimmickTypes配列における「カスタムスクリプト」の項目のtype番号と
+    // 一致させる必要がある（配列側の定義を変更した場合はここも合わせて変更しないと判定がずれる）。
     private const int CustomScriptEnemyType = 20;
     private const int CustomScriptGimmickType = 24;
 
@@ -930,7 +994,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
-    // Feature: Composite Multi-Part Objects (Parts-M7)
+    // 機能: 複数パーツからなる複合オブジェクト (Composite Multi-Part Objects, 通称 Parts-M7)
     // 敵/ギミック/アイテムいずれのタブでも、タイプ(type_enum)に関係なく使える
     // （パーツは親のタイプとは独立して機能するため、挙動スクリプトのようなタイプ制限は設けない）
     private void BtnPartsEditor_Click()
@@ -963,8 +1027,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
-    // Feature: UI改善（提案書 CUT-2/AM-1）— コンボボックスの数字入り文字列から選ぶのではなく、
-    // アイコン・名前・plain-languageの説明が並んだカード一覧をクリックしてタイプを選べるようにする。
+    // 機能追加: UI改善（提案書 CUT-2/AM-1という項目に対応）— コンボボックスの数字入り文字列から選ぶのではなく、
+    // アイコン・名前・平易な言葉での説明が並んだカード一覧をクリックしてタイプを選べるようにする。
     // 選択結果は既存のtype_enumコンボボックス列(desc文字列で管理)へそのまま書き戻すため、
     // ステージ側の読み込み/保存ロジックには一切手を入れていない。
     private void BtnTypeCardPicker_Click()
@@ -977,8 +1041,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             return;
         }
         var row = dgv.SelectedRows[0];
+        // type_enum列がコンボボックス列でなければ(想定外の状況)、以降の処理を安全にあきらめる
         if (row.Cells["type_enum"] is not DataGridViewComboBoxCell combo) return;
 
+        // 選択中の種別に応じたタイプ一覧(EnemyTypes/GimmickTypes/ItemTypes)を、カード表示用のicon付きの
+        // タプルへ変換する。アイコンはAssetIcons側の対応するFor◯◯メソッドから取得している。
         var options = kind switch
         {
             AssetKind.Enemy => EnemyTypes.Select(t => (t.type, t.desc, t.detail, icon: AssetIcons.ForEnemy(t.type))).ToList(),
@@ -986,25 +1053,37 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             _ => ItemTypes.Select(t => (t.type, t.desc, t.detail, icon: AssetIcons.ForItem(t.type))).ToList(),
         };
         int current = GetSelectedTypeEnum(row);
+        // カード選択ダイアログをモーダルで開く。キャンセルされた場合やSelectedTypeが未設定(-1)のままの場合は何もしない
         using var picker = new TypeCardPickerForm(options, current);
         if (picker.ShowDialog() != DialogResult.OK || picker.SelectedType < 0) return;
 
+        // 選ばれたtype番号を、既存のコンボボックス列が使っているdesc文字列(表示名)に変換して書き戻す。
+        // こうすることで、カードから選んでもコンボボックスから選んでも内部的には全く同じ形式のデータになり、
+        // 保存処理(ReadEnemies等)側の実装を変更する必要がない。
         var vals = (string[]?)combo.DataSource;
         if (vals == null || picker.SelectedType >= vals.Length) return;
         combo.Value = vals[picker.SelectedType];
+        // タイプが変わったので、挙動パラメータパネルとアイコン表示も手動で更新しておく
+        // （コンボボックスの値をコード側からセットした場合、CellValueChangedが発火しないことがあるための保険）
         UpdateBehaviorParamsPanel(dgv, isEnemy: kind == AssetKind.Enemy);
         RefreshIconCell(dgv, row.Index, isEnemy: kind == AssetKind.Enemy, isGimmick: kind == AssetKind.Gimmick);
     }
 
     // 選択中の敵/ギミック行のtype_enumに応じて、挙動パラメータの入力欄を動的に組み立てる。
     // 該当タイプに調整可能なパラメータが無い場合は非表示にし、従来のタイプ一覧説明を見せる。
+    // EnemyParamFields/GimmickParamFields（クラス冒頭で定義した「どのtype_enumにどのフィールドを
+    // 表示するか」のテーブル）を元に、リフレクション(GetProperty/GetValue/SetValue)でEnemyDef/GimmickDef
+    // の該当プロパティへ直接読み書きするNumericUpDownをその場で動的に生成している。
     private void UpdateBehaviorParamsPanel(DataGridView dgv, bool isEnemy)
     {
+        // 何も選択されていなければパラメータパネルを隠し、タイプ説明欄を出す
         if (dgv.SelectedRows.Count == 0) { pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; return; }
         var row = dgv.SelectedRows[0];
         int typeEnum = GetSelectedTypeEnum(row);
         var fieldMap = isEnemy ? EnemyParamFields : GimmickParamFields;
 
+        // 選択中のtype_enumに対応する調整可能パラメータの定義が存在しない（またはフィールド0件）場合は、
+        // パラメータパネルではなく従来のタイプ一覧説明(rtbTypeHint)を表示する
         if (!fieldMap.TryGetValue(typeEnum, out var fields) || fields.Length == 0)
         {
             pnlBehaviorParams.Visible = false;
@@ -1013,14 +1092,23 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             return;
         }
 
+        // 行に紐づくEnemyDef/GimmickDef本体（既に無ければ新規作成）を取得し、以降このオブジェクトの
+        // プロパティへ直接値を読み書きする
         object paramsObj = isEnemy ? GetOrCreateEnemyParams(row) : GetOrCreateGimmickParams(row);
+        // これから複数のNumericUpDownのValueをプログラム側から設定するため、その間はValueChangedの
+        // 中身をスキップさせるフラグを立てておく（フィールド宣言のコメント参照。無限ループ・誤書き込み防止）
         _isUpdatingBehaviorPanel = true;
         pnlBehaviorParams.SuspendLayout();
+        // 前回選択されていた行のパラメータ欄がまだ残っている可能性があるため、一旦すべて作り直す
         pnlBehaviorParams.Controls.Clear();
 
+        // fields配列（(プロパティ名, ラベル文言, 小数点桁数)の並び）を1件ずつ、ラベル+NumericUpDownの
+        // ペアとして縦に並べていく。yはこのパネル内でのY座標（次の項目を配置する高さ）を表す
         int y = 4;
         foreach (var (field, label, decimals) in fields)
         {
+            // フィールド名の文字列からリフレクションでEnemyDef/GimmickDef側のプロパティ情報を取得する。
+            // こうすることで、type_enumごとに専用のUIコードを1件ずつ書かずに済んでいる。
             var prop = paramsObj.GetType().GetProperty(field)!;
             var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
             var nud = new NumericUpDown
@@ -1028,30 +1116,42 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 Location = new Point(4, y + 18),
                 Size = new Size(140, 22),
                 DecimalPlaces = decimals,
+                // 小数点桁数が0(整数値)ならクリック1回で1ずつ、小数を持つ値ならその最小単位(例: 桁数2なら0.01)ずつ増減する
                 Increment = decimals > 0 ? (decimal)Math.Pow(10, -decimals) : 1m,
+                // 極端な値を防ぐための一律の上下限（挙動パラメータの種類ごとに個別の上下限は設けていない）
                 Minimum = -100000m,
                 Maximum = 100000m,
+                // paramsObjの現在値をfloat→decimalへ変換して初期表示する
                 Value = (decimal)Convert.ToSingle(prop.GetValue(paramsObj))
             };
             nud.ValueChanged += (s, e) =>
             {
+                // プログラム側からValueを設定している最中(上のValue=...行が動いた瞬間)は無視する。
+                // ここを無視しないと、初期値を設定しただけなのに「ユーザーが値を変更した」と誤判定してしまう。
                 if (_isUpdatingBehaviorPanel) return;
+                // EnemyDef/GimmickDef側のプロパティの型(int or float)に合わせてキャストして書き戻す
                 if (prop.PropertyType == typeof(int)) prop.SetValue(paramsObj, (int)nud.Value);
                 else prop.SetValue(paramsObj, (float)nud.Value);
             };
             pnlBehaviorParams.Controls.Add(lbl);
             pnlBehaviorParams.Controls.Add(nud);
+            // 次の項目はラベル+入力欄ぶんの高さ(42px)だけ下にずらして配置する
             y += 42;
         }
 
         pnlBehaviorParams.ResumeLayout();
+        // 全ての初期値設定が終わったので、以降のユーザー操作によるValueChangedは正常に処理されるようフラグを戻す
         _isUpdatingBehaviorPanel = false;
 
+        // タイプ説明欄を隠してパラメータパネルを表示し、見出しラベルの文言も切り替える
         rtbTypeHint.Visible = false;
         pnlBehaviorParams.Visible = true;
         lblTypeHintTitle.Text = "⚙ 挙動パラメータ";
     }
 
+    // 右サイドパネルの「📋 タイプ説明」欄(rtbTypeHint)の中身を、現在アクティブな種別(GetActiveKind)に応じて
+    // 丸ごと書き直す。RichTextBoxのSelectionFont/SelectionColorを使い、見出し部分は太字+種別ごとの色、
+    // 説明本文はグレーの小さめフォント、という体裁を種別ごとのdesc/detail一覧を1件ずつ流し込んで再現している。
     private void UpdateTypeHint()
     {
         rtbTypeHint.Clear();
@@ -1112,12 +1212,20 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== データ読み込み =====
+    // コンストラクタから一度だけ呼ばれる。assets(コンストラクタで渡された既存の定義データ)の内容を
+    // 敵/ギミック/アイテムそれぞれのDataGridViewへ1行ずつ流し込んで、グリッドの表示を初期化する。
+    // コモンイベント側は既にコンストラクタで_commonEventsへ複製済みのため、ここでは扱わない
+    // （表示自体はInitUI内のRefreshCommonEventsList呼び出しで行われる）。
     private void LoadData()
     {
         dgvEnemies.Rows.Clear();
         _enemyParams.Clear();
         foreach (var e in assets.Enemies)
         {
+            // 保存済みJSON側のtype_enumが、現在のEnemyTypes定義に存在しない番号になっている場合
+            // （例えば古いバージョンで定義されていたタイプ番号を削除した後にファイルを読み込んだ場合など）に
+            // 備えたフォールバック処理。コンボボックスのDataSourceに存在しない値を設定すると
+            // DataError（HandleDataError参照）が発生してしまうため、警告ログを残した上でtype_enum=0に丸める。
             string typeLabel = EnemyTypes.FirstOrDefault(t => t.type == e.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !EnemyTypes.Any(t => t.desc == typeLabel))
             {
@@ -1125,7 +1233,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 typeLabel = EnemyTypes[0].desc;
             }
             dgvEnemies.Rows.Add(AssetIcons.ForEnemy(e.type_enum), e.id, e.name, typeLabel, e.hp, e.width, e.height, e.hitboxOffsetX, e.hitboxOffsetY, e.hitboxWidth, e.hitboxHeight, e.scale, e.sprite, "🎯", "📏", "📁", "🗑");
-            // Feature: Configurable Behavior Parameters (M1) — 行オブジェクトに紐づけて挙動パラメータ本体を保持する
+            // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 行オブジェクトに紐づけて挙動パラメータ本体を保持する。
+            // ここでは新しくEnemyDefを作り直すのではなく、assetsから読み込んだeそのものを紐づけている点に注意
+            // （こうしないと、JSONに保存されていた挙動パラメータ・SE設定・スクリプト等の情報が失われてしまう）
             _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = e;
         }
 
@@ -1133,6 +1243,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         _gimmickParams.Clear();
         foreach (var g in assets.Gimmicks)
         {
+            // 敵と同様、type_enumが現在の定義に存在しない場合のフォールバック（詳細は敵側のコメント参照）
             string typeLabel = GimmickTypes.FirstOrDefault(t => t.type == g.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !GimmickTypes.Any(t => t.desc == typeLabel))
             {
@@ -1147,6 +1258,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         _itemParams.Clear();
         foreach (var i in assets.Items)
         {
+            // 敵・ギミックと同様のフォールバック処理（詳細は敵側のコメント参照）
             string typeLabel = ItemTypes.FirstOrDefault(t => t.type == i.type_enum).desc;
             if (string.IsNullOrEmpty(typeLabel) || !ItemTypes.Any(t => t.desc == typeLabel))
             {
@@ -1154,17 +1266,23 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 typeLabel = ItemTypes[0].desc;
             }
             dgvItems.Rows.Add(AssetIcons.ForItem(i.type_enum), i.id, i.name, typeLabel, i.hitboxOffsetX, i.hitboxOffsetY, i.hitboxWidth, i.hitboxHeight, i.sprite, i.grant_ability, "🎯", "📁", "🗑");
-            // Feature: Composite Multi-Part Objects (Parts-M7) — 行オブジェクトに紐づけて非グリッド項目(parts等)を保持する
+            // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — 行オブジェクトに紐づけて非グリッド項目(parts等)を保持する
             _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = i;
         }
     }
 
-    // Feature: UI改善（提案書 CUT-3）— ID重複や画像未設定のまま保存すると、ステージ側からの参照が
+    // 機能追加: UI改善（提案書のCUT-3という項目に対応）— ID重複や画像未設定のまま保存すると、ステージ側からの参照が
     // 意図せず別の定義を指してしまったり、ゲーム内で表示されないままになったりして気づきにくい。
+    // そこで保存の直前にこのメソッドで軽い自己診断を行い、問題があれば警告文の一覧を返す
+    // （呼び出し元のBtnSave_Clickでは、警告が1件でもあればユーザーに続行するかどうかを確認する）。
+    // 戻り値の警告文は「保存を止める」ものではなく、あくまで注意喚起であることに留意（保存自体は続行できる）。
     private static List<string> ValidateAssets(List<EnemyDef> enemies, List<GimmickDef> gimmicks, List<ItemDef> items, List<CommonEventDef> commonEvents)
     {
         var warnings = new List<string>();
 
+        // 同じ種別のリスト内でidが重複している項目をまとめて検出するローカル関数。
+        // idSelでリスト要素からid文字列を取り出す方法を渡すことで、敵/ギミック/アイテム/コモンイベントの
+        // 4種類すべてに対して同じロジックを使い回している。
         void CheckDup<T>(List<T> list, Func<T, string> idSel, string kind)
         {
             var dups = list.GroupBy(idSel).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
@@ -1176,6 +1294,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         CheckDup(items, i => i.id, "アイテム");
         CheckDup(commonEvents, c => c.id, "コモンイベント");
 
+        // 画像パスが空のまま保存しようとしている敵を検出する（ギミック/アイテムは画像が無くても
+        // 致命的ではないケースがあるため、ここでは敵のみをチェック対象にしている）
         var noSpriteEnemies = enemies.Where(e => string.IsNullOrWhiteSpace(e.sprite)).Select(e => e.id).ToList();
         if (noSpriteEnemies.Count > 0)
             warnings.Add($"画像が未設定の敵があります (ID: {string.Join(", ", noSpriteEnemies)})。ゲーム内で表示されません。");
@@ -1184,15 +1304,21 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== 保存 =====
+    // 「💾 保存して閉じる」ボタンのクリックハンドラ。グリッドの内容をEnemyDef/GimmickDef/ItemDefの
+    // リストへ変換し、ValidateAssetsで軽く自己診断してから、実際にassets.SaveToFolderでJSONへ書き出す。
     private void BtnSave_Click(object? sender, EventArgs e)
     {
         var enemies = ReadEnemies();
         var gimmicks = ReadGimmicks();
         var items = ReadItems();
 
+        // 保存前バリデーション。ID重複や画像未設定などの警告があれば、内容を一覧表示した上で
+        // 「それでも保存するか」をユーザーに確認する。警告はあくまで注意喚起であり保存を強制的に止めはしない。
         var warnings = ValidateAssets(enemies, gimmicks, items, _commonEvents);
         if (warnings.Count > 0)
         {
+            // 警告が大量にある場合にメッセージボックスが際限なく縦長にならないよう、先頭8件だけ表示し
+            // それ以上は「…他◯件」という形でまとめる
             string msg = "保存前に確認してください:\n\n" +
                 string.Join("\n", warnings.Take(8)) +
                 (warnings.Count > 8 ? $"\n…他{warnings.Count - 8}件" : "") +
@@ -1200,6 +1326,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         }
 
+        // 読み取ったリストをassets本体へ反映し、assetsPathフォルダへJSONとして書き出す
         assets.Enemies = enemies;
         assets.Gimmicks = gimmicks;
         assets.Items = items;
@@ -1207,25 +1334,37 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         assets.SaveToFolder(assetsPath);
         MessageBox.Show("アセット定義を保存しました！\n\n※画像はimgフォルダへコピー済みです。\nゲームを再ビルドすると新しいスプライトが反映されます。",
             "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        // このUserControlはFormのClose()を持たないため、保存完了をホスト側に伝えるためのイベントを発火する
+        // （クラス冒頭のコメント参照。ホスト側がこれを購読してForm.Close()やGoBack()を呼ぶ）
         Saved?.Invoke(this, EventArgs.Empty);
     }
 
+    // 敵グリッド(dgvEnemies)の全行を読み取り、EnemyDefのリストへ変換する。BtnSave_Clickから呼ばれる。
     private List<EnemyDef> ReadEnemies()
     {
         var list = new List<EnemyDef>();
         foreach (DataGridViewRow row in dgvEnemies.Rows)
         {
+            // DataGridViewは末尾に「新規行を入力するための空行」を自動的に持つため、それは読み飛ばす
             if (row.IsNewRow) continue;
             string? id = row.Cells["id"].Value?.ToString();
+            // idが空の行（データが実質的に未入力の行）は保存対象から除外する
             if (string.IsNullOrWhiteSpace(id)) continue;
 
-            // type_enum: コンボボックスの選択インデックスから取得
+            // type_enum: コンボボックスの選択インデックスから取得。
+            // 以下の2段階の処理になっているのは、
+            // (1)まずdesc文字列に含まれる番号や単語からのゆるい文字列一致で候補を探し、
+            // (2)その後、実際のDataGridViewComboBoxCellとしての選択値インデックス取得を試みて、
+            //    見つかればそちらの結果で上書きする、というフォールバック構成になっているため。
+            // 通常時は(2)が必ず成功して(1)の結果を上書きするが、何らかの理由でセルがコンボボックスとして
+            // 認識できない状況（例外的なケース）でも(1)の緩い一致により大きく外れた値にはなりにくいよう
+            // 保険をかけている。
             int typeIdx = 0;
             string typeStr = row.Cells["type_enum"].Value?.ToString() ?? "";
             for (int i = 0; i < EnemyTypes.Length; i++)
                 if (EnemyTypes[i].desc.Split('=')[1].Trim().Split(' ')[0] == typeStr ||
                     typeStr == i.ToString() || EnemyTypes[i].desc.Contains(typeStr)) { typeIdx = i; break; }
-            // ComboBoxのインデックスで取得試み
+            // ComboBoxのインデックスで取得試み（こちらが取得できれば上の緩い一致より優先して採用する）
             if (row.Cells["type_enum"] is DataGridViewComboBoxCell combo)
             {
                 var vals = (string[]?)combo.DataSource;
@@ -1236,7 +1375,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            // Feature: Configurable Behavior Parameters (M1) — 行に紐づく保持済みEnemyDef（挙動パラメータ・SE等を保持）を
+            // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 行に紐づく保持済みEnemyDef（挙動パラメータ・SE等を保持）を
             // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する（新規に作り直すと挙動パラメータが失われるため）
             var def = GetOrCreateEnemyParams(row);
             def.id = id;
@@ -1256,6 +1395,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return list;
     }
 
+    // ギミックグリッド(dgvGimmicks)の全行を読み取り、GimmickDefのリストへ変換する。
+    // 敵側と異なり、type_enumはComboBoxセルからのインデックス取得のみ（緩い文字列一致のフォールバックは無い）。
     private List<GimmickDef> ReadGimmicks()
     {
         var list = new List<GimmickDef>();
@@ -1276,7 +1417,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            // Feature: Configurable Behavior Parameters (M1) — 行に紐づく保持済みGimmickDef（挙動パラメータ・SE等を保持）を
+            // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 行に紐づく保持済みGimmickDef（挙動パラメータ・SE等を保持）を
             // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する
             var def = GetOrCreateGimmickParams(row);
             def.id = id;
@@ -1292,6 +1433,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return list;
     }
 
+    // アイテムグリッド(dgvItems)の全行を読み取り、ItemDefのリストへ変換する。考え方はReadGimmicksとほぼ同じだが、
+    // grant_ability(付与能力)列も併せて読み取る点がアイテム固有。
     private List<ItemDef> ReadItems()
     {
         var list = new List<ItemDef>();
@@ -1312,7 +1455,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
                 }
             }
 
-            // Feature: Composite Multi-Part Objects (Parts-M7) — 行に紐づく保持済みItemDef（parts等）を
+            // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — 行に紐づく保持済みItemDef（parts等）を
             // 土台にし、グリッドで編集可能な基本フィールドだけをそこへ反映する（新規に作り直すとpartsが失われるため）
             var def = GetOrCreateItemParams(row);
             def.id = id;
@@ -1329,20 +1472,25 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return list;
     }
 
+    // 指定した列のセル値を安全にintへ変換する。数値として解釈できない場合(空文字・不正な文字列等)はdefを返す
     private static int IntCell(DataGridViewRow row, string col, int def = 0)
         => int.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
 
+    // IntCellのfloat版。scale等の小数値を持つ列の読み取りに使う
     private static float FloatCell(DataGridViewRow row, string col, float def = 0f)
         => float.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
 
     // ===== コモンイベント =====
-    // Feature: UI改善（提案書 AM-4）— 件数だけでなく「何をするイベントか」がタイトルだけで
+    // 機能追加: UI改善（提案書のAM-4という項目に対応）— 件数だけでなく「何をするイベントか」がタイトルだけで
     // 一目で分かるよう、実行内容(アクション種別)を矢印でつないだ要約を添える。
+    // _commonEventsリストの内容を丸ごと読み直してlstCommonEventsの表示項目を作り直す（差分更新はしない）。
     private void RefreshCommonEventsList()
     {
         lstCommonEvents.Items.Clear();
         foreach (var ce in _commonEvents)
         {
+            // アクションが1つも登録されていなければその旨を、そうでなければ先頭4件までのアクション名を
+            // 「→」でつないだ要約文字列を作る。5件以上ある場合は末尾に「…」を付けて省略を示す。
             string summary = ce.actions.Count == 0
                 ? "(実行内容が未設定)"
                 : string.Join("→", ce.actions.Take(4).Select(a => a.action)) + (ce.actions.Count > 4 ? "…" : "");
@@ -1350,6 +1498,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
+    // 「＋コモンイベント追加」ボタンから呼ばれる。まず衝突しない連番のidを決めた上で空のCommonEventDefを作り、
+    // CommonEventEditRequestedイベント経由でホスト側に編集画面を開いてもらう。
+    // 敵/ギミック/アイテムの追加(AddRow)と違い即座にグリッドへ行を足すのではなく、先に編集画面を開かせて
+    // OKされた結果だけを_commonEventsへ追加する、という一手間多い流れになっている
+    // （コモンイベントはアクション列を持たないリスト表示のため、詳細内容は必ず専用の編集画面で組み立てる必要があるため）。
     private void AddCommonEvent()
     {
         int n = _commonEvents.Count + 1;
@@ -1364,6 +1517,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         });
     }
 
+    // リストボックスのダブルクリック、または「✎ 編集」ボタンから呼ばれる。
+    // 選択中のコモンイベントをホスト側の編集画面に渡し、OKされたら_commonEventsの該当要素を置き換える。
     private void EditSelectedCommonEvent()
     {
         int idx = lstCommonEvents.SelectedIndex;
@@ -1373,10 +1528,12 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         {
             _commonEvents[idx] = result;
             RefreshCommonEventsList();
+            // リスト再構築で選択状態が失われるため、編集していた項目を選択したままにしておく
             lstCommonEvents.SelectedIndex = idx;
         });
     }
 
+    // 「🗑 削除」ボタンから呼ばれる。誤操作防止のため確認ダイアログを挟んでから_commonEventsリストから取り除く
     private void DeleteSelectedCommonEvent()
     {
         int idx = lstCommonEvents.SelectedIndex;
@@ -1387,7 +1544,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== 検索フィルタ (MZ風 ID/名前検索) =====
-    // Feature: UI改善 — タブ廃止により全種別が同時に画面上へ並ぶため、検索は表示中の全グリッド/一覧へ横断的に適用する
+    // 機能追加: UI改善 — タブ廃止により全種別が同時に画面上へ並ぶため、検索は表示中の全グリッド/一覧へ横断的に適用する。
+    // txtSearchのTextChangedイベントから呼ばれ、入力するたびリアルタイムに絞り込みを更新する。
     private void ApplySearchFilter()
     {
         string q = txtSearch.Text.Trim();
@@ -1397,11 +1555,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         FilterCommonEventsList(q);
     }
 
+    // 敵/ギミック/アイテムのいずれかのグリッドに対し、id列またはname列にqueryを含まない行を非表示(Visible=false)にする。
+    // 行そのものを削除するわけではないため、検索欄を空にすればすぐに全件表示へ戻せる。
     private static void FilterGrid(DataGridView dgv, string query)
     {
         foreach (DataGridViewRow row in dgv.Rows)
         {
             if (row.IsNewRow) continue;
+            // 検索文字列が空なら絞り込みなし（全行表示）
             if (string.IsNullOrEmpty(query)) { row.Visible = true; continue; }
             string id = row.Cells["id"].Value?.ToString() ?? "";
             string name = dgv.Columns.Contains("name") ? row.Cells["name"].Value?.ToString() ?? "" : "";
@@ -1409,6 +1570,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
+    // コモンイベントのリストボックス用の絞り込み。DataGridViewのように行単位でVisibleを切り替える仕組みが
+    // ListBoxには無いため、こちらは該当する項目だけを毎回作り直して再表示する方式にしている
+    // （RefreshCommonEventsListとほぼ同じ表示処理だが、絞り込み後は簡易表示（要約文なし・件数表示のみ）になる）。
     private void FilterCommonEventsList(string query)
     {
         lstCommonEvents.Items.Clear();
@@ -1420,6 +1584,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     }
 
     // ===== 選択行の複製 (MZ風: 似た定義を素早く量産) =====
+    // ツールバーの「⧉ 選択行を複製」ボタンから呼ばれる共通の入り口。GetActiveKindで「今どの種別が
+    // 選択されているか」を判定し、それぞれの種別専用の複製処理へ振り分ける。
     private void BtnDuplicate_Click(object? sender, EventArgs e)
     {
         switch (GetActiveKind())
@@ -1432,6 +1598,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
     }
 
+    // 複製元のbaseIdを元に、"baseId_copy"→衝突していれば"baseId_copy2"→"baseId_copy3"…という具合に
+    // 衝突しない複製先idを決める。MakeUniqueSequentialId（新規追加用の連番採番）とは用途が異なるための別実装。
     private static string MakeUniqueId(DataGridView dgv, string baseId)
     {
         var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1444,6 +1612,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return candidate;
     }
 
+    // 敵グリッドで選択中の行を複製する。表示列の値をそのままコピーした新しい行をグリッドへ追加した上で、
+    // _enemyParamsに保持している非表示の挙動パラメータ本体もJSONシリアライズ/デシリアライズを介して
+    // ディープコピーする（単純に代入するだけだと新旧の行が同じEnemyDefインスタンスを共有してしまい、
+    // 片方を編集するともう片方も変わってしまうため）。
     private void DuplicateEnemyRow()
     {
         if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
@@ -1459,11 +1631,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["scale"].Value ?? 1.0f,
             r.Cells["sprite"].Value ?? "", "🎯", "📏", "📁", "🗑"
         });
-        // Feature: Configurable Behavior Parameters (M1) — 挙動パラメータも複製する
+        // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 挙動パラメータもディープコピーして複製する。
+        // JSON経由での往復変換（クラス冒頭のコメント参照）を使うことで、参照を共有しない独立したコピーを作れる。
         var srcDef = GetOrCreateEnemyParams(r);
         _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = JsonConvert.DeserializeObject<EnemyDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
+    // ギミックグリッドで選択中の行を複製する。考え方はDuplicateEnemyRowと同じ
     private void DuplicateGimmickRow()
     {
         if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
@@ -1477,11 +1651,12 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
             r.Cells["sprite"].Value ?? "", "🎯", "📁", "🗑"
         });
-        // Feature: Configurable Behavior Parameters (M1) — 挙動パラメータも複製する
+        // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 挙動パラメータもディープコピーして複製する
         var srcDef = GetOrCreateGimmickParams(r);
         _gimmickParams[dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1]] = JsonConvert.DeserializeObject<GimmickDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
+    // アイテムグリッドで選択中の行を複製する。考え方はDuplicateEnemyRowと同じ
     private void DuplicateItemRow()
     {
         if (dgvItems.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
@@ -1495,11 +1670,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             r.Cells["hitboxWidth"].Value ?? 32, r.Cells["hitboxHeight"].Value ?? 32,
             r.Cells["sprite"].Value ?? "", r.Cells["grant_ability"].Value ?? "", "🎯", "📁", "🗑"
         });
-        // Feature: Composite Multi-Part Objects (Parts-M7) — parts等の非グリッド項目も複製する
+        // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — parts等の非グリッド項目も複製する
         var srcDef = GetOrCreateItemParams(r);
         _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = JsonConvert.DeserializeObject<ItemDef>(JsonConvert.SerializeObject(srcDef))!;
     }
 
+    // コモンイベントリストで選択中の項目を複製する。グリッド系と違いDataGridViewRowを使わないため、
+    // JSONシリアライズではなくactionsリストの要素を1件ずつ新しいEventActionEntryへコピーする方式にしている。
     private void DuplicateCommonEvent()
     {
         int idx = lstCommonEvents.SelectedIndex;
@@ -1521,13 +1698,19 @@ Exception.StackTrace: {e.Exception.StackTrace}";
 }
 
 // ======================================================
-// TypeCardPickerForm - type_enumを数字ではなくカード形式で選ぶダイアログ
-// Feature: UI改善（提案書 CUT-2/AM-1）
+// TypeCardPickerForm - type_enumを数字入りの文字列から選ぶのではなく、アイコン・名前・平易な説明が
+// 並んだ「カード」を一覧表示し、クリックするだけでタイプを選べるようにするための単純なモーダルダイアログ。
+// 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）
+// BtnTypeCardPicker_Click（AssetManagerPageControl側）から呼び出され、選ばれた結果はSelectedTypeプロパティ
+// 経由で呼び出し元へ伝わる（DialogResult.OKかどうかも合わせて確認される想定）。
 // ======================================================
 public class TypeCardPickerForm : Form
 {
+    // ユーザーがクリックして選んだtype番号。何も選ばれていない(キャンセルされた等)場合は-1のまま
     public int SelectedType { get; private set; } = -1;
 
+    // options: カードとして並べるタイプの一覧 (type番号, 表示名, 詳細説明, 絵文字アイコン) のタプル配列
+    // currentType: 現在選択されている（呼び出し元で選ばれていた）type番号。該当するカードをハイライト表示するために使う
     public TypeCardPickerForm(List<(int type, string desc, string detail, string icon)> options, int currentType)
     {
         Text = "🔍 タイプをカードから選ぶ";
@@ -1536,6 +1719,7 @@ public class TypeCardPickerForm : Form
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
+        // 画面上部の操作案内ラベル
         var lblHint = new Label
         {
             Dock = DockStyle.Top,
@@ -1546,6 +1730,7 @@ public class TypeCardPickerForm : Form
             ForeColor = Color.DarkSlateGray,
         };
 
+        // カードを縦に並べるスクロール可能なリストパネル
         var pnlList = new FlowLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -1555,8 +1740,10 @@ public class TypeCardPickerForm : Form
             Padding = new Padding(8),
         };
 
+        // optionsの1件ずつを「見出し(アイコン+タイプ名)＋詳細説明」を縦に積んだ1枚のカード(Panel)として組み立てる
         foreach (var opt in options)
         {
+            // 現在選択中のtype番号と一致するカードは背景色を薄い黄色にして目立たせ、「（現在選択中）」の文言も添える
             bool isCurrent = opt.type == currentType;
             var card = new Panel
             {
@@ -1589,6 +1776,9 @@ public class TypeCardPickerForm : Form
             inner.Controls.Add(lblDetail);
             card.Controls.Add(inner);
 
+            // このカードがクリックされたときにSelectedTypeへ結果を設定し、DialogResult.OKでダイアログを閉じる
+            // ローカル関数。foreachのイテレーション変数(opt.type)をラムダ式内でそのまま使うと、ループが進むたびに
+            // 参照先が変わって全カードが最後の値を指してしまう問題があるため、capturedTypeへ一度コピーしてから使う。
             int capturedType = opt.type;
             void Choose()
             {
@@ -1597,17 +1787,23 @@ public class TypeCardPickerForm : Form
                 Close();
             }
             card.Click += (s, e) => Choose();
+            // カード自体だけでなく、その中の見出しラベル・詳細ラベル等の子孫コントロール上をクリックしても
+            // 同じように選択が反応するよう、再帰的に取得した全子孫コントロールにもClickハンドラを配線する
+            // （そうしないと、ラベルの文字の上をクリックしたときだけ反応しない、という体験になってしまう）。
             foreach (var c in AllDescendants(card)) c.Click += (s, e) => Choose();
+            // カーソルも同様に、カード全体のどこにマウスを乗せても「クリックできる」ことが分かる手の形にする
             foreach (var c in AllDescendants(card)) c.Cursor = Cursors.Hand;
 
             pnlList.Controls.Add(card);
         }
 
+        // 下部の「キャンセル」ボタン。押すとDialogResult.Cancelでダイアログが閉じ、SelectedTypeは-1のままになる
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
         flow.Controls.Add(btnCancel);
         pnlBottom.Controls.Add(flow);
+        // CancelButtonに設定しておくことで、Escキーを押した場合もキャンセル扱いで閉じるようになる
         CancelButton = btnCancel;
 
         Controls.Add(pnlList);
@@ -1615,6 +1811,9 @@ public class TypeCardPickerForm : Form
         Controls.Add(lblHint);
     }
 
+    // rootの配下にある全てのコントロールを、階層の深さに関わらず再帰的に列挙するヘルパー。
+    // カード(Panel)の中にFlowLayoutPanel、その中にLabelが2つ、という入れ子構造の全てへ
+    // 同じイベントハンドラやカーソル設定を一括で配線するために使っている。
     private static IEnumerable<Control> AllDescendants(Control root)
     {
         foreach (Control c in root.Controls)

@@ -14,6 +14,12 @@ namespace Lab_Editor;
 // ======================================================
 public static class BehaviorScriptTemplates
 {
+    // テンプレート1件分の情報を表すクラス。
+    // Name        : テンプレート選択リストに表示される名前（絵文字付きの短いラベル）
+    // Description : そのテンプレートがどんな動きになるかを説明する文章（選択時に詳細欄へ表示される）
+    // Build       : 実際にこのテンプレートのブロック構成をJSON AST（JArray）として組み立てて返す関数。
+    //               呼び出すたびに新しいJArrayを生成するため、同じテンプレートを複数回読み込んでも
+    //               参照を共有して壊し合うことがない。
     public class TemplateInfo
     {
         public string Name = "";
@@ -21,6 +27,7 @@ public static class BehaviorScriptTemplates
         public Func<JArray> Build = () => new JArray();
     }
 
+    // 用意されている全テンプレートの一覧。TemplatePickerFormのリストにそのまま表示される。
     public static readonly List<TemplateInfo> All = new()
     {
         new TemplateInfo
@@ -61,8 +68,12 @@ public static class BehaviorScriptTemplates
         },
     };
 
+    // 「hatブロック（開始点）+ その中身(body)」という、BlockScriptSerializerが読み込める最上位のJSON AST片を
+    // 1つ組み立てる共通ヘルパー。hatName（例："OnSpawn"）と、その中で実行するブロック列(body)を受け取る。
     private static JArray Hat(string hatName, JArray body) => new JArray { new JObject { ["hat"] = hatName, ["body"] = body } };
 
+    // 「⬅➡ 左右パトロール」テンプレート：出現時(OnSpawn)から、右へ2の速さで1秒(60フレーム)進んで止まり、
+    // 続けて左へ同じ速さで1秒進んで止まる…という往復動作をForeverの中で無限に繰り返す。
     private static JArray BuildPatrol() => Hat("OnSpawn", new JArray
     {
         new JObject
@@ -78,6 +89,9 @@ public static class BehaviorScriptTemplates
         }
     });
 
+    // 「🏃 近づいたら追いかける」テンプレート：Forever内で毎フレーム、プレイヤーとの距離(DistanceToPlayer)が
+    // 200px未満かどうかを判定(IfElse)し、近ければプレイヤー方向(Toward)へ速さ2で移動、
+    // 遠ければ何もせず1フレームだけ待機する（＝待機状態）を繰り返す。
     private static JArray BuildChase() => Hat("OnSpawn", new JArray
     {
         new JObject
@@ -96,6 +110,8 @@ public static class BehaviorScriptTemplates
         }
     });
 
+    // 「🎯 一定間隔で狙撃」テンプレート：Forever内で、プレイヤーへ自動照準で弾（速さ6・威力1）を1発撃ち、
+    // その後90フレーム（1.5秒）待ってから再び撃つ、を繰り返す。
     private static JArray BuildShootAtPlayer() => Hat("OnSpawn", new JArray
     {
         new JObject
@@ -109,6 +125,9 @@ public static class BehaviorScriptTemplates
         }
     });
 
+    // 「🌊 上下に振動する床」テンプレート：ForeverでOscillateブロックを1つだけ実行し続ける。
+    // Y座標を200(min)〜300(max)の間で90フレーム(1.5秒)周期に往復させる。min/maxは絶対座標なので、
+    // このテンプレートを実際に使う際は配置後の実際の座標に合わせて数値を調整する必要がある。
     private static JArray BuildOscillatingFloor() => Hat("OnSpawn", new JArray
     {
         new JObject
@@ -121,6 +140,9 @@ public static class BehaviorScriptTemplates
         }
     });
 
+    // 「🌀 その場で回転し続ける」テンプレート：Forever内で毎フレーム、経過フレーム数(Time)に0.05を
+    // 掛けた値を回転角(SetAngle)として設定し続けることで、時間経過に比例してゆっくり回転させる。
+    // 1フレームごとにWaitで待つことで、Foreverが無限ループとして暴走せず1フレームずつ進む。
     private static JArray BuildSelfRotate() => Hat("OnSpawn", new JArray
     {
         new JObject
@@ -134,6 +156,9 @@ public static class BehaviorScriptTemplates
         }
     });
 
+    // 「💢 被弾時に一瞬無敵＋点滅」テンプレート：OnDamaged（ダメージを受けた瞬間）をきっかけに、
+    // 無敵状態をONにしてから明るさ演出(brightness, 強度1.5)をかけ、30フレーム(0.5秒)待った後、
+    // 無敵状態をOFFに戻す。連続ヒットを防ぎつつ被弾したことを視覚的に分かりやすくする定番パターン。
     private static JArray BuildDamagedFlash() => Hat("OnDamaged", new JArray
     {
         new JObject { ["op"] = "SetInvincible", ["on"] = "true" },
@@ -146,22 +171,29 @@ public static class BehaviorScriptTemplates
 // ======================================================
 // TemplatePickerForm - テンプレート選択ダイアログ
 // Feature: UI改善（提案書 BS-3）
+//
+// BehaviorScriptTemplates.Allの一覧をリスト表示し、選択した項目の説明文を下に表示するだけの
+// シンプルなモーダルダイアログ。OKが押された時点のSelectedTemplateを呼び出し元が読み取り、
+// TemplateInfo.Build()を実行してキャンバスへ読み込む、という流れで使われる。
 // ======================================================
 public class TemplatePickerForm : Form
 {
-    private ListBox _list = null!;
-    private Label _lblDesc = null!;
+    private ListBox _list = null!;   // テンプレート名の一覧を表示するリストボックス
+    private Label _lblDesc = null!;  // 選択中テンプレートの説明文を表示するラベル
 
+    // OKボタンが押された時点で選択されていたテンプレート情報。未選択のままOKされた場合はnullのまま。
     public BehaviorScriptTemplates.TemplateInfo? SelectedTemplate { get; private set; }
 
+    // コンストラクタ：UI一式を構築し、テンプレート一覧をリストボックスへ流し込む。
     public TemplatePickerForm()
     {
         Text = "📋 テンプレートから開始";
         Size = new Size(520, 420);
-        MinimumSize = new Size(420, 320);
+        MinimumSize = new Size(420, 320); // ウィンドウを小さくしすぎてUIが崩れないよう最小サイズを設定
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
+        // 上部の説明文（このダイアログが何をするものかの案内）
         var lblHint = new Label
         {
             Dock = DockStyle.Top,
@@ -172,35 +204,42 @@ public class TemplatePickerForm : Form
             ForeColor = Color.DarkSlateGray,
         };
 
+        // テンプレート名の一覧を表示するリストボックス。BehaviorScriptTemplates.Allの各Nameを項目として追加する。
         _list = new ListBox { Dock = DockStyle.Fill, Font = new Font("Meiryo UI", 10f), IntegralHeight = false };
         foreach (var t in BehaviorScriptTemplates.All) _list.Items.Add(t.Name);
+        // 選択項目が変わるたびに、対応するテンプレートの説明文(Description)を下部ラベルへ反映する
         _list.SelectedIndexChanged += (s, e) =>
         {
             int idx = _list.SelectedIndex;
             _lblDesc.Text = idx >= 0 ? BehaviorScriptTemplates.All[idx].Description : "";
         };
 
+        // 選択中テンプレートの説明文を表示するラベル（初期状態は空）
         _lblDesc = new Label { Dock = DockStyle.Top, Height = 60, Padding = new Padding(8), ForeColor = Color.DimGray, Text = "" };
 
+        // 下部のOK/キャンセルボタン領域。RightToLeftのFlowLayoutPanelで右詰めに配置する。
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var btnCancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
         var btnOk = new Button { Text = "このテンプレートを読み込む", DialogResult = DialogResult.OK, AutoSize = true, Padding = new Padding(10, 5, 10, 5), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        // OKが押された時点でリストの選択項目があれば、それをSelectedTemplateとして確定する
         btnOk.Click += (s, e) =>
         {
             if (_list.SelectedIndex >= 0) SelectedTemplate = BehaviorScriptTemplates.All[_list.SelectedIndex];
         };
+        // RightToLeftは追加順が右から並ぶため、OKボタンを一番右に見せたい場合は先にCancelを追加する
         flow.Controls.Add(btnCancel);
         flow.Controls.Add(btnOk);
         pnlBottom.Controls.Add(flow);
-        AcceptButton = btnOk;
-        CancelButton = btnCancel;
+        AcceptButton = btnOk;     // Enterキーで確定できるようにする
+        CancelButton = btnCancel; // Escキーでキャンセルできるようにする
 
         Controls.Add(_list);
         Controls.Add(pnlBottom);
         Controls.Add(lblHint);
         Controls.Add(_lblDesc);
 
+        // 初期状態で先頭のテンプレートを選択しておくことで、開いた瞬間から説明文が表示された状態にする
         if (_list.Items.Count > 0) _list.SelectedIndex = 0;
     }
 }

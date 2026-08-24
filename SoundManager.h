@@ -79,7 +79,6 @@ public:
         currentBgmId = "";
     }
 
-    // Mute toggle for the player's stealth tool (M key). Only suppresses newly-triggered SE, not BGM.
     // プレイヤーが使う「ステルスツール」（Mキー）用のミュート切り替え。
     // これがtrueの間は新しく再生しようとしたSEだけが抑制され、BGMには影響しない。
     void SetMuted(bool muted) { isMuted = muted; }

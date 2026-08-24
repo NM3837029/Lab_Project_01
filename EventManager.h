@@ -25,7 +25,6 @@ struct EventActionEntry {
 
 // コモンイベントの定義（RPGツクールMZのコモンイベントに相当する仕組み）。
 // CallCommonEventアクションから名前（id）で呼び出され、まとめて登録されたアクション群を実行する。
-// Common event definition (RPG Maker MZ style). Referenced by the CallCommonEvent action.
 struct CommonEventDef {
     std::string id;                        // コモンイベントを識別するID（CallCommonEventのparam1と対応）
     std::string name;                       // 表示・管理用の名前（実処理には使わない）
@@ -43,10 +42,9 @@ struct EventTrigger {
     bool triggered = false;                   // 既に発動済みかどうかのフラグ
     std::vector<EventActionEntry> actions;    // 条件が満たされたときに実行するアクションの並び
 
-    // Runtime-only state, not persisted to JSON.
     // 以下はJSONには保存されず、プレイ中の一時的な状態としてのみ使うメンバー。
-    bool wasPlayerInside = false; // for PlayerExit（直前のフレームでプレイヤーが領域内にいたかどうか。PlayerExit判定に使う）
-    float elapsedTime = 0.0f;     // for TimerExpired（このトリガーが有効になってからの経過時間。TimerExpired判定に使う）
+    bool wasPlayerInside = false; // 直前のフレームでプレイヤーが領域内にいたかどうか（PlayerExit判定に使う）
+    float elapsedTime = 0.0f;     // このトリガーが有効になってからの経過時間（TimerExpired判定に使う）
 };
 
 // アクションを実行する際に、EventManagerの外部（呼び出し元）へ処理を委譲するためのコールバック型。
@@ -124,7 +122,6 @@ public:
         }
     }
 
-    // Loads common event definitions from assets/common_events.json. Referenced by the CallCommonEvent action.
     // assets/common_events.jsonからコモンイベントの定義一覧を読み込む関数。
     // ここで読み込んだ定義は、CallCommonEventアクションが実行されたときにidで検索して使われる。
     void LoadCommonEventsFromJson(const json& j) {
@@ -166,7 +163,6 @@ public:
         actionQueue.clear();
     }
 
-    // Shared switch state used by the SetSwitch action and the SwitchOn condition.
     // SetSwitchアクションとSwitchOn条件の両方から参照される、共有スイッチ状態を切り替える関数。
     // id : スイッチを識別する名前
     // on : trueならスイッチをONにする（activeSwitchesに追加）、falseならOFFにする（削除）
@@ -177,7 +173,6 @@ public:
     // 指定したIDのスイッチが現在ONになっているかどうかを調べる関数。
     bool IsSwitchOn(const std::string& id) const { return activeSwitches.count(id) > 0; }
 
-    // collectedItemIds: assetIds of items collected so far on this stage, used by the ItemCollected condition.
     // 毎フレーム呼び出して、すべてのトリガーの発動条件をチェックし、条件を満たしたものを実行する関数。
     // dt              : 前回のUpdate呼び出しからの経過時間（秒）
     // playerX, playerY: プレイヤーの現在座標（トリガー領域との当たり判定に使う）
@@ -307,7 +302,6 @@ private:
                         if (sub.delay > 0.0f) {
                             actionQueue.push_back({sub, sub.delay});
                         } else {
-                            // recurse to support nested CallCommonEvent
                             // 再帰呼び出しにすることで、コモンイベントの中からさらに別のコモンイベントを
                             // 呼び出す（ネストしたCallCommonEvent）ケースにも対応できるようにしている。
                             ExecuteAction(sub, stageClear, gotoStage);

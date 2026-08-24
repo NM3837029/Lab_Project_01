@@ -1007,18 +1007,14 @@ struct StageData {
     std::string sourceFile = ""; // assets/stages/ 配下のファイル名（GoToStageでの再読み込み判定に使用）
     std::vector<std::vector<int>> map; // 地形タイルマップ（[行][列]にTileTypeの数値が入る2次元配列）
 
-    // Feature 1
     std::vector<std::vector<int>> decoMapBack;  // プレイヤーより奥に描画される装飾タイルマップ
     std::vector<std::vector<int>> decoMapFront; // プレイヤーより手前に描画される装飾タイルマップ
     std::vector<BackgroundLayer> backgrounds;   // 視差スクロール背景レイヤーの一覧
 
-    // Feature 3
     std::string bgmId = ""; // このステージで再生するBGMの識別子
 
-    // Feature 4
     bool testMode = false; // trueの場合、動作確認用の特殊モードでステージを開始する
 
-    // Feature 5
     json triggersJson = json::array(); // ステージ内のトリガー（イベント発生条件）定義（JSON配列のまま保持）
 
     float playerStartX = 0.0f; // プレイヤーの初期スポーンX座標
@@ -3045,7 +3041,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bullets[i].x = player.x + (player.direction == 0 ? (float)player.width * player.scale : -10.0f);
                     bullets[i].y = player.y + (float)player.height * player.scale / 4.0f;
                     bullets[i].vx = (player.direction == 0 ? BULLET_SPEED : -BULLET_SPEED);
-                    bullets[i].vy = 0.0f; // Initialize vertical velocity to 0
+                    bullets[i].vy = 0.0f; // Y方向速度は0で初期化（プレイヤーの弾は常に水平方向にのみ飛ぶため）
                     bullets[i].isPlayerOwned = true; // プレイヤーの弾
                     bullets[i].isRewinding = false;
                     bullets[i].history.clear();
@@ -3143,7 +3139,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         } else {
             if (canPlayerAct) {
                 float pts = ts * player.speedScale;
-                float prevPlayerX = player.x; // Keep track of previous X to detect precise boundary crossing
+                float prevPlayerX = player.x; // 移動前のX座標を保持しておく（境界を正確にまたいだ瞬間を検出するのに使う）
 
                 if (player.invulnTimer > 0.0f) player.invulnTimer -= pts;
 
@@ -3299,13 +3295,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         enemy.y += gimmicks[enemy.ridingGimmickIndex].lastDeltaY;
                     }
 
-                    // Apply Gravity first
+                    // まず重力を適用する（この後の各AI分岐でvxやvyがさらに上書き・加算される）
                     enemy.vy += GRAVITY * ets;
 
                     // Feature: Configurable Behavior Parameters (M1) — このフレームのEnemyDefを一度だけ引く
                     const EnemyDef* edef = FindEnemyDef(enemy.assetId);
 
-                    // Switch behavior based on EnemyType
+                    // 敵タイプ(EnemyType)ごとに行動ロジックを分岐させる
                     switch (enemy.type) {
                         case ENEMY_PATROL: {
                             // シンプルAI：patrolLeft ～ patrolRight の範囲でパトロール
@@ -3418,9 +3414,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distX = std::abs(pCenterX - eCenterX);
                             float distY = std::abs(pCenterY - eCenterY);
 
-                            // aiState: 0=PATROL, 1=ATTACK
-                            if (distX <= detectX && distY <= detectY) enemy.aiState = 1; // ATTACK
-                            else enemy.aiState = 0; // PATROL
+                            // aiState: 0=パトロール中, 1=攻撃(索敵成功)中
+                            if (distX <= detectX && distY <= detectY) enemy.aiState = 1; // 索敵範囲内 → 攻撃状態へ
+                            else enemy.aiState = 0; // 索敵範囲外 → パトロール状態へ
 
                             if (enemy.aiState == 0) {
                                 if (enemy.direction == 1) {
@@ -4286,7 +4282,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (isPlayerOn && gim.angle == 0.0f) {
                             gim.customTimer += 1.0f * gts;
                             if (gim.customTimer >= gim.val2) {
-                                gim.angle = 1.0f; // isFalling = true
+                                gim.angle = 1.0f; // angle=1.0を「落下中」フラグとして流用する（このギミックでは角度そのものは描画に使わないため）
                                 // val2はここまで「待機フレーム数」として使っていたが、これ以降は疑似落下速度として
                                 // 再利用するため、0から加速し直すようリセットする（しないと待機フレーム数分の
                                 // 初速がついた状態で瞬間ワープ落下してしまう）

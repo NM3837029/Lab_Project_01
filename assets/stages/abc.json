@@ -13,6 +13,26 @@
     "baseJumpPower": -15,
     "baseSpeed": 4.0
   },
+  "allowed_edit_tools": {
+    "rewindEnabled": true,
+    "pauseEnabled": true,
+    "fastForwardEnabled": true,
+    "screenEffectEnabled": true,
+    "objectEditEnabled": true
+  },
+  "edit_cost_settings": {
+    "maxCost": 100.0,
+    "regenPerSec": 6.0,
+    "drainRewindPerSec": 18.0,
+    "drainPausePerSec": 4.0,
+    "drainFastForwardPerSec": 10.0,
+    "drainScreenEffectPerSec": 8.0,
+    "flatColorCycle": 5.0,
+    "flatMenuToggle": 8.0,
+    "flatSpeedChange": 6.0,
+    "flatDirectionFlip": 4.0,
+    "flatResetAll": 10.0
+  },
   "map": [
     [
       0,
@@ -7410,7 +7430,13 @@
     }
   ],
   "triggers": [],
-  "enemies": [],
+  "enemies": [
+    {
+      "id": "enemy_caterpillar",
+      "x": 288.0,
+      "y": 320.0
+    }
+  ],
   "gimmicks": [],
   "items": [],
   "platforms": []

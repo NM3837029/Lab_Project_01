@@ -1754,8 +1754,8 @@ public class PendulumGroupInfo
     public string IdPrefix = "pendulum";
     public float Spacing;
     public float Speed;
-    public float Amplitude; // ラジアン
-    public float BaseAngle; // ラジアン
+    public float Amplitude; // 振れ幅（ラジアン単位。基準角度からどれだけ左右に振れるかを表す）
+    public float BaseAngle; // 基準角度（ラジアン単位。振り子が静止しているときの中心となる向き。90度=真下）
     public int Hp;
     public int ZOrder;
     public int PartSize;
