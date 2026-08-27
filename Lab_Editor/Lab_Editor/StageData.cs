@@ -604,6 +604,14 @@ public class EditToolFlags
     [System.ComponentModel.DisplayName("個別オブジェクト編集")]
     [System.ComponentModel.Category("編集ツール")]
     public bool objectEditEnabled { get; set; } = true;
+
+    // trueの場合、ゲーム画面下部のタイムライン上でCtrl+クリック×2して作る「カット」
+    // （ステージの一区間をまるごと飛ばして通過する編集操作）が使用可能になる。
+    // 「個別オブジェクト編集」とは独立したフラグなので、
+    // 「オブジェクト編集は禁止だがカットは許す」「カットだけ禁止する」といった設定も作れる。
+    [System.ComponentModel.DisplayName("カット(タイムライン)")]
+    [System.ComponentModel.Category("編集ツール")]
+    public bool cutEnabled { get; set; } = true;
 }
 
 // ===== 編集コスト経済設定 =====
@@ -665,6 +673,14 @@ public class EditCostSettings
     [System.ComponentModel.DisplayName("すべてリセット")]
     [System.ComponentModel.Category("コスト(単発)")]
     public float flatResetAll { get; set; } = 10.0f;
+
+    // タイムラインカット（ゲーム内の下部タイムラインでCtrl+クリック×2で作る、
+    // ステージの一区間をまるごと飛ばす編集操作）を1本作るたびに消費される固定コスト量。
+    // ステージ攻略を一気に飛ばせる最も強力な操作なので、既定値は他の単発操作より高くしてある。
+    // ※このプロパティが無いと、ゲーム側が書いたflatCutCreateをLab_Editorの保存時に取りこぼしてしまう。
+    [System.ComponentModel.DisplayName("カット作成")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float flatCutCreate { get; set; } = 20.0f;
 }
 
 // ===== 配置オブジェクト =====

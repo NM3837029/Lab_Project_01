@@ -1,5 +1,16 @@
 [
   {
+    "id": "gimmick_checkpoint",
+    "name": "チェックポイント",
+    "type_enum": 25,
+    "sprite": "",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 64
+  },
+  {
     "id": "gim_portal",
     "name": "ポータル",
     "type_enum": 0,

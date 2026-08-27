@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
@@ -191,6 +191,7 @@ public partial class Form1 : Form
             chkEditFastForward.Checked = currentStage.EditTools.fastForwardEnabled;
             chkEditScreenFx.Checked = currentStage.EditTools.screenEffectEnabled;
             chkEditObjectEdit.Checked = currentStage.EditTools.objectEditEnabled;
+            chkEditCut.Checked = currentStage.EditTools.cutEnabled;
 
             // 編集コスト（ゲージの最大値・自然回復・各操作ごとの消費量）の数値を反映する。
             numEditMaxCost.Value = (decimal)Math.Clamp(currentStage.EditCost.maxCost, 0, 999);
@@ -204,6 +205,7 @@ public partial class Form1 : Form
             numEditFlatSpeedChange.Value = (decimal)Math.Clamp(currentStage.EditCost.flatSpeedChange, 0, 999);
             numEditFlatDirectionFlip.Value = (decimal)Math.Clamp(currentStage.EditCost.flatDirectionFlip, 0, 999);
             numEditFlatResetAll.Value = (decimal)Math.Clamp(currentStage.EditCost.flatResetAll, 0, 999);
+            numEditFlatCutCreate.Value = (decimal)Math.Clamp(currentStage.EditCost.flatCutCreate, 0, 999);
 
             // マップサイズ（幅・高さ）の数値を反映する。
             numMapW.Value = currentStage.MapW;
@@ -775,6 +777,7 @@ public partial class Form1 : Form
         currentStage.EditTools.fastForwardEnabled = chkEditFastForward.Checked;
         currentStage.EditTools.screenEffectEnabled = chkEditScreenFx.Checked;
         currentStage.EditTools.objectEditEnabled = chkEditObjectEdit.Checked;
+        currentStage.EditTools.cutEnabled = chkEditCut.Checked;
 
         // 編集コストゲージの最大値・自然回復量・各操作の消費量（秒あたり／1回あたり）を書き戻す。
         currentStage.EditCost.maxCost = (float)numEditMaxCost.Value;
@@ -788,6 +791,7 @@ public partial class Form1 : Form
         currentStage.EditCost.flatSpeedChange = (float)numEditFlatSpeedChange.Value;
         currentStage.EditCost.flatDirectionFlip = (float)numEditFlatDirectionFlip.Value;
         currentStage.EditCost.flatResetAll = (float)numEditFlatResetAll.Value;
+        currentStage.EditCost.flatCutCreate = (float)numEditFlatCutCreate.Value;
 
         // ここまでの内容をすべてJSONファイルとして書き出す。
         currentStage.SaveToFile(Path.Combine(stagesPath, currentStageFile));

@@ -254,6 +254,12 @@ struct EditToolFlags {
     bool fastForwardEnabled = true;  // 早送り操作を許可するか
     bool screenEffectEnabled = true; // Z/X/C（ズーム・明暗）+ T（色フィルタ）をまとめた「画面エフェクト」
     bool objectEditEnabled = true;   // 右クリックによる個別オブジェクト編集（選択・コンテキストメニュー全体）
+    // Feature: カット機能の復活 — 下部タイムラインでのカット（区間を丸ごと飛ばす編集）を許可するか。
+    // 「オブジェクト編集」とは独立したフラグにしてあるので、
+    //   ・オブジェクト編集は禁止だがカットは許す
+    //   ・カットだけ禁止する（ステージを飛ばされたくない場面）
+    // といった組み合わせをステージ単位で作れる。
+    bool cutEnabled = true;
 };
 
 // 編集系ツールを使い続けるための「コストゲージ」に関する数値設定。
@@ -270,10 +276,13 @@ struct EditCostSettings {
     float flatSpeedChange = 6.0f;        // 速度変更操作1回あたりの固定消費量
     float flatDirectionFlip = 4.0f;      // 向き反転操作1回あたりの固定消費量
     float flatResetAll = 10.0f;          // 全リセット操作1回あたりの固定消費量
+    // Feature: カット機能の復活 — タイムラインカットを1本作るのにかかる固定消費量。
+    // カットはステージの一区間をまるごと飛ばせる最も強力な編集操作なので、他より高めに設定してある。
+    float flatCutCreate = 20.0f;
 };
 
 // アイテムで恒久解禁された操作（セッション永続。editorPlayerCapsと同じ扱いでResetStageではクリアしない）
-EditToolFlags unlockedEditTools = { false, false, false, false, false };
+EditToolFlags unlockedEditTools = { false, false, false, false, false, false };
 
 std::vector<ItemDef> itemDefs; // 読み込み済みのアイテム定義（items.json由来）を全種類分保持する一覧
 // ステージ上に実際に配置された「アイテム1個分」の情報。
@@ -792,7 +801,10 @@ enum GimmickType {
     // ===== プレイヤーが能動的に使う編集ツール（T/Z/X/C）と連動する地形 =====
     GIMMICK_COLOR_LOCK_PLATFORM,     // 色ロック足場：param("1"/"2"/"3"=赤/緑/青)とプレイヤーの色フィルタが一致する時だけ実体化する
     GIMMICK_BRIGHTNESS_LOCK_PLATFORM,// 明暗ロック足場：param("dark"/"bright")と現在の画面の明るさが一致する時だけ実体化する
-    GIMMICK_CUSTOM_SCRIPT            // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで挙動を自作する
+    GIMMICK_CUSTOM_SCRIPT,           // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで挙動を自作する
+
+    GIMMICK_CHECKPOINT               // Feature: チェックポイント — 触れると復帰地点として記録され、ゲームオーバー/落下死からの
+                                      // リトライがステージ開始位置ではなくこの地点から再開するようになる（val1>0.5=このチェックポイントが現在の復帰地点）
 };
 
 // 巻き戻し機能のために毎フレーム記録する、ギミック1個・1フレーム分のスナップショット。
@@ -956,6 +968,15 @@ struct Gimmick {
     // 前フレームにプレイヤーと接触していたかどうか（同じフレーム内での往復ワープ連鎖や、
     // 転送先に立った瞬間の即時再トリガーを防ぐエッジトリガー用）
     bool portalWasTouching = false;
+
+    // Feature: カット機能の復活 — CUT_PORTALの「2つの使われ方」を区別するためのフラグ。
+    //   false : ステージJSONにX,Y配置された通常のワープポータル。同じparamを持つ相手と対で使う。
+    //   true  : 下部タイムライン上でCtrl+クリックして作る「タイムラインカット」。
+    //           座標は持たず、val1/val2に「ステージ全長に対する比率(0.0〜1.0)」で始点・終点を持つ。
+    //           プレイヤーがその区間の境界をまたぐと、区間そのものを飛ばして反対側へ送られる
+    //           （動画編集でクリップを切り取ると、再生が切り取った部分を飛ばすのと同じ挙動）。
+    // 実行時にCtrl+クリックで生成されるときだけtrueになるので、既存のステージデータには影響しない。
+    bool isTimelineCut = false;
 
     // 動くギミックに乗っているプレイヤー/敵を追従させるための、直近フレームの移動量
     float lastDeltaX = 0.0f, lastDeltaY = 0.0f;
@@ -1770,6 +1791,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     });
 
 
+    // Feature: チェックポイント — 現在の復帰地点（-1,-1 = 未設定＝ステージ開始位置を使う）。
+    // ResetStage()では意図的にクリアしない（ゲームオーバー/落下死からのリトライで保持し続けるため）。
+    // 実際にステージが切り替わる箇所（SwitchToStageラムダ）でのみクリアする。
+    float checkpointX = -1.0f;
+    float checkpointY = -1.0f;
+
     float cameraX = 0.0f; // カメラのワールドX座標（プレイヤーを追従して毎フレーム更新される）
     float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
     float STAGE_WIDTH = 2560.0f; // 現在のステージの実際のマップ幅に応じて毎フレーム更新される。下記メインループ参照。
@@ -1852,6 +1879,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     float dragOffsetX = 0, dragOffsetY = 0, baseScale = 1.0f, baseAngle = 0.0f, baseSpeed = 1.0f;
     int lastMouseX = 0, lastMouseY = 0;
     float globalTimeScale = 1.0f;
+    // Feature: カット機能の復活 — カット範囲を作る途中の「1点目」を覚えておく変数。
+    // Ctrl+クリック1回目でここに比率(0.0〜1.0)が入り、2回目のクリックで区間が確定してカットが生成される。
+    // -1.0f は「まだ1点目が打たれていない」を意味する番兵。
+    float tempCutStart = -1.0f;
 
     // 複数選択用コンテナとドラッグ用変数
     std::vector<Player*> selectedPlayers;
@@ -1928,11 +1959,35 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 編集ツール許可設定（ステージ単位、キー未指定時はデフォルト全部true）
                     {
                         auto etf = sj.value("allowed_edit_tools", json::object());
-                        jsonStage.editToolFlags.rewindEnabled       = etf.value("rewind", true);
-                        jsonStage.editToolFlags.pauseEnabled        = etf.value("pause", true);
-                        jsonStage.editToolFlags.fastForwardEnabled  = etf.value("fastForward", true);
-                        jsonStage.editToolFlags.screenEffectEnabled = etf.value("screenEffect", true);
-                        jsonStage.editToolFlags.objectEditEnabled   = etf.value("objectEdit", true);
+                        // 【重要】Lab_Editorが書き出すキー名はC#のプロパティ名そのまま（"rewindEnabled" 等）だが、
+                        // ここは元々短縮形（"rewind" 等）しか読んでいなかったため、キーが一生一致せず
+                        // 常に既定値trueへフォールバックしていた＝「編集ツール設定」がゲームに全く効いていなかった。
+                        // 両方の綴りを受け付けるようにして、エディタ側の設定が実際に反映されるようにする。
+                        // （長い方＝エディタが書く形式を優先し、無ければ短縮形、それも無ければ従来どおり許可(true)）
+                        auto readTool = [&etf](const char* longKey, const char* shortKey) {
+                            if (etf.contains(longKey)) return etf.value(longKey, true);
+                            return etf.value(shortKey, true);
+                        };
+                        jsonStage.editToolFlags.rewindEnabled       = readTool("rewindEnabled",       "rewind");
+                        jsonStage.editToolFlags.pauseEnabled        = readTool("pauseEnabled",        "pause");
+                        jsonStage.editToolFlags.fastForwardEnabled  = readTool("fastForwardEnabled",  "fastForward");
+                        jsonStage.editToolFlags.screenEffectEnabled = readTool("screenEffectEnabled", "screenEffect");
+                        jsonStage.editToolFlags.objectEditEnabled   = readTool("objectEditEnabled",   "objectEdit");
+                        // Feature: カット機能の復活 — キー未指定の既存ステージは従来どおり許可(true)で読み込む
+                        jsonStage.editToolFlags.cutEnabled          = readTool("cutEnabled",          "cut");
+
+                        // どの編集ツールが許可された状態でステージが読み込まれたかをログに残す。
+                        // 上記のキー名不一致のように「エディタで設定したのに効いていない」種類の不具合は
+                        // ゲーム画面からは気付けないため、ステージ作成時の確認手段として記録しておく。
+                        {
+                            const auto& ef = jsonStage.editToolFlags;
+                            char toolLog[192];
+                            sprintf_s(toolLog, sizeof(toolLog),
+                                      "editTools rewind=%d pause=%d fastForward=%d screenEffect=%d objectEdit=%d cut=%d",
+                                      ef.rewindEnabled ? 1 : 0, ef.pauseEnabled ? 1 : 0, ef.fastForwardEnabled ? 1 : 0,
+                                      ef.screenEffectEnabled ? 1 : 0, ef.objectEditEnabled ? 1 : 0, ef.cutEnabled ? 1 : 0);
+                            Logger::Info("System", "LoadStageJson", toolLog);
+                        }
                     }
 
                     // 編集コスト経済設定（ステージ単位、キー未指定時はコード既定値）
@@ -1949,6 +2004,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         jsonStage.editCostSettings.flatSpeedChange         = ecs.value("flatSpeedChange", 6.0f);
                         jsonStage.editCostSettings.flatDirectionFlip       = ecs.value("flatDirectionFlip", 4.0f);
                         jsonStage.editCostSettings.flatResetAll            = ecs.value("flatResetAll", 10.0f);
+                        // Feature: カット機能の復活 — キー未指定の既存ステージJSONでも既定値20で動くようにしておく
+                        jsonStage.editCostSettings.flatCutCreate           = ecs.value("flatCutCreate", 20.0f);
                     }
 
                     // サウンド・フラグ
@@ -2156,8 +2213,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!currentEditTools.rewindEnabled && !unlockedEditTools.rewindEnabled) player.isRewinding = false;
         if (!currentEditTools.objectEditEnabled && !unlockedEditTools.objectEditEnabled) { selectedType = SELECT_NONE; menu.isOpen = false; }
 
-        player.x = stage.playerStartX;
-        player.y = stage.playerStartY;
+        // Feature: チェックポイント — 復帰地点が記録済みならステージ開始位置の代わりにそこから再開する
+        if (checkpointX >= 0.0f) {
+            player.x = checkpointX;
+            player.y = checkpointY;
+        } else {
+            player.x = stage.playerStartX;
+            player.y = stage.playerStartY;
+        }
         player.vx = 0.0f;
         player.vy = 0.0f;
         player.isJumping = false;
@@ -2218,6 +2281,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             // Feature: Composite Multi-Part Objects (Parts-M1)
             gim.parts = gdef ? BuildPartInstances(gdef->parts, gim.x, gim.y) : std::vector<PartInstance>();
+            // Feature: チェックポイント — テンプレートから作り直した直後はval1(発動済みフラグ)が消えるため、
+            // 現在の復帰地点と座標が一致するチェックポイントだけ再度「発動済み」の見た目に戻す
+            if (gim.type == GIMMICK_CHECKPOINT && checkpointX >= 0.0f && gim.x == checkpointX && gim.y == checkpointY) {
+                gim.val1 = 1.0f;
+            }
         }
 
         platforms = stage.platforms;
@@ -2264,6 +2332,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 既に読み込み済みのステージがあれば使い回し、無ければassets/stages/から読み込んでstagesに追加した上で
     // currentStageIdxを切り替え、ResetStageで敵・アイテム・ギミック・BGM・トリガーを新ステージの内容に同期する。
     auto SwitchToStage = [&](const std::string& fileName) -> bool {
+        // Feature: チェックポイント — 別ステージへ移る場合は前のステージの復帰地点を持ち越さない
+        // （ResetStage自体はゲームオーバー/落下死からの同ステージ内リトライで保持し続けたいのでクリアしない）
+        checkpointX = -1.0f;
+        checkpointY = -1.0f;
         for (int i = 0; i < (int)stages.size(); i++) {
             if (stages[i].sourceFile == fileName) {
                 currentStageIdx = i;
@@ -2386,6 +2458,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool fastForwardOpEnabled = IsEditToolEnabled(currentEditTools.fastForwardEnabled, unlockedEditTools.fastForwardEnabled);
         bool screenEffectOpEnabled = IsEditToolEnabled(currentEditTools.screenEffectEnabled, unlockedEditTools.screenEffectEnabled);
         bool objectEditOpEnabled = IsEditToolEnabled(currentEditTools.objectEditEnabled, unlockedEditTools.objectEditEnabled);
+        bool cutOpEnabled        = IsEditToolEnabled(currentEditTools.cutEnabled,        unlockedEditTools.cutEnabled);
 
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
@@ -2473,7 +2546,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!isAnyRewindActive) for (auto& b : bullets)  if (b.isRewinding)  { isAnyRewindActive = true; break; }
         if (!isAnyRewindActive) for (auto& it : items)   if (it.isRewinding) { isAnyRewindActive = true; break; }
 
-        if (isEditMode && objectEditOpEnabled) {
+        // Feature: カット機能の復活 — このブロックには「個別オブジェクト編集」と「タイムラインカット」の
+        // 2系統の操作が同居している。どちらか一方だけを許可したステージを作れるように、
+        // 入口はORで通し、実際の操作ごとに objectEditOpEnabled / cutOpEnabled を個別に見る。
+        if (isEditMode && (objectEditOpEnabled || cutOpEnabled)) {
             // コンテキストメニューの有効化
             if (currentRightClick && !lastRightClick) { 
                 // コンテキストメニューの当たり判定・選択のトリガー
@@ -2520,7 +2596,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTALも他のギミックと同様、
                         // 通常のgim.x/gim.yに基づくクリック選択の対象にする（専用タイムラインUIは廃止）
                         bool gimSelected = false;
+                        // オブジェクト側の選択は「個別オブジェクト編集」の許可が要る
                         for (auto& gim : gimmicks) {
+                            if (!objectEditOpEnabled) break;
+                            // タイムラインカットは座標を持たない（x,y,w,hが全て0）ため、
+                            // ここで判定するとマップ左上の1点に当たり判定があるように振る舞ってしまう。
+                            // カットの選択は後段の「タイムライン帯上での右クリック」で行う。
+                            if (gim.isTimelineCut) continue;
                             if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
                                 gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
                                 selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
@@ -2531,6 +2613,32 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 targetSpeedScale = &gim.customTimer;
                                 targetPaused = &gim.isPaused;
                                 targetRewind = &gim.isRewinding;
+                                targetDirection = nullptr;
+                                targetEnemyType = nullptr;
+                                targetGimmick = &gim;
+                                targetEnemy = nullptr;
+                                gimSelected = true;
+                                break;
+                            }
+                        }
+
+                        // Feature: カット機能の復活 — タイムライン帯の上で右クリックした場合は、
+                        // その位置に重なっているカットを選択する（選択後、コンテキストメニューから削除できる）。
+                        if (!gimSelected && cutOpEnabled && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                            float ct = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
+                            for (auto& gim : gimmicks) {
+                                if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive || !gim.isTimelineCut) continue;
+                                if (ct < gim.val1 || ct > gim.val2) continue;
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedGimmicks.push_back(&gim);
+                                selectedType = SELECT_GIMMICK;
+                                // カットは拡大・回転・速度変更のいずれも意味を持たないので、
+                                // インスペクタ側の対象ポインタは全てnullptrにしておく（誤操作でクラッシュしないように）
+                                targetScale = nullptr;
+                                targetAngle = nullptr;
+                                targetSpeedScale = nullptr;
+                                targetPaused = nullptr;
+                                targetRewind = nullptr;
                                 targetDirection = nullptr;
                                 targetEnemyType = nullptr;
                                 targetGimmick = &gim;
@@ -2571,7 +2679,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // コンテキストメニューのアクショントリガー
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
                 if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
-                    {
+                    // Feature: カット機能の復活 — タイムラインカットを選択している場合は専用メニュー（Delete Cutのみ）。
+                    // カットに対しては巻き戻し/一時停止/速度といった通常項目が全て無意味で、
+                    // かつ target 系ポインタがnullptrなので、通常メニューの処理へ流してはいけない（nullptr参照でクラッシュする）。
+                    if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
+                        if (my >= menu.y + 5 && my <= menu.y + 30) {
+                            if (editCost >= currentEditCost.flatMenuToggle) {
+                                editCost -= currentEditCost.flatMenuToggle;
+                                // 巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
+                                for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
+                                    if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
+                                }
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedType = SELECT_NONE;
+                                targetGimmick = nullptr;
+                                SoundManager::Get().PlaySe("ui_color_cycle");
+                            } else {
+                                SoundManager::Get().PlaySe("ui_denied");
+                            }
+                        }
+                        menu.isOpen = false;
+                    }
+                    else {
                         // 巻き戻しの切り替え（Feature: 編集コストゲージ）
                         if (my >= menu.y + 5 && my <= menu.y + 30) {
                             if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetRewind = !(*targetRewind); }
@@ -2725,15 +2854,66 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else { SoundManager::Get().PlaySe("ui_denied"); }
                 }
 
-                // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン上のCtrl+クリックによる
-                // ポータル生成は廃止。ポータルはC#側のLab_Editor（通常のX,Y配置フロー）で作成する。
+                // Feature: カット機能の復活 — 下部タイムライン帯へのCtrl+クリックでカット区間を作る。
+                // 1回目のクリックで始点(tempCutStart)を打ち、2回目のクリックで区間が確定してカットが生成される。
+                // 生成されたカットは isTimelineCut=true のCUT_PORTALとして gimmicks に積まれ、
+                // val1=始点比率 / val2=終点比率 を持つ（ワールド座標は持たないので x,y,w,h は全て0）。
+                // 編集コストゲージの管理下に置くため、コストが足りなければ生成せずに拒否音を鳴らす。
+                // なお、この処理を含むブロック全体が objectEditOpEnabled で囲われているので、
+                // 「オブジェクト編集」が封印されているステージではカットも作れない（＝ステージ側で制御できる）。
+                if (!lastLeftClick && cutOpEnabled && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                    if (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL)) {
+                        // クリックX座標をタイムライン帯(左右50px余白)上の比率0.0〜1.0へ変換する
+                        float ct = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
+                        if (ct < 0.0f) ct = 0.0f;
+                        if (ct > 1.0f) ct = 1.0f;
+                        if (tempCutStart < 0.0f) {
+                            // 1点目：始点を記録するだけ。ここではまだコストを消費しない
+                            tempCutStart = ct;
+                            SoundManager::Get().PlaySe("ui_color_cycle");
+                        } else if (editCost >= currentEditCost.flatCutCreate) {
+                            // 2点目：区間が確定。クリック順に関係なく小さい方を始点にそろえる
+                            float start = (ct > tempCutStart ? tempCutStart : ct);
+                            float end   = (ct > tempCutStart ? ct : tempCutStart);
+                            // 幅が無いに等しいカットは意味がない上、境界の判定が不安定になるので弾く
+                            if (end - start < 0.01f) {
+                                tempCutStart = -1.0f;
+                                SoundManager::Get().PlaySe("ui_denied");
+                            } else {
+                                editCost -= currentEditCost.flatCutCreate;
+                                // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
+                                // targetGimmick / selectedGimmicks の生ポインタが全てダングリングになる。
+                                // そのまま触ると不正アクセスで落ちるので、追加の前に選択を解除しておく。
+                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                                selectedType = SELECT_NONE;
+                                targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+                                targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+                                targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+
+                                Gimmick cut{ GIMMICK_CUT_PORTAL, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                             true, start, end, 0.0f, 0.0f, false, false, {} };
+                                cut.isTimelineCut = true;
+                                gimmicks.push_back(cut);
+                                tempCutStart = -1.0f;
+                                SoundManager::Get().PlaySe("ui_fastforward");
+                            }
+                        } else {
+                            // コスト不足。始点は残さず捨てて、打ち直しさせる
+                            tempCutStart = -1.0f;
+                            SoundManager::Get().PlaySe("ui_denied");
+                        }
+                    }
+                }
 
                 // インスペクターのドラッグと切り替え（選択されたすべてに適用）
-                if (!lastLeftClick && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
-                    if (my >= 80 && my <= 95) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
-                    else if (my >= 100 && my <= 115) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
-                    else if (my >= 120 && my <= 135) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
-                    else if (my >= 140 && my <= 155) {
+                if (!lastLeftClick && objectEditOpEnabled && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
+                    // 各行の target 系ポインタは「その対象では意味を持たない項目」の場合にnullptrになる
+                    // （インスペクタ表示側は既にN/A表示で分岐している）。タイムラインカットのように
+                    // 全項目がnullptrになる選択対象があるため、ドラッグ開始時も必ずnullチェックしてから参照する。
+                    if (my >= 80 && my <= 95 && targetScale != nullptr) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
+                    else if (my >= 100 && my <= 115 && targetAngle != nullptr) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
+                    else if (my >= 120 && my <= 135 && targetSpeedScale != nullptr) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
+                    else if (my >= 140 && my <= 155 && targetPaused != nullptr) {
                         // Feature: 編集コストゲージ — 複数選択でも定額（対象数に関わらず一発分のコスト）
                         if (editCost >= currentEditCost.flatMenuToggle) {
                             editCost -= currentEditCost.flatMenuToggle;
@@ -2743,7 +2923,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
                         } else SoundManager::Get().PlaySe("ui_denied");
                     }
-                    else if (my >= 160 && my <= 175) {
+                    else if (my >= 160 && my <= 175 && targetRewind != nullptr) {
                         if (editCost >= currentEditCost.flatMenuToggle) {
                             editCost -= currentEditCost.flatMenuToggle;
                             bool nextRewind = !(*targetRewind);
@@ -2768,7 +2948,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // Gキーで可変地面を追加
                 static bool lastGKey = false;
                 bool currentGKey = CheckHitKey(KEY_INPUT_G) != 0;
-                if (currentGKey && !lastGKey) {
+                if (currentGKey && !lastGKey && objectEditOpEnabled) {
                     int imgW, imgH;
                     GetGraphSize(jimenHandle, &imgW, &imgH);
                     float h = 32.0f;
@@ -2779,7 +2959,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 lastGKey = currentGKey;
 
                 // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
-                if (!lastLeftClick && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
+                if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
                     mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
                     
                     // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
@@ -3171,6 +3351,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float ph_scaled = (float)player.height * player.scale;
                 for (auto& gim : gimmicks) {
                     if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive) continue;
+                    if (gim.isTimelineCut) continue; // タイムラインカットは座標を持たないので、このAABB判定の対象外
                     bool touching = CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
                     if (touching && !gim.portalWasTouching && !gim.param.empty()) {
                         for (auto& other : gimmicks) {
@@ -3185,6 +3366,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
                     gim.portalWasTouching = touching;
+                }
+
+                // Feature: カット機能の復活 — タイムラインカットの通過判定。
+                // プレイヤーのX座標をステージ全長で割った「タイムライン上の位置(0.0〜1.0)」を求め、
+                // 前フレームの位置(prev_tp)と今フレームの位置(tp)を比べて、カット区間の境界を
+                // 「またいだ瞬間」だけワープさせる。境界上に立ち止まっているだけでは発火しないので、
+                // 行ったり来たりして無限にワープし続けることがない。
+                // 右へ進んで始点をまたいだら終点へ、左へ戻って終点をまたいだら始点へ送る＝
+                // 動画のタイムラインからその区間を切り取ったのと同じ見え方になる。
+                {
+                    float tp = player.x / STAGE_WIDTH;
+                    float prev_tp = prevPlayerX / STAGE_WIDTH; // 前フレームのタイムライン位置
+                    for (auto& gim : gimmicks) {
+                        if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive || !gim.isTimelineCut) continue;
+                        float timePos = gim.val1;       // カット区間の始点（比率）
+                        float targetTimePos = gim.val2; // カット区間の終点（比率）
+                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+                        // ワープ後に境界へめり込んだまま止まらないよう、少しだけ外側へ押し出す量
+                        float warpOffset = gdef ? gdef->warpOffsetPx : 8.0f;
+
+                        // 左の境界（timePos）を左から右へ越えたときのみ前方へワープ
+                        if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
+                            player.x = targetTimePos * STAGE_WIDTH + warpOffset;
+                            SoundManager::Get().PlaySe(gdef ? gdef->seActivate : "ui_fastforward");
+                        }
+                        // 右の境界（targetTimePos）を右から左へ越えたときのみ後方へワープ
+                        else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
+                            player.x = timePos * STAGE_WIDTH - pw_scaled - warpOffset;
+                            SoundManager::Get().PlaySe(gdef ? gdef->seActivate : "ui_fastforward");
+                        }
+                    }
                 }
 
                 // ステージ境界の制限
@@ -4079,6 +4291,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     else if (op == "FastForward") unlockedEditTools.fastForwardEnabled = true;
                                     else if (op == "ScreenEffect") unlockedEditTools.screenEffectEnabled = true;
                                     else if (op == "ObjectEdit") unlockedEditTools.objectEditEnabled = true;
+                                    // Feature: カット機能の復活 — カットもアイテムで恒久解禁できるようにする
+                                    else if (op == "Cut") unlockedEditTools.cutEnabled = true;
                                 }
                             }
                         }
@@ -4117,6 +4331,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         else if (op == "FastForward") unlockedEditTools.fastForwardEnabled = true;
                                         else if (op == "ScreenEffect") unlockedEditTools.screenEffectEnabled = true;
                                         else if (op == "ObjectEdit") unlockedEditTools.objectEditEnabled = true;
+                                    // Feature: カット機能の復活 — カットもアイテムで恒久解禁できるようにする
+                                    else if (op == "Cut") unlockedEditTools.cutEnabled = true;
                                     }
                                 }
                                 break;
@@ -4595,6 +4811,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
+            // Feature: チェックポイント — 触れた瞬間に復帰地点として記録する（val1>0.5で「発動済み」を表す）。
+            // isPlayerRewinding中は巻き戻し閲覧なので発動させない。
+            if (!isPlayerRewinding) {
+                for (auto& gim : gimmicks) {
+                    if (gim.type == GIMMICK_CHECKPOINT && gim.isActive && gim.val1 < 0.5f) {
+                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.hitboxWidth, gim.hitboxHeight)) {
+                            gim.val1 = 1.0f;
+                            checkpointX = gim.x;
+                            checkpointY = gim.y;
+                            const GimmickDef* gdefCp = FindGimmickDef(gim.assetId);
+                            if (gdefCp) SoundManager::Get().PlaySe(gdefCp->seActivate);
+                        }
+                    }
+                }
+            }
+
             // 2. プレイヤー vs 敵の衝突判定
             if (!isPlayerRewinding) {
                 for (const auto& enemy : enemies) {
@@ -4852,6 +5084,36 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // ===== チェックポイントの描画 =====
+        // ゴールと同じ「プリミティブ描画で組み立てた旗」方式。未発動は灰色の旗、発動済みは緑色に光る旗にして
+        // 「ここが今の復帰地点」だと一目で分かるようにする。
+        for (const auto& gim : gimmicks) {
+            if (gim.type != GIMMICK_CHECKPOINT || !gim.isActive) continue;
+            int cgx = (int)(gim.x - cameraX);
+            int cgy = (int)(gim.y - cameraY);
+            bool cpActive = gim.val1 > 0.5f;
+            if (cpActive) {
+                // 発動済み：足元にうっすら発光する光の柱を出す
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50);
+                DrawBox(cgx + 6, cgy, cgx + TILE_SIZE - 6, cgy + TILE_SIZE, GetColor(120, 255, 150), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            }
+            // 支柱
+            DrawBox(cgx + 12, cgy - TILE_SIZE, cgx + 17, cgy + TILE_SIZE, GetColor(200, 200, 205), TRUE);
+            DrawBox(cgx + 12, cgy - TILE_SIZE, cgx + 17, cgy + TILE_SIZE, GetColor(100, 100, 110), FALSE);
+            // 旗（未発動=灰色ではためかない／発動済み=緑色ではためく）
+            int cfx = cgx + 17, cfy = cgy - TILE_SIZE + 4;
+            if (cpActive) {
+                float cwave = sinf(BehaviorInterpreter::globalFrameCounter * 0.12f + gim.x) * 3.0f;
+                DrawTriangle(cfx, cfy, cfx, cfy + 16, cfx + 20 + (int)cwave, cfy + 8, GetColor(80, 230, 120), TRUE);
+            } else {
+                DrawTriangle(cfx, cfy, cfx, cfy + 16, cfx + 20, cfy + 8, GetColor(140, 140, 145), TRUE);
+            }
+            // 台座
+            DrawBox(cgx + 4, cgy + TILE_SIZE - 6, cgx + TILE_SIZE - 4, cgy + TILE_SIZE, GetColor(150, 150, 155), TRUE);
+            DrawString(cgx - 10, cgy - TILE_SIZE - 18, cpActive ? "CHECKPOINT!" : "checkpoint", cpActive ? GetColor(150, 255, 180) : GetColor(180, 180, 185));
+        }
+
         // ===== deadly タイル判定 =====
         if (currentScene == PLAY && !isPlayerRewinding) {
             float _pw = (float)player.width * player.scale;
@@ -4975,9 +5237,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
-            else if (gim.type == GIMMICK_CUT_PORTAL) {
+            else if (gim.type == GIMMICK_CUT_PORTAL && !gim.isTimelineCut) {
                 // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン比率(val1/val2)ではなく、
-                // 他のギミックと同じくgim.x/gim.yに基づいて通常のスプライト描画を行う
+                // 他のギミックと同じくgim.x/gim.yに基づいて通常のスプライト描画を行う。
+                // Feature: カット機能の復活 — タイムラインカットはワールド座標を持たない（x,y,w,hが全て0）ので
+                // ここでは描かず、下部パネルのタイムライン帯にだけ帯として描画する。
                 int useHandle = gim.handle >= 0 ? gim.handle : portalHandle;
                 int x1 = (int)(gim.x - cameraX);
                 int y1 = (int)(gim.y - cameraY);
@@ -5533,8 +5797,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(x1, y1, x2, y2, GetColor(100, 150, 255), FALSE); // 不透明の青い輪郭線
             }
 
-            // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライントラック/再生ヘッド/カット表示は
-            // CUT_PORTALの専用UIだったため廃止（ポータルは通常のギミックとして画面上に直接描画・選択される）
+            // Feature: カット機能の復活 — 下部パネルのタイムライン表示。
+            // 帯の左端がステージ左端、右端がステージ右端に対応し、赤い縦棒が現在のプレイヤー位置（再生ヘッド）。
+            // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(60, 60, 60), TRUE);
+            float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
+            DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
+
+            // 確定済みカット区間の描画（選択中のものは輪郭を白くして分かるようにする）
+            for (auto& gim : gimmicks) {
+                if (gim.type != GIMMICK_CUT_PORTAL || !gim.isTimelineCut) continue;
+                int cx1 = 50 + (int)(gim.val1 * (float)(WINDOW_WIDTH - 100));
+                int cx2 = 50 + (int)(gim.val2 * (float)(WINDOW_WIDTH - 100));
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 80);
+                DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, GetColor(200, 50, 50), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                bool isSel = (targetGimmick == &gim);
+                int edgeColor = isSel ? GetColor(255, 255, 255) : GetColor(255, 255, 0);
+                DrawLine(cx1, WINDOW_HEIGHT - 60, cx1, WINDOW_HEIGHT - 40, edgeColor);
+                DrawLine(cx2, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor);
+                if (isSel) DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor, FALSE);
+            }
+            // 打ちかけの始点（2点目のクリック待ち）
+            if (tempCutStart >= 0.0f) {
+                int px = 50 + (int)(tempCutStart * (float)(WINDOW_WIDTH - 100));
+                DrawLine(px, WINDOW_HEIGHT - 75, px, WINDOW_HEIGHT - 25, GetColor(0, 255, 255));
+            }
+            // 操作ヒント。中央のPAUSEボタン(x 590..690)に文字がかぶらない長さに収めてある
+            DrawString(50, WINDOW_HEIGHT - 88, "TIMELINE  [Ctrl]+Click x2 = Cut / RightClick = Select", GetColor(140, 140, 140));
 
             // 動的インスペクターパネルの描画
             DrawString(WINDOW_WIDTH - 240, 20, "[INSPECTOR]", GetColor(200, 200, 200));
@@ -5556,7 +5846,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else if (targetGimmick->type == GIMMICK_SCALABLE_BOX) sprintf_s(objName, sizeof(objName), "Selected: SCALABLE BOX");
                         else if (targetGimmick->type == GIMMICK_WEIGHT_SWITCH) sprintf_s(objName, sizeof(objName), "Selected: WEIGHT SWITCH");
                         else if (targetGimmick->type == GIMMICK_GATE_DOOR) sprintf_s(objName, sizeof(objName), "Selected: GATE DOOR");
-                        else if (targetGimmick->type == GIMMICK_CUT_PORTAL) sprintf_s(objName, sizeof(objName), "Selected: PORTAL");
+                        // Feature: カット機能の復活 — 同じCUT_PORTAL型でも、タイムラインカットと
+                        // ワールド配置のワープポータルは別物なので表示名を分ける
+                        else if (targetGimmick->type == GIMMICK_CUT_PORTAL) {
+                            sprintf_s(objName, sizeof(objName),
+                                      targetGimmick->isTimelineCut ? "Selected: TIMELINE CUT" : "Selected: PORTAL");
+                        }
                     }
                 }
                 DrawString(WINDOW_WIDTH - 240, 50, objName, GetColor(0, 255, 255));
@@ -5619,7 +5914,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(50, 50, 50), TRUE);
                 DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(180, 180, 180), FALSE);
 
-                {
+                // Feature: カット機能の復活 — カット選択中は「Delete Cut」だけを出す専用メニュー
+                if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
+                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", GetColor(255, 100, 100)); // 目立つ赤で表示
+                    DrawString(menu.x + 10, menu.y + 40, "(timeline cut)", GetColor(150, 150, 150));
+                }
+                else {
                     char rewindStr[32];
                     sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
                     char pausedStr[32];

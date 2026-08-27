@@ -18,7 +18,8 @@
     "pauseEnabled": false,
     "fastForwardEnabled": false,
     "screenEffectEnabled": false,
-    "objectEditEnabled": false
+    "objectEditEnabled": false,
+    "cutEnabled": false
   },
   "edit_cost_settings": {
     "maxCost": 140.0,
@@ -31,7 +32,8 @@
     "flatMenuToggle": 6.0,
     "flatSpeedChange": 5.0,
     "flatDirectionFlip": 3.0,
-    "flatResetAll": 8.0
+    "flatResetAll": 8.0,
+    "flatCutCreate": 20.0
   },
   "goal": {
     "x": 4736.0,
@@ -6885,7 +6887,248 @@
     ]
   ],
   "backgrounds": [],
-  "triggers": [],
+  "triggers": [
+    {
+      "id": "t_intro",
+      "x": 96.0,
+      "y": 0.0,
+      "width": 128.0,
+      "height": 480.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "ようこそ編集室へ。編集ツールは全て封印中だ",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_ff_get",
+      "x": 416.0,
+      "y": 300.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_unlock_fastforward",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "早送りスプール入手！ [F]で時間を早送り",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_ff_wall",
+      "x": 560.0,
+      "y": 0.0,
+      "width": 96.0,
+      "height": 480.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "この壁は早送り中だけ消える。押しっぱなしで抜けろ",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_fx_get",
+      "x": 992.0,
+      "y": 300.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_unlock_screeneffect",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "フィルタ入手！ [X]暗転 [C]明転 [T]色替",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_bright",
+      "x": 1088.0,
+      "y": 320.0,
+      "width": 128.0,
+      "height": 160.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "暗い足場は[X]、明るい足場は[C]で実体化する",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_color",
+      "x": 1792.0,
+      "y": 224.0,
+      "width": 96.0,
+      "height": 128.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "[T]で色を切替。赤→緑→青の順に橋が出る",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_pause_get",
+      "x": 2944.0,
+      "y": 208.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_unlock_pause",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "ポーズ・カートリッジ入手！ [Space]で停止",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_step",
+      "x": 2976.0,
+      "y": 224.0,
+      "width": 96.0,
+      "height": 96.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "停止中に[→]でコマ送り。橋が1コマずつ降りる",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_edit_get",
+      "x": 3520.0,
+      "y": 208.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_unlock_objectedit",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "ディレクターズ・パス入手！ 右クリックで編集",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_switch",
+      "x": 3488.0,
+      "y": 224.0,
+      "width": 96.0,
+      "height": 96.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "箱を選び[S]+上下ドラッグで拡げてスイッチへ運べ",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_rew_get",
+      "x": 4064.0,
+      "y": 112.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_unlock_rewind",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "巻き戻しリール入手！ [R]で時間を巻き戻す",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_vault",
+      "x": 4160.0,
+      "y": 330.0,
+      "width": 352.0,
+      "height": 118.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "行き止まり。リフトを右クリックで選び[R]で戻せ",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    },
+    {
+      "id": "t_key",
+      "x": 4416.0,
+      "y": 368.0,
+      "width": 64.0,
+      "height": 64.0,
+      "condition": "ItemCollected",
+      "conditionParam": "item_edit_keyreel",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "OpenDoor",
+          "param1": "gim_edit_final_door",
+          "param2": "",
+          "delay": 0.0
+        },
+        {
+          "action": "ShowMessage",
+          "param1": "キーリール取得。最終ゲートが開いた！",
+          "param2": "ディレクター",
+          "delay": 0.0
+        }
+      ]
+    }
+  ],
   "enemies": [
     {
       "id": "edit_sentry",

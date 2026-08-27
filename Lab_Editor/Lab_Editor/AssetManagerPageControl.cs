@@ -200,6 +200,7 @@ public class AssetManagerPageControl : UserControl
         (22, "22 = 色ロック足場 (Color Lock Platform)", "paramで指定した色(Tキーの色フィルタ)とプレイヤーの現在の色が一致している間だけ実体化する足場です。"),
         (23, "23 = 明暗ロック足場 (Brightness Lock Platform)", "paramで指定した明暗状態(Xキー)とプレイヤーの現在の状態が一致している間だけ実体化する足場です。"),
         (24, "24 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
+        (25, "25 = チェックポイント (Checkpoint)", "プレイヤーが触れるとその地点が復帰地点として記録されます。ゲームオーバーや落下死からのリトライは、記録済みならステージ開始位置ではなくこの地点から再開します。1ステージに複数置くと直近で触れたものが有効になります。"),
     };
     // アイテムのtype_enum(タイプ番号)ごとの説明一覧。敵・ギミックと同じ (番号, 表示名, 詳細説明) の形式
     private static readonly (int type, string desc, string detail)[] ItemTypes =
