@@ -2053,3 +2053,33 @@
 [2026-08-27 21:01:19] [System::ResetStage] INFO: Begin ResetStage
 [2026-08-27 21:01:50] [System::ResetStage] INFO: Begin ResetStage
 [2026-08-27 21:01:58] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-27 21:09:52] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-27 21:09:52] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-27 21:09:53] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-27 21:09:53] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-08-27 21:09:53] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-27 21:09:53] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-27 21:10:07] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-27 21:10:07] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-27 21:10:08] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-27 21:10:08] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-08-27 21:10:08] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-27 21:10:08] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-27 21:11:26] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-27 21:11:27] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-27 21:11:27] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-27 21:11:27] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-08-27 21:11:27] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-27 21:11:27] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-27 21:11:52] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-27 21:11:53] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-27 21:11:53] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-27 21:11:53] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-08-27 21:11:53] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-27 21:11:53] [System::ResetStage] INFO: Begin ResetStage
+[2026-08-27 21:13:32] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-08-27 21:13:34] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-08-27 21:13:34] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-08-27 21:13:34] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-08-27 21:13:34] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-08-27 21:13:34] [System::ResetStage] INFO: Begin ResetStage

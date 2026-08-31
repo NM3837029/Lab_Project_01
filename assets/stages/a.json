@@ -18,7 +18,8 @@
     "pauseEnabled": true,
     "fastForwardEnabled": true,
     "screenEffectEnabled": true,
-    "objectEditEnabled": true
+    "objectEditEnabled": true,
+    "cutEnabled": true
   },
   "edit_cost_settings": {
     "maxCost": 100.0,
@@ -3734,8 +3735,8 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_caterpillar",
-      "x": 704.0,
+      "id": "enemy_5",
+      "x": 544.0,
       "y": 288.0
     }
   ],
