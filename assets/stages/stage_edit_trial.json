@@ -7131,37 +7131,37 @@
   ],
   "enemies": [
     {
-      "id": "edit_sentry",
+      "id": "enemy_houdai",
       "x": 896.0,
       "y": 352.0
     },
     {
-      "id": "edit_floater",
+      "id": "enemy_drone",
       "x": 1440.0,
       "y": 176.0
     },
     {
-      "id": "edit_sentry",
+      "id": "enemy_houdai",
       "x": 2720.0,
       "y": 96.0
     },
     {
-      "id": "edit_sentry",
+      "id": "enemy_houdai",
       "x": 3360.0,
       "y": 256.0
     },
     {
-      "id": "edit_stalker",
+      "id": "enemy_imomushi",
       "x": 3648.0,
       "y": 256.0
     },
     {
-      "id": "edit_dropper",
+      "id": "enemy_dossun",
       "x": 3456.0,
       "y": 96.0
     },
     {
-      "id": "edit_stalker",
+      "id": "enemy_imomushi",
       "x": 4160.0,
       "y": 160.0
     }
@@ -7255,7 +7255,7 @@
   ],
   "items": [
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 256.0,
       "y": 352.0
     },
@@ -7265,7 +7265,7 @@
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 608.0,
       "y": 352.0
     },
@@ -7275,12 +7275,12 @@
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1376.0,
       "y": 288.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1632.0,
       "y": 224.0
     },
@@ -7290,7 +7290,7 @@
       "y": 196.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 2400.0,
       "y": 128.0
     },
@@ -7310,7 +7310,7 @@
       "y": 260.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 3936.0,
       "y": 264.0
     },
@@ -7335,7 +7335,7 @@
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 4672.0,
       "y": 168.0
     }

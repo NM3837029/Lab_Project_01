@@ -4271,7 +4271,7 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_6",
+      "id": "enemy_dossun",
       "x": 320.0,
       "y": 96.0
     }
@@ -4390,77 +4390,77 @@
   ],
   "items": [
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 176.0,
       "y": 1824.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 304.0,
       "y": 1728.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 432.0,
       "y": 1632.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 96.0,
       "y": 1472.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 304.0,
       "y": 1376.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 464.0,
       "y": 1280.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 336.0,
       "y": 1184.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 480.0,
       "y": 992.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 336.0,
       "y": 896.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 176.0,
       "y": 800.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 432.0,
       "y": 608.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 272.0,
       "y": 512.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 144.0,
       "y": 416.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 256.0,
       "y": 224.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 512.0,
       "y": 32.0
     }

@@ -325,7 +325,7 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_shrinker_demo",
+      "id": "enemy_honeycomb",
       "x": 320,
       "y": 176
     }
@@ -339,7 +339,7 @@
   ],
   "items": [
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 640,
       "y": 200
     }

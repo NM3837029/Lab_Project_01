@@ -60,6 +60,16 @@ struct PartDef {
     float scale = 1.0f;   // 表示倍率（1.0=等倍）
     int hp = 0;      // 0=破壊不能(常在ハザード) / 1以上=個別に破壊可能
     int zOrder = 0;  // 負=親より奥に描画、正=親より手前
+    // ギミックのパーツがプレイヤーに接触ダメージを与えるかどうか。
+    //
+    // 敵のパーツは元から「触れたら1ダメージ」だが、ギミックのパーツには接触判定が無く、
+    // 回転する棘の輪・ファイアバー・振り子といった「見るからに危険な回転ハザード」が
+    // 実際には素通りできる飾りでしかなかった。見た目と機能が食い違うと
+    // プレイヤーは何を避ければいいのか学習できないため、明示的に危険だと宣言できるようにする。
+    //
+    // 既定はfalse。扉の板やアイテムの装飾オーブのように「当たっても何も起きない」パーツが
+    // 大半なので、危険にしたいパーツだけJSONで deadly:true を書く方式にしてある。
+    bool deadly = false;
     json script = json::array(); // このパーツ専用の行動スクリプト（JSON形式のAST。未使用なら空配列のまま）
 };
 
@@ -76,6 +86,7 @@ struct PartInstance {
     int hitboxOffsetX = 0, hitboxOffsetY = 0, hitboxWidth = 32, hitboxHeight = 32; // 当たり判定用の矩形情報（PartDefからコピー）
     int width = 0, height = 0; // 表示サイズ（PartDefからコピー）
     int zOrder = 0;            // 描画順（負=親より奥、正=親より手前）
+    bool deadly = false;       // 接触ダメージを与えるパーツか（PartDefからコピー）
     int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
     ScriptState scriptState;   // OnSpawn用
     ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
@@ -146,6 +157,23 @@ struct EnemyDef {
     float fastForwardAttackMult = -1.0f; // STATIONARY/PATROL_SHOOTERが早送り中に攻撃間隔を詰める倍率
     float diagonalFallSpeed = -1.0f;     // FALLERの編集機能(方向反転)連動：向きをスポーン時から変更されたときの斜め落下速度(px/フレーム)
 
+    // 新敵ロスター対応 — この敵がプレイヤーの「一時停止」を無視して動き続けるかどうか。
+    // 幽霊タイプの敵のように「止めても止まらないので逃げるしかない」相手を作るためのフラグ。
+    // 既定は false なので、このキーを書いていない既存の敵定義は従来どおり一時停止で止まる。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    //   無いとエディタで保存した瞬間にこのキーが黙って消えてしまう。
+    bool ignorePause = false;
+
+    // ==== 敵の行動改良（新ロスター向けに追加したパラメータ） ====
+    // いずれも -1 / false のままなら従来の挙動と完全に同じになるようにしてあるので、
+    // このキーを書いていない既存の enemies.json は無変更で動く。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    //   無いとエディタで保存した瞬間にこのキーが黙って消えてしまう。
+    bool radialFire = false;            // SPREAD_SHOOTER: trueなら正面ファンではなく360度全方位へ均等に撃つ
+    float spreadRotationStep = -1.0f;   // SPREAD_SHOOTER: 1斉射ごとに発射角度をずらす量(ラジアン)。渦巻き弾幕を作る
+    float verticalTrackSpeed = -1.0f;   // FLOATER: 浮遊の中心高度をプレイヤーのYへ寄せる速さ(px/フレーム)。0なら従来どおり高さ固定
+    float riseSpeed = -1.0f;            // FALLER: クールダウン後に元の高さへ戻る速さ(px/フレーム)。0以下なら従来どおり瞬間復帰
+
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
 
@@ -186,6 +214,13 @@ struct GimmickDef {
     float tintR = -1.0f, tintG = -1.0f, tintB = -1.0f; // COLOR_ZONE: 色調(RGB倍率)
     float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
     float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
+
+    // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
+    // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、
+    // 状態がひと目で分かる必要があるギミック向け。空文字なら従来どおり sprite 1枚で描画する。
+    // ※ Lab_Editor 側の GimmickDef にも同名プロパティを用意してあること。
+    std::string spriteAlt_path = "";
+    int graphHandleAlt = -1;            // spriteAlt_pathをLoadGraphした結果のハンドル（未設定/失敗時は-1）
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==GIMMICK_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
@@ -276,9 +311,20 @@ struct EditCostSettings {
     float flatSpeedChange = 6.0f;        // 速度変更操作1回あたりの固定消費量
     float flatDirectionFlip = 4.0f;      // 向き反転操作1回あたりの固定消費量
     float flatResetAll = 10.0f;          // 全リセット操作1回あたりの固定消費量
-    // Feature: カット機能の復活 — タイムラインカットを1本作るのにかかる固定消費量。
+    // Feature: カット機能の復活 — タイムラインカットを1本作るのにかかる基本消費量。
     // カットはステージの一区間をまるごと飛ばせる最も強力な編集操作なので、他より高めに設定してある。
+    // 「距離に関わらず必ず取られる分」＝取っ掛かりのコスト。
     float flatCutCreate = 20.0f;
+    // Feature: カットコストの距離変動 — カットで飛ばす距離1タイル(32px)あたりの追加消費量。
+    //
+    // 従来カットは長さに関係なく一律 flatCutCreate だけで作れたため、
+    // 「ゲージが溜まったらステージの端から端まで1本引いて丸ごと飛ばす」のが常に最適解になっていた。
+    // 距離に比例した追加コストを課すと
+    //   ・短いカット … 安い。詰まった数タイルを飛ばす、細かい局所的な使い方ができる
+    //   ・長いカット … 高い。ゲージを使い切る覚悟が要る、ここぞの一手になる
+    // という使い分けが生まれ、「どこをどれだけ飛ばすか」自体が考えどころになる。
+    // 実際の総額は ComputeCutCreateCost() を参照。0にすれば従来どおりの定額に戻せる。
+    float cutCostPerTile = 1.2f;
 };
 
 // アイテムで恒久解禁された操作（セッション永続。editorPlayerCapsと同じ扱いでResetStageではクリアしない）
@@ -318,13 +364,17 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.triggerRange, 260.0f); fill(def.chargeTime, 30.0f);
             fill(def.dashSpeedMult, 1.5f); fill(def.dashDuration, 40.0f); fill(def.cooldownTime, 70.0f);
             break;
-        case 7: fill(def.triggerRange, 24.0f); fill(def.fallDelay, 10.0f); fill(def.cooldownTime, 120.0f); fill(def.shockwaveRadius, 60.0f); fill(def.fastForwardJitter, 30.0f); fill(def.diagonalFallSpeed, 2.5f); break; // FALLER
+        // FALLER: riseSpeedは0.0fで補完＝「復帰は瞬間移動」。従来と同じ挙動を保つ
+        case 7: fill(def.triggerRange, 24.0f); fill(def.fallDelay, 10.0f); fill(def.cooldownTime, 120.0f); fill(def.shockwaveRadius, 60.0f); fill(def.fastForwardJitter, 30.0f); fill(def.diagonalFallSpeed, 2.5f); fill(def.riseSpeed, 0.0f); break; // FALLER
         case 8: // SPREAD_SHOOTER
             fill(def.actionInterval, 150.0f); fill(def.spreadAngle, 0.35f); fill(def.projectileSpeed, 0.5f);
             if (def.spreadCount < 0) def.spreadCount = 3;
+            // 0.0fで補完＝「斉射ごとの角度ずらし無し」。従来の固定ファン射撃と完全に同じ挙動になる。
+            fill(def.spreadRotationStep, 0.0f);
             break;
         case 9: fill(def.actionInterval, 130.0f); fill(def.projectileSpeed, 0.55f); break; // AIMED_SHOOTER
-        case 10: fill(def.floatAmplitude, 40.0f); fill(def.floatFrequency, 0.05f); fill(def.moveSpeed, 0.2f); fill(def.triggerRange, 300.0f); break; // FLOATER
+        // FLOATER: verticalTrackSpeedは0.0fで補完＝「高度は据え置き」。従来と同じ挙動を保つ
+        case 10: fill(def.floatAmplitude, 40.0f); fill(def.floatFrequency, 0.05f); fill(def.moveSpeed, 0.2f); fill(def.triggerRange, 300.0f); fill(def.verticalTrackSpeed, 0.0f); break; // FLOATER
         case 11: fill(def.actionInterval, 180.0f); fill(def.teleportRangeMin, 120.0f); fill(def.teleportRangeMax, 220.0f); break; // TELEPORTER
         case 12: fill(def.moveSpeed, 0.35f); fill(def.enragedMoveSpeed, 0.9f); fill(def.shrinkFactor, 0.6f); fill(def.triggerRange, 300.0f); break; // SHRINKER
         case 13: fill(def.moveSpeed, 0.3f); fill(def.shieldOffDuration, 150.0f); fill(def.shieldOnDuration, 90.0f); fill(def.triggerRange, 300.0f); break; // SHIELD
@@ -383,6 +433,7 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
         part.scale = p.value("scale", 1.0f);
         part.hp = p.value("hp", 0);
         part.zOrder = p.value("zOrder", 0);
+        part.deadly = p.value("deadly", false); // 既定false＝従来どおり無害な装飾パーツ
         if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
         // 画像パスが指定されていれば実際に読み込み、幅・高さ・当たり判定サイズが
         // JSONで未指定（0のまま）だった場合は画像の実サイズで補完する。
@@ -432,16 +483,20 @@ void LoadAssetDefinitions() {
                     def.hitboxWidth = e.value("hitboxWidth", def.width);
                     def.hitboxHeight = e.value("hitboxHeight", def.height);
                     def.scale = e.value("scale", 1.0f);
-                    // 画像を読み込み、幅・高さは画像の実サイズで必ず上書きする（JSON側のwidth/heightより優先）。
-                    // 当たり判定サイズが0（未指定）の場合のみ、画像サイズをそのまま使う。
+                    // 画像を読み込む。
+                    // 【重要】以前はここで width/height を画像の実サイズで必ず上書きしていたが、
+                    // 新素材は全て 640x640 の共通キャンバスで描かれているため、それをやると
+                    // 全ての敵の「論理サイズ」が 640 になってしまい、ComputeFitScale() が
+                    // 表示倍率を 1.0（＝原寸640px）と算出して画面が敵1体で埋まる。
+                    // そこで JSON の width/height を正とし、未指定（0以下）のときだけ画像サイズで補完する。
                     if (!def.sprite_path.empty()) {
                         def.graphHandle = LoadGraph(def.sprite_path.c_str());
                         int gw, gh;
                         GetGraphSize(def.graphHandle, &gw, &gh);
-                        def.width = gw;
-                        def.height = gh;
-                        if (def.hitboxWidth == 0) def.hitboxWidth = gw;
-                        if (def.hitboxHeight == 0) def.hitboxHeight = gh;
+                        if (def.width <= 0) def.width = gw;
+                        if (def.height <= 0) def.height = gh;
+                        if (def.hitboxWidth == 0) def.hitboxWidth = def.width;
+                        if (def.hitboxHeight == 0) def.hitboxHeight = def.height;
                     }
                     // Feature: Configurable Behavior Parameters (M1)
                     // 行動パラメータ群をJSONから読み込む。未指定のキーは-1.0f(未設定)のままにしておき、
@@ -468,6 +523,14 @@ void LoadAssetDefinitions() {
                     def.shieldOnDuration = e.value("shieldOnDuration", -1.0f);
                     def.shieldOffDuration = e.value("shieldOffDuration", -1.0f);
                     def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
+                    // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
+                    def.ignorePause = e.value("ignorePause", false);
+                    // 敵の行動改良で追加したパラメータ。未指定なら false / -1 のままにしておき、
+                    // ApplyEnemyDefaultParams() が「従来の挙動と完全に同じ」値を後から補完する。
+                    def.radialFire = e.value("radialFire", false);
+                    def.spreadRotationStep = e.value("spreadRotationStep", -1.0f);
+                    def.verticalTrackSpeed = e.value("verticalTrackSpeed", -1.0f);
+                    def.riseSpeed = e.value("riseSpeed", -1.0f);
                     def.sizeAmplitude = e.value("sizeAmplitude", -1.0f);
                     def.sizeFrequency = e.value("sizeFrequency", -1.0f);
                     def.minScale = e.value("minScale", -1.0f);
@@ -580,6 +643,15 @@ void LoadAssetDefinitions() {
                     def.tintB = g.value("tintB", -1.0f);
                     def.zoomLevel = g.value("zoomLevel", -1.0f);
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    // 新ギミックロスター対応 — 作動中に差し替える画像。
+                    // 起動時に一度だけ読み込んでハンドルを持っておく（毎フレームのLoadGraphは重いため）。
+                    def.spriteAlt_path = g.value("spriteAlt", "");
+                    if (!def.spriteAlt_path.empty()) {
+                        def.graphHandleAlt = LoadGraph(def.spriteAlt_path.c_str());
+                        if (def.graphHandleAlt == -1) {
+                            Logger::Error("DrawPixel", "LoadAssetDefinitions", "Failed to load gimmick spriteAlt", def.spriteAlt_path.c_str());
+                        }
+                    }
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     if (g.contains("script") && g["script"].is_array()) def.script = g["script"];
                     ApplyGimmickDefaultParams(def);
@@ -632,10 +704,34 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         inst.width = pd.width;
         inst.height = pd.height;
         inst.zOrder = pd.zOrder;
+        inst.deadly = pd.deadly;
         inst.partIndex = (int)pi;
         result.push_back(inst);
     }
     return result;
+}
+
+// 新アセット移行対応 — 素材画像の実サイズを、定義側が意図した論理サイズへ収める表示倍率を求める。
+//
+// 新しい素材は全て 640x640 の共通キャンバスで描かれているため、DrawRotaGraph に倍率 1.0 を
+// そのまま渡すと画面いっぱいの大きさで描画されてしまう（DrawRotaGraph は「画像の原寸 × 倍率」で描くため）。
+// そこで「論理サイズ ÷ 画像サイズ」を求め、これを既存の scale に掛けて渡す。
+// こうすると scale の意味を従来どおり「1.0 = 定義サイズちょうど」に保てるので、
+// SHRINKER の縮小演出やスクリプトの SetScale といった既存の倍率操作を一切変えずに済む。
+//
+// 縦横比が素材と論理サイズで食い違っていても枠からはみ出さないよう、幅基準・高さ基準の小さい方を採る。
+// 画像が未読み込み(-1)、または論理サイズが未設定(0以下)の場合は 1.0 を返し、従来どおり原寸で描画する。
+static float ComputeFitScale(int graphHandle, float logicalW, float logicalH) {
+    if (graphHandle < 0) return 1.0f;
+    if (logicalW <= 0.0f && logicalH <= 0.0f) return 1.0f;
+    int imgW = 0, imgH = 0;
+    GetGraphSize(graphHandle, &imgW, &imgH);
+    if (imgW <= 0 || imgH <= 0) return 1.0f;
+    float sx = (logicalW > 0.0f) ? (logicalW / (float)imgW) : 0.0f;
+    float sy = (logicalH > 0.0f) ? (logicalH / (float)imgH) : 0.0f;
+    if (sx <= 0.0f) return sy;
+    if (sy <= 0.0f) return sx;
+    return (sx < sy) ? sx : sy;
 }
 
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
@@ -651,11 +747,99 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める
         int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
         int pcy = (int)(part.y + (part.height * part.scale) / 2.0f - cameraY);
-        DrawRotaGraph(pcx, pcy, part.scale, part.angle, part.handle, TRUE);
+        // 新アセット移行対応 — パーツ画像(640x640)をパーツ定義の width/height へ収める倍率を掛ける
+        float partFit = ComputeFitScale(part.handle, (float)part.width, (float)part.height);
+        DrawRotaGraph(pcx, pcy, partFit * part.scale, part.angle, part.handle, TRUE);
     }
 }
 
 
+
+// ===================================================================================
+// UI素材化 — img/UI*.png を使ったUI共通描画ヘルパー
+// ===================================================================================
+//
+// これまでUIは DrawBox による単色の矩形と DrawTriangle で組まれていたが、
+// 専用のウィンドウ枠の絵（img/UIウィンドウ.png）と再生/一時停止アイコンが用意されたので、
+// UIの見た目をすべてそちらに寄せる。
+//
+// 素材が「クリーム色の明るいウィンドウ」なので、UI上に載せる文字は
+// 従来の白～薄灰ではまったく読めなくなる。そのため文字色も合わせて
+// 下記の Ui〜() で定義した暗いインク色に統一する。
+// 色を定数(const int)ではなく関数にしてあるのは、GetColor() が
+// 描画モードの色深度に依存するため、DxLib_Init より前の静的初期化時に
+// 呼ばれる形にしたくないから。
+
+inline int UiInk() { return GetColor(32, 34, 40); }        // 主要テキスト（ほぼ黒）
+inline int UiInkSub() { return GetColor(112, 116, 126); }  // 補助テキスト・無効表示
+inline int UiInkAccent() { return GetColor(20, 84, 132); } // 強調（ウィンドウ枠の青と同系色）
+inline int UiInkWarn() { return GetColor(196, 52, 52); }   // 警告・削除など危険寄りの操作
+inline int UiInkOk() { return GetColor(28, 122, 68); }     // 正常・有効を示す緑
+
+// --- 9スライス描画のパラメータ ---
+// 9スライスとは、1枚の枠絵を「四隅・上下左右の辺・中央」の9領域に切り分け、
+//   ・四隅は引き伸ばさない
+//   ・上下の辺は横方向だけ、左右の辺は縦方向だけ引き伸ばす
+//   ・中央だけ縦横とも引き伸ばす
+// という描き方のこと。こうするとどんな大きさのウィンドウを作っても
+// 角の丸みや枠線の太さが潰れず、1枚の素材を全UIで使い回せる。
+//
+// UIウィンドウ.png は 640x640 で、周囲におよそ 17〜26px の透明な余白がある。
+// その余白まで含めて描くと小さいウィンドウが内側に痩せて見えるので、
+// 全周 16px を切り落とした内側だけを素材として扱う。
+const int UI_WIN_SRC_PAD = 16;                              // 素材から切り落とす透明余白(px)
+const int UI_WIN_SRC_SPAN = 640 - UI_WIN_SRC_PAD * 2;       // 実際に使う素材の一辺(px)
+const int UI_WIN_SRC_SLICE = 60;                            // 素材側で「枠」として扱う縁の太さ(px)
+const int UI_WIN_DEST_SLICE = 14;                           // 画面上での枠の太さ(px)
+
+// UIウィンドウを9スライスで描く。
+// handleが未読み込み(-1)の場合は、素材が無くてもUIが消えないよう単色の枠でフォールバックする。
+void DrawUiWindow(int x1, int y1, int x2, int y2, int handle) {
+    int w = x2 - x1;
+    int h = y2 - y1;
+    if (w <= 0 || h <= 0) return;
+    if (handle < 0) {
+        DrawBox(x1, y1, x2, y2, GetColor(252, 246, 236), TRUE);
+        DrawBox(x1, y1, x2, y2, GetColor(20, 84, 132), FALSE);
+        return;
+    }
+    // 枠の太さは基本 UI_WIN_DEST_SLICE。ただしウィンドウ自体が小さいときに
+    // 左右（上下）の枠がぶつかって潰れないよう、短辺の1/3を上限にする。
+    int ds = UI_WIN_DEST_SLICE;
+    int limit = (w < h ? w : h) / 3;
+    if (ds > limit) ds = limit;
+    if (ds < 2) ds = 2;
+
+    const int ss = UI_WIN_SRC_SLICE;
+    const int sm = UI_WIN_SRC_SPAN - ss * 2; // 素材の中央部分の一辺
+    const int sx0 = UI_WIN_SRC_PAD, sx1 = sx0 + ss, sx2 = sx1 + sm;
+    const int sy0 = UI_WIN_SRC_PAD, sy1 = sy0 + ss, sy2 = sy1 + sm;
+    const int dx1 = x1 + ds, dx2 = x2 - ds;
+    const int dy1 = y1 + ds, dy2 = y2 - ds;
+
+    // 四隅（引き伸ばさず、枠の太さぶんに縮めて描く）
+    DrawRectExtendGraph(x1,  y1,  dx1, dy1, sx0, sy0, ss, ss, handle, TRUE);
+    DrawRectExtendGraph(dx2, y1,  x2,  dy1, sx2, sy0, ss, ss, handle, TRUE);
+    DrawRectExtendGraph(x1,  dy2, dx1, y2,  sx0, sy2, ss, ss, handle, TRUE);
+    DrawRectExtendGraph(dx2, dy2, x2,  y2,  sx2, sy2, ss, ss, handle, TRUE);
+    // 上下の辺（横方向だけ引き伸ばす）
+    DrawRectExtendGraph(dx1, y1,  dx2, dy1, sx1, sy0, sm, ss, handle, TRUE);
+    DrawRectExtendGraph(dx1, dy2, dx2, y2,  sx1, sy2, sm, ss, handle, TRUE);
+    // 左右の辺（縦方向だけ引き伸ばす）
+    DrawRectExtendGraph(x1,  dy1, dx1, dy2, sx0, sy1, ss, sm, handle, TRUE);
+    DrawRectExtendGraph(dx2, dy1, x2,  dy2, sx2, sy1, ss, sm, handle, TRUE);
+    // 中央（縦横とも引き伸ばす）
+    DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sm, sm, handle, TRUE);
+}
+
+// UIアイコンを (cx, cy) を中心に boxSize x boxSize の正方形へ収めて描く。
+// 素材はどれも 640x640 の共通キャンバスに中央寄せで描かれているので、
+// キャンバスごと正方形に押し込めば自動的に中央揃えになる。
+void DrawUiIcon(int cx, int cy, int boxSize, int handle) {
+    if (handle < 0 || boxSize <= 0) return;
+    int half = boxSize / 2;
+    DrawExtendGraph(cx - half, cy - half, cx - half + boxSize, cy - half + boxSize, handle, TRUE);
+}
 
 // 定数（ゲーム全体で使う基本的な数値設定）
 const int SCREEN_WIDTH = 640;    // ゲーム内部の描画解像度（横）
@@ -665,6 +849,9 @@ const int WINDOW_HEIGHT = 720;   // 実際に表示するウィンドウの高�
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
 const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
 const float BULLET_SPEED = 20.0f;// 弾の基本速度
+// 弾の描画サイズ(px)。当たり判定側が全ての判定箇所で 16x16 決め打ちになっているため、
+// 見た目と判定がズレないよう同じ値を定数化して描画にも使う。
+const int BULLET_DRAW_SIZE = 16;
 const float JUMP_POWER = -12.0f; // プレイヤーの基本ジャンプ力（負の値で上方向）
 const float WALK_SPEED = 4.0f;   // プレイヤーの基本歩行速度
 const float DASH_SPEED = 8.0f;   // プレイヤーの基本ダッシュ速度
@@ -672,6 +859,25 @@ const float DASH_SPEED = 8.0f;   // プレイヤーの基本ダッシュ速度
 const int TILE_SIZE = 32;        // マップの1タイルあたりのピクセルサイズ
 const int MAP_WIDTH_TILES = 80;  // 2560 / 32 = 80
 const int MAP_HEIGHT_TILES = 15; // 480 / 32 = 15
+
+// Feature: カットコストの距離変動 — タイムラインカット1本の作成コストを求める。
+//
+// startRatio / endRatio はタイムライン帯上の位置を 0.0(ステージ左端)〜1.0(右端) で表したもの。
+// この2点の間隔にステージの実幅(stageWidthPx)を掛けると、そのカットが実際に飛ばす距離[px]になる。
+// それをタイル数へ直し、1タイルあたり cutCostPerTile を足し込む。
+//
+//     総コスト = flatCutCreate + cutCostPerTile × 飛ばすタイル数
+//
+// クリックの順序で start > end になることがあるので、必ず差の絶対値を取る。
+float ComputeCutCreateCost(float startRatio, float endRatio, float stageWidthPx, const EditCostSettings& costSettings) {
+    float span = endRatio - startRatio;
+    if (span < 0.0f) span = -span;
+    if (stageWidthPx <= 0.0f) return costSettings.flatCutCreate; // ステージ幅が未確定なら基本コストのみ
+    float spanTiles = (span * stageWidthPx) / (float)TILE_SIZE;
+    float total = costSettings.flatCutCreate + costSettings.cutCostPerTile * spanTiles;
+    if (total < 0.0f) total = 0.0f;
+    return total;
+}
 
 // マップを構成するタイルの種類。マップデータ(数値配列)の各マスがこの番号で表現される。
 enum TileType {
@@ -1417,21 +1623,81 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
     }
-    // 共通で使う画像素材をあらかじめすべて読み込んでおく（毎フレーム読み込むと重いため起動時に一括ロード）
-    int playerHandle = LoadGraph("img/player.png");
-    int bulletHandle = LoadGraph("img/bullet.png");
-    int jimenHandle = LoadGraph("img/jimen.png");
-    int tutiHandle = LoadGraph("img/tuti.png");
-    int portalHandle = LoadGraph("img/portal.png");
-    int bridgeHandle = LoadGraph("img/bridge.png");
-    int breakableBlockHandle = LoadGraph("img/breakable_block.png");
-    int liftHandle = LoadGraph("img/lift.png");
-    int mirrorHandle = LoadGraph("img/mirror.png");
-    int switchHandle = LoadGraph("img/switch.png");
-    int boxHandle = LoadGraph("img/box.png");
-    int doorHandle = LoadGraph("img/door.png");
-    int spikesHandle = LoadGraph("img/spikes.png");
-    int coinHandle = LoadGraph("img/coin.png");
+    // 共通で使う画像素材をあらかじめすべて読み込んでおく（毎フレーム読み込むと重いため起動時に一括ロード）。
+    // 【重要】ここで読む素材は img/ 直下の日本語ファイル名に全面移行した。旧素材（player.png 等）は
+    // リポジトリから一括削除されており、参照し続けると全ハンドルが -1 になって何も描画されなくなる。
+    // これらは「アセット定義側に個別スプライトが無かった場合のフォールバック」も兼ねているため、
+    // 1枚でも欠けると該当ギミックが不可視になる点に注意すること。
+    int playerHandle = LoadGraph("img/プレイヤー.png");
+    int bulletHandle = LoadGraph("img/弾.png");
+    int jimenHandle = LoadGraph("img/地面緑.png");
+    int tutiHandle = LoadGraph("img/地面黄.png");
+    int portalHandle = LoadGraph("img/ワープゲート.png");
+    int bridgeHandle = LoadGraph("img/床青.png");
+    int breakableBlockHandle = LoadGraph("img/地面ピンク.png");
+    int liftHandle = LoadGraph("img/乗ったら落ちる床.png");
+    int mirrorHandle = LoadGraph("img/床青.png");
+    int switchHandle = LoadGraph("img/スイッチオフ.png");
+    int boxHandle = LoadGraph("img/地面黄緑.png");
+    int doorHandle = LoadGraph("img/扉.png");
+    int spikesHandle = LoadGraph("img/棘.png");
+    int coinHandle = LoadGraph("img/コイン.png");
+
+    // UI・演出専用の画像素材。従来これらは DrawBox / DrawTriangle による自前のプリミティブ描画で
+    // 代用していたが、専用の絵が用意されたので画像に置き換える。
+    int uiWindowHandle = LoadGraph("img/UIウィンドウ.png");       // 汎用ウィンドウ枠（9スライスで引き伸ばす）
+    int uiPlayHandle = LoadGraph("img/UI再生中.png");             // 再生中(▶)アイコン
+    int uiPauseHandle = LoadGraph("img/UI一時停止中.png");        // 一時停止中(||)アイコン
+    int energyHandle = LoadGraph("img/エネルギー.png");           // 編集コストゲージのアイコン
+    int cursorHandle = LoadGraph("img/マウスホイール.png");       // ゲーム内マウスカーソル（実物は矢印の絵）
+    int goalHandle = LoadGraph("img/ゴール.png");                 // ゴール地点
+    int checkpointHandle = LoadGraph("img/チェックポイント.png"); // チェックポイントの旗
+    int switchOnHandle = LoadGraph("img/スイッチオン.png");       // 押し込まれた状態のスイッチ
+
+    // 新アセット移行の自己診断 —
+    // 素材はすべてファイル名が日本語なので、文字コードの設定が1つでも噛み合っていないと
+    // LoadGraph が黙って -1 を返し、「ビルドは通るのに画面が真っ黒」という追いにくい壊れ方をする。
+    // （具体的には .vcxproj の /utf-8 と SetUseCharCodeFormat(DX_CHARCODEFORMAT_UTF8) の組み合わせ。
+    //   どちらかが欠けるとリテラルの文字コードとDxLibの解釈がずれる。）
+    // どのファイルが読めなかったのかを起動直後にログへ落としておけば、原因の切り分けが一目で済む。
+    {
+        struct { const char* label; int handle; } loadedGraphs[] = {
+            { "img/プレイヤー.png",        playerHandle },
+            { "img/弾.png",                bulletHandle },
+            { "img/地面緑.png",            jimenHandle },
+            { "img/地面黄.png",            tutiHandle },
+            { "img/ワープゲート.png",      portalHandle },
+            { "img/床青.png",              bridgeHandle },
+            { "img/地面ピンク.png",        breakableBlockHandle },
+            { "img/乗ったら落ちる床.png",  liftHandle },
+            { "img/スイッチオフ.png",      switchHandle },
+            { "img/地面黄緑.png",          boxHandle },
+            { "img/扉.png",                doorHandle },
+            { "img/棘.png",                spikesHandle },
+            { "img/コイン.png",            coinHandle },
+            { "img/UIウィンドウ.png",      uiWindowHandle },
+            { "img/UI再生中.png",          uiPlayHandle },
+            { "img/UI一時停止中.png",      uiPauseHandle },
+            { "img/エネルギー.png",        energyHandle },
+            { "img/マウスホイール.png",    cursorHandle },
+            { "img/ゴール.png",            goalHandle },
+            { "img/チェックポイント.png",  checkpointHandle },
+            { "img/スイッチオン.png",      switchOnHandle },
+        };
+        int failedCount = 0;
+        for (const auto& g : loadedGraphs) {
+            if (g.handle < 0) {
+                failedCount++;
+                Logger::Error("DrawPixel", "WinMain", "Failed to load graph", g.label);
+            }
+        }
+        if (failedCount == 0) {
+            Logger::Info("DrawPixel", "WinMain", "[Init] All core graphics loaded");
+        } else {
+            Logger::Error("DrawPixel", "WinMain", "Some core graphics failed to load (check /utf-8 build option)",
+                          std::to_string(failedCount) + " missing");
+        }
+    }
 
     // tileDefs: tiles.json から動的に読み込む (なければデフォルト3種)
     std::vector<TileDefinition> tileDefs;
@@ -1461,11 +1727,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     int handle = -1;
                     if (!spritePath.empty()) {
-                        handle = LoadGraph(("assets/" + spritePath).c_str());
+                        // 【重要】tiles.json に書かれるパスは Lab_Editor が "img/xxx.png" 形式で書き出す。
+                        // 以前はここで先に "assets/" を前置していたため、常に存在しない
+                        // "assets/img/xxx.png" を探しに行き、1回目のロードが必ず失敗していた。
+                        // 敵・ギミック・アイテム側はプロジェクトルート起点で読んでいるので、
+                        // タイルもルート起点を先に試し、見つからない場合だけ assets/ 配下を探すよう順序を入れ替える。
+                        handle = LoadGraph(spritePath.c_str());
                         if (handle == -1) {
-                            // assets/フォルダ内に見つからなかった場合、絶対パスまたは実行ファイルからの
-                            // 相対パスとして再度読み込みを試みる
-                            handle = LoadGraph(spritePath.c_str());
+                            // ルート直下に無い場合のみ、assets/ 配下に置かれている可能性を試す
+                            handle = LoadGraph(("assets/" + spritePath).c_str());
                         }
                     }
 
@@ -1501,8 +1771,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
     }
 
-    int pw, ph;
-    GetGraphSize(playerHandle, &pw, &ph);
+    // 新アセット移行対応 — プレイヤーおよびC++直書きステージの敵の「論理サイズ」。
+    // 以前は GetGraphSize(playerHandle) で画像の実寸をそのまま使っていたが、
+    // 新素材は全て 640x640 なので、そのままだと表示だけでなく当たり判定まで 640px になって破綻する。
+    // 描画倍率は ComputeFitScale が画像実寸から自動算出するため、ここはタイル1マス(32px)基準の
+    // ゲーム的な大きさを直接指定してよい。
+    const int PLAYER_LOGICAL_SIZE = 32;
+    int pw = PLAYER_LOGICAL_SIZE, ph = PLAYER_LOGICAL_SIZE;
 
     // オブジェクトの仮初期化（ResetStageで正しく設定されます）
     Player player = { 100.0f, 300.0f, 0.0f, 0.0f, playerHandle, 0, false, pw, ph, 1.0f, 0.0f, 1.0f, false, false, {} };
@@ -2006,6 +2281,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         jsonStage.editCostSettings.flatResetAll            = ecs.value("flatResetAll", 10.0f);
                         // Feature: カット機能の復活 — キー未指定の既存ステージJSONでも既定値20で動くようにしておく
                         jsonStage.editCostSettings.flatCutCreate           = ecs.value("flatCutCreate", 20.0f);
+                        // Feature: カットコストの距離変動 — 1タイルあたりの追加消費量。
+                        // 0を指定すればそのステージだけ従来どおりの「距離に関係なく定額」に戻せる。
+                        jsonStage.editCostSettings.cutCostPerTile          = ecs.value("cutCostPerTile", 1.2f);
                     }
 
                     // サウンド・フラグ
@@ -2867,11 +3145,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float ct = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
                         if (ct < 0.0f) ct = 0.0f;
                         if (ct > 1.0f) ct = 1.0f;
+                        // Feature: カットコストの距離変動 — 2点目を打った時点で「その長さの」コストを計算する。
+                        // 1点目のクリックではまだ距離が決まらないので、コスト判定も2点目まで持ち越す。
+                        float pendingCutCost = (tempCutStart >= 0.0f)
+                            ? ComputeCutCreateCost(tempCutStart, ct, STAGE_WIDTH, currentEditCost)
+                            : currentEditCost.flatCutCreate;
                         if (tempCutStart < 0.0f) {
                             // 1点目：始点を記録するだけ。ここではまだコストを消費しない
                             tempCutStart = ct;
                             SoundManager::Get().PlaySe("ui_color_cycle");
-                        } else if (editCost >= currentEditCost.flatCutCreate) {
+                        } else if (editCost >= pendingCutCost) {
                             // 2点目：区間が確定。クリック順に関係なく小さい方を始点にそろえる
                             float start = (ct > tempCutStart ? tempCutStart : ct);
                             float end   = (ct > tempCutStart ? ct : tempCutStart);
@@ -2880,7 +3163,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 tempCutStart = -1.0f;
                                 SoundManager::Get().PlaySe("ui_denied");
                             } else {
-                                editCost -= currentEditCost.flatCutCreate;
+                                editCost -= pendingCutCost;
                                 // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
                                 // targetGimmick / selectedGimmicks の生ポインタが全てダングリングになる。
                                 // そのまま触ると不正アクセスで落ちるので、追加の前に選択を解除しておく。
@@ -3185,10 +3468,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // --- 装置等による更新可否判定 ---
-        auto CanUpdate = [&](float ox, float oy, float ow, float oh, float scale, bool isObjPaused) {
+        // ignoresPause には「この個体はプレイヤーの一時停止を無視して動き続ける」場合に true を渡す。
+        // 幽霊タイプの敵のように、時間を止めても止まらない＝止める以外の対処を強いる相手を成立させるための逃げ道。
+        // ただしドラッグ中・スケール変更中などの「エディタ操作中」は、操作対象が動くと掴めなくなるので
+        // 従来どおり一律停止させる（＝最初の早期returnより後ろで判定する）。
+        auto CanUpdate = [&](float ox, float oy, float ow, float oh, float scale, bool isObjPaused, bool ignoresPause = false) {
             if (currentScene != PLAY || isDragging || isScaling || isScalingHeight || isRotating || isShowingMessage) return false;
             if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
             if (isStepFrame) return true;
+            if (ignoresPause) return true;
             
             // TIME_FIELD ギミックの影響範囲内ならポーズ中でも動ける
             float cx = ox + (ow * scale) / 2.0f;
@@ -3497,7 +3785,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     enemy.auxF3 = s.auxF3;
                 }
             } else {
-                bool canEnemyAct = enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.hitboxWidth, (float)enemy.hitboxHeight, enemy.scale, enemy.isPaused);
+                // 新敵ロスター対応 — 定義側で ignorePause が立っている敵は一時停止中も動かす。
+                // 定義が見つからない（旧データ等）場合は false 扱いで従来どおり止まる。
+                const EnemyDef* pauseDef = FindEnemyDef(enemy.assetId);
+                bool enemyIgnoresPause = (pauseDef != nullptr && pauseDef->ignorePause);
+                bool canEnemyAct = enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.hitboxWidth, (float)enemy.hitboxHeight, enemy.scale, enemy.isPaused, enemyIgnoresPause);
                 if (canEnemyAct) {
                     float ets = ts * enemy.speedScale;
 
@@ -3523,15 +3815,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 enemy.patrolLeft = std::max<float>(0.0f, enemy.x - 200.0f);
                                 enemy.patrolRight = enemy.x + 200.0f;
                             }
+
+                            // 敵の行動改良 — 地形を見て反転する。
+                            // 従来のPATROLは patrolLeft/patrolRight という「座標の壁」だけで折り返していたため、
+                            // 足場から平然とはみ出して空中を歩き、壁があってもめり込んだまま押し続けていた。
+                            // 見た目が壊れているだけでなく「どこで折り返すか」がプレイヤーから読めず、
+                            // 踏み台にしたり避けたりする計画が立てられないので、
+                            // WALKER/CHASERと同じタイル判定（進行方向の足元に床があるか／目の前に壁があるか）を入れて
+                            // 崖ぎわと壁ぎわで必ず反転させる。座標指定の巡回範囲はその外枠として今まで通り効く。
+                            auto& mpP = stages[currentStageIdx].map;
+                            auto probeTileP = [&](float px, float py) -> bool {
+                                int tCol = (int)(px / TILE_SIZE);
+                                int tRow = (int)(py / TILE_SIZE);
+                                if (mpP.empty() || tRow < 0 || tRow >= (int)mpP.size() || tCol < 0 || tCol >= (int)mpP[0].size()) return false;
+                                int tid = mpP[tRow][tCol];
+                                return (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                            };
+                            float bodyW = (float)enemy.hitboxWidth * enemy.scale;
+                            float bodyH = (float)enemy.hitboxHeight * enemy.scale;
+                            // 進行方向のわずかに先を見る。向きは 0=右 / 1=左。
+                            float aheadX = (enemy.direction == 0) ? (enemy.x + bodyW + 4.0f) : (enemy.x - 4.0f);
+                            bool groundAheadP = probeTileP(aheadX, enemy.y + bodyH + 4.0f); // 足元に床が続いているか
+                            bool wallAheadP = probeTileP(aheadX, enemy.y + bodyH * 0.5f);   // 胴の高さに壁があるか
+                            // 空中に浮いている個体（足場の無い所に配置された敵）まで崖判定で止めてしまうと
+                            // その場で永久に向きを変え続けるだけになるので、今まさに接地している時だけ崖を見る。
+                            bool groundedNowP = (std::abs(enemy.vy) < 1.0f) && probeTileP(enemy.x + bodyW * 0.5f, enemy.y + bodyH + 4.0f);
+                            bool turnByTerrain = wallAheadP || (groundedNowP && !groundAheadP);
+
                             if (enemy.direction == 0) {
                                 enemy.vx = enemySpeed;
-                                if (enemy.patrolRight > 0 && enemy.x + enemy.vx >= enemy.patrolRight) {
+                                if (turnByTerrain || (enemy.patrolRight > 0 && enemy.x + enemy.vx >= enemy.patrolRight)) {
                                     enemy.direction = 1;
+                                    enemy.vx = 0.0f; // 反転したフレームは踏み込まず、次フレームから逆向きに歩き出す
                                 }
                             } else {
                                 enemy.vx = -enemySpeed;
-                                if (enemy.x + enemy.vx <= enemy.patrolLeft) {
+                                if (turnByTerrain || (enemy.x + enemy.vx <= enemy.patrolLeft)) {
                                     enemy.direction = 0;
+                                    enemy.vx = 0.0f;
                                 }
                             }
                             break;
@@ -3835,39 +4156,89 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
                                 enemy.customTimer -= ets;
                                 if (enemy.customTimer <= 0) {
-                                    // 元の場所（＝配置位置）へ復帰して待機状態へ。斜め誘導で着地X座標がずれていても
-                                    // X/Yとも配置時の座標へ戻す（従来はYしか戻しておらず、斜め落下後にXがずれたままだった）。
-                                    enemy.x = enemy.auxF3;
-                                    enemy.y = enemy.auxF2;
-                                    enemy.auxState = 0;
+                                    // 敵の行動改良 — 元の場所（＝配置位置）へ「せり上がって」戻る。
+                                    //
+                                    // 従来はクールダウンが明けた瞬間に enemy.x/y へ配置座標を代入する完全な瞬間移動だった。
+                                    // そのため「落ちてくる→消える→いきなり天井に居る」という見え方になり、
+                                    // プレイヤーは真下を通れる安全な時間がどれだけ残っているのかを一切読めなかった。
+                                    // riseSpeed を与えると毎フレーム riseSpeed[px] ずつ配置座標へ近づくので、
+                                    // 「まだ戻りきっていない今のうちに真下を走り抜ける」という攻略が成立する。
+                                    //
+                                    // 座標を直接動かして共通の物理更新を通さないのは、従来の瞬間移動と同じ理由。
+                                    // 斜め落下で天井の下へ潜り込んだ個体が、戻る途中で天井に引っ掛かって
+                                    // 二度と待機状態へ復帰できなくなるのを防ぐ。
+                                    float riseSpeedF = edef ? edef->riseSpeed : 0.0f;
+                                    if (riseSpeedF <= 0.0f) {
+                                        // 従来どおりの瞬間復帰（riseSpeed未設定の既存の敵定義はこちらを通る）
+                                        enemy.x = enemy.auxF3;
+                                        enemy.y = enemy.auxF2;
+                                        enemy.auxState = 0;
+                                    } else {
+                                        float stepF = riseSpeedF * ets;
+                                        // XとYそれぞれ、残り距離がstep以下になったらぴったり合わせる（行き過ぎ防止）
+                                        float dxHome = enemy.auxF3 - enemy.x;
+                                        float dyHome = enemy.auxF2 - enemy.y;
+                                        if (std::abs(dxHome) <= stepF) enemy.x = enemy.auxF3;
+                                        else                           enemy.x += (dxHome > 0.0f ? stepF : -stepF);
+                                        if (std::abs(dyHome) <= stepF) enemy.y = enemy.auxF2;
+                                        else                           enemy.y += (dyHome > 0.0f ? stepF : -stepF);
+                                        // XもYも定位置に着いたら、また落下を待つ待機状態へ戻す
+                                        if (enemy.x == enemy.auxF3 && enemy.y == enemy.auxF2) enemy.auxState = 0;
+                                    }
                                 }
                             }
                             break;
                         }
                         case ENEMY_SPREAD_SHOOTER: {
-                            // 拡散弾：固定位置から3方向へ拡散射撃
+                            // 拡散弾：一定間隔で複数方向へ同時に射撃する。
+                            //
+                            // 敵の行動改良 — radialFire を立てると「正面へのファン」ではなく
+                            // 「360度への全方位ばらまき」になり、さらに spreadRotationStep の分だけ
+                            // 斉射ごとに発射角度がずれていくので、弾が渦を描いて広がる。
+                            // 従来の正面ファンは、敵から離れた側へ歩いているだけで永久に安全＝
+                            // 撃たれていること自体に意味が無かった。全方位＋角度ずらしにすると
+                            // 「弾と弾の隙間がどこに来るか」を読んで抜ける遊びになり、一時停止やスローとも噛み合う。
+                            // radialFire=false のままなら従来と完全に同じ挙動になる。
                             float shootInterval = edef ? edef->actionInterval : 150.0f;
                             float spreadAngle = edef ? edef->spreadAngle : 0.35f;
                             int spreadCount = (edef && edef->spreadCount > 0) ? edef->spreadCount : 3;
                             float projSpeed = edef ? edef->projectileSpeed : 0.5f;
+                            bool radialFire = (edef && edef->radialFire);
+                            float rotStep = edef ? edef->spreadRotationStep : 0.0f;
                             enemy.vx = 0.0f;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.customTimer += ets;
                             if (enemy.customTimer >= shootInterval) {
                                 float baseDir = (enemy.direction == 0) ? 1.0f : -1.0f;
+                                // auxF1に「これまでの累積回転量」を貯めておく。斉射のたびにrotStep分だけ回る。
+                                // 2πを超えたら折り返し、長時間プレイしても値が発散しないようにする。
+                                float spin = enemy.auxF1;
+                                float ecxSp = enemy.x + (float)enemy.hitboxWidth * enemy.scale * 0.5f;
+                                float ecySp = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
                                 for (int a = 0; a < spreadCount; a++) {
-                                    // spreadCount本を -spreadAngle ～ +spreadAngle の範囲に等間隔配置（spreadCount==1なら正面のみ）
-                                    float angle = (spreadCount > 1)
-                                        ? (-spreadAngle + (2.0f * spreadAngle) * ((float)a / (float)(spreadCount - 1)))
-                                        : 0.0f;
+                                    // 全方位モード：0～2πをspreadCount等分し、そこにspinを加算した向きへ撃つ。
+                                    // 正面ファンモード：-spreadAngle ～ +spreadAngle を等間隔に割り振る（従来どおり）。
+                                    float angle = radialFire
+                                        ? (spin + 6.2831853f * ((float)a / (float)spreadCount))
+                                        : ((spreadCount > 1)
+                                            ? (-spreadAngle + (2.0f * spreadAngle) * ((float)a / (float)(spreadCount - 1)) + spin)
+                                            : spin);
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
-                                            bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
-                                            bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
                                             float spd = BULLET_SPEED * projSpeed;
-                                            bullets[i].vx = baseDir * spd * cosf(angle);
-                                            bullets[i].vy = spd * sinf(angle);
+                                            if (radialFire) {
+                                                // 全方位なので発射位置は敵の中心。左右どちらを向いているかは関係ない
+                                                bullets[i].x = ecxSp;
+                                                bullets[i].y = ecySp;
+                                                bullets[i].vx = spd * cosf(angle);
+                                                bullets[i].vy = spd * sinf(angle);
+                                            } else {
+                                                bullets[i].x = enemy.x + (enemy.direction == 0 ? (float)enemy.hitboxWidth * enemy.scale : -10.0f);
+                                                bullets[i].y = enemy.y + (float)enemy.hitboxHeight * enemy.scale / 4.0f;
+                                                bullets[i].vx = baseDir * spd * cosf(angle);
+                                                bullets[i].vy = spd * sinf(angle);
+                                            }
                                             bullets[i].isPlayerOwned = false;
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
@@ -3875,6 +4246,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         }
                                     }
                                 }
+                                enemy.auxF1 = spin + rotStep;
+                                if (enemy.auxF1 > 6.2831853f) enemy.auxF1 -= 6.2831853f;
+                                if (enemy.auxF1 < -6.2831853f) enemy.auxF1 += 6.2831853f;
                                 enemy.customTimer = 0.0f;
                             }
                             break;
@@ -3919,6 +4293,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float frequency = edef ? edef->floatFrequency : 0.05f;
                             if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
                             enemy.customTimer += ets;
+
+                            // 敵の行動改良 — 浮遊の中心高度(auxF2)をプレイヤーの高さへゆっくり寄せる。
+                            // 従来のFLOATERは配置された高さを一切変えず横方向にしか寄って来なかったため、
+                            // 段差を1つ上るか下りるかするだけで完全に無力化でき、
+                            // 「空を飛んでいる敵」なのに地形だけで完封できてしまう噛み合わなさがあった。
+                            // 高度も追ってくるようにすると上下に逃げるだけでは振り切れなくなり、
+                            // 代わりに一時停止やスローで止めて抜けるという編集ツール側の解答が要る相手になる。
+                            // verticalTrackSpeed が 0（＝未設定の既存定義）なら高度は据え置きで従来どおり。
+                            float vTrack = edef ? edef->verticalTrackSpeed : 0.0f;
+                            float triggerRangeVt = edef ? edef->triggerRange : 300.0f;
+                            if (vTrack > 0.0f && std::abs(player.x - enemy.x) < triggerRangeVt) {
+                                // プレイヤーの中心の高さを目標にする（足元ではなく胴を狙うので接触しやすい）
+                                float targetCenterY = player.y + (float)player.height * player.scale * 0.5f;
+                                float homeCenterY = enemy.auxF2 + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                                float dyTrack = targetCenterY - homeCenterY;
+                                float stepTrack = vTrack * ets;
+                                if (std::abs(dyTrack) <= stepTrack) enemy.auxF2 += dyTrack;
+                                else                                enemy.auxF2 += (dyTrack > 0.0f ? stepTrack : -stepTrack);
+                                if (enemy.auxF2 < 0.0f) enemy.auxF2 = 0.0f; // 画面外の上空へ抜けていかないよう下限を張る
+                            }
+
                             float desiredY = enemy.auxF2 + sinf(enemy.customTimer * frequency) * amplitude;
                             // enemy.yを直接上書きすると天井・床とのY方向衝突判定を素通りしてしまうため、
                             // 目標Yとの差分をvyとして渡し、他の敵と同じ経路（共通の物理更新）でY衝突判定を通す
@@ -4827,6 +5222,42 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
+            // Feature: 危険パーツ — プレイヤー vs ギミックのパーツ（回転する棘の輪・ファイアバー・振り子など）。
+            // 敵のパーツと同じく1ダメージ＋ノックバック＋無敵時間にそろえてある。
+            // トゲ床(GIMMICK_SPIKES)の即死ではなく被ダメージ扱いにしたのは、
+            // これらが自分から動き回るハザードで、避けきれない位置に来ることがあるため。
+            // 即死にすると理不尽になる一方、無傷では避ける意味が無くなるので、その中間を取る。
+            if (!isPlayerRewinding && player.invulnTimer <= 0.0f) {
+                for (const auto& gimHz : gimmicks) {
+                    if (!gimHz.isActive) continue;
+                    bool hitDeadlyPart = false;
+                    float partCx = 0.0f;
+                    for (const auto& part : gimHz.parts) {
+                        if (!part.isActive || !part.deadly) continue;
+                        float partW = (float)part.hitboxWidth * part.scale;
+                        float partH = (float)part.hitboxHeight * part.scale;
+                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
+                                           part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                            hitDeadlyPart = true;
+                            partCx = part.x + part.hitboxOffsetX + partW / 2.0f;
+                            break;
+                        }
+                    }
+                    if (hitDeadlyPart) {
+                        player.hp--;
+                        player.invulnTimer = 60.0f;
+                        // 当たったパーツから離れる向きへ弾き飛ばす（ハザードの上で連続被弾し続けるのを防ぐ）
+                        float playerCx = player.x + pw_scaled / 2.0f;
+                        player.vx = (playerCx < partCx ? -1.0f : 1.0f) * 6.0f;
+                        player.vy = -4.0f;
+                        const GimmickDef* gdefHz = FindGimmickDef(gimHz.assetId);
+                        if (gdefHz) SoundManager::Get().PlaySe(gdefHz->seActivate);
+                        if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
+                        break; // 同一フレームで複数のハザードに多重被弾させない
+                    }
+                }
+            }
+
             // 2. プレイヤー vs 敵の衝突判定
             if (!isPlayerRewinding) {
                 for (const auto& enemy : enemies) {
@@ -5060,8 +5491,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // ===== ゴールの描画 =====
-        // 従来はゴールが当たり判定のみで一切描画されておらず、プレイヤーから位置が見えなかった。
-        // 外部画像に依存せず確実に表示されるよう、旗をプリミティブ描画で組み立てる。
+        // 新素材移行 — 以前はプリミティブ描画（棒＋三角の旗）で組み立てていたが、
+        // 専用の絵（img/ゴール.png）が用意されたのでそちらに差し替える。
+        // 光柱と拡縮の脈動は「遠くからでも見つかる目印」として残す。
         {
             const auto& curStage = stages[currentStageIdx];
             if (curStage.goalX >= 0) {
@@ -5069,48 +5501,40 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int gy = (int)(curStage.goalY - cameraY);
                 // 目印の光柱（ゴールの位置を遠くからでも分かるようにする）
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 40);
-                DrawBox(gx + 10, 0, gx + TILE_SIZE - 10, gy + TILE_SIZE, GetColor(255, 240, 120), TRUE);
+                DrawBox(gx + 6, 0, gx + TILE_SIZE - 6, gy + TILE_SIZE, GetColor(255, 240, 120), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                // 支柱
-                DrawBox(gx + 12, gy - TILE_SIZE, gx + 17, gy + TILE_SIZE, GetColor(230, 230, 235), TRUE);
-                DrawBox(gx + 12, gy - TILE_SIZE, gx + 17, gy + TILE_SIZE, GetColor(120, 120, 130), FALSE);
-                // 旗（はためきをsinで表現）
-                float wave = sinf(BehaviorInterpreter::globalFrameCounter * 0.12f) * 3.0f;
-                int fx = gx + 17, fy = gy - TILE_SIZE + 4;
-                DrawTriangle(fx, fy, fx, fy + 18, fx + 22 + (int)wave, fy + 9, GetColor(230, 60, 70), TRUE);
-                // 台座
-                DrawBox(gx + 4, gy + TILE_SIZE - 6, gx + TILE_SIZE - 4, gy + TILE_SIZE, GetColor(200, 180, 90), TRUE);
+                // ゴール本体。ゆっくり脈動させて「ここが目的地」であることを目立たせる
+                float goalPulse = 1.0f + sinf(BehaviorInterpreter::globalFrameCounter * 0.06f) * 0.06f;
+                int goalSize = (int)(TILE_SIZE * 1.5f * goalPulse);
+                DrawUiIcon(gx + TILE_SIZE / 2, gy + TILE_SIZE / 2, goalSize, goalHandle);
                 DrawString(gx - 4, gy - TILE_SIZE - 18, "GOAL", GetColor(255, 255, 160));
             }
         }
 
         // ===== チェックポイントの描画 =====
-        // ゴールと同じ「プリミティブ描画で組み立てた旗」方式。未発動は灰色の旗、発動済みは緑色に光る旗にして
-        // 「ここが今の復帰地点」だと一目で分かるようにする。
+        // 新素材移行 — 専用の旗の絵（img/チェックポイント.png）に差し替える。
+        // 未発動と発動済みを絵柄で描き分けることはできないので、
+        //   ・未発動 … 輝度を落として色褪せた旗にする
+        //   ・発動済み … 光の柱を足元に出し、旗をわずかに上下させて「生きている」感を出す
+        // という演出側の差で「ここが今の復帰地点か」を判別できるようにする。
         for (const auto& gim : gimmicks) {
             if (gim.type != GIMMICK_CHECKPOINT || !gim.isActive) continue;
             int cgx = (int)(gim.x - cameraX);
             int cgy = (int)(gim.y - cameraY);
             bool cpActive = gim.val1 > 0.5f;
+            int flagBob = 0;
             if (cpActive) {
                 // 発動済み：足元にうっすら発光する光の柱を出す
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50);
-                DrawBox(cgx + 6, cgy, cgx + TILE_SIZE - 6, cgy + TILE_SIZE, GetColor(120, 255, 150), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                DrawBox(cgx + 4, cgy - TILE_SIZE, cgx + TILE_SIZE - 4, cgy + TILE_SIZE, GetColor(120, 255, 150), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-            }
-            // 支柱
-            DrawBox(cgx + 12, cgy - TILE_SIZE, cgx + 17, cgy + TILE_SIZE, GetColor(200, 200, 205), TRUE);
-            DrawBox(cgx + 12, cgy - TILE_SIZE, cgx + 17, cgy + TILE_SIZE, GetColor(100, 100, 110), FALSE);
-            // 旗（未発動=灰色ではためかない／発動済み=緑色ではためく）
-            int cfx = cgx + 17, cfy = cgy - TILE_SIZE + 4;
-            if (cpActive) {
-                float cwave = sinf(BehaviorInterpreter::globalFrameCounter * 0.12f + gim.x) * 3.0f;
-                DrawTriangle(cfx, cfy, cfx, cfy + 16, cfx + 20 + (int)cwave, cfy + 8, GetColor(80, 230, 120), TRUE);
+                flagBob = (int)(sinf(BehaviorInterpreter::globalFrameCounter * 0.09f + gim.x) * 2.0f);
             } else {
-                DrawTriangle(cfx, cfy, cfx, cfy + 16, cfx + 20, cfy + 8, GetColor(140, 140, 145), TRUE);
+                SetDrawBright(150, 150, 155); // 未発動：色褪せて見えるよう輝度を落とす
             }
-            // 台座
-            DrawBox(cgx + 4, cgy + TILE_SIZE - 6, cgx + TILE_SIZE - 4, cgy + TILE_SIZE, GetColor(150, 150, 155), TRUE);
+            // 旗は「棒の根元が配置マスの底」に来るよう、1マス分せり上げた位置を中心にして描く
+            DrawUiIcon(cgx + TILE_SIZE / 2, cgy + flagBob, (int)(TILE_SIZE * 1.9f), checkpointHandle);
+            SetDrawBright(255, 255, 255);
             DrawString(cgx - 10, cgy - TILE_SIZE - 18, cpActive ? "CHECKPOINT!" : "checkpoint", cpActive ? GetColor(150, 255, 180) : GetColor(180, 180, 185));
         }
 
@@ -5213,7 +5637,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                 }
 
-                if (isActiveState) SetDrawBright(100, 255, 100); // 起動時は緑っぽく
+                // 新ギミックロスター対応 — 作動中は spriteAlt（押し込まれたスイッチの絵）へ差し替える。
+                // spriteAlt が未設定の定義では従来どおり緑の色味を乗せて「入っている」ことを示す。
+                const GimmickDef* swDef = FindGimmickDef(gim.assetId);
+                bool hasAltSprite = (isActiveState && swDef != nullptr && swDef->graphHandleAlt >= 0);
+                if (hasAltSprite) {
+                    useHandle = swDef->graphHandleAlt;
+                } else if (isActiveState) {
+                    SetDrawBright(100, 255, 100); // 起動時は緑っぽく
+                }
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 SetDrawBright(255, 255, 255);
             }
@@ -5572,17 +6004,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 GetGraphSize(enemy.handle, &imgW, &imgH);
                 int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
                 int ecy = (int)(enemy.y - cameraY + (enemy.hitboxHeight * enemy.scale) / 2.0f);
+                // 新敵ロスター対応 — 以前はここで全ての敵に一律 SetDrawBright(255,120,120) の赤い色味を
+                // 掛けていた。全員が同じ img/enemy.png を使っていた頃は「赤い＝敵」という唯一の見分けだったが、
+                // 種類ごとに色も形も違う専用素材へ移行した今は、緑のいもむし・青い砲台・黄色いハニカム・
+                // 紫の幽霊が全部くすんだ赤に染まってしまい、せっかくの描き分けが潰れる。
+                // さらにパーツ(DrawPartsPass)はこの色味の外で描かれるため、
+                // 「胴体だけ緑で頭だけ赤い」といった本体とパーツの食い違いも起きていた。
+                // よって通常時は素材の色をそのまま出し、色味を乗せるのは
+                // 「今どういう状態か」を示す必要がある無敵中(SHIELD)だけに限定する。
                 if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
-                else SetDrawBright(255, 120, 120);
+                else SetDrawBright(255, 255, 255);
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
                     enemy.anim.DrawAt(ecx, animCy, enemy.scale, enemy.angle, enemy.direction != 0);
                 } else if (enemy.direction == 0) {
-                    DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE);
+                    // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE);
                 } else {
-                    DrawRotaGraph(ecx, ecy, enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
                 }
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
@@ -5629,9 +6070,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             player.anim.DrawAt(cx, drawCy, player.scale, player.angle, player.direction == 1);
         } else {
             GetGraphSize(player.handle, &pImgW, &pImgH);
-            int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
-            if (player.direction == 0) DrawRotaGraph(cx, drawCy, player.scale, player.angle, player.handle, TRUE);
-            else DrawRotaGraph(cx, drawCy, player.scale, player.angle, player.handle, TRUE, TRUE);
+            // 新アセット移行対応 — 640x640の素材をプレイヤーの表示サイズへ収める倍率。
+            // 描画の縦位置(drawCy)は「実画像サイズ×倍率」で決めているので、
+            // 倍率を掛けたあとの見かけの高さで計算し直さないと足元の位置がずれる。
+            float playerFit = ComputeFitScale(player.handle, (float)player.width, (float)player.height);
+            int drawCy = (int)(cy - (pImgH * playerFit * player.scale) / 2.0f);
+            if (player.direction == 0) DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE);
+            else DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE, TRUE);
         }
         
         if (isDebugDrawMode) {
@@ -5669,44 +6114,58 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // 弾の描画
         for (int i = 0; i < MAX_BULLETS; i++) {
-            if (bullets[i].isActive) DrawGraph((int)(bullets[i].x - cameraX), (int)(bullets[i].y - cameraY), bullets[i].handle, TRUE);
+            // 新アセット移行対応 — 以前は DrawGraph で原寸描画していたため、640x640の弾画像だと
+            // 画面が弾で埋まってしまう。弾の当たり判定は各所で 16x16 固定なので、描画もそれに合わせる。
+            if (bullets[i].isActive) {
+                int bx = (int)(bullets[i].x - cameraX);
+                int by = (int)(bullets[i].y - cameraY);
+                DrawExtendGraph(bx, by, bx + BULLET_DRAW_SIZE, by + BULLET_DRAW_SIZE, bullets[i].handle, TRUE);
+            }
         }
 
-        // OSD：コインカウント（正しくプレビューされるようにgameScreen内に描画）
+        // OSD：コイン枚数と編集コストゲージ（正しくプレビューされるようにgameScreen内に描画）
+        // UI素材化 — 単色のDrawBox2枚だったものを UIウィンドウ.png の9スライス枠1枚にまとめ、
+        // 「何のカウンタか」を英字ラベルではなくアイコンの絵（コイン.png / エネルギー.png）で示す。
         int collectedCoins = 0;
         for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
-        char coinStr[32];
-        sprintf_s(coinStr, sizeof(coinStr), "COINS: %d / %d", collectedCoins, (int)items.size());
-        
-        // OSDボックスの描画
-        DrawBox(10, 10, 150, 40, GetColor(30, 30, 30), TRUE);
-        DrawBox(10, 10, 150, 40, GetColor(255, 215, 0), FALSE);
-        DrawString(20, 18, coinStr, GetColor(255, 215, 0));
-
-        // OSD：編集コストゲージ（コインカウンターの直下）
         {
+            const int panelX1 = 8, panelY1 = 8, panelX2 = 196, panelY2 = 84;
+            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle);
+
+            // --- 1段目：コインの取得枚数 ---
+            DrawUiIcon(34, 30, 34, coinHandle);
+            char coinStr[32];
+            sprintf_s(coinStr, sizeof(coinStr), "%d / %d", collectedCoins, (int)items.size());
+            DrawString(56, 23, coinStr, UiInk());
+
+            // --- 2段目：編集コストゲージ ---
             float ratio = editCost / currentEditCost.maxCost;
             if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
             bool isLow = ratio < 0.2f;
             bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-            int barColor = isLow ? (blinkOn ? GetColor(255, 80, 80) : GetColor(90, 30, 30)) : GetColor(0, 200, 255);
+            int barColor = isLow ? (blinkOn ? GetColor(255, 80, 80) : GetColor(90, 30, 30)) : GetColor(0, 170, 225);
 
-            DrawBox(10, 45, 150, 65, GetColor(30, 30, 30), TRUE);
-            DrawBox(10, 45, (int)(10 + 140 * ratio), 65, barColor, TRUE);
-            DrawBox(10, 45, 150, 65, GetColor(255, 215, 0), FALSE);
+            DrawUiIcon(34, 60, 38, energyHandle);
+            // ゲージの器は暗い溝にしておく。こうしておけば残量が減ってバーが後退しても、
+            // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
+            const int gx1 = 54, gy1 = 50, gx2 = 186, gy2 = 70;
+            DrawBox(gx1, gy1, gx2, gy2, GetColor(56, 52, 48), TRUE);
+            DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
+            DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
             char editCostStr[32];
-            sprintf_s(editCostStr, sizeof(editCostStr), "EDIT: %d / %d", (int)editCost, (int)currentEditCost.maxCost);
-            DrawString(16, 50, editCostStr, GetColor(255, 255, 255));
+            sprintf_s(editCostStr, sizeof(editCostStr), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
+            DrawString(gx1 + 6, gy1 + 3, editCostStr, GetColor(255, 255, 255));
         }
 
-        // 編集ツールの状態インジケータ（色フィルタ・ミュート）
+        // 編集ツールの状態インジケータ（色フィルタ・ミュート）。
+        // 上のOSDパネルが横196pxまで伸びたので、重ならない位置へずらしてある。
         if (playerColorFilter != 0) {
             const char* filterName = playerColorFilter == 1 ? "RED" : playerColorFilter == 2 ? "GREEN" : "BLUE";
             int filterColor = playerColorFilter == 1 ? GetColor(255, 90, 90) : playerColorFilter == 2 ? GetColor(90, 220, 90) : GetColor(90, 150, 255);
-            DrawFormatString(160, 18, filterColor, "FILTER: %s", filterName);
+            DrawFormatString(206, 16, filterColor, "FILTER: %s", filterName);
         }
         if (SoundManager::Get().IsMuted()) {
-            DrawString(160, 34, "MUTED", GetColor(150, 150, 150));
+            DrawString(206, 34, "MUTED", GetColor(200, 200, 200));
         }
 
         // ヘルプガイドのOSDオーバーレイ
@@ -5723,16 +6182,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // Feature 5: ShowMessageアクションによるメッセージウィンドウ
         if (isShowingMessage) {
+            // UI素材化 — 半透明の黒箱から UIウィンドウ.png の枠へ差し替える。
+            // 背景がクリーム色になるので、文字は白ではなく暗いインク色で描く。
             int boxX = 20, boxY = SCREEN_HEIGHT - 110, boxW = SCREEN_WIDTH - 40, boxH = 90;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
-            DrawBox(boxX, boxY, boxX + boxW, boxY + boxH, GetColor(0, 0, 0), TRUE);
-            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-            DrawBox(boxX, boxY, boxX + boxW, boxY + boxH, GetColor(255, 255, 255), FALSE);
+            DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle);
             if (!currentMessageSpeaker.empty()) {
-                DrawString(boxX + 12, boxY + 8, currentMessageSpeaker.c_str(), GetColor(255, 220, 120));
+                DrawString(boxX + 18, boxY + 14, currentMessageSpeaker.c_str(), UiInkAccent());
             }
-            DrawString(boxX + 12, boxY + (currentMessageSpeaker.empty() ? 12 : 32), currentMessageText.c_str(), GetColor(255, 255, 255));
-            DrawString(boxX + boxW - 110, boxY + boxH - 22, "[ENTER] to close", GetColor(180, 180, 180));
+            DrawString(boxX + 18, boxY + (currentMessageSpeaker.empty() ? 20 : 38), currentMessageText.c_str(), UiInk());
+            DrawString(boxX + boxW - 118, boxY + boxH - 26, "[ENTER] to close", UiInkSub());
         }
 
         // リザルト画面
@@ -5762,9 +6220,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             SetFontSize(16);
 
-            DrawBox(btnX, btnY, btnX + btnW, btnY + btnH, isHover ? GetColor(150, 150, 150) : GetColor(80, 80, 80), TRUE);
-            DrawBox(btnX, btnY, btnX + btnW, btnY + btnH, GetColor(255, 255, 255), FALSE);
-            DrawString(btnX + 55, btnY + 17, "RETRY", GetColor(255, 255, 255));
+            // UI素材化 — RETRYボタンも UIウィンドウ.png の枠で描く。
+            // ホバー中は輝度を上げて「押せる」ことを示す（枠の絵は1枚しか無いため色味で差をつける）。
+            if (isHover) SetDrawBright(255, 255, 255);
+            else         SetDrawBright(205, 200, 194);
+            DrawUiWindow(btnX, btnY, btnX + btnW, btnY + btnH, uiWindowHandle);
+            SetDrawBright(255, 255, 255);
+            DrawString(btnX + 58, btnY + 18, "RETRY", isHover ? UiInkAccent() : UiInk());
         }
 
         // --- 最終ワークスペースレイアウト出力 ---
@@ -5772,13 +6234,50 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         ClearDrawScreen();
         if (isEditMode) {
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
-            DrawBox(0, 0, 250, WINDOW_HEIGHT - 100, GetColor(45, 45, 45), TRUE); // 左パネル
+            // UI素材化 — 左パネルを UIウィンドウ.png の9スライス枠で描く。
+            // 素材が明るいクリーム色なので、この中に載せる文字は全て暗いインク色(UiInk系)に統一する。
+            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle);
             
-            // パネルタイトル
-            DrawString(20, 20, "STAGE EDITOR", GetColor(200, 200, 200));
+            // パネルタイトルと、いま再生中か一時停止中かの表示。
+            // 「再生中/一時停止中」は文字だけでなく専用アイコン（UI再生中.png / UI一時停止中.png）でも示す。
+            DrawString(24, 22, "STAGE EDITOR", UiInkAccent());
+            DrawUiIcon(38, 60, 26, isPaused ? uiPauseHandle : uiPlayHandle);
+            DrawString(60, 53, isPaused ? "PAUSED" : "PLAYING", isPaused ? UiInkWarn() : UiInkOk());
 
-            DrawBox(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, GetColor(45, 45, 45), TRUE); // 右パネル（インスペクター）
-            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(40, 40, 40), TRUE); // 下部パネル（タイムライン）
+            // 編集ツールの解禁・許可状況の一覧。
+            // ステージ側の封印(allowed_edit_tools)とアイテムによる恒久解禁の両方を踏まえた
+            // 「今このステージで実際に使えるか」を表示する。使えない操作をプレイヤーが
+            // 延々と試して詰まるのを防ぐためのガイドなので、判定は入力処理と同じ変数を参照している。
+            {
+                DrawString(24, 92, "EDIT TOOLS", UiInkSub());
+                struct { const char* label; bool on; } toolRows[] = {
+                    { "Rewind   [R]",     rewindOpEnabled },
+                    { "Pause    [SPACE]", pauseOpEnabled },
+                    { "FastFwd  [F]",     fastForwardOpEnabled },
+                    { "Screen   [TZXC]",  screenEffectOpEnabled },
+                    { "Object   [RClick]", objectEditOpEnabled },
+                    { "Cut      [Ctrl]",  cutOpEnabled },
+                };
+                for (int ti = 0; ti < 6; ti++) {
+                    int rowY = 114 + ti * 20;
+                    DrawString(24, rowY, toolRows[ti].label, toolRows[ti].on ? UiInk() : UiInkSub());
+                    DrawString(200, rowY, toolRows[ti].on ? "ON" : "--", toolRows[ti].on ? UiInkOk() : UiInkSub());
+                }
+            }
+
+            // 残り編集コスト。下部のゲージと同じ情報だが、エディタ側でも常に見えるようにしておく。
+            {
+                float leftRatio = editCost / currentEditCost.maxCost;
+                if (leftRatio < 0.0f) leftRatio = 0.0f; if (leftRatio > 1.0f) leftRatio = 1.0f;
+                DrawUiIcon(38, 262, 30, energyHandle);
+                DrawBox(60, 254, 226, 272, GetColor(56, 52, 48), TRUE);
+                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, GetColor(0, 170, 225), TRUE);
+                DrawBox(60, 254, 226, 272, UiInkAccent(), FALSE);
+                DrawFormatString(66, 257, GetColor(255, 255, 255), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
+            }
+
+            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle); // 右パネル（インスペクター）
+            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle);        // 下部パネル（タイムライン）
 
             // モニタープレビューウィンドウ
             DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
@@ -5800,7 +6299,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Feature: カット機能の復活 — 下部パネルのタイムライン表示。
             // 帯の左端がステージ左端、右端がステージ右端に対応し、赤い縦棒が現在のプレイヤー位置（再生ヘッド）。
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(60, 60, 60), TRUE);
+            // 帯そのものは暗い溝にしておく。パネルがクリーム色になったので、
+            // 帯まで明るくすると「どこがタイムラインか」の輪郭が消えてしまう。
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(56, 52, 48), TRUE);
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiInkAccent(), FALSE);
             float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
             DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
 
@@ -5818,18 +6320,56 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawLine(cx2, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor);
                 if (isSel) DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor, FALSE);
             }
-            // 打ちかけの始点（2点目のクリック待ち）
+            // 打ちかけの始点（2点目のクリック待ち）と、確定前のコストプレビュー。
+            //
+            // Feature: カットコストの距離変動 — 長さでコストが変わる以上、
+            // 「今マウスを離したらいくら取られるのか」が見えないと運任せの操作になってしまう。
+            // そこで始点からマウス位置までを仮の帯として描き、その区間の総コストを実数値で出す。
+            // 払えない長さなら帯と数字を赤にして、クリックしても弾かれることを事前に伝える。
             if (tempCutStart >= 0.0f) {
                 int px = 50 + (int)(tempCutStart * (float)(WINDOW_WIDTH - 100));
+                // マウスX座標をタイムライン上の比率へ変換する（クリック判定と同じ式）
+                float hoverRatio = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
+                if (hoverRatio < 0.0f) hoverRatio = 0.0f;
+                if (hoverRatio > 1.0f) hoverRatio = 1.0f;
+                float previewCost = ComputeCutCreateCost(tempCutStart, hoverRatio, STAGE_WIDTH, currentEditCost);
+                bool affordable = (editCost >= previewCost);
+                int hx = 50 + (int)(hoverRatio * (float)(WINDOW_WIDTH - 100));
+                int bandL = (px < hx) ? px : hx;
+                int bandR = (px < hx) ? hx : px;
+
+                // 仮の帯（払えるならシアン、払えないなら赤）
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 90);
+                DrawBox(bandL, WINDOW_HEIGHT - 60, bandR, WINDOW_HEIGHT - 40,
+                        affordable ? GetColor(0, 200, 255) : GetColor(220, 60, 60), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 DrawLine(px, WINDOW_HEIGHT - 75, px, WINDOW_HEIGHT - 25, GetColor(0, 255, 255));
+                DrawLine(hx, WINDOW_HEIGHT - 75, hx, WINDOW_HEIGHT - 25,
+                         affordable ? GetColor(0, 255, 255) : GetColor(255, 90, 90));
+
+                // コスト表示。帯の中央上に「距離(タイル数)」と「総コスト / 残ゲージ」を出す。
+                float spanRatio = hoverRatio - tempCutStart;
+                if (spanRatio < 0.0f) spanRatio = -spanRatio;
+                int spanTiles = (int)((spanRatio * STAGE_WIDTH) / (float)TILE_SIZE);
+                int labelX = (bandL + bandR) / 2 - 70;
+                if (labelX < 50) labelX = 50;
+                if (labelX > WINDOW_WIDTH - 200) labelX = WINDOW_WIDTH - 200;
+                DrawFormatString(labelX, WINDOW_HEIGHT - 78,
+                                 affordable ? UiInkAccent() : UiInkWarn(),
+                                 "CUT %d tiles  COST %.0f / %.0f", spanTiles, previewCost, editCost);
             }
-            // 操作ヒント。中央のPAUSEボタン(x 590..690)に文字がかぶらない長さに収めてある
-            DrawString(50, WINDOW_HEIGHT - 88, "TIMELINE  [Ctrl]+Click x2 = Cut / RightClick = Select", GetColor(140, 140, 140));
+            // 操作ヒント。中央のPAUSEボタン(x 590..690)に文字がかぶらない長さに収めてある。
+            // カットのコストは距離で変わるので、その計算式もここに出しておく。
+            DrawString(50, WINDOW_HEIGHT - 86, "TIMELINE  [Ctrl]+Click x2 = Cut / RightClick = Select", UiInkSub());
+            // カットのコスト式は、中央のPAUSEボタン(x 580..700)より右側の空きスペースに出す。
+            // 操作ヒントと同じ行に置くことで、下のタイムライン帯やコストプレビューと行がぶつからない。
+            DrawFormatString(760, WINDOW_HEIGHT - 86, UiInkSub(),
+                             "CUT COST = %.0f + %.1f / tile", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
 
             // 動的インスペクターパネルの描画
-            DrawString(WINDOW_WIDTH - 240, 20, "[INSPECTOR]", GetColor(200, 200, 200));
+            DrawString(WINDOW_WIDTH - 240, 22, "INSPECTOR", UiInkAccent());
             if (selectedType == SELECT_NONE) {
-                DrawString(WINDOW_WIDTH - 240, 50, "No Object Selected", GetColor(150, 150, 150));
+                DrawString(WINDOW_WIDTH - 240, 50, "No Object Selected", UiInkSub());
             } else {
                 char objName[64] = "Selected: UNKNOWN";
                 size_t totalSelected = selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size();
@@ -5854,44 +6394,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
                 }
-                DrawString(WINDOW_WIDTH - 240, 50, objName, GetColor(0, 255, 255));
+                DrawString(WINDOW_WIDTH - 240, 50, objName, UiInkAccent());
                 
+                // ドラッグ操作中の行はアクセント色にして「今つまんでいる項目」を示す
                 if (targetScale != nullptr) {
                     if (selectedType == SELECT_GIMMICK) {
-                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Width: %.0f", *targetScale);
+                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? UiInkAccent() : UiInk(), "Width: %.0f", *targetScale);
                     } else {
-                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Scale: %.2f", *targetScale);
+                        DrawFormatString(WINDOW_WIDTH - 240, 80, isInspScale ? UiInkAccent() : UiInk(), "Scale: %.2f", *targetScale);
                     }
                 } else {
-                    DrawFormatString(WINDOW_WIDTH - 240, 80, GetColor(150, 150, 150), "Scale: N/A");
+                    DrawFormatString(WINDOW_WIDTH - 240, 80, UiInkSub(), "Scale: N/A");
                 }
 
                 if (targetAngle != nullptr) {
-                    DrawFormatString(WINDOW_WIDTH - 240, 100, isInspAngle ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Angle: %.2f", *targetAngle);
+                    DrawFormatString(WINDOW_WIDTH - 240, 100, isInspAngle ? UiInkAccent() : UiInk(), "Angle: %.2f", *targetAngle);
                 } else {
-                    DrawFormatString(WINDOW_WIDTH - 240, 100, GetColor(150, 150, 150), "Angle: N/A");
+                    DrawFormatString(WINDOW_WIDTH - 240, 100, UiInkSub(), "Angle: N/A");
                 }
                 
                 if (selectedType == SELECT_GIMMICK) {
-                    DrawFormatString(WINDOW_WIDTH - 240, 120, GetColor(150, 150, 150), "Speed: N/A");
+                    DrawFormatString(WINDOW_WIDTH - 240, 120, UiInkSub(), "Speed: N/A");
                 } else {
                     if (targetSpeedScale != nullptr) {
-                        DrawFormatString(WINDOW_WIDTH - 240, 120, isInspSpeed ? GetColor(255, 255, 0) : GetColor(255, 255, 255), "Speed: %.1f", *targetSpeedScale);
+                        DrawFormatString(WINDOW_WIDTH - 240, 120, isInspSpeed ? UiInkAccent() : UiInk(), "Speed: %.1f", *targetSpeedScale);
                     } else {
-                        DrawFormatString(WINDOW_WIDTH - 240, 120, GetColor(150, 150, 150), "Speed: N/A");
+                        DrawFormatString(WINDOW_WIDTH - 240, 120, UiInkSub(), "Speed: N/A");
                     }
                 }
 
+                // 個別一時停止はアイコンでも示す（この対象だけ時間が止まっているかどうか）
                 if (targetPaused != nullptr) {
-                    DrawFormatString(WINDOW_WIDTH - 240, 140, *targetPaused ? GetColor(255, 255, 100) : GetColor(200, 200, 200), "Pause: %s", *targetPaused ? "TRUE (||)" : "FALSE");
+                    DrawUiIcon(WINDOW_WIDTH - 254, 147, 18, *targetPaused ? uiPauseHandle : uiPlayHandle);
+                    DrawFormatString(WINDOW_WIDTH - 240, 140, *targetPaused ? UiInkWarn() : UiInk(), "Pause: %s", *targetPaused ? "TRUE" : "FALSE");
                 } else {
-                    DrawFormatString(WINDOW_WIDTH - 240, 140, GetColor(150, 150, 150), "Pause: N/A");
+                    DrawFormatString(WINDOW_WIDTH - 240, 140, UiInkSub(), "Pause: N/A");
                 }
 
                 if (targetRewind != nullptr) {
-                    DrawFormatString(WINDOW_WIDTH - 240, 160, *targetRewind ? GetColor(255, 80, 80) : GetColor(200, 200, 200), "Rewind: %s", *targetRewind ? "TRUE (<<)" : "FALSE");
+                    DrawFormatString(WINDOW_WIDTH - 240, 160, *targetRewind ? UiInkWarn() : UiInk(), "Rewind: %s", *targetRewind ? "TRUE (<<)" : "FALSE");
                 } else {
-                    DrawFormatString(WINDOW_WIDTH - 240, 160, GetColor(150, 150, 150), "Rewind: N/A");
+                    DrawFormatString(WINDOW_WIDTH - 240, 160, UiInkSub(), "Rewind: N/A");
                 }
                 
                 if (selectedType == SELECT_ENEMY && targetEnemyType != nullptr) {
@@ -5899,25 +6442,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (*targetEnemyType == ENEMY_PATROL) typeName = "PATROL";
                     else if (*targetEnemyType == ENEMY_JUMPER) typeName = "JUMPER";
                     else if (*targetEnemyType == ENEMY_STATIONARY) typeName = "STATIONARY";
-                    DrawFormatString(WINDOW_WIDTH - 240, 180, GetColor(0, 255, 0), "Type: %s", typeName);
+                    DrawFormatString(WINDOW_WIDTH - 240, 180, UiInkOk(), "Type: %s", typeName);
                 }
 
-                DrawString(WINDOW_WIDTH - 240, 210, "(Drag values / click to toggle)", GetColor(150, 150, 150));
+                DrawString(WINDOW_WIDTH - 240, 210, "(Drag values / click to toggle)", UiInkSub());
             }
 
-            // 下部一時停止ボタン
-            DrawBox(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT - 90, WINDOW_WIDTH / 2 + 50, WINDOW_HEIGHT - 70, GetColor(80, 80, 80), TRUE);
-            DrawString(WINDOW_WIDTH / 2 - 25, WINDOW_HEIGHT - 85, isPaused ? "RESUME" : "PAUSE", GetColor(255, 255, 255));
+            // 下部一時停止ボタン。
+            // UI素材化 — ボタンの下地を UIウィンドウ.png にし、
+            // 「押すとどうなるか」を再生/一時停止アイコンで示す
+            // （一時停止中は再生アイコン＝押せば再開、再生中は一時停止アイコン＝押せば止まる）。
+            {
+                const int pbX1 = WINDOW_WIDTH / 2 - 60, pbY1 = WINDOW_HEIGHT - 94;
+                const int pbX2 = WINDOW_WIDTH / 2 + 60, pbY2 = WINDOW_HEIGHT - 66;
+                bool pbHover = (mx >= pbX1 && mx <= pbX2 && my >= pbY1 && my <= pbY2);
+                if (pbHover) SetDrawBright(255, 255, 255);
+                else         SetDrawBright(214, 209, 202);
+                DrawUiWindow(pbX1, pbY1, pbX2, pbY2, uiWindowHandle);
+                SetDrawBright(255, 255, 255);
+                DrawUiIcon(pbX1 + 20, (pbY1 + pbY2) / 2, 20, isPaused ? uiPlayHandle : uiPauseHandle);
+                DrawString(pbX1 + 38, pbY1 + 6, isPaused ? "RESUME" : "PAUSE", UiInk());
+            }
 
             // コンテキストメニューポップアップの描画
             if (menu.isOpen) {
-                DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(50, 50, 50), TRUE);
-                DrawBox(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, GetColor(180, 180, 180), FALSE);
+                // UI素材化 — ポップアップメニューも UIウィンドウ.png の枠で描く
+                DrawUiWindow(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, uiWindowHandle);
 
                 // Feature: カット機能の復活 — カット選択中は「Delete Cut」だけを出す専用メニュー
                 if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
-                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", GetColor(255, 100, 100)); // 目立つ赤で表示
-                    DrawString(menu.x + 10, menu.y + 40, "(timeline cut)", GetColor(150, 150, 150));
+                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", UiInkWarn()); // 目立つ赤で表示
+                    DrawString(menu.x + 10, menu.y + 40, "(timeline cut)", UiInkSub());
                 }
                 else {
                     char rewindStr[32];
@@ -5925,19 +6480,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     char pausedStr[32];
                     sprintf_s(pausedStr, sizeof(pausedStr), "Pause: %s", (targetPaused && *targetPaused) ? "ON" : "OFF");
 
-                    DrawString(menu.x + 10, menu.y + 10, rewindStr, GetColor(255, 255, 255));
-                    DrawString(menu.x + 10, menu.y + 35, pausedStr, GetColor(255, 255, 255));
+                    DrawString(menu.x + 10, menu.y + 10, rewindStr, UiInk());
+                    DrawString(menu.x + 10, menu.y + 35, pausedStr, UiInk());
 
                     if (selectedType == SELECT_GIMMICK) {
-                        DrawString(menu.x + 10, menu.y + 60, "Speed: N/A", GetColor(120, 120, 120));
-                        DrawString(menu.x + 10, menu.y + 85, "Speed: N/A", GetColor(120, 120, 120));
-                        DrawString(menu.x + 10, menu.y + 110, "Flip: N/A", GetColor(120, 120, 120));
+                        DrawString(menu.x + 10, menu.y + 60, "Speed: N/A", UiInkSub());
+                        DrawString(menu.x + 10, menu.y + 85, "Speed: N/A", UiInkSub());
+                        DrawString(menu.x + 10, menu.y + 110, "Flip: N/A", UiInkSub());
                     } else {
-                        DrawString(menu.x + 10, menu.y + 60, "Speed +0.5", GetColor(255, 255, 255));
-                        DrawString(menu.x + 10, menu.y + 85, "Speed -0.5", GetColor(255, 255, 255));
-                        DrawString(menu.x + 10, menu.y + 110, "Flip Object", GetColor(255, 255, 255));
+                        DrawString(menu.x + 10, menu.y + 60, "Speed +0.5", UiInk());
+                        DrawString(menu.x + 10, menu.y + 85, "Speed -0.5", UiInk());
+                        DrawString(menu.x + 10, menu.y + 110, "Flip Object", UiInk());
                     }
-                    DrawString(menu.x + 10, menu.y + 135, "Reset All", GetColor(255, 255, 255));
+                    DrawString(menu.x + 10, menu.y + 135, "Reset All", UiInk());
                 }
             }
 
@@ -5950,14 +6505,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
-            if (isPaused) {
-                DrawString(10, 10, "PROFESSIONAL EDIT MODE (PAUSED)", GetColor(255, 255, 0));
-            } else {
-                DrawString(10, 10, "PROFESSIONAL PLAY MODE (RUNNING)", GetColor(50, 255, 50));
-            }
+            // 従来ここに出していたモード表示は、左パネル上部の再生/一時停止アイコン付き表示へ統合した
+            // （同じ場所に "STAGE EDITOR" と重なって二重に見えていたため）。
         } else {
+            // 非エディタ表示（ゲーム画面のみをウィンドウ全体へ拡大表示するモード）
             Screen_DrawComposited(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen);
-            if (isPaused) DrawString(WINDOW_WIDTH / 2 - 40, WINDOW_HEIGHT / 2, "PAUSED", GetColor(255, 255, 255));
+            if (isPaused) {
+                // UI素材化 — 「PAUSED」の文字だけだったものを、
+                // UIウィンドウ.pngの枠と一時停止アイコンを合わせた表示に差し替える。
+                const int puX1 = WINDOW_WIDTH / 2 - 110, puY1 = WINDOW_HEIGHT / 2 - 34;
+                const int puX2 = WINDOW_WIDTH / 2 + 110, puY2 = WINDOW_HEIGHT / 2 + 34;
+                DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle);
+                DrawUiIcon(puX1 + 44, (puY1 + puY2) / 2, 36, uiPauseHandle);
+                DrawString(puX1 + 78, (puY1 + puY2) / 2 - 8, "PAUSED", UiInk());
+            }
         }
         // ImGuiのフレーム開始
         ImGui_ImplDX11_NewFrame();
@@ -6191,6 +6752,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // F5キーでエディタに戻る
         
+
+        // UI素材化 — ゲーム内マウスカーソル。
+        // OS標準のカーソルを消し、代わりに img/マウスホイール.png（矢印の絵）を描く。
+        // ただし専用エディタモード(ImGui)のときだけはOSカーソルのままにする。
+        // ImGuiのウィンドウはこの後に描かれるため、自前カーソルだとImGuiの上に出せず
+        // パネル上でカーソルが見えなくなってしまうから。
+        {
+            bool useOwnCursor = !isDedicatedEditorMode && cursorHandle >= 0;
+            SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
+            if (useOwnCursor) {
+                int cmx = 0, cmy = 0;
+                GetMousePoint(&cmx, &cmy);
+                // 素材の矢印の先端は 640x640 キャンバス上の (188, 93) 付近にある。
+                // 表示サイズ40pxに縮めると先端は左上から (12, 6) の位置に来るので、
+                // その分だけ左上へずらして描くと、絵の先端が実際のマウス座標と一致する。
+                const int cursorSize = 40;
+                DrawExtendGraph(cmx - 12, cmy - 6, cmx - 12 + cursorSize, cmy - 6 + cursorSize, cursorHandle, TRUE);
+            }
+        }
 
         ImGui::Render();
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());

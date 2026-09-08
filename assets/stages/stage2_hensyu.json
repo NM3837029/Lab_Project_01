@@ -5556,14 +5556,14 @@
   ],
   "enemies": [
     {
-      "id": "st1_slime",
+      "id": "enemy_maru",
       "x": 3584.0,
       "y": 352.0,
       "patrol_left": 3552.0,
       "patrol_right": 3616.0
     },
     {
-      "id": "st1_slime",
+      "id": "enemy_maru",
       "x": 3712.0,
       "y": 352.0,
       "patrol_left": 3680.0,
@@ -5664,87 +5664,87 @@
   ],
   "items": [
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 224.0,
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 288.0,
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 352.0,
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 544.0,
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 576.0,
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 608.0,
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 640.0,
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1024.0,
       "y": 200.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1440.0,
       "y": 420.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1920.0,
       "y": 102.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 1984.0,
       "y": 102.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 2496.0,
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 2816.0,
       "y": 352.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 2976.0,
       "y": 262.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 3232.0,
       "y": 102.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 3392.0,
       "y": 262.0
     },
     {
-      "id": "st1_coin",
+      "id": "item_coin",
       "x": 3648.0,
       "y": 352.0
     }

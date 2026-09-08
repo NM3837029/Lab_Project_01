@@ -1,145 +1,70 @@
 [
   {
-    "id": "item_double_jump",
-    "name": "Double Jump Boots",
+    "id": "item_coin",
+    "name": "コイン",
     "type_enum": 1,
-    "sprite": "img/player.png",
-    "grant_ability": "DoubleJump",
-    "seCollect": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "parts": []
-  },
-  {
-    "id": "item_dash",
-    "name": "Dash Ring",
-    "type_enum": 2,
-    "sprite": "img/player.png",
-    "grant_ability": "Dash",
-    "seCollect": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "parts": []
-  },
-  {
-    "id": "item_fireball",
-    "name": "Fire Flower",
-    "type_enum": 0,
-    "sprite": "img/bullet.png",
-    "grant_ability": "ShootFireball",
-    "seCollect": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "parts": []
-  },
-  {
-    "id": "item_coin_sparkle",
-    "name": "キラキラ付きコイン",
-    "type_enum": 1,
-    "sprite": "img/enemy.png",
+    "sprite": "img/コイン.png",
     "grant_ability": "",
-    "seCollect": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 20,
-    "hitboxHeight": 20,
-    "parts": [
-      {
-        "id": "sparkle",
-        "sprite": "img/bullet.png",
-        "offsetX": 0.0,
-        "offsetY": 0.0,
-        "width": 6,
-        "height": 6,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 6,
-        "hitboxHeight": 6,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Cos",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "Time"
-                          },
-                          "b": 0.1
-                        }
-                      },
-                      "b": 14
-                    },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "Time"
-                          },
-                          "b": 0.1
-                        }
-                      },
-                      "b": 14
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "item_treasure_orbit",
-    "name": "守護オーブ付きの宝",
-    "type_enum": 2,
-    "sprite": "img/enemy.png",
-    "grant_ability": "",
-    "seCollect": "",
+    "seCollect": "se_item_coin",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 24,
     "hitboxHeight": 24,
+    "parts": []
+  },
+  {
+    "id": "item_energy",
+    "name": "エネルギー（編集コスト回復）",
+    "type_enum": 0,
+    "sprite": "img/エネルギー.png",
+    "grant_ability": "RestoreEditCost:40",
+    "seCollect": "se_item_power",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 26,
+    "hitboxHeight": 26,
+    "parts": []
+  },
+  {
+    "id": "item_edit_cost_refill",
+    "name": "エネルギー小（編集コスト回復）",
+    "type_enum": 0,
+    "sprite": "img/エネルギー.png",
+    "grant_ability": "RestoreEditCost:25",
+    "seCollect": "se_item_power",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 26,
+    "hitboxHeight": 26,
+    "parts": []
+  },
+  {
+    "id": "item_double_jump",
+    "name": "二段ジャンプ",
+    "type_enum": 0,
+    "sprite": "img/弾2.png",
+    "grant_ability": "DoubleJump",
+    "seCollect": "se_item_jump",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 28,
+    "hitboxHeight": 28,
     "parts": [
       {
-        "id": "guardian0",
-        "sprite": "img/bullet.png",
+        "id": "orb0",
+        "sprite": "img/弾.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 8,
-        "height": 8,
+        "width": 10,
+        "height": 10,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 8,
-        "hitboxHeight": 8,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": false,
         "script": [
           {
             "hat": "OnSpawn",
@@ -148,55 +73,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.07
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 3.1416
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.1
                       },
-                      "b": 20
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.07
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 3.1416
-                          }
-                        }
-                      },
-                      "b": 20
-                    }
+                    "radius": 18.0
                   },
                   {
                     "op": "Wait",
@@ -209,19 +104,20 @@
         ]
       },
       {
-        "id": "guardian1",
-        "sprite": "img/bullet.png",
+        "id": "orb1",
+        "sprite": "img/弾.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 8,
-        "height": 8,
+        "width": 10,
+        "height": 10,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 8,
-        "hitboxHeight": 8,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": false,
         "script": [
           {
             "hat": "OnSpawn",
@@ -230,55 +126,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.07
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 3.1416
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.1
                       },
-                      "b": 20
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.07
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 3.1416
-                          }
-                        }
-                      },
-                      "b": 20
-                    }
+                    "radius": 18.0
                   },
                   {
                     "op": "Wait",
@@ -293,36 +159,303 @@
     ]
   },
   {
-    "id": "st1_coin",
-    "name": "ステージ1：コイン",
-    "type_enum": 1,
-    "sprite": "img/stage1/coin.png",
-    "grant_ability": "",
-    "seCollect": "se_coin",
+    "id": "item_dash",
+    "name": "ダッシュ",
+    "type_enum": 0,
+    "sprite": "img/弾2.png",
+    "grant_ability": "Dash",
+    "seCollect": "se_item_dash",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 24,
-    "hitboxHeight": 24,
-    "parts": []
+    "hitboxWidth": 28,
+    "hitboxHeight": 28,
+    "parts": [
+      {
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.14
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 18.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb1",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.14
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 18.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb2",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.14
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 18.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   },
   {
-    "id": "item_edit_cost_refill",
-    "name": "Splice Battery",
+    "id": "item_fireball",
+    "name": "ファイアボール",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
-    "grant_ability": "RestoreEditCost:40",
-    "seCollect": "se_item_jump",
+    "sprite": "img/弾.png",
+    "grant_ability": "ShootFireball",
+    "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 24,
-    "hitboxHeight": 24,
-    "parts": []
+    "hitboxWidth": 28,
+    "hitboxHeight": 28,
+    "parts": [
+      {
+        "id": "orb0",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.12
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 16.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb1",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.12
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 16.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   },
   {
     "id": "item_unlock_rewind",
-    "name": "Rewind Reel",
+    "name": "巻き戻しの解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:Rewind",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -331,10 +464,10 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": -4.0,
-        "offsetY": 2.0,
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -344,13 +477,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5708
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m1",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": -6.0,
+        "id": "orb1",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -360,13 +530,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5708
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m2",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": 2.0,
+        "id": "orb2",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -376,13 +583,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5708
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m3",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": 22.0,
+        "id": "orb3",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -392,15 +636,52 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5708
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
     "id": "item_unlock_pause",
-    "name": "Pause Cartridge",
+    "name": "一時停止の解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:Pause",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -409,10 +690,10 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": -6.0,
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -422,13 +703,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m1",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": 22.0,
+        "id": "orb1",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -438,15 +756,52 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
     "id": "item_unlock_fastforward",
-    "name": "Fast Forward Spool",
+    "name": "早送りの解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:FastForward",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -455,10 +810,10 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": 2.0,
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -468,15 +823,52 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 6.2832
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
     "id": "item_unlock_screeneffect",
-    "name": "Color Grading Filter",
+    "name": "画面エフェクトの解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:ScreenEffect",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -485,10 +877,10 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": -4.0,
-        "offsetY": 2.0,
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -498,13 +890,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m1",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": 2.0,
+        "id": "orb1",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -514,15 +943,105 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb2",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 2.0944
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
     "id": "item_unlock_objectedit",
-    "name": "Director's Pass",
+    "name": "オブジェクト編集の解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:ObjectEdit",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -531,10 +1050,10 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": -4.0,
-        "offsetY": -6.0,
+        "id": "orb0",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -544,13 +1063,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.25664
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m1",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": -6.0,
+        "id": "orb1",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -560,13 +1116,50 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.25664
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m2",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": 22.0,
+        "id": "orb2",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
         "width": 10,
         "height": 10,
         "hitboxOffsetX": 0,
@@ -576,61 +1169,158 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
-      }
-    ]
-  },
-  {
-    "id": "item_edit_keyreel",
-    "name": "編集キーリール",
-    "type_enum": 0,
-    "sprite": "img/stage1/coin.png",
-    "grant_ability": "",
-    "seCollect": "se_item_power",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 28,
-    "hitboxHeight": 28,
-    "parts": [
-      {
-        "id": "g0",
-        "sprite": "img/bullet.png",
-        "offsetX": -8.0,
-        "offsetY": 8.0,
-        "width": 12,
-        "height": 12,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.25664
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "g1",
-        "sprite": "img/bullet.png",
-        "offsetX": 24.0,
-        "offsetY": 8.0,
-        "width": 12,
-        "height": 12,
+        "id": "orb3",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.25664
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb4",
+        "sprite": "img/弾.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 10,
+        "height": 10,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 10,
+        "hitboxHeight": 10,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.09
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.25664
+                      }
+                    },
+                    "radius": 20.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
     "id": "item_unlock_cut",
-    "name": "Cut Blade",
+    "name": "カットの解禁",
     "type_enum": 0,
-    "sprite": "img/bullet.png",
+    "sprite": "img/エネルギー.png",
     "grant_ability": "UnlockEditTool:Cut",
     "seCollect": "se_item_power",
     "hitboxOffsetX": 0,
@@ -639,84 +1329,442 @@
     "hitboxHeight": 28,
     "parts": [
       {
-        "id": "m0",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": -4.0,
-        "offsetY": -6.0,
-        "width": 10,
-        "height": 10,
+        "id": "orb0",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m1",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": -6.0,
-        "width": 10,
-        "height": 10,
+        "id": "orb1",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m2",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 9.0,
-        "offsetY": 8.0,
-        "width": 10,
-        "height": 10,
+        "id": "orb2",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m3",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": -4.0,
-        "offsetY": 22.0,
-        "width": 10,
-        "height": 10,
+        "id": "orb3",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
-        "id": "m4",
-        "sprite": "img/stage1/coin.png",
-        "offsetX": 22.0,
-        "offsetY": 22.0,
-        "width": 10,
-        "height": 10,
+        "id": "orb4",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 10,
-        "hitboxHeight": 10,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
-        "script": []
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb5",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.11
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.0472
+                      }
+                    },
+                    "radius": 22.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "item_edit_keyreel",
+    "name": "編集キーリール",
+    "type_enum": 1,
+    "sprite": "img/コイン.png",
+    "grant_ability": "",
+    "seCollect": "se_item_power",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 26,
+    "hitboxHeight": 26,
+    "parts": [
+      {
+        "id": "orb0",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.13
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 18.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orb1",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 9,
+        "height": 9,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 9,
+        "hitboxHeight": 9,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Time"
+                        },
+                        "b": 0.13
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 3.1416
+                      }
+                    },
+                    "radius": 18.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }

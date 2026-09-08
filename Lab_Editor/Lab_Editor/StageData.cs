@@ -824,6 +824,16 @@ public class EnemyDef
     public float fastForwardAttackMult { get; set; } = -1.0f;    // 早送り中の攻撃頻度・威力に掛ける倍率
     public float diagonalFallSpeed { get; set; } = -1.0f;        // 斜め方向に落下する際の速度
 
+    // ==== 新敵ロスター／敵の行動改良で追加したパラメータ ====
+    // 【重要】C++側 DrawPixel.cpp の EnemyDef と1:1で対応させること。
+    // ここに無いキーは、エディタでアセットを保存し直した瞬間にenemies.jsonから黙って消える。
+    // いずれも false / -1 が「従来どおりの挙動」を意味する既定値。
+    public bool ignorePause { get; set; } = false;               // trueならプレイヤーの一時停止を無視して動き続ける（幽霊タイプ用）
+    public bool radialFire { get; set; } = false;                // 拡散弾タイプ：trueなら正面ファンではなく360度全方位へ撃つ
+    public float spreadRotationStep { get; set; } = -1.0f;       // 拡散弾タイプ：1斉射ごとに発射角度をずらす量（ラジアン）。渦巻き弾幕になる
+    public float verticalTrackSpeed { get; set; } = -1.0f;       // 浮遊タイプ：浮遊の中心高度をプレイヤーの高さへ寄せる速さ（px/フレーム）
+    public float riseSpeed { get; set; } = -1.0f;                // 落下タイプ：着地後、元の高さへ戻る速さ（px/フレーム）。0以下なら瞬間復帰
+
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     // BlockCanvasControlで組み立てたビジュアルスクリプト（ブロックの木構造）をJSON化して保持する。
     public JArray script { get; set; } = new JArray();
@@ -875,6 +885,12 @@ public class GimmickDef
     public float tintB { get; set; } = -1.0f;                     // 色味（ティント）の青成分
     public float zoomLevel { get; set; } = -1.0f;                 // ズーム演出の倍率
     public float warpOffsetPx { get; set; } = -1.0f;              // ワープ（瞬間移動）させる距離（ピクセル）
+
+    // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
+    // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、
+    // 状態がひと目で分かる必要があるギミック向け。空文字なら sprite 1枚だけで描画する。
+    // 【重要】C++側 DrawPixel.cpp の GimmickDef.spriteAlt_path と対応する。
+    public string spriteAlt { get; set; } = "";
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==24(GIMMICK_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();
@@ -941,6 +957,11 @@ public class PartDef
     public int hp { get; set; } = 0;
     // 負=親より奥に描画、正=親より手前
     public int zOrder { get; set; } = 0;
+    // ギミックのパーツがプレイヤーに接触ダメージを与えるかどうか（回転する棘の輪などをtrueにする）。
+    // 【重要】C++側 DrawPixel.cpp の PartDef.deadly と対応する。
+    // ここに無いと、エディタで保存し直した瞬間にこのキーがJSONから黙って消えて、
+    // 危険なはずのハザードが素通りできる飾りに戻ってしまう。
+    public bool deadly { get; set; } = false;
     // このパーツ専用のBehaviorScript（OnSpawn/OnDamaged/OnDeath）
     // このパーツだけに適用される、ビジュアルスクリプトのJSON AST（ブロック構造）。
     public JArray script { get; set; } = new JArray();

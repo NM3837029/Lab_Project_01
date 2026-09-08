@@ -108,10 +108,10 @@ public class AssetManagerPageControl : UserControl
         [4] = new[] { ("moveSpeed", "移動速度係数", 2) }, // type_enum=4: 歩いてくる(Walker)
         [5] = new[] { ("moveSpeed", "移動速度係数", 2), ("jumpPowerMult", "ジャンプ力係数", 2) }, // type_enum=5: 追っかけてくる(Chaser)
         [6] = new[] { ("triggerRange", "発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("dashSpeedMult", "突進速度係数", 2), ("dashDuration", "突進継続時間(フレーム)", 0), ("cooldownTime", "クールダウン(フレーム)", 0) }, // type_enum=6: 突進(Dash Charger)
-        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0), ("shockwaveRadius", "着地ショックウェイブ半径(px)", 0), ("fastForwardJitter", "早送り中の落下ジッター量(px)", 0), ("diagonalFallSpeed", "方向反転時の斜め落下速度(px/フレーム)", 2) }, // type_enum=7: 落ちてくる敵(Faller)
-        [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2) }, // type_enum=8: 拡散弾(Spread Shooter)
+        [7] = new[] { ("triggerRange", "真下判定幅(px)", 0), ("fallDelay", "落下開始遅延(フレーム)", 0), ("cooldownTime", "着地後クールダウン(フレーム)", 0), ("shockwaveRadius", "着地ショックウェイブ半径(px)", 0), ("fastForwardJitter", "早送り中の落下ジッター量(px)", 0), ("diagonalFallSpeed", "方向反転時の斜め落下速度(px/フレーム)", 2), ("riseSpeed", "元の高さへ戻る速度(px/フレーム・0で瞬間復帰)", 2) }, // type_enum=7: 落ちてくる敵(Faller)
+        [8] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("spreadAngle", "拡散角度(ラジアン)", 2), ("spreadCount", "弾数", 0), ("projectileSpeed", "弾速係数", 2), ("radialFire", "全方位に撃つ(360度ばらまき)", 0), ("spreadRotationStep", "斉射ごとの回転量(ラジアン)", 2) }, // type_enum=8: 拡散弾(Spread Shooter)
         [9] = new[] { ("actionInterval", "射撃間隔(フレーム)", 0), ("projectileSpeed", "弾速係数", 2) }, // type_enum=9: 照準弾(Aimed Shooter)
-        [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2) }, // type_enum=10: 浮遊敵(Floater)
+        [10] = new[] { ("floatAmplitude", "浮遊振幅(px)", 0), ("floatFrequency", "浮遊周波数", 3), ("moveSpeed", "接近速度係数", 2), ("verticalTrackSpeed", "高度追従速度(px/フレーム・0で高さ固定)", 2) }, // type_enum=10: 浮遊敵(Floater)
         [11] = new[] { ("actionInterval", "テレポート間隔(フレーム)", 0), ("teleportRangeMin", "オフセット最小(px)", 0), ("teleportRangeMax", "オフセット最大(px)", 0) }, // type_enum=11: テレポーター(Teleporter)
         [12] = new[] { ("moveSpeed", "通常時速度係数", 2), ("enragedMoveSpeed", "覚醒後速度係数", 2), ("shrinkFactor", "縮小率", 2) }, // type_enum=12: 分裂もどき(Shrinker)
         [13] = new[] { ("moveSpeed", "移動速度係数", 2), ("shieldOffDuration", "無敵解除継続(フレーム)", 0), ("shieldOnDuration", "無敵継続(フレーム)", 0) }, // type_enum=13: シールド(Shield)
@@ -121,6 +121,13 @@ public class AssetManagerPageControl : UserControl
         [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // type_enum=17: 明るさ操作敵(Brightness Phantom)
         [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // type_enum=18: 色調整敵(Color Shifter)
         [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // type_enum=19: ズーム撹乱敵(Zoom Disruptor)
+    };
+    // 敵のtype_enumに関係なく、どのタイプでも共通で出す挙動パラメータ欄。
+    // 上のEnemyParamFieldsに定義があるタイプの末尾へ追加で並べる
+    // （定義が無いタイプ＝調整項目そのものが無いタイプは、従来どおりタイプ説明文の表示を優先する）。
+    private static readonly (string Field, string Label, int Decimals)[] CommonEnemyParamFields =
+    {
+        ("ignorePause", "一時停止を無視して動き続ける", 0),
     };
     // type_enum(ギミックのタイプ番号)ごとに表示する挙動パラメータ欄の定義一覧。中身の意味はEnemyParamFieldsと同じ形式。
     // ここに定義が無いtype_enum（＝配列の添字にキーが存在しない番号）は、そのギミックに調整可能なパラメータが
@@ -1106,11 +1113,38 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // fields配列（(プロパティ名, ラベル文言, 小数点桁数)の並び）を1件ずつ、ラベル+NumericUpDownの
         // ペアとして縦に並べていく。yはこのパネル内でのY座標（次の項目を配置する高さ）を表す
         int y = 4;
-        foreach (var (field, label, decimals) in fields)
+        // 敵の場合は、タイプ固有の項目の後ろに全タイプ共通の項目（一時停止無視など）を連結する
+        var effectiveFields = isEnemy ? fields.Concat(CommonEnemyParamFields).ToArray() : fields;
+        foreach (var (field, label, decimals) in effectiveFields)
         {
             // フィールド名の文字列からリフレクションでEnemyDef/GimmickDef側のプロパティ情報を取得する。
             // こうすることで、type_enumごとに専用のUIコードを1件ずつ書かずに済んでいる。
             var prop = paramsObj.GetType().GetProperty(field)!;
+
+            // bool型のパラメータ（例: ignorePause / radialFire）は数値入力欄では扱えないので、
+            // ラベル付きのチェックボックス1つに置き換える。
+            // NumericUpDownと違い、ラベルはチェックボックス自身のTextで兼ねられるため縦幅も詰められる。
+            if (prop.PropertyType == typeof(bool))
+            {
+                var chk = new CheckBox
+                {
+                    Text = label,
+                    Location = new Point(4, y + 3),
+                    Size = new Size(236, 20),
+                    Font = new Font("Meiryo UI", 7.5f),
+                    Checked = Convert.ToBoolean(prop.GetValue(paramsObj))
+                };
+                chk.CheckedChanged += (s, e) =>
+                {
+                    // NumericUpDownと同じ理由で、パネル構築中の初期値反映は書き戻さない
+                    if (_isUpdatingBehaviorPanel) return;
+                    prop.SetValue(paramsObj, chk.Checked);
+                };
+                pnlBehaviorParams.Controls.Add(chk);
+                y += 26;
+                continue;
+            }
+
             var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
             var nud = new NumericUpDown
             {
