@@ -121,6 +121,9 @@ public class AssetManagerPageControl : UserControl
         [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // type_enum=17: 明るさ操作敵(Brightness Phantom)
         [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // type_enum=18: 色調整敵(Color Shifter)
         [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // type_enum=19: ズーム撹乱敵(Zoom Disruptor)
+        // type_enum=21: 飛びかかり(Pouncer)。項目名は突進(Dash Charger)と共通のものを流用しているが、
+        // dashSpeedMult は「突進速度」ではなく「飛びかかりの水平初速」、dashDuration は滞空時間の上限を意味する。
+        [21] = new[] { ("moveSpeed", "走行速度係数", 2), ("triggerRange", "飛びかかり発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("jumpPowerMult", "飛びかかりジャンプ力係数", 2), ("dashSpeedMult", "飛びかかり水平速度係数", 2), ("dashDuration", "滞空時間の上限(フレーム)", 0), ("cooldownTime", "着地後の硬直(フレーム)", 0), ("consumePartOnAttack", "命中するたび胴体を1節消費する", 0) },
     };
     // 敵のtype_enumに関係なく、どのタイプでも共通で出す挙動パラメータ欄。
     // 上のEnemyParamFieldsに定義があるタイプの末尾へ追加で並べる
@@ -175,6 +178,7 @@ public class AssetManagerPageControl : UserControl
         (18, "18 = 色調整敵 (Color Shifter)", "射程内で画面の色調を変化させます（新画面エフェクト機能と連携）。"),
         (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
         (20, "20 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
+        (21, "21 = 飛びかかり (Pouncer)", "普段は高速で地上を追いかけ、射程に入ると溜めてから放物線を描いて飛びかかります。着地後の硬直が反撃の窓になります。パーツ(parts)を持たせて「命中するたび胴体を1節消費する」を有効にすると、攻撃するほど短くなり、使い切ると力尽きる相手になります。"),
     };
     // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— 敵タイプ(EnemyTypes)には元々あった
     // 「専門用語を使わない平易な説明文(detail)」を、ギミック/アイテムのタイプにも同じように用意した。

@@ -833,6 +833,9 @@ public class EnemyDef
     public float spreadRotationStep { get; set; } = -1.0f;       // 拡散弾タイプ：1斉射ごとに発射角度をずらす量（ラジアン）。渦巻き弾幕になる
     public float verticalTrackSpeed { get; set; } = -1.0f;       // 浮遊タイプ：浮遊の中心高度をプレイヤーの高さへ寄せる速さ（px/フレーム）
     public float riseSpeed { get; set; } = -1.0f;                // 落下タイプ：着地後、元の高さへ戻る速さ（px/フレーム）。0以下なら瞬間復帰
+    // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
+    // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
+    public bool consumePartOnAttack { get; set; } = false;
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     // BlockCanvasControlで組み立てたビジュアルスクリプト（ブロックの木構造）をJSON化して保持する。

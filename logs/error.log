@@ -1,43 +1,63 @@
-[2026-09-08 17:53:34] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 17:53:36] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 17:53:36] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 17:53:36] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 17:53:36] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 17:53:36] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 17:53:36] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 18:58:22] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 18:58:23] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 18:58:24] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 18:58:24] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 18:58:24] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 18:58:24] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 18:58:24] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 18:59:10] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 18:59:11] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 18:59:11] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 18:59:11] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 18:59:11] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 18:59:11] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 18:59:12] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 18:59:43] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 19:00:01] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 19:00:02] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 19:00:02] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 19:00:02] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 19:00:02] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 19:00:02] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 19:00:03] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 19:02:03] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 19:02:03] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 19:02:04] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 19:02:04] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 19:02:04] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 19:02:04] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 19:02:04] [System::ResetStage] INFO: Begin ResetStage
-[2026-09-08 19:02:35] [System::WinMain] INFO: [Init] WinMain Begin
-[2026-09-08 19:02:36] [System::WinMain] INFO: [Init] DxLib_Init Success
-[2026-09-08 19:02:36] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
-[2026-09-08 19:02:36] [System::WinMain] INFO: [Init] StageLoader Success
-[2026-09-08 19:02:36] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
-[2026-09-08 19:02:36] [System::WinMain] INFO: [Init] stages.json parsing finished
-[2026-09-08 19:02:36] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:55:57] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:55:58] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:55:59] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:55:59] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:55:59] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:55:59] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:55:59] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:03] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:04] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:04] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:04] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:04] [System::LoadStageJson] INFO: editTools rewind=0 pause=0 fastForward=0 screenEffect=0 objectEdit=0 cut=0
+[2026-09-08 19:56:04] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:04] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:09] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:09] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:10] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:10] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:10] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:10] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:10] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:14] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:15] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:15] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:15] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:15] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:15] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:15] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:20] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:20] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:21] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:21] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:21] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:21] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:21] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:25] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:26] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:26] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:26] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:26] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:26] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:27] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:31] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:32] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:32] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:32] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:32] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:32] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:32] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:36] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:37] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:37] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:37] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:37] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:37] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:38] [System::ResetStage] INFO: Begin ResetStage
+[2026-09-08 19:56:42] [System::WinMain] INFO: [Init] WinMain Begin
+[2026-09-08 19:56:43] [System::WinMain] INFO: [Init] DxLib_Init Success
+[2026-09-08 19:56:43] [DrawPixel::WinMain] INFO: [Init] All core graphics loaded
+[2026-09-08 19:56:43] [System::WinMain] INFO: [Init] StageLoader Success
+[2026-09-08 19:56:43] [System::LoadStageJson] INFO: editTools rewind=1 pause=1 fastForward=1 screenEffect=1 objectEdit=1 cut=1
+[2026-09-08 19:56:43] [System::WinMain] INFO: [Init] stages.json parsing finished
+[2026-09-08 19:56:43] [System::ResetStage] INFO: Begin ResetStage

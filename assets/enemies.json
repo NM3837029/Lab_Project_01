@@ -22,14 +22,14 @@
   },
   {
     "id": "enemy_imomushi",
-    "name": "いもむし（多節・追従歩行）",
-    "type_enum": 4,
-    "hp": 4,
+    "name": "いもむし（飛びかかり・多節）",
+    "type_enum": 21,
+    "hp": 5,
     "width": 34,
     "height": 34,
     "sprite": "img/芋虫顔.png",
     "seSpawn": "",
-    "seAttack": "",
+    "seAttack": "se_split_attack",
     "seDamage": "se_shield_crack",
     "seDeath": "se_split_02",
     "hitboxOffsetX": 0,
@@ -37,21 +37,27 @@
     "hitboxWidth": 34,
     "hitboxHeight": 34,
     "scale": 1.0,
-    "moveSpeed": 0.3,
-    "triggerRange": 340.0,
+    "moveSpeed": 0.75,
+    "triggerRange": 210.0,
+    "chargeTime": 22.0,
+    "jumpPowerMult": 1.0,
+    "dashSpeedMult": 0.5,
+    "dashDuration": 120.0,
+    "cooldownTime": 45.0,
+    "consumePartOnAttack": true,
     "script": [],
     "parts": [
       {
         "id": "body0",
         "sprite": "img/芋虫胴.png",
-        "offsetX": -18.0,
-        "offsetY": 5.0,
-        "width": 26,
-        "height": 26,
+        "offsetX": -16.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 22,
-        "hitboxHeight": 22,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
         "scale": 1.0,
         "hp": 0,
         "zOrder": -1,
@@ -66,48 +72,75 @@
                   {
                     "op": "SetLocalOffset",
                     "dx": {
-                      "op": "Mul",
+                      "op": "Add",
                       "a": {
                         "op": "Mul",
                         "a": {
-                          "op": "ParentDirection"
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
                         },
-                        "b": -18.0
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
                       },
-                      "b": {
-                        "op": "Add",
-                        "a": {
-                          "op": "PartIndex"
-                        },
-                        "b": 1
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 5.0,
                       "b": {
                         "op": "Mul",
                         "a": {
-                          "op": "Sin",
+                          "op": "Cos",
                           "a": {
-                            "op": "Add",
+                            "op": "Sub",
                             "a": {
                               "op": "Mul",
                               "a": {
                                 "op": "Time"
                               },
-                              "b": 0.22
+                              "b": 0.3
                             },
                             "b": {
                               "op": "Mul",
                               "a": {
                                 "op": "PartIndex"
                               },
-                              "b": 1.1
+                              "b": 0.9
                             }
                           }
                         },
-                        "b": 3.0
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
                       }
                     }
                   },
@@ -124,14 +157,14 @@
       {
         "id": "body1",
         "sprite": "img/芋虫胴.png",
-        "offsetX": -36.0,
-        "offsetY": 5.0,
-        "width": 26,
-        "height": 26,
+        "offsetX": -32.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 22,
-        "hitboxHeight": 22,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
         "scale": 1.0,
         "hp": 0,
         "zOrder": -1,
@@ -146,48 +179,75 @@
                   {
                     "op": "SetLocalOffset",
                     "dx": {
-                      "op": "Mul",
+                      "op": "Add",
                       "a": {
                         "op": "Mul",
                         "a": {
-                          "op": "ParentDirection"
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
                         },
-                        "b": -18.0
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
                       },
-                      "b": {
-                        "op": "Add",
-                        "a": {
-                          "op": "PartIndex"
-                        },
-                        "b": 1
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 5.0,
                       "b": {
                         "op": "Mul",
                         "a": {
-                          "op": "Sin",
+                          "op": "Cos",
                           "a": {
-                            "op": "Add",
+                            "op": "Sub",
                             "a": {
                               "op": "Mul",
                               "a": {
                                 "op": "Time"
                               },
-                              "b": 0.22
+                              "b": 0.3
                             },
                             "b": {
                               "op": "Mul",
                               "a": {
                                 "op": "PartIndex"
                               },
-                              "b": 1.1
+                              "b": 0.9
                             }
                           }
                         },
-                        "b": 3.0
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
                       }
                     }
                   },
@@ -204,14 +264,14 @@
       {
         "id": "body2",
         "sprite": "img/芋虫胴.png",
-        "offsetX": -54.0,
-        "offsetY": 5.0,
-        "width": 26,
-        "height": 26,
+        "offsetX": -48.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 22,
-        "hitboxHeight": 22,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
         "scale": 1.0,
         "hp": 0,
         "zOrder": -1,
@@ -226,48 +286,503 @@
                   {
                     "op": "SetLocalOffset",
                     "dx": {
-                      "op": "Mul",
+                      "op": "Add",
                       "a": {
                         "op": "Mul",
                         "a": {
-                          "op": "ParentDirection"
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
                         },
-                        "b": -18.0
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
                       },
-                      "b": {
-                        "op": "Add",
-                        "a": {
-                          "op": "PartIndex"
-                        },
-                        "b": 1
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 5.0,
                       "b": {
                         "op": "Mul",
                         "a": {
-                          "op": "Sin",
+                          "op": "Cos",
                           "a": {
-                            "op": "Add",
+                            "op": "Sub",
                             "a": {
                               "op": "Mul",
                               "a": {
                                 "op": "Time"
                               },
-                              "b": 0.22
+                              "b": 0.3
                             },
                             "b": {
                               "op": "Mul",
                               "a": {
                                 "op": "PartIndex"
                               },
-                              "b": 1.1
+                              "b": 0.9
                             }
                           }
                         },
-                        "b": 3.0
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "body3",
+        "sprite": "img/芋虫胴.png",
+        "offsetX": -64.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
+                        },
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "body4",
+        "sprite": "img/芋虫胴.png",
+        "offsetX": -80.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
+                        },
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "body5",
+        "sprite": "img/芋虫胴.png",
+        "offsetX": -96.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
+                        },
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "body6",
+        "sprite": "img/芋虫胴.png",
+        "offsetX": -112.0,
+        "offsetY": 6.0,
+        "width": 24,
+        "height": 24,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 20,
+        "hitboxHeight": 20,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Mul",
+                          "a": {
+                            "op": "ParentDirection"
+                          },
+                          "b": -16.0
+                        },
+                        "b": {
+                          "op": "Add",
+                          "a": {
+                            "op": "PartIndex"
+                          },
+                          "b": 1
+                        }
+                      },
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 3.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.3
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "PartIndex"
+                              },
+                              "b": 0.9
+                            }
+                          }
+                        },
+                        "b": 8.0
                       }
                     }
                   },

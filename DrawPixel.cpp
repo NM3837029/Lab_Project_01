@@ -173,6 +173,11 @@ struct EnemyDef {
     float spreadRotationStep = -1.0f;   // SPREAD_SHOOTER: 1斉射ごとに発射角度をずらす量(ラジアン)。渦巻き弾幕を作る
     float verticalTrackSpeed = -1.0f;   // FLOATER: 浮遊の中心高度をプレイヤーのYへ寄せる速さ(px/フレーム)。0なら従来どおり高さ固定
     float riseSpeed = -1.0f;            // FALLER: クールダウン後に元の高さへ戻る速さ(px/フレーム)。0以下なら従来どおり瞬間復帰
+    // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
+    // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
+    // 残りの節数がそのまま「あと何回危険な攻撃が来るか」の可視化になる。
+    // 既定はfalseなので、パーツを持つ既存の敵（砲台・ドッスン等）の挙動は一切変わらない。
+    bool consumePartOnAttack = false;
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
@@ -384,6 +389,19 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
         case 17: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.brightnessMin, 0.35f); fill(def.triggerRange, 300.0f); break; // BRIGHTNESS_PHANTOM
         case 18: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.tintStrength, 0.6f); fill(def.triggerRange, 300.0f); break; // COLOR_SHIFTER
         case 19: fill(def.effectRange, 280.0f); fill(def.zoomAmplitude, 0.25f); fill(def.zoomFrequency, 0.08f); fill(def.triggerRange, 300.0f); break; // ZOOM_DISRUPTOR
+        case 21: // POUNCER（飛びかかり）。DASH_CHARGERと同じ項目名を使い回すが、突進ではなくジャンプに使う
+            fill(def.moveSpeed, 0.7f);       // 通常時の走行速度係数（速めに追ってくる）
+            fill(def.triggerRange, 200.0f);  // この距離まで詰めると飛びかかりを始める
+            fill(def.chargeTime, 22.0f);     // 飛ぶ前の溜め（＝プレイヤーが避け始める合図）
+            // 飛距離は概ね D ≒ 416 × jumpPowerMult × dashSpeedMult [px] になる。
+            // 既定は triggerRange(200px) とほぼ同じ距離に着地する組み合わせにしてあり、
+            // 「飛びかかられたら着地点は自分の足元」と読めるようにしている。
+            // これより大きくすると相手を大きく飛び越してしまい、追い詰められている感じが消える。
+            fill(def.jumpPowerMult, 1.0f);   // 飛びかかりのジャンプ力係数
+            fill(def.dashSpeedMult, 0.5f);   // 飛びかかりの水平速度係数
+            fill(def.dashDuration, 120.0f);  // 空中に居られる上限フレーム（着地を取り逃した時の保険）
+            fill(def.cooldownTime, 45.0f);   // 着地後の硬直＝反撃の窓
+            break;
         default: break;
     }
 }
@@ -531,6 +549,7 @@ void LoadAssetDefinitions() {
                     def.spreadRotationStep = e.value("spreadRotationStep", -1.0f);
                     def.verticalTrackSpeed = e.value("verticalTrackSpeed", -1.0f);
                     def.riseSpeed = e.value("riseSpeed", -1.0f);
+                    def.consumePartOnAttack = e.value("consumePartOnAttack", false);
                     def.sizeAmplitude = e.value("sizeAmplitude", -1.0f);
                     def.sizeFrequency = e.value("sizeFrequency", -1.0f);
                     def.minScale = e.value("minScale", -1.0f);
@@ -846,6 +865,15 @@ const int SCREEN_WIDTH = 640;    // ゲーム内部の描画解像度（横）
 const int SCREEN_HEIGHT = 480;   // ゲーム内部の描画解像度（縦）
 const int WINDOW_WIDTH = 1280;   // 実際に表示するウィンドウの幅（内部解像度から拡大表示する）
 const int WINDOW_HEIGHT = 720;   // 実際に表示するウィンドウの高さ
+
+// エディタ下部の一時停止／再開ボタンの矩形。
+// 描画側とクリック判定側の両方から参照させて、見た目と当たり判定が絶対にズレないようにする
+// （以前は片方だけ広げてしまい、ボタンの端を押しても反応しない領域ができていた）。
+// 再生／一時停止アイコン1つぶんだけの正方形寄りサイズ。
+const int PAUSE_BUTTON_X1 = WINDOW_WIDTH / 2 - 24;
+const int PAUSE_BUTTON_X2 = WINDOW_WIDTH / 2 + 24;
+const int PAUSE_BUTTON_Y1 = WINDOW_HEIGHT - 94;
+const int PAUSE_BUTTON_Y2 = WINDOW_HEIGHT - 66;
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
 const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
 const float BULLET_SPEED = 20.0f;// 弾の基本速度
@@ -945,6 +973,7 @@ enum EnemyType {
     ENEMY_COLOR_SHIFTER,      // 色調整敵：射程内で画面を色調変化させる（新画面エフェクト連携）
     ENEMY_ZOOM_DISRUPTOR,     // ズーム撹乱敵：射程内で画面ズームを揺さぶる（新画面エフェクト連携）
     ENEMY_CUSTOM_SCRIPT,      // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで挙動を自作する
+    ENEMY_POUNCER,            // 飛びかかり：普段は高速で地上を追い、射程に入ると溜めてから放物線ジャンプで飛びかかる
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
@@ -3126,7 +3155,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // エディタUI / ドラッグ操作
             if (currentLeftClick && !menu.isOpen) {
                 // 一時停止ボタンのチェック
-                if (!lastLeftClick && mx >= WINDOW_WIDTH / 2 - 50 && mx <= WINDOW_WIDTH / 2 + 50 && my >= WINDOW_HEIGHT - 90 && my <= WINDOW_HEIGHT - 70) {
+                if (!lastLeftClick && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
                     if (isPaused) { isPaused = false; SoundManager::Get().PlaySe("ui_pause"); }
                     else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe("ui_pause"); }
                     else { SoundManager::Get().PlaySe("ui_denied"); }
@@ -4115,7 +4144,36 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     float diagVx = aimedSideways ? ((enemy.direction == 0 ? 1.0f : -1.0f) * diagonalSpeedF * ets) : 0.0f;
                                     float jitterVx = isFastForward ? sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f : 0.0f;
                                     enemy.vx = diagVx + jitterVx;
-                                    if (std::abs(enemy.vy) < 0.5f) {
+
+                                    // 着地判定 —
+                                    // 【重要】ここは以前 `std::abs(enemy.vy) < 0.5f`（＝速度がほぼ0なら着地とみなす）だったが、
+                                    // これは通常速度では絶対に成立しない条件だった。
+                                    //   ・重力は毎フレーム enemy.vy += GRAVITY(0.5f) * ets で加算される
+                                    //   ・着地すると CheckGridCollisionY が enemy.vy = 0 に落とす
+                                    // つまり地面に乗っている間、このAI分岐に来た時点の vy は毎フレームぴったり 0.5 になり、
+                                    // 「0.5 < 0.5」は偽。結果として着地が一度も検出されず、
+                                    // ドッスンは落下状態のまま地面に座り込み、クールダウンにも復帰処理にも進まなかった。
+                                    // （着地ショックウェイブと壊せるブロックの破壊も同じ理由で一度も発動していなかった。
+                                    //   スローモーション中だけ ets < 1 になり、偶然 0.5 未満になって動いていた。）
+                                    //
+                                    // 速度を見るのをやめ、JUMPER/CUSTOM_SCRIPTと同じ「1〜2px下に地面があるか」を
+                                    // 直接調べる接地プローブへ置き換える。こちらは時間スケールに一切依存しない。
+                                    // CheckGridCollisionY / CheckPlatformCollision は座標と速度を参照渡しで書き換えるため、
+                                    // 必ずコピーを渡して本体の x / y / vy を汚さないようにする
+                                    // （とくに x は斜め落下の着地点＝復帰の起点になるので触られると困る）。
+                                    bool landedOnGround = false;
+                                    if (enemy.vy >= 0.0f) { // 上昇中に「着地」しないようにガードする
+                                        float probeX = enemy.x;
+                                        float probeY = enemy.y + 2.0f;
+                                        float probeVY = 1.0f;
+                                        bool tileGround = CheckGridCollisionY(probeX, probeY, probeVY,
+                                            enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
+                                            stages[currentStageIdx].map, tileDefs);
+                                        bool platGround = CheckPlatformCollision(probeX, probeY, probeVY,
+                                            enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                        landedOnGround = (tileGround || platGround);
+                                    }
+                                    if (landedOnGround) {
                                         // 着地の瞬間：踏みつけだけでなく着地地点周辺にもショックウェイブ判定を発生させる
                                         float ew_scaledF = (float)enemy.hitboxWidth * enemy.scale;
                                         float eh_scaledF = (float)enemy.hitboxHeight * enemy.scale;
@@ -4496,6 +4554,89 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distZ = std::abs(player.x - enemy.x);
                             if (distZ < range) {
                                 Screen_SetZoom(1.0f + sinf(enemy.customTimer * frequency) * amplitude);
+                            }
+                            break;
+                        }
+                        case ENEMY_POUNCER: {
+                            // 飛びかかり敵（いもむし用）。
+                            // 「高速で地面を這って迫る」→「溜め」→「放物線を描いて飛びかかる」→「着地硬直」を繰り返す。
+                            // DASH_CHARGERの4状態機械と同じ骨格だが、水平突進ではなくジャンプなので
+                            // 一度だけ初速を与えたあとは重力任せにし、着地するまで速度に触らない
+                            // （毎フレーム上書きすると放物線にならず、直線的な飛行になってしまう）。
+                            // auxState: 0=追跡 / 1=溜め / 2=飛行中 / 3=着地硬直
+                            float triggerRangePc = edef ? edef->triggerRange : 200.0f;
+                            float chargeTimePc = edef ? edef->chargeTime : 22.0f;
+                            float jumpMultPc = edef ? edef->jumpPowerMult : 1.15f;
+                            float dashMultPc = edef ? edef->dashSpeedMult : 0.9f;
+                            float airLimitPc = edef ? edef->dashDuration : 120.0f;
+                            float cooldownPc = edef ? edef->cooldownTime : 45.0f;
+                            float runSpeedPc = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.7f);
+                            float distXpc = player.x - enemy.x;
+
+                            // 進行方向の足元に床が続いているか（崖から落ちないための判定）。
+                            // WALKER/PATROLと同じタイルプローブ。
+                            auto& mpPc = stages[currentStageIdx].map;
+                            auto probeTilePc = [&](float px, float py) -> bool {
+                                int tCol = (int)(px / TILE_SIZE);
+                                int tRow = (int)(py / TILE_SIZE);
+                                if (mpPc.empty() || tRow < 0 || tRow >= (int)mpPc.size() || tCol < 0 || tCol >= (int)mpPc[0].size()) return false;
+                                int tid = mpPc[tRow][tCol];
+                                return (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                            };
+                            float bodyWpc = (float)enemy.hitboxWidth * enemy.scale;
+                            float bodyHpc = (float)enemy.hitboxHeight * enemy.scale;
+
+                            if (enemy.auxState == 0) {
+                                // --- 追跡：プレイヤーの方へ走る。崖のふちでは止まって落ちない ---
+                                enemy.direction = (distXpc < 0.0f) ? 1 : 0;
+                                enemy.vx = (enemy.direction == 1) ? -runSpeedPc : runSpeedPc;
+                                float aheadXpc = (enemy.direction == 0) ? (enemy.x + bodyWpc + 6.0f) : (enemy.x - 6.0f);
+                                if (!probeTilePc(aheadXpc, enemy.y + bodyHpc + 4.0f)) enemy.vx = 0.0f;
+                                if (std::abs(distXpc) < triggerRangePc) {
+                                    enemy.auxState = 1;
+                                    enemy.customTimer = chargeTimePc;
+                                }
+                            } else if (enemy.auxState == 1) {
+                                // --- 溜め：その場で止まり、飛ぶ直前まで向きだけプレイヤーへ追従させる ---
+                                enemy.vx = 0.0f;
+                                enemy.direction = (distXpc < 0.0f) ? 1 : 0;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0.0f) {
+                                    // 初速を一度だけ与える。以降は共通の重力処理が放物線を作る
+                                    enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpMultPc;
+                                    enemy.vx = (enemy.direction == 1 ? -1.0f : 1.0f) * DASH_SPEED * dashMultPc;
+                                    enemy.auxState = 2;
+                                    enemy.customTimer = 0.0f;
+                                    if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                }
+                            } else if (enemy.auxState == 2) {
+                                // --- 飛行中：速度には触らない。落下に転じてから接地したら着地とみなす ---
+                                enemy.customTimer += ets;
+                                bool landedPc = false;
+                                // 飛び出した直後は足元にまだ地面があるので、上昇中(vy<0)は着地判定しない。
+                                // 参照渡しで書き換えられるため、必ずコピーを渡して本体の座標を汚さない。
+                                if (enemy.vy >= 0.0f && enemy.customTimer > 4.0f) {
+                                    float probeXpc = enemy.x;
+                                    float probeYpc = enemy.y + 2.0f;
+                                    float probeVYpc = 1.0f;
+                                    bool tileG = CheckGridCollisionY(probeXpc, probeYpc, probeVYpc,
+                                        enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
+                                        stages[currentStageIdx].map, tileDefs);
+                                    bool platG = CheckPlatformCollision(probeXpc, probeYpc, probeVYpc,
+                                        enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                    landedPc = (tileG || platG);
+                                }
+                                // 何かの拍子に着地を取り逃しても空中で固まらないよう、滞空時間に上限を設けておく
+                                if (landedPc || enemy.customTimer >= airLimitPc) {
+                                    enemy.vx = 0.0f;
+                                    enemy.auxState = 3;
+                                    enemy.customTimer = cooldownPc;
+                                }
+                            } else {
+                                // --- 着地硬直：完全に停止する。ここがプレイヤーの反撃・すり抜けの窓になる ---
+                                enemy.vx = 0.0f;
+                                enemy.customTimer -= ets;
+                                if (enemy.customTimer <= 0.0f) enemy.auxState = 0;
                             }
                             break;
                         }
@@ -5259,8 +5400,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // 2. プレイヤー vs 敵の衝突判定
+            // consumePartOnAttack の敵はヒット時にパーツを消費するため、const参照では回せない
             if (!isPlayerRewinding) {
-                for (const auto& enemy : enemies) {
+                for (auto& enemy : enemies) {
                     if (enemy.isActive && !isPlayerRewinding && player.invulnTimer <= 0.0f) {
                         // この敵が現在巻き戻し中の場合はスキップ
                         bool isThisEnemyRew = (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
@@ -5296,6 +5438,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             {
                                 const EnemyDef* edef = FindEnemyDef(enemy.assetId);
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+
+                                // 攻撃するたびに胴体を消費する敵（いもむし）の処理。
+                                // 尾＝parts配列の末尾側なので、後ろから探して最初に見つかった生存パーツを落とす。
+                                // こうすると「頭から順に短くなる」のではなく、尻尾から削れていく見た目になる。
+                                if (edef != nullptr && edef->consumePartOnAttack) {
+                                    bool consumed = false;
+                                    for (int pi = (int)enemy.parts.size() - 1; pi >= 0; pi--) {
+                                        if (enemy.parts[pi].isActive) {
+                                            enemy.parts[pi].isActive = false;
+                                            consumed = true;
+                                            break;
+                                        }
+                                    }
+                                    // 消費した結果、残っている節が1つも無くなったら力尽きて撃破される。
+                                    // 「消費できる節が最初から無かった」場合も同じ扱いにしておくと、
+                                    // パーツ定義を空にしたときに無敵の敵ができあがる事故を防げる。
+                                    bool anyLeft = false;
+                                    for (const auto& part : enemy.parts) { if (part.isActive) { anyLeft = true; break; } }
+                                    if (!anyLeft) {
+                                        enemy.isActive = false;
+                                        SoundManager::Get().PlaySe(edef->seDeath);
+                                    }
+                                    (void)consumed;
+                                }
                             }
                             if (player.hp <= 0) {
                                 currentScene = RESULT_GAMEOVER;
@@ -6067,7 +6233,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (player.anim.HasClip(player.anim.currentClip)) {
             pImgH = player.anim.GetCurrentFrameHeight();
             int drawCy = (int)(cy - (pImgH * player.scale) / 2.0f);
-            player.anim.DrawAt(cx, drawCy, player.scale, player.angle, player.direction == 1);
+            // 左右反転の基準 — img/プレイヤー.png は目が左側に描かれた「左向き」の絵。
+            // そのため direction==0(右向き) のときこそ画像を反転しなければならない。
+            // 以前は逆（direction==1で反転）だったので、プレイヤーは常に進行方向と逆を向いていた。
+            player.anim.DrawAt(cx, drawCy, player.scale, player.angle, player.direction == 0);
         } else {
             GetGraphSize(player.handle, &pImgW, &pImgH);
             // 新アセット移行対応 — 640x640の素材をプレイヤーの表示サイズへ収める倍率。
@@ -6075,8 +6244,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 倍率を掛けたあとの見かけの高さで計算し直さないと足元の位置がずれる。
             float playerFit = ComputeFitScale(player.handle, (float)player.width, (float)player.height);
             int drawCy = (int)(cy - (pImgH * playerFit * player.scale) / 2.0f);
-            if (player.direction == 0) DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE);
-            else DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE, TRUE);
+            // 素材が左向きなので、右を向いているとき(direction==0)に反転して描く。
+            // 敵側は素材ごとに事情が違うため、ここではプレイヤーの描画だけを直している。
+            if (player.direction == 0) DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE, TRUE);
+            else DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE);
         }
         
         if (isDebugDrawMode) {
@@ -6116,10 +6287,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (int i = 0; i < MAX_BULLETS; i++) {
             // 新アセット移行対応 — 以前は DrawGraph で原寸描画していたため、640x640の弾画像だと
             // 画面が弾で埋まってしまう。弾の当たり判定は各所で 16x16 固定なので、描画もそれに合わせる。
+            //
+            // 弾の向きの可視化 — 軸そろえの DrawExtendGraph をやめ、進行方向へ回転させて描く。
+            // 砲台のように狙う角度が変わる敵は、弾がどちらへ飛んでいるかが分からないと
+            // 「今の一発は自分に向いているのか」を読めず、避ける判断ができなかった。
+            // img/弾.png は横長の楕円で「角度0＝右向き」に描かれているので、
+            // 速度ベクトルの atan2 をそのまま回転角に使える（絵の向きを補正する必要が無い）。
+            // 回転すると弾が進行方向へ伸びた曳光弾のように見えるため、向きが一目で分かる。
             if (bullets[i].isActive) {
-                int bx = (int)(bullets[i].x - cameraX);
-                int by = (int)(bullets[i].y - cameraY);
-                DrawExtendGraph(bx, by, bx + BULLET_DRAW_SIZE, by + BULLET_DRAW_SIZE, bullets[i].handle, TRUE);
+                // 当たり判定が各所で (x, y, 16, 16) 固定なので、その矩形の中心を回転中心にする
+                int bcx = (int)(bullets[i].x - cameraX) + BULLET_DRAW_SIZE / 2;
+                int bcy = (int)(bullets[i].y - cameraY) + BULLET_DRAW_SIZE / 2;
+                float bulletAngle = atan2f(bullets[i].vy, bullets[i].vx);
+                float bulletFit = ComputeFitScale(bullets[i].handle, (float)BULLET_DRAW_SIZE, (float)BULLET_DRAW_SIZE);
+                DrawRotaGraph(bcx, bcy, bulletFit, bulletAngle, bullets[i].handle, TRUE);
             }
         }
 
@@ -6453,15 +6634,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 「押すとどうなるか」を再生/一時停止アイコンで示す
             // （一時停止中は再生アイコン＝押せば再開、再生中は一時停止アイコン＝押せば止まる）。
             {
-                const int pbX1 = WINDOW_WIDTH / 2 - 60, pbY1 = WINDOW_HEIGHT - 94;
-                const int pbX2 = WINDOW_WIDTH / 2 + 60, pbY2 = WINDOW_HEIGHT - 66;
-                bool pbHover = (mx >= pbX1 && mx <= pbX2 && my >= pbY1 && my <= pbY2);
+                // アイコンだけのボタンにしたので、文字ぶんの横幅を詰めて正方形寄りにする。
+                // 矩形は PAUSE_BUTTON_* 定数を描画とクリック判定の両方で共有しているため、
+                // 見た目と当たり判定が食い違うことがない（以前はここだけ広げてズレていた）。
+                bool pbHover = (mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2);
                 if (pbHover) SetDrawBright(255, 255, 255);
                 else         SetDrawBright(214, 209, 202);
-                DrawUiWindow(pbX1, pbY1, pbX2, pbY2, uiWindowHandle);
+                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle);
                 SetDrawBright(255, 255, 255);
-                DrawUiIcon(pbX1 + 20, (pbY1 + pbY2) / 2, 20, isPaused ? uiPlayHandle : uiPauseHandle);
-                DrawString(pbX1 + 38, pbY1 + 6, isPaused ? "RESUME" : "PAUSE", UiInk());
+                // 「押すとどうなるか」はアイコンだけで伝わるので、PAUSE/RESUMEの文字は出さない
+                DrawUiIcon((PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2, (PAUSE_BUTTON_Y1 + PAUSE_BUTTON_Y2) / 2,
+                           20, isPaused ? uiPlayHandle : uiPauseHandle);
             }
 
             // コンテキストメニューポップアップの描画

@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+89038d5676ff27fad715abfef6d3ce669f7604b1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b62641986b25532b7081c55a658efe1967ba40e6")]
 [assembly: System.Reflection.AssemblyProductAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Lab_Editor")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
