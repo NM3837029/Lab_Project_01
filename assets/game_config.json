@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "window_title": "Lab Project 01 - 編集して進む2Dアクション",
+  "title_enabled": true,
+  "theme": {
+    "ink": [
+      32,
+      34,
+      40
+    ],
+    "ink_sub": [
+      112,
+      116,
+      126
+    ],
+    "ink_accent": [
+      20,
+      84,
+      132
+    ],
+    "backdrop": [
+      246,
+      240,
+      228
+    ]
+  },
+  "title_screen": {
+    "background_image": "img/薄橙色の背景.png",
+    "bgm_id": "",
+    "elements": [
+      {
+        "key": "logo",
+        "type": "image",
+        "visible": false,
+        "image": "",
+        "x": 320,
+        "y": 110,
+        "w": 360,
+        "h": 120
+      },
+      {
+        "key": "title",
+        "type": "text",
+        "visible": true,
+        "text": "ラボ・プロジェクト",
+        "x": 320,
+        "y": 92,
+        "font_size": 52,
+        "align": "center",
+        "color_role": "accent",
+        "edge": true
+      },
+      {
+        "key": "subtitle",
+        "type": "text",
+        "visible": true,
+        "text": "編集して進む2Dアクション",
+        "x": 320,
+        "y": 162,
+        "font_size": 20,
+        "align": "center",
+        "color_role": "ink",
+        "edge": true
+      },
+      {
+        "key": "menu",
+        "type": "menu",
+        "visible": true,
+        "x": 320,
+        "y": 240,
+        "w": 260,
+        "item_h": 46,
+        "gap": 12,
+        "font_size": 22,
+        "align": "center"
+      }
+    ],
+    "menu_items": [
+      {
+        "label": "はじめる",
+        "action": "stage_select"
+      },
+      {
+        "label": "つづきから",
+        "action": "continue"
+      },
+      {
+        "label": "おわる",
+        "action": "quit"
+      }
+    ]
+  },
+  "stage_select": {
+    "background_image": "img/薄橙色の背景.png",
+    "bgm_id": "",
+    "heading": "ステージせんたく",
+    "heading_x": 320,
+    "heading_y": 34,
+    "heading_font_size": 30,
+    "grid": {
+      "x": 64,
+      "y": 92,
+      "cols": 3,
+      "cell_w": 160,
+      "cell_h": 116,
+      "gap_x": 16,
+      "gap_y": 16
+    },
+    "back_label": "もどる",
+    "locked_label": "？ ？ ？"
+  },
+  "stages": [
+    {
+      "file": "stage1_hajimari.json",
+      "name": "はじまりの草原",
+      "thumbnail": "",
+      "order": 0,
+      "unlock": "always",
+      "require": [],
+      "item_total": 15
+    },
+    {
+      "file": "stage2_hensyu.json",
+      "name": "編集のとびら",
+      "thumbnail": "",
+      "order": 1,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 17
+    },
+    {
+      "file": "stage_edit_trial.json",
+      "name": "編集棟のこころみ",
+      "thumbnail": "",
+      "order": 2,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 17
+    },
+    {
+      "file": "stage4_tate_tower.json",
+      "name": "たての塔",
+      "thumbnail": "",
+      "order": 3,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 15
+    },
+    {
+      "file": "stage_iro.json",
+      "name": "いろの回廊",
+      "thumbnail": "",
+      "order": 4,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 13
+    },
+    {
+      "file": "stage_edit_reaction_test.json",
+      "name": "編集リアクション検証",
+      "thumbnail": "",
+      "order": 5,
+      "unlock": "always",
+      "require": [],
+      "item_total": 0
+    }
+  ],
+  "result": {
+    "next_label": "つぎのステージへ",
+    "retry_label": "もういちど",
+    "select_label": "ステージ選択へ",
+    "victory_text": "クリア！",
+    "gameover_text": "ゲームオーバー"
+  }
+}

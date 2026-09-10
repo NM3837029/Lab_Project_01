@@ -8,6 +8,7 @@
 #include "json.hpp"
 #include "Logger.h"
 #include "GamePaths.h"
+#include "GameConfig.h"
 #include <exception>
 
 #include "imgui.h"
@@ -929,10 +930,17 @@ enum TileType {
 };
 
 // 現在のゲーム全体の進行状態（シーン）。
+//
+// TITLE と STAGE_SELECT は「ゲームプレイのループに乗らない画面」で、
+// メインループの先頭で早期continueして専用の描画へ分岐する。
+// そのため CanUpdate やリザルト描画といったゲームプレイ側の処理には一切到達しない。
+// 値を足すときは必ず末尾へ。既存の値の並びを崩さないこと。
 enum GameScene {
     PLAY,             // 通常プレイ中
     RESULT_GAMEOVER,  // ゲームオーバー結果画面
-    RESULT_VICTORY    // クリア（勝利）結果画面
+    RESULT_VICTORY,   // クリア（勝利）結果画面
+    TITLE,            // タイトル画面
+    STAGE_SELECT      // ステージセレクト画面
 };
 
 // 1種類のタイルの見た目・当たり判定情報をまとめた定義データ。
@@ -2265,7 +2273,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
     // コマンドライン引数でステージファイル名が渡されていれば、起動時に読み込むステージを上書きする
     // （Lab_Editorから「このステージでテストプレイ」を実行したときに使われる仕組み）
+    // 引数が付いているかどうかが、そのまま「Lab_Editorからテストプレイで起動されたか」の
+    // 判定になる。エディタから来た場合はタイトル画面を挟まず、指定されたステージへ直行する
+    // （毎回タイトルを経由させられてはテストプレイにならない）。
+    bool bootDirectToStage = false;
     if (l != nullptr && strlen(l) > 0) {
+        bootDirectToStage = true;
         currentStageFileName = l;
         // コマンドライン引数の前後に空白/引用符が付くケースへの防御（呼び出し元により混入することがある）
         while (!currentStageFileName.empty() && (currentStageFileName.front() == ' ' || currentStageFileName.front() == '"')) currentStageFileName.erase(0, 1);
@@ -2306,6 +2319,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 実際のウィンドウサイズ(WINDOW_WIDTH x WINDOW_HEIGHT)へは、この仮想スクリーンを拡大して転送する。
     int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
     LoadAssetDefinitions(); // 敵/アイテム/ギミックの定義データ(enemies.json等)を読み込む
+
+    // ゲーム全体の設定（タイトル画面の内容・ステージ一覧・テーマ色など）を読み込む。
+    // ファイルが無い/壊れている場合は titleEnabled=false になるだけで、
+    // 従来どおり起動即プレイになる（設定が壊れても遊べなくならない）。
+    GameCfg::GameConfig gameConfig;
+    GameCfg::LoadGameConfig("assets/game_config.json", gameConfig);
+    if (!gameConfig.windowTitle.empty()) {
+        SetMainWindowText(gameConfig.windowTitle.c_str());
+    }
+
+    // 進行状況（どのステージをクリアしたか・最高取得数）。
+    // 置き場所は %LOCALAPPDATA%\LabProject01\save.json。
+    // 初回起動ではファイルが無いので false が返るが、それは正常な状態。
+    GameCfg::SaveData saveData;
+    GameCfg::LoadSaveData(saveData);
     {
         // Feature 5: コモンイベント定義の読み込み。CallCommonEventアクションから参照される。
         std::ifstream cef("assets/common_events.json");
@@ -2882,6 +2910,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int currentStageIdx = 0;
 
     GameScene currentScene = PLAY;
+    // 前フレームのシーン。「PLAY からクリアへ移った瞬間」を検出してセーブするために持つ。
+    // currentScene = RESULT_VICTORY の代入元は6箇所以上に散っているので、
+    // 個々の代入元へセーブ処理を書き足すのではなく、遷移そのものを1箇所で拾う。
+    // こうしておけば、後からクリア判定を増やしても自動的にセーブされる。
+    GameScene prevSceneForSave = PLAY;
 
     // ===== JSON ステージ読み込み =====
     // assets/stages/<ファイル名> を読み込みStageDataを構築するラムダ。
@@ -3427,11 +3460,404 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
     });
 
+
+    // ================================================================
+    // Feature: タイトル画面・ステージセレクト画面
+    //
+    // これらは gameScreen(640x480の仮想スクリーン)を経由せず、
+    // 実ウィンドウ(1280x720)へ直接描く。理由は2つ。
+    //   ・640x480に描いてから拡大すると、大きなタイトル文字がボケる
+    //   ・編集UI（左パネル・インスペクタ・タイムライン）と重ねる必要が無い
+    // 座標は game_config.json 側が640x480で持ち、等方1.5倍＋左右160pxの余白で配置する
+    // （背景画像は全面に敷くので余白は見えない）。
+    // ================================================================
+
+    // フォントハンドルのキャッシュ（デザイン上のサイズ → ハンドル）。
+    // SetFontSize は呼ぶたびに既定フォントを作り直す重い処理なので、
+    // 複数サイズを使うタイトル画面では必ずハンドルを作ってキャッシュする。
+    // 失敗値(-1)もキャッシュして、毎フレーム作り直しに行かないようにする。
+    std::map<int, int> metaFontCache;
+    auto MetaFont = [&](int designSize) -> int {
+        auto it = metaFontCache.find(designSize);
+        if (it != metaFontCache.end()) return it->second;
+        int px = (int)(designSize * GameCfg::DESIGN_SCALE);
+        // EDGE付きにするのは、背景画像の上に文字を置いても読めるようにするため。
+        // 縁取りは CreateFontToHandle の FontType でしか指定できず、SetFontSize では作れない。
+        int fh = CreateFontToHandle("メイリオ", px, 4, DX_FONTTYPE_ANTIALIASING_EDGE_4X4, -1, 2);
+        metaFontCache[designSize] = fh;
+        return fh;
+    };
+
+    // 画像のキャッシュ（パス → ハンドル）。毎フレーム LoadGraph するのは重い
+    std::map<std::string, int> metaImageCache;
+    auto MetaImage = [&](const std::string& path) -> int {
+        if (path.empty()) return -1;
+        auto it = metaImageCache.find(path);
+        if (it != metaImageCache.end()) return it->second;
+        int h = LoadGraph(path.c_str());
+        metaImageCache[path] = h;
+        return h;
+    };
+
+    auto MetaColor = [&](const GameCfg::Color& c) { return GetColor(c.r, c.g, c.b); };
+    auto MetaRoleColor = [&](const std::string& role) -> unsigned int {
+        if (role == "sub")    return MetaColor(gameConfig.inkSub);
+        if (role == "accent") return MetaColor(gameConfig.inkAccent);
+        return MetaColor(gameConfig.ink);
+    };
+
+    // デザイン座標(640x480)へ文字を描く。align=="center" のとき dx は中心座標。
+    auto MetaDrawText = [&](const std::string& s, float dx, float dy, int fontSize,
+                            const std::string& align, unsigned int color, bool edge) {
+        if (s.empty()) return;
+        int x = GameCfg::ToScreenX(dx);
+        int y = GameCfg::ToScreenY(dy);
+        int fh = MetaFont(fontSize);
+        if (fh < 0) {
+            // メイリオが使えない環境向けのフォールバック。
+            // 見栄えは落ちるが、真っ白な画面になるよりはるかにまし。
+            SetFontSize((int)(fontSize * GameCfg::DESIGN_SCALE));
+            if (align == "center") x -= GetDrawStringWidth(s.c_str(), (int)s.size()) / 2;
+            DrawString(x, y, s.c_str(), color);
+            SetFontSize(16);
+            return;
+        }
+        // GetDrawStringWidthToHandle の第2引数(StrLen)は、SetUseCharCodeFormat(UTF8) の状態では
+        // 「文字数」ではなく「バイト数」を渡すのが正しい。
+        // 実測: フォント30pxで "ラボ"(2文字/6バイト) を計測したところ、
+        //   バイト数(6)を渡すと 68px（全角2文字ぶん＋縁取り。期待どおり）
+        //   文字数(2)を渡すと 34px（1文字ぶんしか数えていない）
+        // std::string::size() はバイト数なのでそのまま渡してよい。
+        if (align == "center") x -= GetDrawStringWidthToHandle(s.c_str(), (int)s.size(), fh) / 2;
+        DrawStringToHandle(x, y, s.c_str(), color, fh, edge ? GetColor(255, 255, 255) : 0);
+    };
+
+    // 指定した幅(デザイン座標)に収まるよう、文字サイズを段階的に落としてから描く。
+    //
+    // ステージ名やメニュー文言はエディタで自由に書き換えられるので、
+    // 固定サイズにするといずれ必ずセルからはみ出す。
+    // 「はみ出したら小さくする」を仕組みとして持たせておけば、
+    // 長い名前を付けても崩れない。
+    auto MetaDrawTextFit = [&](const std::string& str, float dx, float dy, int fontSize,
+                               float maxWidthDesign, const std::string& align,
+                               unsigned int color, bool edge) {
+        if (str.empty()) return;
+        int size = fontSize;
+        const int minSize = 9; // これ以下は読めないので下限を設ける
+        while (size > minSize) {
+            int fh = MetaFont(size);
+            if (fh < 0) break; // フォントが作れない環境ではフォールバックに任せる
+            int wpx = GetDrawStringWidthToHandle(str.c_str(), (int)str.size(), fh);
+            if (wpx <= GameCfg::ToScreenLen(maxWidthDesign)) break;
+            size -= 1;
+        }
+        MetaDrawText(str, dx, dy, size, align, color, edge);
+    };
+    // デザイン座標の矩形をウィンドウ座標へ変換してボタンとして描く。
+    // 見た目は既存UIと揃えて UIウィンドウ.png の9スライスを使う。
+    auto MetaDrawButton = [&](float dl, float dt, float dw, float dh,
+                              const std::string& label, int fontSize, bool hot, bool enabled) {
+        int x1 = GameCfg::ToScreenX(dl);
+        int y1 = GameCfg::ToScreenY(dt);
+        int x2 = x1 + GameCfg::ToScreenLen(dw);
+        int y2 = y1 + GameCfg::ToScreenLen(dh);
+        if (!enabled)   SetDrawBright(150, 148, 145);
+        else if (hot)   SetDrawBright(255, 255, 255);
+        else            SetDrawBright(214, 209, 202);
+        DrawUiWindow(x1, y1, x2, y2, uiWindowHandle);
+        SetDrawBright(255, 255, 255);
+        unsigned int col = !enabled ? MetaColor(gameConfig.inkSub)
+                         : (hot ? MetaColor(gameConfig.inkAccent) : MetaColor(gameConfig.ink));
+        // ラベルはボタンの中央へ置く（縦方向はフォントの高さぶんだけ上げる）
+        // ラベルはボタンの中央へ。幅からはみ出す場合は自動で小さくなる
+        MetaDrawTextFit(label, dl + dw * 0.5f, dt + dh * 0.5f - fontSize * 0.6f,
+                        fontSize, dw - 16.0f, "center", col, false);
+    };
+
+    // メニュー項目 i 番目の矩形をデザイン座標で求める。
+    //
+    // 【重要】このレイアウト式は Lab_Editor 側の配置キャンバスにも同じものがある。
+    // 片方だけ変えると「エディタで見た位置」と「実際に出る位置」がズレるので、
+    // 変更するときは必ず両方を直すこと。変数を4つ(x,y,w,item_h,gap)に絞ってあるのは
+    // そのため。
+    //   align=="center" のとき:
+    //     left = x - w/2,  top = y + i*(item_h + gap),  width = w,  height = item_h
+    auto MetaMenuItemRect = [&](const GameCfg::Element& m, int i,
+                                float& l, float& t, float& w, float& h) {
+        w = m.w; h = m.itemH;
+        l = (m.align == "center") ? (m.x - m.w * 0.5f) : m.x;
+        t = m.y + i * (m.itemH + m.gap);
+    };
+
+    // 画面全体に背景を敷く（背景画像はウィンドウ全面へ拡大するので左右の余白は見えない）
+    auto MetaDrawBackdrop = [&](const std::string& imgPath) {
+        DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, MetaColor(gameConfig.backdrop), TRUE);
+        int bg = MetaImage(imgPath);
+        if (bg >= 0) DrawExtendGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, bg, TRUE);
+    };
+
+    // タイトル/セレクトのカーソル位置と、メインループへ「終了したい」と伝えるフラグ
+    int titleCursor = 0;
+    int selectCursor = 0;
+    bool metaWantExit = false;
+    std::string metaBgmPlaying = "";
+
+    // ---- メタシーン（タイトル / ステージセレクト）の更新と描画 ----
+    // メインループの先頭から呼ばれ、この中で ScreenFlip() まで済ませる。
+    // 呼び出し側は直後に continue するので、ゲームプレイ本体は丸ごと飛ぶ。
+    auto UpdateAndDrawMetaScene = [&]() {
+        // このシーン専用の入力エッジ検出。
+        // ゲームプレイ側の lastLeftClick は早期continueで更新されないため流用できない。
+        static bool mPrevClick = false, mPrevUp = false, mPrevDown = false;
+        static bool mPrevLeft = false, mPrevRight = false, mPrevDecide = false, mPrevCancel = false;
+
+        int mx, my; GetMousePoint(&mx, &my);
+        bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+        bool clickEdge = click && !mPrevClick;
+
+        bool kUp     = CheckHitKey(KEY_INPUT_UP) != 0    || CheckHitKey(KEY_INPUT_W) != 0;
+        bool kDown   = CheckHitKey(KEY_INPUT_DOWN) != 0  || CheckHitKey(KEY_INPUT_S) != 0;
+        bool kLeft   = CheckHitKey(KEY_INPUT_LEFT) != 0  || CheckHitKey(KEY_INPUT_A) != 0;
+        bool kRight  = CheckHitKey(KEY_INPUT_RIGHT) != 0 || CheckHitKey(KEY_INPUT_D) != 0;
+        bool kDecide = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
+        // ESCキーはメインループの継続条件でゲーム終了に割り当てられているため、
+        // 「戻る」には使えない。BackSpace と X を使う。
+        bool kCancel = CheckHitKey(KEY_INPUT_BACK) != 0 || CheckHitKey(KEY_INPUT_X) != 0;
+
+        bool upEdge = kUp && !mPrevUp, downEdge = kDown && !mPrevDown;
+        bool leftEdge = kLeft && !mPrevLeft, rightEdge = kRight && !mPrevRight;
+        bool decideEdge = kDecide && !mPrevDecide, cancelEdge = kCancel && !mPrevCancel;
+
+        // ゲームプレイ側と同じ脱出口。早期continueでメインループ末尾の判定を飛ばすため、
+        // これが無いとタイトル画面から十字キー全押しで抜けられなくなる。
+        if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
+            && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) {
+            metaWantExit = true;
+        }
+
+        // BGM。シーンが変わったときだけ切り替える（毎フレーム呼ぶと鳴り直す）
+        const std::string& wantBgm = (currentScene == TITLE) ? gameConfig.titleBgm : gameConfig.selectBgm;
+        if (wantBgm != metaBgmPlaying) {
+            metaBgmPlaying = wantBgm;
+            if (wantBgm.empty()) SoundManager::Get().StopBgm();
+            else                 SoundManager::Get().PlayBgm(wantBgm);
+        }
+
+        SetDrawScreen(DX_SCREEN_BACK);
+        ClearDrawScreen();
+
+        if (currentScene == TITLE) {
+            MetaDrawBackdrop(gameConfig.titleBg);
+
+            // ロゴ・タイトル・サブタイトルを描く（メニューは後段でまとめて扱う）
+            for (const auto& e : gameConfig.titleElements) {
+                if (!e.visible) continue;
+                if (e.type == "image") {
+                    int h = MetaImage(e.image);
+                    if (h < 0) continue;
+                    // align=="center" のとき x,y は中心なので左上へ直す
+                    float l = (e.align == "center") ? (e.x - e.w * 0.5f) : e.x;
+                    float t = (e.align == "center") ? (e.y - e.h * 0.5f) : e.y;
+                    DrawExtendGraph(GameCfg::ToScreenX(l), GameCfg::ToScreenY(t),
+                                    GameCfg::ToScreenX(l) + GameCfg::ToScreenLen(e.w),
+                                    GameCfg::ToScreenY(t) + GameCfg::ToScreenLen(e.h), h, TRUE);
+                } else if (e.type == "text") {
+                    MetaDrawText(e.text, e.x, e.y, e.fontSize, e.align, MetaRoleColor(e.colorRole), e.edge);
+                }
+            }
+
+            // メニュー
+            const GameCfg::Element* menu = gameConfig.FindElement("menu");
+            int itemCount = (int)gameConfig.menuItems.size();
+            if (menu != nullptr && menu->visible && itemCount > 0) {
+                if (titleCursor < 0) titleCursor = itemCount - 1;
+                if (titleCursor >= itemCount) titleCursor = 0;
+                if (upEdge)   { titleCursor = (titleCursor - 1 + itemCount) % itemCount; SoundManager::Get().PlaySe("ui_color_cycle"); }
+                if (downEdge) { titleCursor = (titleCursor + 1) % itemCount; SoundManager::Get().PlaySe("ui_color_cycle"); }
+
+                int chosen = -1;
+                for (int i = 0; i < itemCount; i++) {
+                    float l, t, w, h; MetaMenuItemRect(*menu, i, l, t, w, h);
+                    int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
+                    int x2 = x1 + GameCfg::ToScreenLen(w), y2 = y1 + GameCfg::ToScreenLen(h);
+                    bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                    if (hover) titleCursor = i; // マウスを乗せたらカーソルもそこへ移す
+                    MetaDrawButton(l, t, w, h, gameConfig.menuItems[i].label,
+                                   menu->fontSize, (titleCursor == i), true);
+                    if (hover && clickEdge) chosen = i;
+                }
+                if (decideEdge) chosen = titleCursor;
+
+                if (chosen >= 0 && chosen < itemCount) {
+                    const std::string& act = gameConfig.menuItems[chosen].action;
+                    SoundManager::Get().PlaySe("ui_pause");
+                    if (act == "quit") {
+                        metaWantExit = true;
+                    } else if (act == "continue") {
+                        // 最後に遊んだステージから再開する。記録が無ければセレクトへ送る。
+                        if (!saveData.lastPlayed.empty() && SwitchToStage(saveData.lastPlayed)) {
+                            metaBgmPlaying = ""; // ステージBGMへ切り替わったので追従させる
+                        } else {
+                            currentScene = STAGE_SELECT;
+                            selectCursor = 0;
+                        }
+                    } else { // "stage_select"
+                        currentScene = STAGE_SELECT;
+                        selectCursor = 0;
+                    }
+                }
+            }
+
+            MetaDrawText("[Enter]決定  [↑↓]選択  [Esc]終了", 320.0f, 448.0f, 14,
+                         "center", MetaColor(gameConfig.inkSub), true);
+        }
+        else if (currentScene == STAGE_SELECT) {
+            MetaDrawBackdrop(gameConfig.selectBg);
+            MetaDrawText(gameConfig.heading, gameConfig.headingX, gameConfig.headingY,
+                         gameConfig.headingFontSize, "center",
+                         MetaColor(gameConfig.inkAccent), true);
+
+            int count = (int)gameConfig.stages.size();
+            const GameCfg::Grid& g = gameConfig.grid;
+            int cols = (g.cols > 0) ? g.cols : 3;
+
+            if (count > 0) {
+                if (selectCursor < 0) selectCursor = 0;
+                if (selectCursor >= count) selectCursor = count - 1;
+                if (leftEdge)  { selectCursor = (selectCursor - 1 + count) % count; SoundManager::Get().PlaySe("ui_color_cycle"); }
+                if (rightEdge) { selectCursor = (selectCursor + 1) % count; SoundManager::Get().PlaySe("ui_color_cycle"); }
+                if (upEdge)    { selectCursor = (selectCursor - cols + count * 2) % count; SoundManager::Get().PlaySe("ui_color_cycle"); }
+                if (downEdge)  { selectCursor = (selectCursor + cols) % count; SoundManager::Get().PlaySe("ui_color_cycle"); }
+            }
+
+            int chosen = -1;
+            for (int i = 0; i < count; i++) {
+                const GameCfg::StageEntry& s = gameConfig.stages[i];
+                bool unlocked = GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)i);
+                bool cleared = saveData.IsCleared(s.file);
+
+                float l = g.x + (i % cols) * (g.cellW + g.gapX);
+                float t = g.y + (i / cols) * (g.cellH + g.gapY);
+                int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
+                int x2 = x1 + GameCfg::ToScreenLen(g.cellW), y2 = y1 + GameCfg::ToScreenLen(g.cellH);
+                bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                if (hover) selectCursor = i;
+                bool hot = (selectCursor == i);
+
+                // 枠
+                if (!unlocked)  SetDrawBright(150, 148, 145);
+                else if (hot)   SetDrawBright(255, 255, 255);
+                else            SetDrawBright(214, 209, 202);
+                DrawUiWindow(x1, y1, x2, y2, uiWindowHandle);
+                SetDrawBright(255, 255, 255);
+
+                // サムネイル。用意されていない場合はテーマ色のブロックで代替する
+                // （画像が無いだけでセルが空白になると、何が並んでいるのか分からなくなる）
+                int thumbTop = y1 + GameCfg::ToScreenLen(8.0f);
+                int thumbBot = y1 + GameCfg::ToScreenLen(g.cellH * 0.55f);
+                int thumbL = x1 + GameCfg::ToScreenLen(10.0f);
+                int thumbR = x2 - GameCfg::ToScreenLen(10.0f);
+                int th = unlocked ? MetaImage(s.thumbnail) : -1;
+                if (th >= 0) {
+                    DrawExtendGraph(thumbL, thumbTop, thumbR, thumbBot, th, TRUE);
+                } else {
+                    DrawBox(thumbL, thumbTop, thumbR, thumbBot,
+                            MetaColor(unlocked ? gameConfig.inkAccent : gameConfig.inkSub), TRUE);
+                }
+
+                // 名前と進捗
+                float labelY = t + g.cellH * 0.60f;
+                if (unlocked) {
+                    // セル幅から少し内側(左右6pxずつ)に収める
+                    MetaDrawTextFit(s.name, l + g.cellW * 0.5f, labelY, 15, g.cellW - 12.0f,
+                                    "center", MetaColor(gameConfig.ink), true);
+                    char prog[64];
+                    sprintf_s(prog, sizeof(prog), "%s  %d / %d",
+                              cleared ? "CLEAR" : "- - -",
+                              saveData.BestItems(s.file), s.itemTotal);
+                    MetaDrawText(prog, l + g.cellW * 0.5f, labelY + 22.0f, 13, "center",
+                                 cleared ? MetaColor(gameConfig.inkAccent) : MetaColor(gameConfig.inkSub), true);
+                } else {
+                    MetaDrawTextFit(gameConfig.lockedLabel, l + g.cellW * 0.5f, labelY, 15,
+                                    g.cellW - 12.0f, "center", MetaColor(gameConfig.inkSub), true);
+                }
+
+                if (hover && clickEdge) {
+                    if (unlocked) chosen = i;
+                    else SoundManager::Get().PlaySe("ui_denied"); // 選べない理由が伝わるように音で返す
+                }
+            }
+            if (decideEdge && selectCursor >= 0 && selectCursor < count) {
+                if (GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)selectCursor)) chosen = selectCursor;
+                else SoundManager::Get().PlaySe("ui_denied");
+            }
+
+            // 「もどる」ボタン
+            {
+                float bw = 140.0f, bh = 34.0f;
+                float bl = 320.0f - bw * 0.5f, bt = 418.0f;
+                int x1 = GameCfg::ToScreenX(bl), y1 = GameCfg::ToScreenY(bt);
+                int x2 = x1 + GameCfg::ToScreenLen(bw), y2 = y1 + GameCfg::ToScreenLen(bh);
+                bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                MetaDrawButton(bl, bt, bw, bh, gameConfig.backLabel, 16, hover, true);
+                if ((hover && clickEdge) || cancelEdge) {
+                    SoundManager::Get().PlaySe("ui_pause");
+                    currentScene = TITLE;
+                }
+            }
+
+            if (chosen >= 0 && chosen < count) {
+                SoundManager::Get().PlaySe("ui_pause");
+                if (SwitchToStage(gameConfig.stages[chosen].file)) {
+                    metaBgmPlaying = ""; // ステージBGMへ切り替わったので追従させる
+                }
+            }
+
+            MetaDrawText("[Enter]決定  [方向キー]選択  [BackSpace]もどる", 320.0f, 462.0f, 13,
+                         "center", MetaColor(gameConfig.inkSub), true);
+        }
+
+        mPrevClick = click; mPrevUp = kUp; mPrevDown = kDown;
+        mPrevLeft = kLeft; mPrevRight = kRight;
+        mPrevDecide = kDecide; mPrevCancel = kCancel;
+
+        // 早期continueでメインループ末尾を飛ばすため、ここで自分で締める。
+        // SoundManager::Update は再生し終わったSEのハンドルを回収する処理で、
+        // これを呼ばないとメニュー音を鳴らすたびにハンドルが溜まり続ける。
+        SoundManager::Get().Update();
+
+        ScreenFlip();
+    };
+
     // 最初のステージ初期化
     ResetStage();
 
+    // ResetStage() は内部でステージBGMを鳴らして currentScene を PLAY にするので、
+    // タイトルから始めたい場合はその後で上書きする。
+    // 引数付き起動（エディタからのテストプレイ）ではタイトルを出さない。
+    if (!bootDirectToStage && gameConfig.titleEnabled) {
+        currentScene = TITLE;
+        SoundManager::Get().StopBgm();
+    }
+
     while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
     {
+        // Feature: タイトル画面・ステージセレクト画面 —
+        // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
+        //
+        // 条件式であちこちを潰す方式（currentScene != PLAY && != TITLE && ...）にすると、
+        // 今後シーンを足すたびに全ての判定箇所を直す必要があり、直し忘れが即バグになる。
+        // 先頭で抜けてしまえば、リザルト描画もCanUpdateもそもそも実行されない。
+        //
+        // なお ImGui の NewFrame と Render はどちらもループ末尾側にあるので、
+        // ここで continue すると対で飛ぶ。ScreenFlip と SoundManager::Update は
+        // UpdateAndDrawMetaScene の中で自前で呼んでいる。
+        if (currentScene == TITLE || currentScene == STAGE_SELECT) {
+            UpdateAndDrawMetaScene();
+            if (metaWantExit) break;
+            continue;
+        }
+
         // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
             STAGE_WIDTH = (float)stages[currentStageIdx].map[0].size() * TILE_SIZE;
@@ -4301,7 +4727,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ただしドラッグ中・スケール変更中などの「エディタ操作中」は、操作対象が動くと掴めなくなるので
         // 従来どおり一律停止させる（＝最初の早期returnより後ろで判定する）。
         auto CanUpdate = [&](float ox, float oy, float ow, float oh, float scale, bool isObjPaused, bool ignoresPause = false) {
-            if (currentScene != PLAY || isDragging || isScaling || isScalingHeight || isRotating || isShowingMessage) return false;
+            // 「PLAY以外は全部止める」ではなく、止めたいシーンを明示する。
+            // タイトルやステージセレクトはメインループの先頭で早期continueしており
+            // そもそもここへ来ないが、条件を曖昧にしておくと将来シーンを足したときに
+            // 意図しない場所が止まる/動くという事故につながる。
+            if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY
+                || isDragging || isScaling || isScalingHeight || isRotating || isShowingMessage) return false;
             if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
             if (isStepFrame) return true;
             if (ignoresPause) return true;
@@ -7916,40 +8347,111 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawString(boxX + boxW - 118, boxY + boxH - 26, "[ENTER] to close", UiInkSub());
         }
 
+        // Feature: 進行状況のセーブ — PLAY からクリアへ移った瞬間だけ記録する。
+        // 毎フレーム書くと磨耗するし、代入元ごとに書くと書き漏らす。
+        if (prevSceneForSave == PLAY && currentScene == RESULT_VICTORY) {
+            // 取得数はゲーム内OSDと同じ数え方（isCollected な全アイテム）にそろえる。
+            // コイン専用のカウンタは存在しないので、ここだけコインに絞ると
+            // プレイ中の表示とセレクト画面の表示が食い違う。
+            int gotItems = 0;
+            for (const auto& it : items) { if (it.isCollected) gotItems++; }
+            GameCfg::RecordClear(saveData, currentStageFileName, gotItems);
+            GameCfg::WriteSaveData(saveData);
+            Logger::Info("GameCfg", "RecordClear",
+                "cleared " + currentStageFileName + " items=" + std::to_string(gotItems));
+        }
+        prevSceneForSave = currentScene;
+
         // リザルト画面
-        if (currentScene != PLAY) {
+        //
+        // ボタンは縦積み。横並びにすると日本語ラベル（「つぎのステージへ」等）が入らない。
+        // 矩形は「描画」と「クリック判定」で同じ値を使い回す（PAUSE_BUTTON_* と同じ方針。
+        // 片方だけ動かすと、見た目の端を押しても反応しない領域ができる）。
+        if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY) {
             SetDrawBlendMode(DX_BLENDMODE_ALPHA, 180);
             DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GetColor(0, 0, 0), TRUE);
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-            int btnW = 160, btnH = 50;
-            int btnX = SCREEN_WIDTH / 2 - btnW / 2;
-            int btnY = SCREEN_HEIGHT / 2 + 30;
+            // 「つぎのステージへ」を出せるか判定する。
+            // 今プレイしているステージが game_config.json の一覧の何番目かを探し、
+            // 次のエントリがあり、かつ（今回のクリアを反映済みのセーブで）解放されていること。
+            int curIdx = -1;
+            for (int i = 0; i < (int)gameConfig.stages.size(); i++) {
+                if (gameConfig.stages[i].file == currentStageFileName) { curIdx = i; break; }
+            }
+            bool hasNext = false;
+            int nextIdx = -1;
+            if (currentScene == RESULT_VICTORY && curIdx >= 0 && curIdx + 1 < (int)gameConfig.stages.size()) {
+                nextIdx = curIdx + 1;
+                hasNext = GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)nextIdx);
+            }
 
+            // 出すボタンを上から順に組み立てる（0=つぎへ / 1=もういちど / 2=セレクトへ）
+            struct ResultBtn { const char* label; int kind; };
+            ResultBtn btns[3];
+            int btnCount = 0;
+            if (hasNext) btns[btnCount++] = { gameConfig.nextLabel.c_str(), 0 };
+            btns[btnCount++] = { gameConfig.retryLabel.c_str(), 1 };
+            // タイトル画面を使わない設定のときはセレクトへ戻れても意味が無いので出さない
+            if (gameConfig.titleEnabled && !gameConfig.stages.empty()) {
+                btns[btnCount++] = { gameConfig.selectLabel.c_str(), 2 };
+            }
+
+            const int RESULT_BTN_W = 220, RESULT_BTN_H = 40, RESULT_BTN_GAP = 10;
+            int btnX = SCREEN_WIDTH / 2 - RESULT_BTN_W / 2;
+            int btnTop = SCREEN_HEIGHT / 2 + 6;
+
+            // ゲーム画面は等倍で monitorX/monitorY の位置へ転送されるので、
+            // ウィンドウ座標のマウスを内部解像度側へ寄せてから判定する。
             int relX = isEditMode ? (mx - monitorX) : mx;
             int relY = isEditMode ? (my - monitorY) : my;
-            bool isHover = (relX >= btnX && relX <= btnX + btnW && relY >= btnY && relY <= btnY + btnH);
 
-            if (currentLeftClick && !prevLeftClick && isHover) {
-                ResetStage();
-            }
-
-            SetFontSize(48);
-            if (currentScene == RESULT_GAMEOVER) {
-                DrawString(SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 - 50, "GAME OVER", GetColor(255, 50, 50));
-            }
-            else {
-                DrawString(SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 - 50, "VICTORY!", GetColor(255, 255, 50));
+            // 見出し
+            SetFontSize(40);
+            {
+                const std::string& head = (currentScene == RESULT_GAMEOVER)
+                                        ? gameConfig.gameoverText : gameConfig.victoryText;
+                int hw = GetDrawStringWidth(head.c_str(), (int)head.size());
+                DrawString(SCREEN_WIDTH / 2 - hw / 2, SCREEN_HEIGHT / 2 - 76, head.c_str(),
+                           (currentScene == RESULT_GAMEOVER) ? GetColor(255, 90, 90) : GetColor(255, 235, 80));
             }
             SetFontSize(16);
 
-            // UI素材化 — RETRYボタンも UIウィンドウ.png の枠で描く。
-            // ホバー中は輝度を上げて「押せる」ことを示す（枠の絵は1枚しか無いため色味で差をつける）。
-            if (isHover) SetDrawBright(255, 255, 255);
-            else         SetDrawBright(205, 200, 194);
-            DrawUiWindow(btnX, btnY, btnX + btnW, btnY + btnH, uiWindowHandle);
-            SetDrawBright(255, 255, 255);
-            DrawString(btnX + 58, btnY + 18, "RETRY", isHover ? UiInkAccent() : UiInk());
+            // クリア時はそのステージの取得数も出す（セレクト画面の表示と同じ数え方）
+            if (currentScene == RESULT_VICTORY && curIdx >= 0) {
+                char prog[64];
+                sprintf_s(prog, sizeof(prog), "ITEM  %d / %d",
+                          saveData.BestItems(currentStageFileName), gameConfig.stages[curIdx].itemTotal);
+                int pw2 = GetDrawStringWidth(prog, (int)strlen(prog));
+                DrawString(SCREEN_WIDTH / 2 - pw2 / 2, SCREEN_HEIGHT / 2 - 26, prog, GetColor(230, 230, 230));
+            }
+
+            for (int i = 0; i < btnCount; i++) {
+                int y1 = btnTop + i * (RESULT_BTN_H + RESULT_BTN_GAP);
+                int y2 = y1 + RESULT_BTN_H;
+                bool isHover = (relX >= btnX && relX <= btnX + RESULT_BTN_W && relY >= y1 && relY <= y2);
+
+                if (isHover) SetDrawBright(255, 255, 255);
+                else         SetDrawBright(205, 200, 194);
+                DrawUiWindow(btnX, y1, btnX + RESULT_BTN_W, y2, uiWindowHandle);
+                SetDrawBright(255, 255, 255);
+                int lw = GetDrawStringWidth(btns[i].label, (int)strlen(btns[i].label));
+                DrawString(btnX + RESULT_BTN_W / 2 - lw / 2, y1 + RESULT_BTN_H / 2 - 8,
+                           btns[i].label, isHover ? UiInkAccent() : UiInk());
+
+                if (currentLeftClick && !prevLeftClick && isHover) {
+                    if (btns[i].kind == 0 && nextIdx >= 0) {
+                        SwitchToStage(gameConfig.stages[nextIdx].file); // 中で ResetStage が呼ばれ PLAY へ戻る
+                    } else if (btns[i].kind == 1) {
+                        ResetStage();
+                    } else {
+                        // セレクトへ戻る。ResetStage は呼ばない（次に選んだときに走る）
+                        currentScene = STAGE_SELECT;
+                        SoundManager::Get().StopBgm();
+                    }
+                    break; // このフレームで複数のボタンに反応させない
+                }
+            }
         }
 
         // --- 最終ワークスペースレイアウト出力 ---
