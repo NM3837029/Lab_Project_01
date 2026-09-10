@@ -1,0 +1,48 @@
+# ============================================================
+# Lab_Project_01 の .gitignore
+#
+# これまで .gitignore が無く、ビルド成果物と実行時に生成されるファイルが
+# 全てリポジトリに追跡されていた（ビルドや起動のたびに git status が
+# 差分だらけになり、本当のソース変更が埋もれていた）。
+#
+# 注意: *.exe のようなブランケット指定はしないこと。
+# DxLib_VC/Tool/ 配下に DxaEncode.exe 等の配布ツールが12本追跡されており、
+# まとめて無視すると意図せず追跡から外れる。必ずパスを限定する。
+# ============================================================
+
+# ---- C++ のビルド成果物 ----
+# OutDir（exe/pdb の出力先）
+/x64/
+/Debug/
+/Release/
+# IntDir（obj/ilk/tlog の出力先）。プロジェクト名のサブフォルダ側にあり見落としやすい
+/Lab_Project_01/x64/
+/Lab_Project_01/Debug/
+/Lab_Project_01/Release/
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.iobj
+*.ipdb
+*.tlog
+*.vcxproj.user
+
+# ---- .NET (Lab_Editor) のビルド成果物 ----
+Lab_Editor/**/bin/
+Lab_Editor/**/obj/
+
+# ---- 実行時に生成されるファイル ----
+# ゲームを起動するだけで書き換わるため、追跡していると常に差分が出る
+/logs/
+/Log.txt
+/imgui.ini
+# エディタの「ここからプレイ」が書き出す一時ステージ
+/assets/stages/_test_play.json
+
+# ---- 配布物 ----
+/dist/
+
+# ---- 作業用 ----
+/scratch/
+/recovered.txt
