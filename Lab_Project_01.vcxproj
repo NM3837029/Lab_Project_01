@@ -113,6 +113,10 @@
            ソース側の判定はBOM任せで問題ない。 -->
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
       <WarningLevel>Level3</WarningLevel>
+      <!-- 【重要】Optimization を明示しないと MSBuild は /O 系フラグを一切渡さず、
+           cl の既定である /Od（最適化なし）になる。つまり指定を省くと
+           「Release構成なのに Debug と同じ速度」という状態になるため必ず書く。 -->
+      <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
@@ -172,6 +176,10 @@
            ソース側の判定はBOM任せで問題ない。 -->
       <AdditionalOptions>/execution-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
       <WarningLevel>Level3</WarningLevel>
+      <!-- 【重要】Optimization を明示しないと MSBuild は /O 系フラグを一切渡さず、
+           cl の既定である /Od（最適化なし）になる。つまり指定を省くと
+           「Release構成なのに Debug と同じ速度」という状態になるため必ず書く。 -->
+      <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
