@@ -123,7 +123,17 @@ partial class Form1
         // 「プレイ」メニュー：テストプレイ開始（F5ショートカット付き）
         var menuPlay = new System.Windows.Forms.ToolStripMenuItem("プレイ(&P)");
         var miPlay = new System.Windows.Forms.ToolStripMenuItem("テストプレイ", null, btnPlay_Click) { ShortcutKeys = System.Windows.Forms.Keys.F5 };
-        menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay });
+        // タイトル画面から起動する入口。引数を渡さないとゲーム側がタイトルを出す仕組みなので、
+        // これが無いとタイトル/ステージセレクトをエディタから確認できない。
+        var miPlayTitle = new System.Windows.Forms.ToolStripMenuItem("タイトル画面から起動", null, btnPlayFromTitle_Click) { ShortcutKeys = System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.F5 };
+        menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay, miPlayTitle });
+
+        // 「ゲーム設定」メニュー：タイトル画面の内容・レイアウトとステージ一覧を編集する。
+        // タイトルやステージ一覧は「アセット」とは概念が違うので、アセット管理の下ではなく
+        // 独立したトップレベルメニューにしてある（見つけやすさのため）。
+        var menuGame = new System.Windows.Forms.ToolStripMenuItem("ゲーム設定(&G)");
+        var miGameConfig = new System.Windows.Forms.ToolStripMenuItem("タイトル画面・ステージ一覧", null, btnGameConfig_Click);
+        menuGame.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miGameConfig });
 
         // Feature: UI改善（提案書 MW-2）— 詰まったときに参照できる使い方ガイドをメニューから開けるようにする
         var menuHelp = new System.Windows.Forms.ToolStripMenuItem("ヘルプ(&H)");
@@ -131,7 +141,7 @@ partial class Form1
         menuHelp.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miHelp });
 
         // 組み立てた各メニューをメニューバーへ登録する。
-        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuPlay, menuHelp });
+        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuGame, menuPlay, menuHelp });
 
         // ===== ツールバー =====
         toolStrip1 = new System.Windows.Forms.ToolStrip();
