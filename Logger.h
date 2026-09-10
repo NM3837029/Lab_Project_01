@@ -5,12 +5,62 @@
 #include <iomanip>
 #include <sstream>
 #include <direct.h>
+#include <windows.h>  // CreateDirectoryW（ログ出力先の作成に使う）
+#include <cstdlib>    // _wdupenv_s（%LOCALAPPDATA% の取得に使う）
 
 // ゲーム全体で共通して使うログ出力クラス。
 // エラー情報や実行情報を "logs/error.log" というテキストファイルに
 // 追記していくだけのシンプルな仕組みで、すべてstatic関数として提供しているため
 // インスタンス化せずに Logger::Error(...) のようにどこからでも呼び出せる。
 class Logger {
+public:
+    // ログファイルのフルパスを返す。初回呼び出し時に一度だけ決定してキャッシュする。
+    //
+    // 【なぜ場所を切り替えるのか】
+    // 従来はカレントディレクトリ直下の "logs/error.log" 固定だった。
+    // 開発中はそれで良いが、配布版が Program Files 配下などにインストールされると
+    // 書き込み権限が無く、ofstream が黙って失敗してログが1行も残らなくなる
+    // （元の実装は is_open() が false なら何もせず return するため、失敗にも気づけない）。
+    //
+    // 【なぜ NDEBUG で分けないのか】
+    // 「Release版だけ %LOCALAPPDATA% へ」とすると、Releaseビルドを手元でデバッグしたい
+    // ときにログが見えなくなる。ビルド構成ではなく「実際に書き込めるかどうか」で
+    // 決めるのが正しい。開発時は今までどおり logs/error.log に出る。
+    static const std::wstring& LogFilePath() {
+        static std::wstring cached = ResolveLogFilePath();
+        return cached;
+    }
+
+private:
+    // 書き込み先を実際に試して決める（LogFilePath から一度だけ呼ばれる）。
+    static std::wstring ResolveLogFilePath() {
+        // まずは従来どおりカレントディレクトリ直下の logs/ を試す。
+        CreateDirectoryW(L"logs", NULL);
+        {
+            std::wstring local = L"logs\\error.log";
+            std::ofstream probe(local.c_str(), std::ios::app);
+            if (probe.is_open()) return local;
+        }
+
+        // 書けなかった（インストール先が読み取り専用など）。
+        // ユーザーごとの書き込み可能フォルダへ逃がす。
+        wchar_t* base = nullptr;
+        size_t len = 0;
+        if (_wdupenv_s(&base, &len, L"LOCALAPPDATA") == 0 && base != nullptr) {
+            std::wstring dir(base);
+            free(base);
+            if (!dir.empty()) {
+                dir += L"\\LabProject01";
+                CreateDirectoryW(dir.c_str(), NULL);
+                dir += L"\\logs";
+                CreateDirectoryW(dir.c_str(), NULL);
+                return dir + L"\\error.log";
+            }
+        }
+        // どちらも駄目なら従来のパスを返す（開けなければ各関数が黙って諦める）。
+        return L"logs\\error.log";
+    }
+
 public:
     // エラー内容をログファイルに記録する関数。
     // className : エラーが発生したクラス名（呼び出し元を特定するために記録する）
@@ -19,11 +69,11 @@ public:
     // fileName  : 関連するファイル名（省略可。指定があればログに追記する）
     // stageName : 関連するステージ名（省略可。指定があればログに追記する）
     static void Error(const std::string& className, const std::string& funcName, const std::string& message, const std::string& fileName = "", const std::string& stageName = "") {
-        // logs フォルダがまだ存在しない場合に備えて、書き込み前に必ず作成しておく。
-        // 既に存在する場合でも _mkdir はエラーを返すだけで問題は起きない。
-        _mkdir("logs");
         // ログファイルを「追記モード」で開く。上書きせず既存のログの下に書き足していく。
-        std::ofstream out("logs/error.log", std::ios::app);
+        // 出力先は LogFilePath() が「書き込める場所」を選んで返す（初回のみ判定）。
+        // ワイド文字のパスを渡しているのは、%LOCALAPPDATA% がユーザー名を含み、
+        // それが日本語だった場合にナロー文字列では正しく開けないため。
+        std::ofstream out(LogFilePath().c_str(), std::ios::app);
         // ファイルを開けなかった場合（アクセス権限がない等）は何もせず処理を終える。
         if (!out.is_open()) return;
 
@@ -60,10 +110,8 @@ public:
     // funcName  : ログを出力した関数名
     // message   : 記録したい内容
     static void Info(const std::string& className, const std::string& funcName, const std::string& message) {
-        // Error と同様に、logs フォルダが無ければ作成しておく。
-        _mkdir("logs");
-        // 追記モードでログファイルを開く。
-        std::ofstream out("logs/error.log", std::ios::app);
+        // 追記モードでログファイルを開く（出力先の決め方は Error 側のコメントを参照）。
+        std::ofstream out(LogFilePath().c_str(), std::ios::app);
         // ファイルを開けなければ何もせず終了する。
         if (!out.is_open()) return;
 

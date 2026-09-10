@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include "json.hpp"
 #include "Logger.h"
+#include "GamePaths.h"
 #include <exception>
 
 #include "imgui.h"
@@ -2202,6 +2203,19 @@ bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, 
 // このファイルで最も大きな関数。
 int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ int n)
 {
+    // ★最初にやること: カレントディレクトリをゲームデータ(assets/ img/ sound/ se/)の
+    // 置き場所へ移す。
+    //
+    // このゲームはアセットを全てCWDからの相対パスで参照している（約67箇所）。
+    // exeの出力先は x64\Debug\ でアセットはリポジトリのルート直下という別階層なので、
+    // これを行わないと exe をダブルクリックしても何も読み込めない。
+    // これまで動いていたのは Lab_Editor が WorkingDirectory を指定して
+    // 起動していたからにすぎず、ゲーム単体では配布できない状態だった。
+    //
+    // ログ出力(Logger)より前に呼ぶ。そうしないと set_terminate ハンドラ内のログが
+    // 移動前の場所へ書かれてしまう。
+    bool gameRootFound = GamePaths::ResolveAndSetGameRoot();
+
     // 未処理の例外でstd::terminateが呼ばれた場合のハンドラを登録しておく。
     // 何も対処しないとプログラムが無言で落ちてしまい原因調査が困難なため、
     // 例外の内容（何のエラーだったか）を可能な限りログファイルに書き残してからabortする。
@@ -2220,6 +2234,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     });
 
     Logger::Info("System", "WinMain", "[Init] WinMain Begin");
+
+    // ゲームデータが見つからなかった場合は、ここで理由を伝えて終了する。
+    // 黙って真っ白な画面が出て終わるのが配布版で最も困る失敗の仕方なので、
+    // 「何が足りないのか」と「どうすれば直るのか」をその場で見せる。
+    if (!gameRootFound) {
+        Logger::Error("System", "WinMain", "Game data (assets folder) not found near the executable");
+        MessageBoxW(NULL,
+            L"ゲームデータ(assetsフォルダ)が見つかりませんでした。\n\n"
+            L"zipを展開したフォルダの中身を移動していないか確認してください。\n"
+            L"実行ファイルと同じ場所に assets / img / sound / se フォルダが必要です。",
+            L"Lab Project 01", MB_OK | MB_ICONERROR);
+        return -1;
+    }
+
+    // DxLibが自動生成する Log.txt を作らない（DxLib_Initより前でのみ有効）。
+    // カレントディレクトリ直下に毎回書き出されるため、追跡していると差分が出続けるうえ、
+    // 配布版ではインストール先へ書き込むことになる。DxLib自体の診断が要る場面は稀。
+    SetOutApplicationLogValidFlag(FALSE);
 
     // DxLibへ渡す文字列の扱いをUTF-8にする（DxLib_Initより前に呼ぶ必要がある）。
     // 既定はShift-JIS解釈のため、assets/*.json（UTF-8）由来の日本語をDrawStringへ渡すと
@@ -2253,8 +2285,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // ウィンドウ同士をドッキング（連結）できるようにする
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // マルチビューポートを有効化（UIを独立したOSウィンドウにできる）
-    // 日本語（メイリオ）フォントを読み込み、日本語グリフ範囲を指定してUI上で日本語表示できるようにする
-    io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese());
+    // imgui.ini を書き出さない。カレントディレクトリ直下に毎回生成されるため、
+    // 追跡していると差分が出続けるうえ、配布版ではインストール先へ書き込むことになる。
+    // ImGuiのUIは現状ほぼ使われていないので、ウィンドウ配置を保存する価値もない。
+    io.IniFilename = nullptr;
+    // 日本語（メイリオ）フォントを読み込み、日本語グリフ範囲を指定してUI上で日本語表示できるようにする。
+    // メイリオが無い環境（システムドライブがC:でない等）でも落ちないよう戻り値を確認する。
+    // 読めなかった場合はImGuiの既定フォント（英数のみ）になるだけで、ゲーム本体には影響しない。
+    if (io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese()) == nullptr) {
+        Logger::Info("System", "WinMain", "[Init] meiryo.ttc not available; ImGui falls back to the default font");
+    }
 
     ImGui::StyleColorsDark(); // UIの配色をダークテーマにする
 
