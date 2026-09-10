@@ -61,6 +61,25 @@ struct ScriptActor {
     int partIndex = 0;                    // 親のparts[]内インデックス（同一スクリプトを複数パーツで共有し、
                                            // パーツごとに異なる位相をつけるためのPartIndexレポーターに使う）
 
+    // Feature: 編集リアクション — プレイヤーが編集ツールでこのアクターに加えた変化。
+    // 呼び出し側(DrawPixel.cpp)が毎フレーム EditReaction から詰める。
+    // ポインタではなく値で持つのは、このヘッダを Enemy/Gimmick の型から独立させておくため。
+    // これらを読めることで、スクリプトで組んだ敵やギミックも
+    // 「拡大されたら舌を長くする」「傾けられた向きへ伸ばす」といった反応を自前で書けるようになる。
+    float editScaleRatio = 1.0f; // 配置時に対する現在の大きさの倍率
+    float editTilt       = 0.0f; // 配置時からの傾き（ラジアン、(-PI,PI]に正規化済み）
+    float editSpeedRatio = 1.0f; // 速度倍率
+    bool  editFlipped    = false; // 向きを反転されたか
+    bool  editPaused     = false; // 個別に一時停止されているか
+    bool  editRewinding  = false; // 個別に巻き戻し中か
+
+    // 画面エフェクト系の編集ツールの現在値。「暗いときだけ動く」「赤フィルタ中は止まる」など、
+    // 画面側の操作に反応するスクリプトを書けるようにする。
+    int   screenColorFilter = 0;    // 0=なし, 1=赤, 2=緑, 3=青
+    float screenBrightness  = 1.0f; // 1.0が通常
+    float screenZoom        = 1.0f; // 1.0が通常
+    bool  isFastForwardNow  = false;
+
     // 環境依存のグローバル呼び出し（弾生成・SE再生・画面演出）はコールバックとして注入する
     std::function<void(float angleRad, float speed, float damage)> shoot;         // 弾を発射する処理（角度[ラジアン]・速度・ダメージ量を渡す）
     std::function<void(const std::string& slot)> playSound;                       // 効果音を再生する処理（再生するスロット名を渡す）
@@ -292,6 +311,19 @@ private:
         if (op == "ParentY") return actor.parentY;                                // 親(複合体本体)のY座標を返す
         if (op == "ParentDirection") return actor.parentDirection;                // 親の向き(+1=右向き/-1=左向き)を返す
         if (op == "PartIndex") return (float)actor.partIndex;                     // 親のparts[]内での自分のインデックスを返す
+
+        // Feature: 編集リアクション — プレイヤーの編集内容をスクリプトから読むためのレポーター群。
+        // これを使うと、C++を一切書き換えずにJSONだけで
+        // 「編集されたらこう変わる」という敵・ギミックを新しく作れる。
+        if (op == "SelfScale")         return actor.scale ? *actor.scale : 1.0f;   // 自分の現在の大きさ
+        if (op == "SelfAngle")         return actor.angle ? *actor.angle : 0.0f;   // 自分の現在の角度
+        if (op == "EditScaleRatio")    return actor.editScaleRatio;                // 配置時に対する大きさの倍率
+        if (op == "EditTilt")          return actor.editTilt;                      // 配置時からの傾き(ラジアン)
+        if (op == "EditSpeedRatio")    return actor.editSpeedRatio;                // 速度倍率
+        if (op == "ScreenColorFilter") return (float)actor.screenColorFilter;      // 色フィルタ番号
+        if (op == "ScreenBrightness")  return actor.screenBrightness;              // 画面の明るさ
+        if (op == "ScreenZoom")        return actor.screenZoom;                    // 画面のズーム倍率
+
         return 0.0f; // 未知のop（将来の拡張やタイプミス）は0.0fを返す
     }
 
@@ -312,6 +344,16 @@ private:
         // 向いている方向側の壁/地面判定を返す（direction: 0=右向き, 1=左向き）
         if (op == "IsWallAhead") return (actor.direction && *actor.direction == 1) ? actor.wallAheadLeft : actor.wallAheadRight;
         if (op == "IsGroundAhead") return (actor.direction && *actor.direction == 1) ? actor.groundAheadLeft : actor.groundAheadRight;
+
+        // Feature: 編集リアクション — 編集されたかどうかを条件分岐に使うためのレポーター群
+        if (op == "EditFlipped")   return actor.editFlipped;    // 向きを反転されたか
+        if (op == "EditPaused")    return actor.editPaused;     // 個別に一時停止されているか
+        if (op == "EditRewinding") return actor.editRewinding;  // 個別に巻き戻し中か
+        if (op == "EditEnlarged")  return actor.editScaleRatio > 1.15f; // 拡大されたか
+        if (op == "EditShrunk")    return actor.editScaleRatio < 0.85f; // 縮小されたか
+        if (op == "EditTilted")    return actor.editTilt > 0.20f || actor.editTilt < -0.20f; // 傾けられたか
+        if (op == "IsFastForward") return actor.isFastForwardNow; // 早送り中か
+
         return false; // 未知のop（将来の拡張やタイプミス）はfalseを返す
     }
 

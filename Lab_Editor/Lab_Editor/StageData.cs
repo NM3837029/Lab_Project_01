@@ -841,6 +841,12 @@ public class EnemyDef
     // BlockCanvasControlで組み立てたビジュアルスクリプト（ブロックの木構造）をJSON化して保持する。
     public JArray script { get; set; } = new JArray();
 
+    // Feature: 編集リアクションのJSON宣言 — 「ゲーム中に編集されたらどう変わるか」を
+    // C++を書き換えずJSONだけで組むためのブロック（C++側 DrawPixel.cpp の EnemyDef.editReactions と対応）。
+    // 中身の構造はC++側でしか解釈しないので、ここでは JObject のまま素通しして保存し直せるようにしておく。
+    // 【重要】このプロパティが無いと、エディタで開いて保存した瞬間に edit_reactions が黙って消える。
+    public JObject edit_reactions { get; set; } = new JObject();
+
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1体の敵を複数の画像パーツの組み合わせで構成したい場合のパーツ一覧（空なら単一画像のまま）。
     public List<PartDef> parts { get; set; } = new();
@@ -897,6 +903,9 @@ public class GimmickDef
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==24(GIMMICK_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();
+
+    // Feature: 編集リアクションのJSON宣言（詳細はEnemyDefの同名プロパティのコメント参照）
+    public JObject edit_reactions { get; set; } = new JObject();
 
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1つのギミックを複数の画像パーツの組み合わせで構成したい場合のパーツ一覧。

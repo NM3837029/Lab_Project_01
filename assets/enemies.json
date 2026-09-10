@@ -1139,11 +1139,20 @@
                   {
                     "op": "IfElse",
                     "cond": {
-                      "op": "Lt",
+                      "op": "And",
                       "a": {
-                        "op": "DistanceToPlayer"
+                        "op": "Lt",
+                        "a": {
+                          "op": "DistanceToPlayer"
+                        },
+                        "b": 170.0
                       },
-                      "b": 170.0
+                      "b": {
+                        "op": "Not",
+                        "a": {
+                          "op": "EditFlipped"
+                        }
+                      }
                     },
                     "body": [
                       {
@@ -1159,7 +1168,13 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": 58.0
+                          "b": {
+                            "op": "Mul",
+                            "a": 58.0,
+                            "b": {
+                              "op": "EditScaleRatio"
+                            }
+                          }
                         },
                         "body": [
                           {
@@ -1170,7 +1185,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1220,7 +1241,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1295,11 +1322,20 @@
                   {
                     "op": "IfElse",
                     "cond": {
-                      "op": "Lt",
+                      "op": "And",
                       "a": {
-                        "op": "DistanceToPlayer"
+                        "op": "Lt",
+                        "a": {
+                          "op": "DistanceToPlayer"
+                        },
+                        "b": 170.0
                       },
-                      "b": 170.0
+                      "b": {
+                        "op": "Not",
+                        "a": {
+                          "op": "EditFlipped"
+                        }
+                      }
                     },
                     "body": [
                       {
@@ -1315,7 +1351,13 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": 58.0
+                          "b": {
+                            "op": "Mul",
+                            "a": 58.0,
+                            "b": {
+                              "op": "EditScaleRatio"
+                            }
+                          }
                         },
                         "body": [
                           {
@@ -1326,7 +1368,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1376,7 +1424,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1451,11 +1505,20 @@
                   {
                     "op": "IfElse",
                     "cond": {
-                      "op": "Lt",
+                      "op": "And",
                       "a": {
-                        "op": "DistanceToPlayer"
+                        "op": "Lt",
+                        "a": {
+                          "op": "DistanceToPlayer"
+                        },
+                        "b": 170.0
                       },
-                      "b": 170.0
+                      "b": {
+                        "op": "Not",
+                        "a": {
+                          "op": "EditFlipped"
+                        }
+                      }
                     },
                     "body": [
                       {
@@ -1471,7 +1534,13 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": 58.0
+                          "b": {
+                            "op": "Mul",
+                            "a": 58.0,
+                            "b": {
+                              "op": "EditScaleRatio"
+                            }
+                          }
                         },
                         "body": [
                           {
@@ -1482,7 +1551,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1532,7 +1607,13 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "DirectionToPlayer"
+                              "op": "Add",
+                              "a": {
+                                "op": "DirectionToPlayer"
+                              },
+                              "b": {
+                                "op": "EditTilt"
+                              }
                             },
                             "radius": {
                               "op": "Mul",
@@ -1583,5 +1664,272 @@
         ]
       }
     ]
+  },
+  {
+    "id": "enemy_pyon",
+    "name": "ぴょん（定期ジャンプ）",
+    "type_enum": 1,
+    "hp": 2,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/普通の敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "scale": 1.0,
+    "actionInterval": 80.0,
+    "jumpPowerMult": 0.8,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_kotei_hou",
+    "name": "固定砲（全方位狙い撃ち）",
+    "type_enum": 2,
+    "hp": 3,
+    "width": 36,
+    "height": 36,
+    "sprite": "img/砲台.png",
+    "seSpawn": "",
+    "seAttack": "se_shoot",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 36,
+    "hitboxHeight": 36,
+    "scale": 1.0,
+    "actionInterval": 115.0,
+    "projectileSpeed": 0.6,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_sakuteki",
+    "name": "サーチャー（索敵して撃つ）",
+    "type_enum": 3,
+    "hp": 3,
+    "width": 34,
+    "height": 34,
+    "sprite": "img/機械的な敵.png",
+    "seSpawn": "",
+    "seAttack": "se_shoot_alt",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 34,
+    "hitboxHeight": 34,
+    "scale": 1.0,
+    "moveSpeed": 0.45,
+    "triggerRange": 300.0,
+    "projectileSpeed": 0.5,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_aruki",
+    "name": "あるき（歩いて詰めてくる）",
+    "type_enum": 4,
+    "hp": 2,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/普通の敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "scale": 1.0,
+    "moveSpeed": 0.4,
+    "triggerRange": 280.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_oikake",
+    "name": "おいかけ（壁を跳び越えて追う）",
+    "type_enum": 5,
+    "hp": 3,
+    "width": 34,
+    "height": 34,
+    "sprite": "img/ハニカムな敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_split_01",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 34,
+    "hitboxHeight": 34,
+    "scale": 1.0,
+    "moveSpeed": 0.55,
+    "triggerRange": 340.0,
+    "jumpPowerMult": 0.85,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_totsushin",
+    "name": "とっしん（溜めて突進）",
+    "type_enum": 6,
+    "hp": 4,
+    "width": 40,
+    "height": 40,
+    "sprite": "img/ドッスン.png",
+    "seSpawn": "",
+    "seAttack": "se_dossun",
+    "seDamage": "",
+    "seDeath": "se_dossun",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 40,
+    "hitboxHeight": 40,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "triggerRange": 260.0,
+    "chargeTime": 30.0,
+    "dashSpeedMult": 1.5,
+    "dashDuration": 40.0,
+    "cooldownTime": 70.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_tobi",
+    "name": "とび（近くへ瞬間移動）",
+    "type_enum": 11,
+    "hp": 2,
+    "width": 34,
+    "height": 34,
+    "sprite": "img/幽霊のような敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 34,
+    "hitboxHeight": 34,
+    "scale": 1.0,
+    "actionInterval": 170.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_tate",
+    "name": "たて（周期的に無敵になる）",
+    "type_enum": 13,
+    "hp": 3,
+    "width": 38,
+    "height": 38,
+    "sprite": "img/幾何学的な敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_shield_crack",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 38,
+    "hitboxHeight": 38,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "triggerRange": 300.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_tempo",
+    "name": "テンポ（速さが乱れる）",
+    "type_enum": 16,
+    "hp": 3,
+    "width": 34,
+    "height": 34,
+    "sprite": "img/機械的な敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 34,
+    "hitboxHeight": 34,
+    "scale": 1.0,
+    "moveSpeed": 0.4,
+    "triggerRange": 300.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_kurayami",
+    "name": "くらやみ（画面を暗くする）",
+    "type_enum": 17,
+    "hp": 3,
+    "width": 36,
+    "height": 36,
+    "sprite": "img/幽霊のような敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 36,
+    "hitboxHeight": 36,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "triggerRange": 300.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_irozome",
+    "name": "いろぞめ（画面を染める）",
+    "type_enum": 18,
+    "hp": 3,
+    "width": 40,
+    "height": 40,
+    "sprite": "img/太陽のような敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 40,
+    "hitboxHeight": 40,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "triggerRange": 300.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "enemy_yugami",
+    "name": "ゆがみ（画面を歪ませる）",
+    "type_enum": 19,
+    "hp": 3,
+    "width": 38,
+    "height": 38,
+    "sprite": "img/幾何学的な敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "se_split_02",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 38,
+    "hitboxHeight": 38,
+    "scale": 1.0,
+    "script": [],
+    "parts": []
   }
 ]
