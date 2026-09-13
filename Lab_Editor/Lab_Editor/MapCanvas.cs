@@ -137,14 +137,27 @@ public class MapCanvas : Panel
             _tileMeta[t.id] = (t.collidable, t.deadly);
 
             // 画像の読み込み（スプライトパスが指定されている場合のみ）。
-            if (!string.IsNullOrEmpty(t.sprite) && !string.IsNullOrEmpty(AssetsPath))
+            if (!string.IsNullOrEmpty(t.sprite))
             {
-                string imgPath = System.IO.Path.Combine(AssetsPath, t.sprite);
+                // 【重要】tiles.json の sprite は "img/xxx.png" のようにプロジェクトルート起点で書かれている。
+                // 以前は assets/ フォルダとだけ結合していたため、常に存在しない
+                // "assets/img/xxx.png" を探しに行き、エディタ上でタイル画像が一切表示されなかった
+                // （ゲーム本体側の DrawPixel.cpp にも同じ二重プレフィックスのバグがあった）。
+                // ルート起点を優先し、見つからない場合だけ従来どおり assets/ 配下も探す。
+                string imgPath = System.IO.Path.Combine(AppPaths.ProjectRoot, t.sprite);
+                if (!System.IO.File.Exists(imgPath) && !string.IsNullOrEmpty(AssetsPath))
+                {
+                    imgPath = System.IO.Path.Combine(AssetsPath, t.sprite);
+                }
                 if (System.IO.File.Exists(imgPath))
                 {
                     try
                     {
-                        _tileImages[t.id] = Image.FromFile(imgPath);
+                        // Image.FromFile はファイルを掴んだままにするため、
+                        // 別プロセス（ゲーム本体）が同じ画像を読めなくなる可能性がある。
+                        // 一旦メモリへ読み切ってからBitmap化することでファイルロックを残さない。
+                        using var fs = new System.IO.FileStream(imgPath, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                        _tileImages[t.id] = new Bitmap(Image.FromStream(fs));
                     }
                     catch
                     {

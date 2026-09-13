@@ -3,458 +3,53 @@
     "id": "gimmick_checkpoint",
     "name": "チェックポイント",
     "type_enum": 25,
-    "sprite": "",
-    "seActivate": "",
+    "sprite": "img/チェックポイント.png",
+    "seActivate": "se_item_power",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 32,
-    "hitboxHeight": 64
+    "hitboxHeight": 64,
+    "script": [],
+    "parts": []
   },
   {
-    "id": "gim_portal",
-    "name": "ポータル",
+    "id": "gim_warp_gate",
+    "name": "ワープゲート",
     "type_enum": 0,
-    "sprite": "img/393_20260616195548.png",
+    "sprite": "img/ワープゲート.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 32,
     "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "warpOffsetPx": 40.0,
     "script": [],
     "parts": []
   },
   {
     "id": "gim_bridge",
-    "name": "回転する橋",
+    "name": "回転する足場",
     "type_enum": 1,
-    "sprite": "img/377_20260604152421.png",
-    "seActivate": "",
-    "hitboxOffsetX": 121,
-    "hitboxOffsetY": 332,
-    "hitboxWidth": 590,
-    "hitboxHeight": 84,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_spikes",
-    "name": "Deadly Spikes",
-    "type_enum": 9,
-    "sprite": "img/376_20260616193402.png",
+    "sprite": "img/床青.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_breakable",
-    "name": "Breakable Block",
-    "type_enum": 3,
-    "sprite": "img/block/406_20260630163637.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_chikuwa",
-    "name": "Chikuwa Block",
-    "type_enum": 11,
-    "sprite": "img/tuti.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": 75.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": 120.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "hitboxWidth": 120,
+    "hitboxHeight": 16,
+    "rotationSpeed": 0.01,
     "script": [],
     "parts": []
   },
   {
     "id": "gim_manual_bridge",
-    "name": "手動で回転可能な橋",
+    "name": "手動回転の足場",
     "type_enum": 2,
-    "sprite": "img/block/406_20260630163637.png",
+    "sprite": "img/床青.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 120,
     "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_falling_lift",
-    "name": "砂時計リフト",
-    "type_enum": 4,
-    "sprite": "img/yuka.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 80,
-    "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_mirror",
-    "name": "反射ミラー",
-    "type_enum": 5,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 80,
-    "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_weight_switch",
-    "name": "重量スイッチ",
-    "type_enum": 6,
-    "sprite": "img/block/376_20260630162057.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 120,
-    "hitboxHeight": 10,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": 120.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_scalable_box",
-    "name": "拡大可能ボックス",
-    "type_enum": 7,
-    "sprite": "img/block/376_20260630162607.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 50,
-    "hitboxHeight": 50,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_gate_door",
-    "name": "ゲート扉",
-    "type_enum": 8,
-    "sprite": "img/block/376_20260628175346.png",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 160,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_scalable_ground",
-    "name": "サイズ変更可能な地面",
-    "type_enum": 10,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 128,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_time_field",
-    "name": "反・一時停止装置",
-    "type_enum": 12,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 64,
-    "hitboxHeight": 64,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_chomper",
-    "name": "敵食いギミック",
-    "type_enum": 13,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
     "script": [],
     "parts": []
   },
@@ -462,95 +57,14 @@
     "id": "gim_moving_platform",
     "name": "動く足場",
     "type_enum": 14,
-    "sprite": "",
+    "sprite": "img/床青.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 96,
     "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_pushable_rock",
-    "name": "岩",
-    "type_enum": 15,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 48,
-    "hitboxHeight": 48,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_ff_gate",
-    "name": "早送りゲート",
-    "type_enum": 16,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 160,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "travelDistance": 96.0,
+    "oscillationSpeed": 0.02,
     "script": [],
     "parts": []
   },
@@ -558,31 +72,300 @@
     "id": "gim_framestep_lift",
     "name": "コマ送りリフト",
     "type_enum": 17,
-    "sprite": "",
+    "sprite": "img/床青.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 80,
     "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "travelDistance": -160.0,
+    "stepIncrement": 0.2,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_stepup_lift",
+    "name": "コマ送り昇降リフト（1コマ1段）",
+    "type_enum": 17,
+    "sprite": "img/床青.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 96,
+    "hitboxHeight": 16,
+    "travelDistance": -224.0,
+    "stepIncrement": 0.125,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_edit_step_bridge",
+    "name": "編集室：コマ送り橋（4コマで降りる）",
+    "type_enum": 17,
+    "sprite": "img/床青.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 256,
+    "hitboxHeight": 16,
+    "travelDistance": 96.0,
+    "stepIncrement": 0.25,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_mirror",
+    "name": "反射ミラー",
+    "type_enum": 5,
+    "sprite": "img/床青.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 80,
+    "hitboxHeight": 16,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_falling_lift",
+    "name": "落下リフト",
+    "type_enum": 4,
+    "sprite": "img/乗ったら落ちる床.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 80,
+    "hitboxHeight": 16,
+    "sinkSpeed": 1.5,
+    "maxDepthOffset": 160.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_edit_sinker",
+    "name": "編集室：おとし穴リフト",
+    "type_enum": 4,
+    "sprite": "img/乗ったら落ちる床.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 96,
+    "hitboxHeight": 16,
+    "sinkSpeed": 2.0,
+    "maxDepthOffset": 0.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_chikuwa",
+    "name": "乗ると落ちる床",
+    "type_enum": 11,
+    "sprite": "img/乗ったら落ちる床.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "standDelayFrames": 75.0,
+    "respawnDelayFrames": 120.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_breakable",
+    "name": "壊せるブロック",
+    "type_enum": 3,
+    "sprite": "img/地面ピンク.png",
+    "seActivate": "se_dossun",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_scalable_box",
+    "name": "拡大できるブロック",
+    "type_enum": 7,
+    "sprite": "img/地面黄緑.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 50,
+    "hitboxHeight": 50,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_scalable_ground",
+    "name": "サイズ変更できる地面",
+    "type_enum": 10,
+    "sprite": "img/地面緑.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 128,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_rock",
+    "name": "岩",
+    "type_enum": 15,
+    "sprite": "img/地面赤.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 48,
+    "hitboxHeight": 48,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_weight_switch",
+    "name": "重量スイッチ",
+    "type_enum": 6,
+    "sprite": "img/スイッチオフ.png",
+    "seActivate": "se_size_change",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 120,
+    "hitboxHeight": 10,
+    "spriteAlt": "img/スイッチオン.png",
+    "triggerWidthThreshold": 120.0,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_gate_door",
+    "name": "ゲート扉",
+    "type_enum": 8,
+    "sprite": "img/扉.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 160,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_edit_gate_a",
+    "name": "編集室：重量スイッチ扉",
+    "type_enum": 8,
+    "sprite": "img/扉.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 160,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_edit_final_door",
+    "name": "編集室：最終ゲート",
+    "type_enum": 8,
+    "sprite": "img/扉.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 160,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_ff_gate",
+    "name": "早送りゲート",
+    "type_enum": 16,
+    "sprite": "img/地面黄.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 160,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_spikes",
+    "name": "棘",
+    "type_enum": 9,
+    "sprite": "img/棘.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_chomper",
+    "name": "敵食らい（棘ブロック）",
+    "type_enum": 13,
+    "sprite": "img/棘ブロック.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_color_lock",
+    "name": "色ロック足場",
+    "type_enum": 22,
+    "sprite": "img/床青.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 96,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_edit_color_bridge",
+    "name": "編集室：色ロック橋",
+    "type_enum": 22,
+    "sprite": "img/床青.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 224,
+    "hitboxHeight": 24,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_brightness_lock",
+    "name": "明暗ロック足場",
+    "type_enum": 23,
+    "sprite": "img/地面黄.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 96,
+    "hitboxHeight": 32,
+    "script": [],
+    "parts": []
+  },
+  {
+    "id": "gim_time_field",
+    "name": "時間停止무効フィールド",
+    "type_enum": 12,
+    "sprite": "",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 64,
+    "hitboxHeight": 64,
+    "radius": 64.0,
     "script": [],
     "parts": []
   },
@@ -596,25 +379,7 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 200,
     "hitboxHeight": 200,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "radius": 100.0,
     "script": [],
     "parts": []
   },
@@ -628,25 +393,7 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 200,
     "hitboxHeight": 200,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "radius": 100.0,
     "script": [],
     "parts": []
   },
@@ -660,25 +407,8 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 200,
     "hitboxHeight": 200,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "radius": 100.0,
+    "zoomLevel": 1.4,
     "script": [],
     "parts": []
   },
@@ -692,508 +422,61 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 200,
     "hitboxHeight": 200,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "radius": 100.0,
     "script": [],
     "parts": []
   },
   {
-    "id": "gim_color_lock",
-    "name": "色ロック足場",
-    "type_enum": 22,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 96,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_brightness_lock",
-    "name": "明暗ロック足場",
-    "type_enum": 23,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 96,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_script_movingplatform",
-    "name": "サンプル：動く足場(スクリプト版) ※M3検証用",
+    "id": "gim_door_sliding",
+    "name": "スライド扉（枠＋扉板）",
     "type_enum": 24,
-    "sprite": "",
+    "sprite": "img/扉縁のみ.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 96,
-    "hitboxHeight": 32,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [
-      {
-        "hat": "OnSpawn",
-        "body": [
-          {
-            "op": "SetVar",
-            "name": "baseY",
-            "value": {
-              "op": "SelfY"
-            }
-          },
-          {
-            "op": "Forever",
-            "body": [
-              {
-                "op": "Oscillate",
-                "min": {
-                  "op": "GetVar",
-                  "name": "baseY"
-                },
-                "max": {
-                  "op": "Add",
-                  "a": {
-                    "op": "GetVar",
-                    "name": "baseY"
-                  },
-                  "b": 96
-                },
-                "periodFrames": 314
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "parts": []
-  },
-  {
-    "id": "gim_swing_door",
-    "name": "開き戸(スイングドア)",
-    "type_enum": 24,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 8,
-    "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 96,
     "script": [],
     "parts": [
       {
         "id": "panel",
-        "sprite": "img/enemy.png",
-        "offsetX": 0.0,
-        "offsetY": 0.0,
-        "width": 32,
-        "height": 64,
+        "sprite": "img/扉ドアのみ.png",
+        "offsetX": 2.0,
+        "offsetY": 3.0,
+        "width": 28,
+        "height": 90,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 32,
-        "hitboxHeight": 64,
+        "hitboxWidth": 24,
+        "hitboxHeight": 86,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": 0,
+        "zOrder": -1,
+        "deadly": false,
         "script": [
           {
             "hat": "OnSpawn",
             "body": [
               {
-                "op": "SetVar",
-                "name": "angle",
-                "value": 0
-              },
-              {
                 "op": "Forever",
                 "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "Lt",
-                      "a": {
-                        "op": "DistanceToPlayer"
-                      },
-                      "b": 80
-                    },
-                    "body": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "angle"
-                          },
-                          "b": 1.4
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "angle",
-                            "value": 0.08
-                          }
-                        ]
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "angle"
-                          },
-                          "b": 0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "angle",
-                            "value": -0.08
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "GetVar",
-                      "name": "angle"
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "gim_slide_door",
-    "name": "横スライド扉",
-    "type_enum": 24,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 8,
-    "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": [
-      {
-        "id": "panelL",
-        "sprite": "img/enemy.png",
-        "offsetX": -20.0,
-        "offsetY": 0.0,
-        "width": 20,
-        "height": 48,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 48,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 0,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "SetVar",
-                "name": "t",
-                "value": 0
-              },
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "Lt",
-                      "a": {
-                        "op": "DistanceToPlayer"
-                      },
-                      "b": 80
-                    },
-                    "body": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "t"
-                          },
-                          "b": 1
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "t",
-                            "value": 0.05
-                          }
-                        ]
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "t"
-                          },
-                          "b": 0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "t",
-                            "value": -0.05
-                          }
-                        ]
-                      }
-                    ]
-                  },
                   {
                     "op": "SetLocalOffset",
                     "dx": {
-                      "op": "Add",
-                      "a": -20,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "GetVar",
-                          "name": "t"
-                        },
-                        "b": -40
-                      }
-                    },
-                    "dy": 0
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "panelR",
-        "sprite": "img/enemy.png",
-        "offsetX": 20.0,
-        "offsetY": 0.0,
-        "width": 20,
-        "height": 48,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 48,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 0,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "SetVar",
-                "name": "t",
-                "value": 0
-              },
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "Lt",
+                      "op": "Mul",
                       "a": {
-                        "op": "DistanceToPlayer"
-                      },
-                      "b": 80
-                    },
-                    "body": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "t"
-                          },
-                          "b": 1
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "t",
-                            "value": 0.05
-                          }
-                        ]
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "If",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "t"
-                          },
-                          "b": 0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "t",
-                            "value": -0.05
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": 20,
-                      "b": {
-                        "op": "Mul",
+                        "op": "Sin",
                         "a": {
-                          "op": "GetVar",
-                          "name": "t"
-                        },
-                        "b": 40
-                      }
+                          "op": "Mul",
+                          "a": {
+                            "op": "Time"
+                          },
+                          "b": 0.02
+                        }
+                      },
+                      "b": 10.0
                     },
-                    "dy": 0
+                    "dy": 0.0
                   },
                   {
                     "op": "Wait",
@@ -1209,49 +492,31 @@
   },
   {
     "id": "gim_firebar",
-    "name": "マリオ風ファイアバー",
+    "name": "ファイアバー",
     "type_enum": 24,
-    "sprite": "img/enemy.png",
+    "sprite": "",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
     "hitboxWidth": 8,
     "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
     "script": [],
     "parts": [
       {
-        "id": "ball0",
-        "sprite": "img/bullet.png",
-        "offsetX": -48.37966,
-        "offsetY": -13.667796,
-        "width": 12,
-        "height": 12,
+        "id": "fb0",
+        "sprite": "img/弾2.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 16,
+        "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 14,
+        "hitboxHeight": 14,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1266,7 +531,7 @@
                       "a": {
                         "op": "Time"
                       },
-                      "b": 0.04
+                      "b": 0.035
                     },
                     "radius": {
                       "op": "Mul",
@@ -1277,7 +542,7 @@
                         },
                         "b": 1
                       },
-                      "b": 14
+                      "b": 26.0
                     }
                   },
                   {
@@ -1291,19 +556,20 @@
         ]
       },
       {
-        "id": "ball1",
-        "sprite": "img/bullet.png",
+        "id": "fb1",
+        "sprite": "img/弾2.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 12,
-        "height": 12,
+        "width": 16,
+        "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 14,
+        "hitboxHeight": 14,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1318,7 +584,7 @@
                       "a": {
                         "op": "Time"
                       },
-                      "b": 0.04
+                      "b": 0.035
                     },
                     "radius": {
                       "op": "Mul",
@@ -1329,7 +595,7 @@
                         },
                         "b": 1
                       },
-                      "b": 14
+                      "b": 26.0
                     }
                   },
                   {
@@ -1343,19 +609,20 @@
         ]
       },
       {
-        "id": "ball2",
-        "sprite": "img/bullet.png",
+        "id": "fb2",
+        "sprite": "img/弾2.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 12,
-        "height": 12,
+        "width": 16,
+        "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 14,
+        "hitboxHeight": 14,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1370,7 +637,7 @@
                       "a": {
                         "op": "Time"
                       },
-                      "b": 0.04
+                      "b": 0.035
                     },
                     "radius": {
                       "op": "Mul",
@@ -1381,7 +648,7 @@
                         },
                         "b": 1
                       },
-                      "b": 14
+                      "b": 26.0
                     }
                   },
                   {
@@ -1395,19 +662,20 @@
         ]
       },
       {
-        "id": "ball3",
-        "sprite": "img/bullet.png",
+        "id": "fb3",
+        "sprite": "img/弾2.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 12,
-        "height": 12,
+        "width": 16,
+        "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 14,
+        "hitboxHeight": 14,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1422,7 +690,7 @@
                       "a": {
                         "op": "Time"
                       },
-                      "b": 0.04
+                      "b": 0.035
                     },
                     "radius": {
                       "op": "Mul",
@@ -1433,7 +701,7 @@
                         },
                         "b": 1
                       },
-                      "b": 14
+                      "b": 26.0
                     }
                   },
                   {
@@ -1447,19 +715,20 @@
         ]
       },
       {
-        "id": "ball4",
-        "sprite": "img/bullet.png",
+        "id": "fb4",
+        "sprite": "img/弾2.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 12,
-        "height": 12,
+        "width": 16,
+        "height": 16,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 14,
+        "hitboxHeight": 14,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1474,7 +743,7 @@
                       "a": {
                         "op": "Time"
                       },
-                      "b": 0.04
+                      "b": 0.035
                     },
                     "radius": {
                       "op": "Mul",
@@ -1485,7 +754,7 @@
                         },
                         "b": 1
                       },
-                      "b": 14
+                      "b": 26.0
                     }
                   },
                   {
@@ -1502,7 +771,7 @@
   },
   {
     "id": "gim_pendulum",
-    "name": "振り子",
+    "name": "振り子（棘）",
     "type_enum": 24,
     "sprite": "",
     "seActivate": "",
@@ -1510,191 +779,23 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 8,
     "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
     "script": [],
     "parts": [
       {
-        "id": "bob",
-        "sprite": "img/enemy.png",
-        "offsetX": 0.0,
-        "offsetY": 60.0,
-        "width": 24,
-        "height": 24,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 24,
-        "hitboxHeight": 24,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 0,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetVar",
-                    "name": "a",
-                    "value": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "Time"
-                          },
-                          "b": 0.03
-                        }
-                      },
-                      "b": 1
-                    }
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "GetVar",
-                      "name": "a"
-                    }
-                  },
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "GetVar",
-                          "name": "a"
-                        }
-                      },
-                      "b": 60
-                    },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Cos",
-                        "a": {
-                          "op": "GetVar",
-                          "name": "a"
-                        }
-                      },
-                      "b": 60
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "gim_weak_point_wall",
-    "name": "弱点付きの壁",
-    "type_enum": 24,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 8,
-    "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": [
-      {
-        "id": "wall",
-        "sprite": "img/tuti.png",
+        "id": "weight",
+        "sprite": "img/棘ブロック.png",
         "offsetX": 0.0,
         "offsetY": 0.0,
-        "width": 64,
-        "height": 64,
+        "width": 40,
+        "height": 40,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 64,
-        "hitboxHeight": 64,
+        "hitboxWidth": 34,
+        "hitboxHeight": 34,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": 0,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": 0,
-                    "dy": 0
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "core",
-        "sprite": "img/enemy.png",
-        "offsetX": 24.0,
-        "offsetY": 24.0,
-        "width": 16,
-        "height": 16,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 16,
-        "hitboxHeight": 16,
-        "scale": 1.0,
-        "hp": 3,
         "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1703,25 +804,32 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": 24,
-                    "dy": 24
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
+                      "a": 1.5707963,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Mul",
+                            "a": {
+                              "op": "Time"
+                            },
+                            "b": 0.035
+                          }
+                        },
+                        "b": 1.15
+                      }
+                    },
+                    "radius": 96.0
                   },
                   {
                     "op": "Wait",
                     "frames": 1
                   }
                 ]
-              }
-            ]
-          },
-          {
-            "hat": "OnDeath",
-            "body": [
-              {
-                "op": "SetVisualEffect",
-                "kind": "brightness",
-                "intensity": 1.8
               }
             ]
           }
@@ -1730,7 +838,7 @@
     ]
   },
   {
-    "id": "gim_rotating_spike_ring",
+    "id": "gim_spike_ring",
     "name": "回転する棘の輪",
     "type_enum": 24,
     "sprite": "",
@@ -1739,41 +847,23 @@
     "hitboxOffsetY": 0,
     "hitboxWidth": 8,
     "hitboxHeight": 8,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
     "script": [],
     "parts": [
       {
-        "id": "spike0",
-        "sprite": "img/enemy.png",
-        "offsetX": 180.0,
-        "offsetY": 189.0,
-        "width": 12,
-        "height": 12,
+        "id": "ring0",
+        "sprite": "img/棘ブロック.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 30,
+        "height": 30,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 26,
+        "hitboxHeight": 26,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": -1,
+        "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1782,55 +872,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.03
                       },
-                      "b": 50
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5707963
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
-                      },
-                      "b": 50
-                    }
+                    "radius": 64.0
                   },
                   {
                     "op": "Wait",
@@ -1843,19 +903,20 @@
         ]
       },
       {
-        "id": "spike1",
-        "sprite": "img/enemy.png",
-        "offsetX": 224.0,
-        "offsetY": 145.0,
-        "width": 12,
-        "height": 12,
+        "id": "ring1",
+        "sprite": "img/棘ブロック.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 30,
+        "height": 30,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 26,
+        "hitboxHeight": 26,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": -1,
+        "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1864,55 +925,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.03
                       },
-                      "b": 50
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5707963
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
-                      },
-                      "b": 50
-                    }
+                    "radius": 64.0
                   },
                   {
                     "op": "Wait",
@@ -1925,19 +956,20 @@
         ]
       },
       {
-        "id": "spike2",
-        "sprite": "img/enemy.png",
-        "offsetX": 267.0,
-        "offsetY": 102.0,
-        "width": 12,
-        "height": 12,
+        "id": "ring2",
+        "sprite": "img/棘ブロック.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 30,
+        "height": 30,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 26,
+        "hitboxHeight": 26,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": -1,
+        "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -1946,55 +978,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.03
                       },
-                      "b": 50
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5707963
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
-                      },
-                      "b": 50
-                    }
+                    "radius": 64.0
                   },
                   {
                     "op": "Wait",
@@ -2007,19 +1009,20 @@
         ]
       },
       {
-        "id": "spike3",
-        "sprite": "img/enemy.png",
-        "offsetX": 306.0,
-        "offsetY": 61.0,
-        "width": 12,
-        "height": 12,
+        "id": "ring3",
+        "sprite": "img/棘ブロック.png",
+        "offsetX": 0.0,
+        "offsetY": 0.0,
+        "width": 30,
+        "height": 30,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 12,
-        "hitboxHeight": 12,
+        "hitboxWidth": 26,
+        "hitboxHeight": 26,
         "scale": 1.0,
         "hp": 0,
-        "zOrder": -1,
+        "zOrder": 1,
+        "deadly": true,
         "script": [
           {
             "hat": "OnSpawn",
@@ -2028,55 +1031,25 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Add",
                       "a": {
-                        "op": "Cos",
+                        "op": "Mul",
                         "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
+                          "op": "Time"
+                        },
+                        "b": 0.03
                       },
-                      "b": 50
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "PartIndex"
+                        },
+                        "b": 1.5707963
+                      }
                     },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Add",
-                          "a": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "Time"
-                            },
-                            "b": 0.05
-                          },
-                          "b": {
-                            "op": "Mul",
-                            "a": {
-                              "op": "PartIndex"
-                            },
-                            "b": 1.5708
-                          }
-                        }
-                      },
-                      "b": 50
-                    }
+                    "radius": 64.0
                   },
                   {
                     "op": "Wait",
@@ -2089,202 +1062,5 @@
         ]
       }
     ]
-  },
-  {
-    "id": "gim_stepup_lift",
-    "name": "コマ送り昇降リフト（→で1段ずつ上昇）",
-    "type_enum": 17,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 96,
-    "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -224.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": 0.125,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "script": [],
-    "parts": []
-  },
-  {
-    "id": "gim_edit_step_bridge",
-    "name": "編集室：コマ送り橋(4コマで降下)",
-    "type_enum": 17,
-    "sprite": "",
-    "seActivate": "se_size_change",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 256,
-    "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": 96.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": 0.25,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "seDeactivate": "",
-    "parts": [],
-    "script": []
-  },
-  {
-    "id": "gim_edit_sinker",
-    "name": "編集室：落とし戸リフト",
-    "type_enum": 4,
-    "sprite": "",
-    "seActivate": "se_size_change",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 96,
-    "hitboxHeight": 16,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": 2.0,
-    "maxDepthOffset": 0.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "seDeactivate": "",
-    "parts": [],
-    "script": []
-  },
-  {
-    "id": "gim_edit_color_bridge",
-    "name": "編集室：色ロック橋(224幅)",
-    "type_enum": 22,
-    "sprite": "",
-    "seActivate": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 224,
-    "hitboxHeight": 24,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "seDeactivate": "",
-    "parts": [],
-    "script": []
-  },
-  {
-    "id": "gim_edit_gate_a",
-    "name": "編集室：重量スイッチ扉",
-    "type_enum": 8,
-    "sprite": "img/block/376_20260628175346.png",
-    "seActivate": "se_split_01",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 160,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "seDeactivate": "",
-    "parts": [],
-    "script": []
-  },
-  {
-    "id": "gim_edit_final_door",
-    "name": "編集室：最終ゲート",
-    "type_enum": 8,
-    "sprite": "img/block/376_20260628175346.png",
-    "seActivate": "se_split_attack",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 160,
-    "rotationSpeed": -1.0,
-    "sinkSpeed": -1.0,
-    "maxDepthOffset": -1.0,
-    "pushOutDistance": -1.0,
-    "triggerWidthThreshold": -1.0,
-    "travelDistance": -1.0,
-    "oscillationSpeed": -1.0,
-    "stepIncrement": -1.0,
-    "standDelayFrames": -1.0,
-    "standTolerancePx": -1.0,
-    "respawnDelayFrames": -1.0,
-    "radius": -1.0,
-    "brightLevel": -1.0,
-    "darkLevel": -1.0,
-    "tintR": -1.0,
-    "tintG": -1.0,
-    "tintB": -1.0,
-    "zoomLevel": -1.0,
-    "warpOffsetPx": -1.0,
-    "seDeactivate": "",
-    "parts": [],
-    "script": []
   }
 ]
