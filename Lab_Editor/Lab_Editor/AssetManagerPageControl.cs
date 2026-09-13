@@ -139,6 +139,9 @@ public class AssetManagerPageControl : UserControl
     {
         [0] = new[] { ("warpOffsetPx", "ワープ後オフセット(px)", 1) }, // type_enum=0: ポータル(Cut Portal)
         [1] = new[] { ("rotationSpeed", "回転速度(rad/フレーム)", 3) }, // type_enum=1: 回転橋・自動(Rotating Bridge)
+        // type_enum=3: 破壊ブロック(Breakable Block)。「誰が・どの大きさなら壊せるか」をここで決める。
+        // 全てOFFにすれば壊れない壁として、breakBySlamだけONにすればドッスン専用のブロックとして使える。
+        [3] = new[] { ("breakBySlam", "ドッスンの落下衝撃で壊れる", 0), ("breakByRam", "敵の体当たりで壊れる", 0), ("breakByBullet", "弾で壊れる", 0), ("breakByPlayer", "クリックで壊れる", 0), ("breakByTip", "45度以上傾けると自重で崩れる", 0), ("breakMinScale", "壊すのに必要な相手の大きさ(0=不問)", 2) },
         [4] = new[] { ("sinkSpeed", "降下速度(px/フレーム)", 2), ("maxDepthOffset", "最大沈み込み(px)", 0) }, // type_enum=4: 落下リフト(Falling Lift)
         [5] = new[] { ("pushOutDistance", "押し出し距離係数", 2) }, // type_enum=5: 反射鏡(Reflect Mirror)
         [6] = new[] { ("triggerWidthThreshold", "起動に必要な横幅(px)", 0) }, // type_enum=6: 重量スイッチ(Weight Switch)
@@ -189,7 +192,7 @@ public class AssetManagerPageControl : UserControl
         (0, "0 = ポータル", "同じparam値を持つポータルを2つ配置すると対になり、片方に触れるともう片方の位置へワープします。"),
         (1, "1 = 回転橋(自動)", "常に一定速度で回転し続ける橋です。橋が水平に近い向きの間だけプレイヤーが乗れます。"),
         (2, "2 = 回転橋(手動)", "初期状態は縦向き(通行不可)。プレイヤーがRキー+ドラッグで回転させ、水平にすると渡れるようになります。"),
-        (3, "3 = 破壊ブロック", "左クリックで壊せるブロックです。壊すとその場所を通行できるようになります。"),
+        (3, "3 = 破壊ブロック", "壊すとその場所を通行できるようになるブロックです。誰が壊せるか（ドッスンの落下衝撃/敵の体当たり/弾/クリック/45度以上傾けた自重崩壊）と、壊すのに必要な相手の大きさを右側のパラメータ欄で個別に設定できます。breakBySlamだけONにすれば「ドッスンの向きを変えて狙わせることが唯一の答え」になるブロックが作れます。"),
         (4, "4 = 落下リフト", "プレイヤーが乗ると少しずつ沈み込んでいく足場です。"),
         (5, "5 = 反射鏡", "触れた弾やプレイヤーを跳ね返します。"),
         (6, "6 = 重量スイッチ", "同じparam値のスケールボックスがtriggerWidthThreshold以上に広がると起動し、同じparam値のゲート扉を開きます。"),

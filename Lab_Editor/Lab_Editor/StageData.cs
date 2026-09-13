@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
@@ -894,6 +894,21 @@ public class GimmickDef
     public float tintB { get; set; } = -1.0f;                     // 色味（ティント）の青成分
     public float zoomLevel { get; set; } = -1.0f;                 // ズーム演出の倍率
     public float warpOffsetPx { get; set; } = -1.0f;              // ワープ（瞬間移動）させる距離（ピクセル）
+
+    // ==== 壊せるブロック(type_enum=3)の破壊条件 ====
+    // 「誰が壊せるか」をブロック側の設定にすることで、
+    // 「ドッスンの落下衝撃でしか壊れない壁」のような場をエディタだけで作れるようにする。
+    // 他の挙動パラメータと違い -1 の「未指定」番兵は使わず、素直な bool にしてある
+    // （挙動パラメータ欄は bool のプロパティをチェックボックスとして描くため）。
+    // 既定値は「今までどおり誰でも壊せる汎用ブロック」。
+    public bool breakBySlam { get; set; } = true;    // ドッスンの落下衝撃で壊れる
+    public bool breakByRam { get; set; } = true;      // 突進・歩行・巡回の体当たりで壊れる
+    public bool breakByBullet { get; set; } = true;   // 弾で壊れる
+    public bool breakByPlayer { get; set; } = true;   // プレイヤーの直接操作（クリック）で壊れる
+    public bool breakByTip { get; set; } = true;      // 45度以上傾けられると自重で崩れる
+    // 壊すのに必要な相手の大きさ（倍率）。0なら大きさを問わない。
+    // 敵の衝撃にだけ掛かり、プレイヤーの操作と自重崩壊には掛からない。
+    public float breakMinScale { get; set; } = 0.0f;
 
     // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
     // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、

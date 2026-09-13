@@ -243,6 +243,28 @@ struct GimmickDef {
     float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
     float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
 
+    // ==== 壊せるブロックの破壊条件（BREAKABLE_BLOCK）====
+    //
+    // 「誰が壊せるか」は長らくブロックを壊す側6箇所へ直に書かれており、条件もバラバラだった
+    // （体当たり系は拡大時のみ、ドッスンは縮小時以外、弾はプレイヤーのものだけ、など）。
+    // そのせいで「ドッスンでしか壊せないブロック」のような場を作ることができなかった。
+    // 壊せる条件をブロック側のデータにすることで、Lab_Editorから場ごとに設計できるようにする。
+    //
+    // ON/OFFは素直に bool で持つ（EnemyDef::ignorePause と同じ）。
+    // 他の数値パラメータが使っている -1.0f の「未指定」番兵はここでは使わない。
+    // 既定値をこの初期化子に書いておけば、キーを持たない既存アセットは自動的に
+    // 「今までどおり誰でも壊せる汎用ブロック」として読み込まれるため。
+    // Lab_Editor 側のパラメータ欄も、bool のプロパティだけをチェックボックスとして描く。
+    bool breakBySlam = true;    // ドッスンの落下衝撃で壊れるか
+    bool breakByRam = true;     // 突進・歩行・巡回の体当たりで壊れるか
+    bool breakByBullet = true;  // 弾で壊れるか
+    bool breakByPlayer = true;  // プレイヤーの直接操作（クリック）で壊れるか
+    bool breakByTip = true;     // 45度以上傾けられると自重で崩れるか
+    // 壊すのに必要な相手の大きさ（倍率）。0なら大きさを問わない。
+    // 敵の衝撃（スラム・体当たり）にだけ掛かり、プレイヤーの操作と自重崩壊には掛からない
+    // （どちらも「相手の大きさ」という概念が無いため）。
+    float breakMinScale = 0.0f;
+
     // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
     // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、
     // 状態がひと目で分かる必要があるギミック向け。空文字なら従来どおり sprite 1枚で描画する。
@@ -690,6 +712,13 @@ void LoadAssetDefinitions() {
                     def.tintB = g.value("tintB", -1.0f);
                     def.zoomLevel = g.value("zoomLevel", -1.0f);
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    // 壊せるブロックの破壊条件（詳細は GimmickDef の同名フィールドのコメント参照）
+                    def.breakBySlam = g.value("breakBySlam", true);
+                    def.breakByRam = g.value("breakByRam", true);
+                    def.breakByBullet = g.value("breakByBullet", true);
+                    def.breakByPlayer = g.value("breakByPlayer", true);
+                    def.breakByTip = g.value("breakByTip", true);
+                    def.breakMinScale = g.value("breakMinScale", 0.0f);
                     // 新ギミックロスター対応 — 作動中に差し替える画像。
                     // 起動時に一度だけ読み込んでハンドルを持っておく（毎フレームのLoadGraphは重いため）。
                     def.spriteAlt_path = g.value("spriteAlt", "");
@@ -1838,6 +1867,60 @@ ParentPose MakeGimmickPose(const Gimmick& g) {
 // 「スクリプトが動かないフレームでもパーツが親に張り付く」という利点だけは共有できる。
 ParentPose MakeItemPose(const Item& it) {
     return MakeParentPose(it.x, it.y, it.width, it.height, 1.0f, 1.0f, 0.0f);
+}
+
+// ===================================================================================
+// 壊せるブロックの破壊 — 「誰が・どの大きさなら壊せるか」の判定をここ1箇所に集める
+// ===================================================================================
+//
+// 壊す側は、エディタのクリック／巡回敵の体当たり／歩行敵の体当たり／突進／
+// ドッスンの着地衝撃／45度傾けた自重崩壊／弾 と7箇所に散らばっていて、
+// それぞれが「拡大されているか」「縮小されていないか」といった条件を独自に書いていた。
+// 同じ判定が散らばっていると、設定を1つ足すたびにどこかが更新漏れになる
+// （パーツの当たり判定を GetPartHitRect へ集約したのと同じ理由）。
+//
+// 破壊の可否はブロック側のデータ(GimmickDef)が決め、壊す側は「どの壊し方で」
+// 「どのくらいの大きさの相手が」ぶつかったかだけを伝える。
+
+// 壊し方の種類。ブロック側の breakBy* と1対1で対応する。
+enum BreakCause {
+    BREAK_SLAM,   // ドッスンの落下衝撃
+    BREAK_RAM,    // 突進・歩行・巡回の体当たり
+    BREAK_BULLET, // 弾
+    BREAK_PLAYER, // プレイヤーの直接操作（クリック）
+    BREAK_TIP,    // 45度以上傾けられた自重崩壊
+};
+
+// このギミックを、その壊し方・その相手の大きさで壊せるなら壊す。壊したら true を返す。
+//
+// attackerScale には敵の scale を渡す。相手の大きさという概念が無い壊し方
+// （プレイヤーの操作・自重崩壊）では 0 以下を渡せば大きさ判定は行われない。
+bool TryBreakGimmick(Gimmick& gim, BreakCause cause, float attackerScale) {
+    if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) return false;
+    const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+    if (gdef == nullptr) return false; // 定義が引けないブロックは壊さない（条件が読めないため）
+
+    // 1) この壊し方が許可されているか
+    bool allowed = false;
+    switch (cause) {
+        case BREAK_SLAM:   allowed = gdef->breakBySlam;   break;
+        case BREAK_RAM:    allowed = gdef->breakByRam;    break;
+        case BREAK_BULLET: allowed = gdef->breakByBullet; break;
+        case BREAK_PLAYER: allowed = gdef->breakByPlayer; break;
+        default:           allowed = gdef->breakByTip;    break; // BREAK_TIP
+    }
+    if (!allowed) return false;
+
+    // 2) 相手の大きさが足りているか。
+    // 「拡大した敵の体当たりでなければ壊せない壁」のような場を、
+    // C++を書き換えずにブロック側の設定だけで作れるようにするための条件。
+    if (attackerScale > 0.0f && gdef->breakMinScale > 0.0f && attackerScale < gdef->breakMinScale) {
+        return false;
+    }
+
+    gim.isActive = false;
+    SoundManager::Get().PlaySe(gdef->seActivate);
+    return true;
 }
 
 // このギミックが45度以上倒されているかどうか。
@@ -4728,10 +4811,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
                     bool blockClicked = false;
                     for (auto& gim : gimmicks) {
-                        if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                            if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
-                                gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
-                                gim.isActive = false;
+                        if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
+                        if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                            gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
+                            // プレイヤーの直接操作。大きさという概念が無いので attackerScale は 0 を渡す。
+                            // 従来ここだけSEを鳴らしていなかったが、TryBreakGimmickに集約したので鳴るようになる。
+                            if (TryBreakGimmick(gim, BREAK_PLAYER, 0.0f)) {
                                 blockClicked = true;
                                 break;
                             }
@@ -5455,6 +5540,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // AI分岐が傾きを自前で解釈したか。しなかった型には分岐の後で
                     // 「傾けた向きへ坂道のように滑る」という汎用の反応を掛ける。
                     bool erTiltHandled = false;
+
+                    // プレイヤーが実際に「向き反転」ツールを使ったかどうか。
+                    //
+                    // EditReaction::flipped は「今の向きが配置時と違う」でしかないため、
+                    // AIが毎フレーム enemy.direction をプレイヤーの位置から書き換える型では、
+                    // プレイヤーが左右を行き来するだけで勝手に true/false が点滅してしまう。
+                    // 実際これが原因で、砲台の「反転させると味方撃ちになる」は
+                    // プレイヤーの立ち位置だけで弾の所属が入れ替わる状態になっていた。
+                    // 編集されたという事実はダーティビットにしか残らないので、そちらを見る。
+                    //
+                    // ※ JUMPER と SHIELD は「自分で direction を書き換えて反転を消費する」ことが
+                    //    仕様なので、あちらは今までどおり er.flipped を使う。
+                    bool erFlipEdited = ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u);
                     (void)erFfAtk; (void)erVision; // 型によっては使わないための抑制
                     // =========================================================================
 
@@ -5511,17 +5609,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 拡大されたまるびは破城槌になり、進路上の壊せるブロックを押し割って進む。
                             // ドッスンの着地時と同じく、その場で相手のisActiveを落とすだけなので
                             // ギミック配列の要素数は変わらず、選択中ポインタを壊す心配がない。
-                            if (er.enlarged) {
+                            {
+                                // 体当たりでブロックを割る。壊せるかどうかはブロック側の設定が決めるので、
+                                // ここで拡大されているかを見る必要はなくなった（大きさの条件は breakMinScale）。
                                 float ramX = (enemy.direction == 0) ? (enemy.x + bodyW) : (enemy.x - 8.0f);
                                 for (auto& gimRam : gimmicks) {
                                     if (gimRam.type != GIMMICK_BREAKABLE_BLOCK || !gimRam.isActive) continue;
                                     if (ramX >= gimRam.x && ramX <= gimRam.x + gimRam.spriteWidth &&
                                         enemy.y + bodyH > gimRam.y && enemy.y < gimRam.y + gimRam.spriteHeight) {
-                                        gimRam.isActive = false;
-                                        const GimmickDef* gdefRam = FindGimmickDef(gimRam.assetId);
-                                        if (gdefRam) SoundManager::Get().PlaySe(gdefRam->seActivate);
-                                        wallAheadP = false; // 割った直後は壁扱いを解いて進ませる
-                                        turnByTerrain = false;
+                                        if (TryBreakGimmick(gimRam, BREAK_RAM, enemy.scale)) {
+                                            wallAheadP = false; // 割った直後は壁扱いを解いて進ませる
+                                            turnByTerrain = false;
+                                        }
                                     }
                                 }
                             }
@@ -5647,16 +5746,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     erTiltHandled = true;
                                     GetEnemyHeading(enemy, er, REST_UP, dirXs, dirYs);
                                 }
+                                // 弾を体の外へ出してから撃つ（砲口の位置）。
+                                //
+                                // 従来は自分の中心にそのまま湧かせていた。敵の弾はプレイヤーにしか当たらないので
+                                // それでも問題にならなかったが、反転させた砲台の弾は「プレイヤー側の弾」になり、
+                                // 他の敵＝自分自身にも当たるようになる。拡大した砲台は体が大きく、しかも
+                                // 弾速が erMass ぶん遅くなるため、1フレームで体を抜けられずに自分の弾で死ぬ。
+                                // 射線方向へ半サイズぶん押し出しておけば、どんな大きさ・速さでも自爆しない。
+                                float muzzleRs = sqrtf((float)enemy.hitboxWidth * enemy.scale * (float)enemy.hitboxWidth * enemy.scale
+                                                     + (float)enemy.hitboxHeight * enemy.scale * (float)enemy.hitboxHeight * enemy.scale) * 0.5f + 4.0f;
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = eCenterXs;
-                                        bullets[i].y = eCenterYs;
+                                        bullets[i].x = eCenterXs + dirXs * muzzleRs;
+                                        bullets[i].y = eCenterYs + dirYs * muzzleRs;
                                         float spdS = BULLET_SPEED * projSpeed;
                                         bullets[i].vx = dirXs * spdS;
                                         bullets[i].vy = dirYs * spdS;
                                         bullets[i].scale = er.scaleRatio;
-                                        bullets[i].isPlayerOwned = er.flipped; // 反転で味方撃ちになる
+                                        bullets[i].isPlayerOwned = erFlipEdited; // 反転で味方撃ちになる
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -5674,7 +5782,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             //  ・拡大     → 索敵範囲が広がる代わりに歩きが鈍る。
                             //  ・縮小     → 索敵が狭くなり、すり抜けやすくなる。
                             //  ・傾ける   → 照準が固定され、プレイヤーではなく傾けた向きへ撃つ。
-                            //  ・向き反転 → 見つけても撃たずに逃げ出す。
+                            //  ・向き反転 → 見つけても撃たずに逃げ出す（プレイヤーと反対側へ歩き続ける）。
                             //  ・暗転     → 索敵範囲が縮み、目の前まで気付かれない。
                             float detectX = (edef ? edef->triggerRange : 300.0f) * er.scaleRatio * erVision;
                             float detectY = (edef ? edef->detectionRangeY : 100.0f) * er.scaleRatio * erVision;
@@ -5701,6 +5809,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.vx = WALK_SPEED * ets * patrolSpd;
                                     if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
                                 }
+                            } else if (enemy.aiState == 1 && erFlipEdited) {
+                                // 向き反転 → 見つけても撃たずに逃げ出す。
+                                //
+                                // この挙動は上のコメントで宣言されていながら実装が存在しなかった。
+                                // プレイヤーと反対側を向いて歩き続け、射撃のタイマーも進めない
+                                // （溜めのズーム演出も出さない）ので、撃たれたくない場面を
+                                // 反転ツール1回で無力化できる、という使い道になる。
+                                //
+                                // 判定に EditReaction::flipped ではなくダーティビットを使うのは、
+                                // すぐ下の分岐が毎フレーム enemy.direction を書き換えるため、
+                                // flipped だとプレイヤーの左右の位置で勝手に点滅してしまうから。
+                                enemy.direction = (player.x < enemy.x) ? 0 : 1;
+                                enemy.vx = (enemy.direction == 1) ? (-WALK_SPEED * ets * patrolSpd)
+                                                                  : ( WALK_SPEED * ets * patrolSpd);
                             } else if (enemy.aiState == 1) {
                                 enemy.vx = 0.0f;
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
@@ -5763,17 +5885,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (er.tilted) erTiltHandled = true;
                                 enemy.vx = walkHx * speed;
 
-                                // 拡大されたWALKERは壊せるブロックを押し割って進む
-                                if (er.enlarged) {
+                                // WALKERは壊せるブロックを押し割って進む（可否はブロック側の設定が決める）
+                                {
                                     float ramXw = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
                                     for (auto& gimW : gimmicks) {
                                         if (gimW.type != GIMMICK_BREAKABLE_BLOCK || !gimW.isActive) continue;
                                         if (ramXw >= gimW.x && ramXw <= gimW.x + gimW.spriteWidth &&
                                             enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimW.y &&
                                             enemy.y < gimW.y + gimW.spriteHeight) {
-                                            gimW.isActive = false;
-                                            const GimmickDef* gdefW = FindGimmickDef(gimW.assetId);
-                                            if (gdefW) SoundManager::Get().PlaySe(gdefW->seActivate);
+                                            TryBreakGimmick(gimW, BREAK_RAM, enemy.scale);
                                         }
                                     }
                                 }
@@ -5857,7 +5977,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (std::abs(distXd) < triggerRange) {
                                     enemy.auxState = 1; enemy.customTimer = chargeTime;
                                     enemy.direction = (distXd < 0) ? 1 : 0;
-                                    if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逆へ突進
+                                    if (erFlipEdited) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逆へ突進
                                 }
                             } else if (enemy.auxState == 1) {
                                 enemy.vx = 0.0f;
@@ -5886,7 +6006,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                                 // 拡大された突進は破城槌になり、当たった壊せるブロックを粉砕する。
                                 // 判定点は進行方向の先端へ出す（斜めや真上への突進でも当たるように）。
-                                if (er.enlarged) {
+                                {
                                     float ramHalfW = (float)enemy.hitboxWidth  * enemy.scale * 0.5f;
                                     float ramHalfH = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
                                     for (auto& gimD : gimmicks) {
@@ -5905,11 +6025,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                                       enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimD.y &&
                                                       enemy.y < gimD.y + gimD.spriteHeight);
                                         }
-                                        if (ramHit) {
-                                            gimD.isActive = false;
-                                            const GimmickDef* gdefD = FindGimmickDef(gimD.assetId);
-                                            if (gdefD) SoundManager::Get().PlaySe(gdefD->seActivate);
-                                        }
+                                        if (ramHit) TryBreakGimmick(gimD, BREAK_RAM, enemy.scale);
                                     }
                                 }
                                 enemy.customTimer -= ets;
@@ -5972,8 +6088,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                             } else if (enemy.auxState == 1) {
                                 if (enemy.customTimer > 0) {
-                                    // 落下予兆（溜め）フェーズ：描画側で影を成長させて見せる
+                                    // 落下予兆（溜め）フェーズ：描画側で影を成長させて見せる。
+                                    //
+                                    // vy も必ず0にすること。重力は switch へ来る前に毎フレーム enemy.vy へ
+                                    // 足されているので、vx だけ止めていた従来は「予兆」のはずのこの26フレームで
+                                    // 真下へ175pxほど落ちてしまっていた。
+                                    // そのせいで、向きを変えたドッスンは「まず真下へ落ちてから向いている方向へ
+                                    // スラムする」という二段構えの動きに見えていた。
+                                    // ここで止めることで、実際に動くのは常に「向いている方向」だけになり、
+                                    // 同時に影が大きくなる予兆の演出が初めて意味を持つ。
                                     enemy.vx = 0.0f;
+                                    enemy.vy = 0.0f;
                                     enemy.customTimer -= ets;
                                 } else {
                                     // 実落下フェーズ。編集で向けられた方向へ「まっすぐ」加速して突っ込む。
@@ -6096,18 +6221,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             player.vy = -4.0f;
                                             if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
                                         }
-                                        // 着地地点周辺の壊せるブロックも一緒に破壊する（斜め誘導で狙って割れるようにするギミック連携）
+                                        // 着地地点周辺の壊せるブロックも一緒に破壊する（向きを変えて狙って割れるようにするギミック連携）。
+                                        //
+                                        // 従来あった「縮小中は何も壊せない」という条件は外してある。
+                                        // スラムするときなら編集状態に関係なく壊しにいき、
+                                        // 壊せるかどうかはブロック側の設定（breakBySlam / breakMinScale）が決める、という分担にした。
                                         for (auto& gimF : gimmicks) {
-                                            if (er.shrunk) break; // 縮小中は何も壊せない
-                                            if (gimF.type == GIMMICK_BREAKABLE_BLOCK && gimF.isActive) {
-                                                float bgcx = gimF.x + gimF.spriteWidth / 2.0f;
-                                                float bgcy = gimF.y + gimF.spriteHeight / 2.0f;
-                                                float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
-                                                if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
-                                                    gimF.isActive = false;
-                                                    const GimmickDef* gdefFaller = FindGimmickDef(gimF.assetId);
-                                                    if (gdefFaller) SoundManager::Get().PlaySe(gdefFaller->seActivate);
-                                                }
+                                            if (gimF.type != GIMMICK_BREAKABLE_BLOCK || !gimF.isActive) continue;
+                                            float bgcx = gimF.x + gimF.spriteWidth / 2.0f;
+                                            float bgcy = gimF.y + gimF.spriteHeight / 2.0f;
+                                            float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
+                                            if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
+                                                TryBreakGimmick(gimF, BREAK_SLAM, enemy.scale);
                                             }
                                         }
                                         enemy.auxState = 2;
@@ -6179,7 +6304,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float projSpeed = edef ? edef->projectileSpeed : 0.5f;
                             bool radialFire = (edef && edef->radialFire);
                             float rotStep = edef ? edef->spreadRotationStep : 0.0f;
-                            if (er.flipped) rotStep = -rotStep; // 向きを反転すると渦が逆回りになる
+                            if (erFlipEdited) rotStep = -rotStep; // 向きを反転すると渦が逆回りになる
                             enemy.vx = 0.0f;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
                             enemy.customTimer += ets * erFfAtk;
@@ -6282,17 +6407,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                                 enemy.direction = (dirXa < 0.0f) ? 1 : 0;
 
+                                // 弾を体の外（砲口の位置）から撃つ。理由はSTATIONARY側の同じ処理のコメント参照。
+                                // 反転させた砲台の弾は他の敵に当たるようになるので、自分にも当たってしまう。
+                                float muzzleRa = sqrtf((float)enemy.hitboxWidth * enemy.scale * (float)enemy.hitboxWidth * enemy.scale
+                                                     + (float)enemy.hitboxHeight * enemy.scale * (float)enemy.hitboxHeight * enemy.scale) * 0.5f + 4.0f;
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = eCenterX;
-                                        bullets[i].y = eCenterY;
+                                        bullets[i].x = eCenterX + dirXa * muzzleRa;
+                                        bullets[i].y = eCenterY + dirYa * muzzleRa;
                                         float spd = BULLET_SPEED * projSpeed;
                                         bullets[i].vx = dirXa * spd;
                                         bullets[i].vy = dirYa * spd;
                                         bullets[i].scale = er.scaleRatio; // 拡大した砲台の弾は大きい
                                         // 向きを反転させた砲台は「味方撃ち」になり、撃った弾が他の敵に当たる
-                                        bullets[i].isPlayerOwned = er.flipped;
+                                        bullets[i].isPlayerOwned = erFlipEdited;
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -6474,7 +6603,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float speed = editorPlayerCaps.baseSpeed * ets * mult * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeSk) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逃走
+                                if (erFlipEdited) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逃走
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
                             } else {
                                 enemy.vx = 0.0f;
@@ -6585,7 +6714,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 「配置時との差」では編集の有無を判別できず、明示的なダーティビットが必要になる。
                             if (!(enemy.editDirtyMask & EDIT_DIRTY_SCALE)) {
                                 float phase = enemy.customTimer * frequency + er.tilt;
-                                if (er.flipped) phase = -phase; // 向き反転で膨張と収縮が入れ替わる
+                                if (erFlipEdited) phase = -phase; // 向き反転で膨張と収縮が入れ替わる
                                 if (er.tilted) erTiltHandled = true;
                                 enemy.scale = 1.0f + sinf(phase) * amplitude;
                                 if (enemy.scale < minSc) enemy.scale = minSc;
@@ -6659,7 +6788,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             bool counteredBp = (fxCurBright > 1.3f);
                             if (distB < range && !counteredBp) {
                                 float t = 1.0f - (distB / range);
-                                if (er.flipped) {
+                                if (erFlipEdited) {
                                     // 反転すると暗転ではなく明転させてくる
                                     Screen_SetBrightness(1.0f + t * 0.7f);
                                 } else {
@@ -6699,7 +6828,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float t = 1.0f - (distCol / range);
                                 float dim = 1.0f - t * tintStrength;
                                 float keep = 1.0f;
-                                if (er.flipped) { float tmp = dim; dim = keep; keep = tmp; } // 反転で補色になる
+                                if (erFlipEdited) { float tmp = dim; dim = keep; keep = tmp; } // 反転で補色になる
                                 if (shiftColor == 1)      Screen_SetTint(keep, dim, dim);
                                 else if (shiftColor == 2) Screen_SetTint(dim, keep, dim);
                                 else                      Screen_SetTint(dim, dim, keep);
@@ -7433,11 +7562,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 編集リアクション：45度以上傾けると自重で崩れる。
                         // クリックで直接叩かなくても、離れた場所のブロックを回して壊せるようになる。
                         // isActiveは巻き戻し履歴に入っているので、巻き戻せばちゃんと元通り積み直る。
-                        if (gr.tipped) {
-                            gim.isActive = false;
-                            const GimmickDef* gdefBb = FindGimmickDef(gim.assetId);
-                            if (gdefBb) SoundManager::Get().PlaySe(gdefBb->seActivate);
-                        }
+                        // 自重で崩れるかどうかもブロック側の設定（breakByTip）で切れるようにしてある。
+                        // 大きさという概念が無いので attackerScale は 0 を渡す。
+                        if (gr.tipped) TryBreakGimmick(gim, BREAK_TIP, 0.0f);
                     }
                     else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
                         // 編集リアクション：
@@ -8003,12 +8130,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // プレイヤーの弾が破壊可能なブロックにヒット
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
-                                if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
-                                        gim.isActive = false;
+                                if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
+                                if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                                    // 弾の大きさは撃った側の大きさを引き継いでいるので、それを相手の大きさとして渡す。
+                                    // 反転させた砲台の弾もここを通るため、ブロック側で「弾で壊れる」を切っておけば
+                                    // 敵に撃たせても壊れない、という設計ができる。
+                                    if (TryBreakGimmick(gim, BREAK_BULLET, bullets[i].scale)) {
                                         bullets[i].isActive = false;
-                                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                                        if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                                         break;
                                     }
                                 }
