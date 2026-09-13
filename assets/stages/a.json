@@ -3733,7 +3733,13 @@
   ],
   "backgrounds": [],
   "triggers": [],
-  "enemies": [],
+  "enemies": [
+    {
+      "id": "enemy_dossun",
+      "x": 672.0,
+      "y": 192.0
+    }
+  ],
   "gimmicks": [],
   "items": [],
   "platforms": []

@@ -3744,9 +3744,9 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_maru",
+      "id": "enemy_dossun",
       "x": 384.0,
-      "y": 288.0
+      "y": 192.0
     }
   ],
   "gimmicks": [],

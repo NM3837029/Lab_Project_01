@@ -1056,6 +1056,10 @@ const int PAUSE_BUTTON_X2 = WINDOW_WIDTH / 2 + 24;
 const int PAUSE_BUTTON_Y1 = WINDOW_HEIGHT - 94;
 const int PAUSE_BUTTON_Y2 = WINDOW_HEIGHT - 66;
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
+// ドッスン(FALLER)が落下フェーズに留まれる最大フレーム数。
+// 落下中は重力を切って軸方向へ加速させるため、着地判定を1回でも取り逃すと
+// そのまま永久に飛び続けてしまう。必ずクールダウンへ抜けられるようにする安全網。
+const float FALLER_MAX_AIRTIME = 600.0f;
 const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
 const float BULLET_SPEED = 20.0f;// 弾の基本速度
 // 弾の描画サイズ(px)。当たり判定側が全ての判定箇所で 16x16 決め打ちになっているため、
@@ -1688,6 +1692,85 @@ EditReaction GetEnemyEditReaction(const Enemy& e, const EnemyDef* edef) {
     r.movedY = e.y - e.editBaseY;
     r.moved  = ((e.editDirtyMask & EDIT_DIRTY_POS) != 0u);
     return r;
+}
+
+// ===================================================================================
+// 敵の「向き」— 編集で変えられた姿勢を、移動・射出の方向へ合成する
+// ===================================================================================
+//
+// プレイヤーが編集ツールで敵を傾けたり反転させたりしたとき、
+// 落ちる方向・突進する向き・飛びかかる角度・弾を撃つ方向がその姿勢どおりになるようにする。
+//
+// これを1箇所にまとめる理由は、以前は同じ三角関数が敵タイプごとにコピーされており、
+// 「基準にしている軸」と「回転の符号」が型ごとにバラバラだったため。
+// たとえばドッスン（静止時は真下を向く）が真上を基準にした式を使っていたせいで、
+// 90度倒しても真横へ落ちず、しかも横へずれる向きが見た目の回転と逆になっていた。
+// 突進は静止時に水平を向くのに真上を基準にしていたため、ほんの少し傾けただけで
+// 突然ほぼ真上へ飛び出すという不連続が起きていた。
+//
+// DxLib の DrawRotaGraph は正の角度で時計回りに描く。画面座標（X右・Y下）での時計回りは
+//     R(θ)·(x, y) = (x·cosθ − y·sinθ, x·sinθ + y·cosθ)
+// なので、この行列で基準ベクトルを回せば、得られる向きは必ずスプライトの見た目と一致する。
+
+// 敵が「編集されていないときにどちらを向いているか」。傾けはこの軸を回す形で解釈する。
+enum EnemyRestAxis {
+    REST_DOWN,    // 落下・スラム系。未編集では真下へ向かう（ドッスン）
+    REST_UP,      // ジャンプ・射撃系。未編集では真上（砲口の向き・跳躍方向）
+    REST_FORWARD, // 歩行・突進系。未編集では enemy.direction の指す左右
+};
+
+// 向き反転で縦向きの基準軸を左右へ振る量（ラジアン、約30度）。
+//
+// 真上・真下のベクトルは左右反転しても値が変わらないため、そのままでは
+// 縦向きの敵に対して反転ツールが何の意味も持たなくなってしまう。
+// そこで反転を「基準の向きを向いている側へ傾ける」と解釈する。
+// これはドッスンが元々持っていた「反転させると斜めに落ちる」という挙動を、
+// px単位の横押しではなく角度として一般化したもの。
+const float EDIT_FLIP_BIAS = 0.5235988f; // 30度
+
+// 編集ぶんを合成した、長さ1の向きベクトルを返す。
+//
+// 未編集（傾き0・反転なし）のときは基準軸そのものを返すので、
+// REST_UP なら (0,-1)、REST_DOWN なら (0,1)、REST_FORWARD なら (±1,0) になる。
+// つまり編集していない限り、どの敵も今までと1ミリも変わらない動きをする。
+//
+// 先に「基準軸をどれだけ回すか」だけを求める。
+// 渦の位相のように向きベクトルではなく角度そのものが欲しい型（SPREAD_SHOOTER）が
+// 同じ解釈を共有できるよう、角度の計算だけを切り出してある。
+float GetEnemyEditAngle(const Enemy& e, const EditReaction& r, EnemyRestAxis axis) {
+    float facing = (e.direction == 0) ? 1.0f : -1.0f; // 0=右向き / それ以外=左向き
+    float theta = r.tilt;
+    //
+    // 反転バイアスの判定に EditReaction::flipped を使ってはいけない。
+    // flipped は「現在の向き != 配置時の向き」でしかなく、プレイヤーを追って自分から
+    // 向きを変えただけの敵でも真になってしまう（歩行敵はほぼ毎秒trueになる）。
+    // 「プレイヤーが反転ツールを使ったかどうか」はダーティビットでしか判別できない。
+    if (axis != REST_FORWARD && (e.editDirtyMask & EDIT_DIRTY_DIR) != 0u) {
+        // 縦向きの型だけ、反転を角度のバイアスとして足し、向いている側へ基準軸を振る。
+        // 符号が上下で逆なのは、真上と真下が正反対のベクトルだから
+        // （同じ向きへ回すには逆方向へ回す必要がある）。
+        // REST_FORWARD の型は enemy.direction 自体が既に反転していて基準ベクトルに反映済みなので、
+        // ここで足すと二重適用になり、反転するたび30度ずつずれていってしまう。
+        theta += (axis == REST_DOWN) ? (-EDIT_FLIP_BIAS * facing) : (EDIT_FLIP_BIAS * facing);
+    }
+    return theta;
+}
+
+void GetEnemyHeading(const Enemy& e, const EditReaction& r, EnemyRestAxis axis,
+                     float& outX, float& outY) {
+    // 1) 基準ベクトルを決める
+    float bx = 0.0f, by = 0.0f;
+    float facing = (e.direction == 0) ? 1.0f : -1.0f;
+    switch (axis) {
+        case REST_DOWN:    bx = 0.0f;    by =  1.0f; break;
+        case REST_UP:      bx = 0.0f;    by = -1.0f; break;
+        default:           bx = facing;  by =  0.0f; break; // REST_FORWARD
+    }
+    // 2) 編集ぶんの回転角を求め、3) 時計回りに回す（DrawRotaGraph と同じ向き）
+    float theta = GetEnemyEditAngle(e, r, axis);
+    float c = cosf(theta), s = sinf(theta);
+    outX = bx * c - by * s;
+    outY = bx * s + by * c;
 }
 
 // ギミック1個ぶんの編集差分を求める。
@@ -5503,10 +5586,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float jumpMag = (float)(-editorPlayerCaps.baseJumpPower) * jumpPowerMult;
                                 enemy.vy = -jumpMag;
                                 if (er.tilted) {
-                                    // 傾けられた向きへ斜めに跳ぶ（真上を0度として時計回り）
+                                    // 編集で向けられた方向へ跳ぶ。真上が基準なので、
+                                    // 未編集なら従来どおりの真上ジャンプと完全に一致する。
                                     erTiltHandled = true;
-                                    enemy.vy = -cosf(er.tilt) * jumpMag;
-                                    enemy.vx =  sinf(er.tilt) * jumpMag;
+                                    float jumpHx = 0.0f, jumpHy = -1.0f;
+                                    GetEnemyHeading(enemy, er, REST_UP, jumpHx, jumpHy);
+                                    enemy.vx = jumpHx * jumpMag;
+                                    enemy.vy = jumpHy * jumpMag;
                                 } else if (er.flipped) {
                                     // 向きを反転させると、着地のたびに左右交互へ跳ぶ移動体になる
                                     enemy.vx = (enemy.direction == 0 ? 1.0f : -1.0f) * jumpMag * 0.5f;
@@ -5555,10 +5641,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float dirXs = dxS / distS;
                                 float dirYs = dyS / distS;
                                 if (er.tilted) {
-                                    // 照準ロック：真上を0度として傾けた向きへ固定射撃する
+                                    // 照準ロック：追尾をやめ、砲口が向いている方向へ固定射撃する。
+                                    // 反転は使わない。この型の反転は既に「味方撃ちになる」という別の意味を持っており、
+                                    // そこへ狙いの変更まで重ねると1操作が2つの意味を持ってしまうため。
                                     erTiltHandled = true;
-                                    dirXs = sinf(er.tilt);
-                                    dirYs = -cosf(er.tilt);
+                                    GetEnemyHeading(enemy, er, REST_UP, dirXs, dirYs);
                                 }
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
@@ -5658,13 +5745,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             //  ・拡大     → 重く鈍いが、進路上の壊せるブロックを押し割る。
                             //  ・縮小     → 軽く速くなり、崖でも止まらず落ちていく。
                             //  ・向き反転 → プレイヤーから逃げる方向へ歩く。
+                            //  ・傾ける   → 向いている方向へ歩く。90度倒すと足が前に出ず止まり、180度で逆走する。
                             //  ・暗転     → 索敵範囲が縮む。
                             float triggerRangeWk = (edef ? edef->triggerRange : 300.0f) * erVision;
                             float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.35f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeWk) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逃走
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // 反転ツールで逃走に転じる。判定にダーティビットを使うのは、
+                                // EditReaction::flipped が「配置時と向きが違う」でしかなく、
+                                // プレイヤーを追って自分から向きを変えただけでも真になってしまうため
+                                // （プレイヤーが左右を行き来するたび勝手に逃走モードが点滅していた）。
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 歩行は地面に縛られているので、向きベクトルの水平成分だけを使う。
+                                // 2次元の向きをそのまま速度にすると、傾けた歩行敵が宙に歩き出して地形判定と噛み合わなくなる。
+                                float walkHx = 0.0f, walkHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, walkHx, walkHy);
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.vx = walkHx * speed;
 
                                 // 拡大されたWALKERは壊せるブロックを押し割って進む
                                 if (er.enlarged) {
@@ -5704,7 +5801,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 編集リアクション：
                             //  ・拡大     → 重くて壁を越えられなくなる（段差で足止めできる）。
                             //  ・縮小     → 軽くなって跳躍力が上がり、より高い壁も越えてくる。
-                            //  ・傾ける   → 追跡の狙いが横にずれ、まっすぐ来なくなる。
+                            //  ・傾ける   → 向いている方向へ進む。90度倒すと止まり、180度で逆走する。
                             //  ・向き反転 → 逃げに転じる。
                             //  ・暗転     → 索敵範囲が縮む。
                             float triggerRangeCh = (edef ? edef->triggerRange : 300.0f) * erVision;
@@ -5712,8 +5809,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float jumpPowerMult = (edef ? edef->jumpPowerMult : 0.8f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeCh) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逃走
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // WALKERと同じ理由でダーティビットを見る（flippedだと追跡中に点滅する）
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 地面に縛られた移動なので、向きベクトルの水平成分だけを使う
+                                float chaseHx = 0.0f, chaseHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, chaseHx, chaseHy);
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.vx = chaseHx * speed;
 
                                 float aheadX = enemy.x + (enemy.direction == 1 ? -4.0f : (float)enemy.hitboxWidth * enemy.scale + 4.0f);
                                 float midY = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
@@ -5738,7 +5840,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 突進：射程内に入ると溜め→高速直進→クールダウン。auxState: 0待機/1溜め/2突進/3クールダウン
                             //
                             // 編集リアクション：
-                            //  ・傾ける   → 突進の向きを固定できる。壊せるブロックへ突っ込ませる誘導に使える。
+                            //  ・傾ける   → 本体が向いている方向へそのまま突進する。突進中は重力を切るので、
+                            //               45度傾ければ斜め45度に一直線へ飛ぶ。壊せるブロックへの誘導に使える。
                             //  ・拡大     → 溜めが長く突進も長い、重い破城槌になる（壊せるブロックを粉砕する）。
                             //  ・縮小     → 溜めが短くなり、短距離を何度も突進してくる。
                             //  ・向き反転 → プレイヤーとは逆方向へ突進する。
@@ -5764,21 +5867,45 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (enemy.customTimer <= 0) { enemy.auxState = 2; enemy.customTimer = dashDuration; }
                             } else if (enemy.auxState == 2) {
                                 float dashSpeed = DASH_SPEED * ets * dashSpeedMult;
-                                enemy.vx = (enemy.direction == 1) ? -dashSpeed : dashSpeed;
+                                // 突進の向き。基準は「前(左右)」なので、未編集なら従来と同じ水平突進になる。
+                                //
+                                // 以前はここが真上を基準にした式だったため、ほんの少し傾けただけで
+                                // 突然ほぼ真上へ飛び出すという不連続が起きていた。
+                                // 前を基準にすれば傾き0が水平突進と連続してつながる。
+                                float dashHx = 0.0f, dashHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, dashHx, dashHy);
+                                enemy.vx = dashHx * dashSpeed;
                                 if (er.tilted) {
-                                    // 傾けられた向きへ突進する（斜め上へ跳ぶような突進もできる）
+                                    // 傾けられているあいだだけ重力を打ち消して軸方向へまっすぐ飛ばす。
+                                    // 重力を残すと斜め突進が途中で失速して落ち、角度どおりに飛ばない。
+                                    //
+                                    // 逆に、傾けられていないときに vy を触ってはいけない。
+                                    // 水平突進で vy=0 にすると崖から飛び出したときに空中で静止してしまう。
                                     erTiltHandled = true;
-                                    enemy.vx = sinf(er.tilt) * dashSpeed;
-                                    enemy.vy = -cosf(er.tilt) * dashSpeed * 0.5f;
+                                    enemy.vy = dashHy * dashSpeed;
                                 }
-                                // 拡大された突進は破城槌になり、当たった壊せるブロックを粉砕する
+                                // 拡大された突進は破城槌になり、当たった壊せるブロックを粉砕する。
+                                // 判定点は進行方向の先端へ出す（斜めや真上への突進でも当たるように）。
                                 if (er.enlarged) {
-                                    float ramXd = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                    float ramHalfW = (float)enemy.hitboxWidth  * enemy.scale * 0.5f;
+                                    float ramHalfH = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
                                     for (auto& gimD : gimmicks) {
                                         if (gimD.type != GIMMICK_BREAKABLE_BLOCK || !gimD.isActive) continue;
-                                        if (ramXd >= gimD.x && ramXd <= gimD.x + gimD.spriteWidth &&
-                                            enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimD.y &&
-                                            enemy.y < gimD.y + gimD.spriteHeight) {
+                                        bool ramHit;
+                                        if (er.tilted) {
+                                            // 斜め・真上への突進では、進行方向の先端1点がブロックに入ったかで見る
+                                            float ramXd = enemy.x + ramHalfW + dashHx * (ramHalfW + 8.0f);
+                                            float ramYd = enemy.y + ramHalfH + dashHy * (ramHalfH + 8.0f);
+                                            ramHit = (ramXd >= gimD.x && ramXd <= gimD.x + gimD.spriteWidth &&
+                                                      ramYd >= gimD.y && ramYd <= gimD.y + gimD.spriteHeight);
+                                        } else {
+                                            // 水平突進は従来どおり。先端のXが重なり、かつ体の高さ全体で縦に重なるか
+                                            float ramXd = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                            ramHit = (ramXd >= gimD.x && ramXd <= gimD.x + gimD.spriteWidth &&
+                                                      enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimD.y &&
+                                                      enemy.y < gimD.y + gimD.spriteHeight);
+                                        }
+                                        if (ramHit) {
                                             gimD.isActive = false;
                                             const GimmickDef* gdefD = FindGimmickDef(gimD.assetId);
                                             if (gdefD) SoundManager::Get().PlaySe(gdefD->seActivate);
@@ -5798,7 +5925,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 待機(0)：静止 → プレイヤーが真下を通ると落下(1、前半は落下予兆の溜め・後半は実落下) → 着地後クールダウン(2) → 元の高さへ復帰
                             //
                             // 編集リアクション：
-                            //  ・傾ける   → 落下角度をそのまま指定できる（向き反転による斜め落下の上位互換）。
+                            //  ・傾ける   → 本体が向いている方向へそのまま落ちる。90度倒せば真横へ、
+                            //               180度回せば真上へ突き上げる。落下中は重力を切って軸方向へ加速する。
+                            //  ・向き反転 → 基準の落下方向が向いている側へ30度振れる（従来の斜め落下）。
                             //  ・拡大     → 着地の衝撃波が大きくなる。壊せるブロックをまとめて割れる。
                             //  ・縮小     → 衝撃波を起こせなくなり、ただの安全な台になる（EnemyIsStandable参照）。
                             //  ・速度を下げる → ゆっくり落ちるので、乗って運んでもらう昇降機として使える。
@@ -5810,7 +5939,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 拡大すると衝撃波の範囲も比例して広がる
                             float shockwaveRadiusF = (edef ? edef->shockwaveRadius : 60.0f) * er.scaleRatio;
                             float ffJitter = edef ? edef->fastForwardJitter : 30.0f;
-                            float diagonalSpeedF = edef ? edef->diagonalFallSpeed : 2.5f;
                             // スポーン（＝ステージ配置）時点のX/Y/向きを一度だけ記録しておく。
                             // これが「元の場所」＝復帰先の基準になる（配置位置そのものをそのまま復帰先にする）。
                             // 編集機能連動：向きはauxF1に記録し、以後プレイヤーが「方向反転」編集ツールで
@@ -5831,9 +5959,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 enemy.editBaseY = enemy.y;
                                 enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_POS;
                             }
-                            // 落下方向。傾け編集があればそれを優先し、無ければ従来どおり
-                            // 「向き反転されたか」で左右どちらかへ斜めに落ちる。
-                            bool aimedSideways = ((int)enemy.auxF1) != enemy.direction;
+                            // 落下方向。編集で変えられた姿勢をそのまま落下ベクトルにする。
+                            // 未編集なら (0,1)＝真下になるので、従来の自由落下と完全に一致する。
+                            float fallHx = 0.0f, fallHy = 1.0f;
+                            GetEnemyHeading(enemy, er, REST_DOWN, fallHx, fallHy);
                             if (er.tilted) erTiltHandled = true;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
@@ -5847,16 +5976,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.vx = 0.0f;
                                     enemy.customTimer -= ets;
                                 } else {
-                                    // 実落下フェーズ。編集機能連動：
-                                    // ・「方向反転」ツールでスポーン時から向きを変えられていたら、その向きへ斜めに落ちる
-                                    //   （プレイヤーが狙いを付けて誘導し、真下から外れた場所のギミックを起動できるようにする）
-                                    // ・早送り中は左右にジッターして直下を読みにくくする
-                                    //   （スローモーション中はets自体が小さくなるため、自然に予兆がゆっくり見えて見切りやすくなる）
-                                    float diagVx = aimedSideways ? ((enemy.direction == 0 ? 1.0f : -1.0f) * diagonalSpeedF * ets) : 0.0f;
-                                    // 傾けられている場合は角度どおりの斜め落下にする（真上を0度として時計回り）
-                                    if (er.tilted) diagVx = sinf(er.tilt) * diagonalSpeedF * 2.0f * ets;
-                                    float jitterVx = isFastForward ? sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f : 0.0f;
-                                    enemy.vx = diagVx + jitterVx;
+                                    // 実落下フェーズ。編集で向けられた方向へ「まっすぐ」加速して突っ込む。
+                                    //
+                                    // 重力を足すのではなく速度そのものを軸方向へ置き換えているのがポイントで、
+                                    // こうしないと真横に向けても重力に引かれて結局下に落ちてしまい、
+                                    // 「見た目は横を向いているのに真下へ落ちる」という食い違いが残る。
+                                    // 速さは直前フレームの速さに重力ぶんを足して作るので、
+                                    // 真下を向いているあいだは従来の自由落下と数値まで完全に一致する。
+                                    // 速さの持ち越しに vx/vy を使うのは、この2つが EnemyState に入っており
+                                    // 巻き戻しと自然に噛み合うため（新しい履歴フィールドを増やさずに済む）。
+                                    float fallStep = GRAVITY * ets;
+                                    float fallSpd = sqrtf(enemy.vx * enemy.vx + enemy.vy * enemy.vy) + fallStep;
+                                    if (fallSpd < fallStep) fallSpd = fallStep; // 落下開始フレーム(速度0)の下限
+                                    enemy.vx = fallHx * fallSpd;
+                                    enemy.vy = fallHy * fallSpd;
+
+                                    // 早送り中は進行方向と直角に揺すって、着弾点を読みにくくする
+                                    // （スローモーション中はets自体が小さくなるため、自然に予兆がゆっくり見えて見切りやすくなる）。
+                                    // 真下に落ちているときだけ横揺れになるよう、軸に垂直な向き(-hy, hx)へ足す。
+                                    if (isFastForward) {
+                                        float jitter = sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f;
+                                        enemy.vx += -fallHy * jitter;
+                                        enemy.vy +=  fallHx * jitter;
+                                    }
 
                                     // 着地判定 —
                                     // 【重要】ここは以前 `std::abs(enemy.vy) < 0.5f`（＝速度がほぼ0なら着地とみなす）だったが、
@@ -5874,8 +6016,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // CheckGridCollisionY / CheckPlatformCollision は座標と速度を参照渡しで書き換えるため、
                                     // 必ずコピーを渡して本体の x / y / vy を汚さないようにする
                                     // （とくに x は斜め落下の着地点＝復帰の起点になるので触られると困る）。
+                                    //
+                                    // 【重要】プローブは必ず「落下している向き」へ出すこと。
+                                    // 真下だけを見る実装のままだと、真横に向けたドッスンは壁にめり込んだあと
+                                    // 永久に着地判定が成立せず、クールダウンにも復帰にも進めなくなって固まる。
                                     bool landedOnGround = false;
-                                    if (enemy.vy >= 0.0f) { // 上昇中に「着地」しないようにガードする
+                                    if (fallHy > 0.05f && enemy.vy >= 0.0f) {
+                                        // 下向き成分があるときだけ、従来どおりの接地プローブを使う
+                                        // （足場やギミックの上に乗る判定はこちらでしか取れない）。
                                         float probeX = enemy.x;
                                         float probeY = enemy.y + 2.0f;
                                         float probeVY = 1.0f;
@@ -5886,6 +6034,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
                                         landedOnGround = (tileGround || platGround);
                                     }
+                                    if (!landedOnGround) {
+                                        // 落下方向の少し先にタイルがあるかを直接見る。
+                                        // 真横スラム・真上への突き上げ・斜め落下はこちらで着地を拾う。
+                                        auto& mpFa = stages[currentStageIdx].map;
+                                        float halfWfa = (float)enemy.hitboxWidth  * enemy.scale * 0.5f;
+                                        float halfHfa = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                                        float probeAx = enemy.x + halfWfa + fallHx * (halfWfa + 4.0f);
+                                        float probeAy = enemy.y + halfHfa + fallHy * (halfHfa + 4.0f);
+                                        int tColFa = (int)(probeAx / TILE_SIZE);
+                                        int tRowFa = (int)(probeAy / TILE_SIZE);
+                                        if (!mpFa.empty() && tRowFa >= 0 && tRowFa < (int)mpFa.size() &&
+                                            tColFa >= 0 && tColFa < (int)mpFa[0].size()) {
+                                            int tidFa = mpFa[tRowFa][tColFa];
+                                            if (tidFa >= 0 && tidFa < (int)tileDefs.size() && tileDefs[tidFa].isCollidable) {
+                                                landedOnGround = true;
+                                            }
+                                        }
+                                    }
+                                    // 最後の安全網 —
+                                    // 何かの拍子に着地を取り逃しても、重力を切っている以上そのまま
+                                    // 永久に飛び続けてしまう。POUNCERの滞空上限(dashDuration)と同じ考え方で、
+                                    // 落下フェーズに時間の上限を設けて必ずクールダウンへ抜けられるようにする。
+                                    enemy.customTimer -= ets; // このフェーズでは経過時間として使う（負の値へ進む）
+                                    if (enemy.customTimer <= -FALLER_MAX_AIRTIME) landedOnGround = true;
                                     if (landedOnGround) {
                                         // 着地の瞬間：踏みつけだけでなく着地地点周辺にもショックウェイブ判定を発生させる
                                         float ew_scaledF = (float)enemy.hitboxWidth * enemy.scale;
@@ -6000,7 +6172,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 2πを超えたら折り返し、長時間プレイしても値が発散しないようにする。
                                 // 傾けたぶんを渦の累積回転に足し込む（auxF1の自動回転は上書きせず合成する）
                                 if (er.tilted) erTiltHandled = true;
-                                float spin = enemy.auxF1 + er.tilt;
+                                // 傾け・反転の解釈は他の型と共通にする（反転でも渦の向きがずれる）
+                                float spin = enemy.auxF1 + GetEnemyEditAngle(enemy, er, REST_UP);
                                 float ecxSp = enemy.x + (float)enemy.hitboxWidth * enemy.scale * 0.5f;
                                 float ecySp = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
                                 for (int a = 0; a < spreadCount; a++) {
@@ -6046,8 +6219,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ。
                             //
                             // 編集リアクション：
-                            //  ・傾ける → 「照準ロック」。プレイヤーを追うのをやめ、傾けた向きへ固定で撃ち続ける。
-                            //             スイッチや壊せるブロックを敵に撃たせる、という使い方ができる。
+                            //  ・傾ける → 「手動照準」。砲身が傾けた向きへ固定され、次の一発だけそこへ撃つ。
+                            //             撃つと傾きを消費してプレイヤー追尾に戻るので、
+                            //             スイッチや壊せるブロックを撃たせたいたびに狙いを付け直す操作になる。
                             //  ・拡大   → 大きく遅い弾。空中で追い越せるので足場感覚で扱える。
                             //  ・縮小   → 小さく速い弾。避けにくいが、当たり判定も小さい。
                             //  ・向き反転 → 弾の所属がプレイヤー側に変わり、他の敵に当たる「味方撃ち砲台」になる。
@@ -6077,12 +6251,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float dirXa = dxA / distA;
                                 float dirYa = dyA / distA;
 
-                                if (er.tilted) {
-                                    // 照準ロック：追尾をやめ、真上(-Y)を0度として傾けた向きへ撃つ。
-                                    // 傾き0で真上、時計回りに倒すほど右下へ向く直感的な対応にしてある。
+                                // 傾けられていたら、追尾をやめて砲身の向いている方向へ撃つ。
+                                // 基準は真上（砲口の向き）なので、未編集なら従来どおりプレイヤーを狙う。
+                                //
+                                // 条件を「傾けられたか」だけにしてあるのは、砲身パーツのスクリプトが
+                                // 同じ EditTilted で見た目を切り替えるため。ここに反転を足すと
+                                // 「砲身はプレイヤーを向いているのに弾は別方向へ飛ぶ」食い違いが復活する。
+                                // この型の反転は既に「味方撃ちになる」という別の意味を持っている。
+                                bool aimedByEdit = er.tilted;
+                                if (aimedByEdit) {
                                     erTiltHandled = true;
-                                    dirXa = sinf(er.tilt);
-                                    dirYa = -cosf(er.tilt);
+                                    GetEnemyHeading(enemy, er, REST_UP, dirXa, dirYa);
                                 }
                                 enemy.direction = (dirXa < 0.0f) ? 1 : 0;
 
@@ -6103,6 +6282,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     }
                                 }
                                 enemy.customTimer = 0.0f;
+
+                                // 手動照準は「一発ぶん」で消費する。
+                                //
+                                // 傾けたままにすると砲台が永久にそこを撃ち続ける置物になってしまい、
+                                // 狙いを付ける操作が一度きりの設置作業に変わってしまう。
+                                // 撃った直後に「今の姿勢」を新しい基準にすることで編集差分が0へ戻り、
+                                // 次の発射からはまたプレイヤーを追尾する。
+                                // 姿勢(enemy.angle)自体は傾けたまま残すので、台座は傾いたまま砲身だけが旋回して復帰する。
+                                //
+                                // 同じ「編集を一度だけ効かせる」処理は SHRINKER の向き反転にも前例がある。
+                                // なお editBaseAngle は EnemyState に入っていないため巻き戻しても消費は戻らない。
+                                // これは FALLER が復帰先(editBaseX/Y)を書き換えるのと同じ既存の割り切りに揃えてある。
+                                if (aimedByEdit) {
+                                    enemy.editBaseAngle = enemy.angle;
+                                    enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_ANGLE;
+                                }
                             }
                             break;
                         }
@@ -6171,9 +6366,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (std::abs(player.x - enemy.x) < triggerRangeFl) {
                                 float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.2f) * erMass;
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                // 向きを反転させると追尾をやめて逃げに転じる
-                                if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // 向きを反転させると追尾をやめて逃げに転じる。
+                                // 判定にダーティビットを使うのは、EditReaction::flipped だと
+                                // プレイヤーを追って向きを変えただけで真になり、追尾中に点滅してしまうため。
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 接近の向きも傾けた姿勢に従わせる（縦の揺れは上の swing 側が担当するので水平成分だけ）
+                                float flHx = 0.0f, flHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, flHx, flHy);
+                                enemy.vx = flHx * speed;
                                 enemy.vx += swingX * frequency; // 傾けた軸ぶんの横揺れ
                             } else {
                                 enemy.vx = swingX * frequency;
@@ -6206,11 +6406,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float destX = player.x + sideX * offsetX;
                                 float destY = player.y + sideY * offsetY;
                                 if (er.tilted) {
-                                    // 傾けられている場合、出現方角を角度どおりに固定する（真上を0度として時計回り）
+                                    // 傾けられている場合、出現方角を向いている方向へ固定する（基準は真上）
                                     erTiltHandled = true;
                                     float radius = rangeMin + rangeSpan * 0.5f;
-                                    destX = player.x + sinf(er.tilt) * radius;
-                                    destY = player.y - cosf(er.tilt) * radius;
+                                    float tpHx = 0.0f, tpHy = -1.0f;
+                                    GetEnemyHeading(enemy, er, REST_UP, tpHx, tpHy);
+                                    destX = player.x + tpHx * radius;
+                                    destY = player.y + tpHy * radius;
                                 }
                                 if (destX < 0.0f) destX = 0.0f;
                                 if (destY < 0.0f) destY = 0.0f;
@@ -6402,8 +6604,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeTw) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                if (er.flipped) enemy.direction = (enemy.direction == 1) ? 0 : 1;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // WALKER/CHASERと同じ理由でダーティビットを見る（flippedだと追跡中に点滅する）
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 地面に縛られた移動なので、向きベクトルの水平成分だけを使う
+                                float twHx = 0.0f, twHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, twHx, twHy);
+                                enemy.vx = twHx * speed;
                             } else {
                                 enemy.vx = 0.0f;
                             }
@@ -6565,14 +6771,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     float launchMag = DASH_SPEED * dashMultPc;
                                     enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpMultPc;
                                     enemy.vx = (enemy.direction == 1 ? -1.0f : 1.0f) * launchMag;
-                                    if (er.tilted) {
-                                        // 傾けられている場合は、その角度をそのまま射出方向にする。
-                                        // 真上を0度として時計回り。真上に近づけるほど高く、
-                                        // 倒すほど水平に遠くへ飛ぶ、という直感どおりの対応になる。
+                                    if (er.tilted || (enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) {
+                                        // 編集で向きを変えられている場合は、その姿勢をそのまま射出方向にする。
+                                        // 真上が基準なので、真上に近づけるほど高く、倒すほど水平に遠くへ飛ぶ。
+                                        // 真下へ向ければ地面に叩きつけられる「砲弾」として使える。
+                                        //
+                                        // 初速を一度与えるだけで以降は重力任せにするので、
+                                        // 角度は放物線の打ち出し角として効く（飛行中に速度を上書きすると直線になってしまう）。
                                         erTiltHandled = true;
+                                        float pounceHx = 0.0f, pounceHy = -1.0f;
+                                        GetEnemyHeading(enemy, er, REST_UP, pounceHx, pounceHy);
                                         float mag = launchMag + (float)(-editorPlayerCaps.baseJumpPower) * jumpMultPc;
-                                        enemy.vx =  sinf(er.tilt) * mag;
-                                        enemy.vy = -cosf(er.tilt) * mag;
+                                        enemy.vx = pounceHx * mag;
+                                        enemy.vy = pounceHy * mag;
                                     }
                                     enemy.auxState = 2;
                                     enemy.customTimer = 0.0f;
@@ -9287,6 +9498,91 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
         }
+
+        // 【一時的な確認用】敵の状態ダンプと編集注入。確認が済んだら削除する。
+        {
+            static int dbgFc = 0;
+            static bool dumpDone = false, simDone = false, simApplied = false;
+            static float simFocusX = 0.0f, simFocusY = 0.0f;
+            dbgFc++;
+
+            // --- 編集の注入（指定アセットの1体目へ scale/angle/width/height を与える）---
+            char* simSpec = nullptr; size_t simSpecLen = 0;
+            if (!simDone && _dupenv_s(&simSpec, &simSpecLen, "LABPROJ_EDITSIM") == 0 && simSpec != nullptr) {
+                std::string spec(simSpec);
+                std::vector<std::string> tok;
+                { size_t st = 0; while (true) { size_t cm = spec.find(',', st);
+                  if (cm == std::string::npos) { tok.push_back(spec.substr(st)); break; }
+                  tok.push_back(spec.substr(st, cm - st)); st = cm + 1; } }
+                if (dbgFc == 120 && tok.size() >= 6) {
+                    float wantScale = (float)atof(tok[1].c_str());
+                    float wantAngle = (float)atof(tok[2].c_str());
+                    float wantW = (float)atof(tok[3].c_str());
+                    float wantH = (float)atof(tok[4].c_str());
+                    bool wantGesture = (atoi(tok[5].c_str()) != 0);
+                    bool found = false;
+                    for (auto& e : enemies) {
+                        if (e.assetId != tok[0]) continue;
+                        if (wantScale > 0.0f) e.scale = e.editBaseScale * wantScale;
+                        if (wantAngle != 0.0f) { e.angle = e.editBaseAngle + wantAngle; e.editDirtyMask |= EDIT_DIRTY_ANGLE; }
+                        if (wantW < 0.0f) { e.direction = (e.direction == 0) ? 1 : 0; e.editDirtyMask |= EDIT_DIRTY_DIR; }
+                        for (auto& h : e.history) { h.angle = e.angle; h.scale = e.scale; h.direction = e.direction; }
+                        simFocusX = e.x; simFocusY = e.y; found = true; break;
+                    }
+                    if (!found) {
+                        for (auto& g : gimmicks) {
+                            if (g.assetId != tok[0]) continue;
+                            if (wantW > 0.0f) SetGimmickWidth(g, g.editBaseWidth * wantW);
+                            if (wantH > 0.0f) SetGimmickHeight(g, g.editBaseHeight * wantH);
+                            if (wantAngle != 0.0f) g.angle = g.editBaseAngle + wantAngle;
+                            simFocusX = g.x; simFocusY = g.y; found = true; break;
+                        }
+                    }
+                    if (found) {
+                        simApplied = true;
+                        if (wantGesture) isScaling = true; // 編集ジェスチャ中の凍結を再現する
+                    }
+                }
+                // トゲ等の即死でゲームオーバーへ飛ばないよう、観測中はプレイヤーを維持する
+                if (simApplied && dbgFc >= 120) {
+                    player.hp = 99; player.invulnTimer = 999999.0f;
+                    // ドッスンの落下トリガーは「プレイヤーが真下24px以内に居ること」なので、
+                    // 真下やや下に置く。突進・飛びかかり・射撃の射程条件もこの位置で満たせる。
+                    player.x = simFocusX + 8.0f; player.y = simFocusY + 150.0f;
+                    player.vx = 0.0f; player.vy = 0.0f;
+                    currentScene = PLAY;
+                }
+                char* shotPath = nullptr; size_t shotLen = 0;
+                if (dbgFc == 200 && _dupenv_s(&shotPath, &shotLen, "LABPROJ_SHOT") == 0 && shotPath != nullptr) {
+                    SaveDrawScreenToPNG(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, shotPath);
+                    free(shotPath);
+                    simDone = true;
+                }
+                free(simSpec);
+            }
+
+            // --- 状態ダンプ（落下・突進の周期より長く回してから採る）---
+            char* dumpPath = nullptr; size_t dumpLen = 0;
+            if (!dumpDone && _dupenv_s(&dumpPath, &dumpLen, "LABPROJ_ENEMYDUMP") == 0 && dumpPath != nullptr) {
+                if (dbgFc == 600) {
+                    std::ofstream df(dumpPath);
+                    if (df.is_open()) {
+                        df << "idx,assetId,x,y,vx,vy,dir,auxState,auxF1,auxF2,auxF3,timer,angle,scale\n";
+                        for (size_t i = 0; i < enemies.size(); i++) {
+                            const Enemy& e = enemies[i];
+                            df << i << "," << e.assetId << "," << e.x << "," << e.y << ","
+                               << e.vx << "," << e.vy << "," << e.direction << "," << e.auxState << ","
+                               << e.auxF1 << "," << e.auxF2 << "," << e.auxF3 << ","
+                               << e.customTimer << "," << e.angle << "," << e.scale << "\n";
+                        }
+                    }
+                    Logger::Info("EnemyDump", "MainLoop", std::string("dumped: ") + dumpPath);
+                    dumpDone = true;
+                }
+                free(dumpPath);
+            }
+        }
+
 
         ScreenFlip();
     }

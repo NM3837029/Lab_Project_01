@@ -842,33 +842,52 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "SetLocalOffsetPolar",
-                    "angle": {
-                      "op": "Sub",
-                      "a": {
-                        "op": "DirectionToPlayer"
-                      },
-                      "b": {
-                        "op": "ParentTilt"
-                      }
+                    "op": "IfElse",
+                    "cond": {
+                      "op": "EditTilted"
                     },
-                    "radius": 10.0
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "Sub",
-                      "a": {
-                        "op": "Add",
-                        "a": {
-                          "op": "DirectionToPlayer"
-                        },
-                        "b": 1.5707963
+                    "body": [
+                      {
+                        "op": "SetLocalOffsetPolar",
+                        "angle": -1.5707963,
+                        "radius": 10.0
                       },
-                      "b": {
-                        "op": "ParentTilt"
+                      {
+                        "op": "SetAngle",
+                        "angle": 0.0
                       }
-                    }
+                    ],
+                    "else": [
+                      {
+                        "op": "SetLocalOffsetPolar",
+                        "angle": {
+                          "op": "Sub",
+                          "a": {
+                            "op": "DirectionToPlayer"
+                          },
+                          "b": {
+                            "op": "ParentTilt"
+                          }
+                        },
+                        "radius": 10.0
+                      },
+                      {
+                        "op": "SetAngle",
+                        "angle": {
+                          "op": "Sub",
+                          "a": {
+                            "op": "Add",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": 1.5707963
+                          },
+                          "b": {
+                            "op": "ParentTilt"
+                          }
+                        }
+                      }
+                    ]
                   },
                   {
                     "op": "Wait",
