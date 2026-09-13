@@ -1059,7 +1059,7 @@ const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y
 // ドッスン(FALLER)が落下フェーズに留まれる最大フレーム数。
 // 落下中は重力を切って軸方向へ加速させるため、着地判定を1回でも取り逃すと
 // そのまま永久に飛び続けてしまう。必ずクールダウンへ抜けられるようにする安全網。
-const float FALLER_MAX_AIRTIME = 600.0f;
+const float FALLER_MAX_AIRTIME = 240.0f;
 const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
 const float BULLET_SPEED = 20.0f;// 弾の基本速度
 // 弾の描画サイズ(px)。当たり判定側が全ての判定箇所で 16x16 決め打ちになっているため、
@@ -5985,8 +5985,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // 真下を向いているあいだは従来の自由落下と数値まで完全に一致する。
                                     // 速さの持ち越しに vx/vy を使うのは、この2つが EnemyState に入っており
                                     // 巻き戻しと自然に噛み合うため（新しい履歴フィールドを増やさずに済む）。
+                                    // ⚠ 速さを測るときは、このフレームの重力ぶんを引いた「前フレーム末の速度」を使う。
+                                    // enemy.vy にはこの分岐へ来る前に既に重力が足されているので、
+                                    // そのまま測ってさらに重力を足すと加速度が2倍になり、真下へ落ちる場合ですら
+                                    // 従来の自由落下より倍の速さで落ちてしまう。
                                     float fallStep = GRAVITY * ets;
-                                    float fallSpd = sqrtf(enemy.vx * enemy.vx + enemy.vy * enemy.vy) + fallStep;
+                                    float fallPrevVy = enemy.vy - fallStep;
+                                    float fallSpd = sqrtf(enemy.vx * enemy.vx + fallPrevVy * fallPrevVy) + fallStep;
                                     if (fallSpd < fallStep) fallSpd = fallStep; // 落下開始フレーム(速度0)の下限
                                     enemy.vx = fallHx * fallSpd;
                                     enemy.vy = fallHy * fallSpd;
@@ -6050,6 +6055,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             if (tidFa >= 0 && tidFa < (int)tileDefs.size() && tileDefs[tidFa].isCollidable) {
                                                 landedOnGround = true;
                                             }
+                                        }
+                                    }
+                                    // マップの外へ飛び出したら、そこで打ち切って復帰へ向かわせる。
+                                    // 真上や真横へ向けたドッスンは遮る地形が無いと延々と飛び続けてしまい、
+                                    // 画面外はるか遠くまで行ってから戻ってくることになる。
+                                    {
+                                        auto& mpBn = stages[currentStageIdx].map;
+                                        float mapWpx = (float)(mpBn.empty() ? 0 : mpBn[0].size()) * TILE_SIZE;
+                                        float mapHpx = (float)mpBn.size() * TILE_SIZE;
+                                        if (enemy.x < 0.0f || enemy.y < 0.0f ||
+                                            enemy.x > mapWpx || enemy.y > mapHpx) {
+                                            landedOnGround = true;
                                         }
                                     }
                                     // 最後の安全網 —
@@ -9498,91 +9515,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
         }
-
-        // 【一時的な確認用】敵の状態ダンプと編集注入。確認が済んだら削除する。
-        {
-            static int dbgFc = 0;
-            static bool dumpDone = false, simDone = false, simApplied = false;
-            static float simFocusX = 0.0f, simFocusY = 0.0f;
-            dbgFc++;
-
-            // --- 編集の注入（指定アセットの1体目へ scale/angle/width/height を与える）---
-            char* simSpec = nullptr; size_t simSpecLen = 0;
-            if (!simDone && _dupenv_s(&simSpec, &simSpecLen, "LABPROJ_EDITSIM") == 0 && simSpec != nullptr) {
-                std::string spec(simSpec);
-                std::vector<std::string> tok;
-                { size_t st = 0; while (true) { size_t cm = spec.find(',', st);
-                  if (cm == std::string::npos) { tok.push_back(spec.substr(st)); break; }
-                  tok.push_back(spec.substr(st, cm - st)); st = cm + 1; } }
-                if (dbgFc == 120 && tok.size() >= 6) {
-                    float wantScale = (float)atof(tok[1].c_str());
-                    float wantAngle = (float)atof(tok[2].c_str());
-                    float wantW = (float)atof(tok[3].c_str());
-                    float wantH = (float)atof(tok[4].c_str());
-                    bool wantGesture = (atoi(tok[5].c_str()) != 0);
-                    bool found = false;
-                    for (auto& e : enemies) {
-                        if (e.assetId != tok[0]) continue;
-                        if (wantScale > 0.0f) e.scale = e.editBaseScale * wantScale;
-                        if (wantAngle != 0.0f) { e.angle = e.editBaseAngle + wantAngle; e.editDirtyMask |= EDIT_DIRTY_ANGLE; }
-                        if (wantW < 0.0f) { e.direction = (e.direction == 0) ? 1 : 0; e.editDirtyMask |= EDIT_DIRTY_DIR; }
-                        for (auto& h : e.history) { h.angle = e.angle; h.scale = e.scale; h.direction = e.direction; }
-                        simFocusX = e.x; simFocusY = e.y; found = true; break;
-                    }
-                    if (!found) {
-                        for (auto& g : gimmicks) {
-                            if (g.assetId != tok[0]) continue;
-                            if (wantW > 0.0f) SetGimmickWidth(g, g.editBaseWidth * wantW);
-                            if (wantH > 0.0f) SetGimmickHeight(g, g.editBaseHeight * wantH);
-                            if (wantAngle != 0.0f) g.angle = g.editBaseAngle + wantAngle;
-                            simFocusX = g.x; simFocusY = g.y; found = true; break;
-                        }
-                    }
-                    if (found) {
-                        simApplied = true;
-                        if (wantGesture) isScaling = true; // 編集ジェスチャ中の凍結を再現する
-                    }
-                }
-                // トゲ等の即死でゲームオーバーへ飛ばないよう、観測中はプレイヤーを維持する
-                if (simApplied && dbgFc >= 120) {
-                    player.hp = 99; player.invulnTimer = 999999.0f;
-                    // ドッスンの落下トリガーは「プレイヤーが真下24px以内に居ること」なので、
-                    // 真下やや下に置く。突進・飛びかかり・射撃の射程条件もこの位置で満たせる。
-                    player.x = simFocusX + 8.0f; player.y = simFocusY + 150.0f;
-                    player.vx = 0.0f; player.vy = 0.0f;
-                    currentScene = PLAY;
-                }
-                char* shotPath = nullptr; size_t shotLen = 0;
-                if (dbgFc == 200 && _dupenv_s(&shotPath, &shotLen, "LABPROJ_SHOT") == 0 && shotPath != nullptr) {
-                    SaveDrawScreenToPNG(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, shotPath);
-                    free(shotPath);
-                    simDone = true;
-                }
-                free(simSpec);
-            }
-
-            // --- 状態ダンプ（落下・突進の周期より長く回してから採る）---
-            char* dumpPath = nullptr; size_t dumpLen = 0;
-            if (!dumpDone && _dupenv_s(&dumpPath, &dumpLen, "LABPROJ_ENEMYDUMP") == 0 && dumpPath != nullptr) {
-                if (dbgFc == 600) {
-                    std::ofstream df(dumpPath);
-                    if (df.is_open()) {
-                        df << "idx,assetId,x,y,vx,vy,dir,auxState,auxF1,auxF2,auxF3,timer,angle,scale\n";
-                        for (size_t i = 0; i < enemies.size(); i++) {
-                            const Enemy& e = enemies[i];
-                            df << i << "," << e.assetId << "," << e.x << "," << e.y << ","
-                               << e.vx << "," << e.vy << "," << e.direction << "," << e.auxState << ","
-                               << e.auxF1 << "," << e.auxF2 << "," << e.auxF3 << ","
-                               << e.customTimer << "," << e.angle << "," << e.scale << "\n";
-                        }
-                    }
-                    Logger::Info("EnemyDump", "MainLoop", std::string("dumped: ") + dumpPath);
-                    dumpDone = true;
-                }
-                free(dumpPath);
-            }
-        }
-
 
         ScreenFlip();
     }
