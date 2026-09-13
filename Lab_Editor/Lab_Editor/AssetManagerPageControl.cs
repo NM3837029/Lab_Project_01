@@ -1,4 +1,4 @@
-// Newtonsoft.Json（Json.NET）を使用する。挙動パラメータ(EnemyDef/GimmickDef/ItemDef)を
+﻿// Newtonsoft.Json（Json.NET）を使用する。挙動パラメータ(EnemyDef/GimmickDef/ItemDef)を
 // ディープコピーする際に、JSONへ一度シリアライズしてから逆シリアライズする手法(DuplicateXxxRow系)で利用している。
 using Newtonsoft.Json;
 
@@ -1017,21 +1017,24 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             var row = dgvEnemies.SelectedRows[0];
             var def = GetOrCreateEnemyParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
-            PartsEditRequested?.Invoke($"敵: {row.Cells["id"].Value}", def.parts, sprite, parts => def.parts = parts);
+            PartsEditRequested?.Invoke($"敵: {row.Cells["id"].Value}", def.parts, sprite,
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
         }
         else if (kind == AssetKind.Gimmick)
         {
             var row = dgvGimmicks.SelectedRows[0];
             var def = GetOrCreateGimmickParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
-            PartsEditRequested?.Invoke($"ギミック: {row.Cells["id"].Value}", def.parts, sprite, parts => def.parts = parts);
+            PartsEditRequested?.Invoke($"ギミック: {row.Cells["id"].Value}", def.parts, sprite,
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
         }
         else if (kind == AssetKind.Item)
         {
             var row = dgvItems.SelectedRows[0];
             var def = GetOrCreateItemParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
-            PartsEditRequested?.Invoke($"アイテム: {row.Cells["id"].Value}", def.parts, sprite, parts => def.parts = parts);
+            PartsEditRequested?.Invoke($"アイテム: {row.Cells["id"].Value}", def.parts, sprite,
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
         }
         else
         {

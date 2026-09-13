@@ -26,6 +26,80 @@ using json = nlohmann::json;
 // ゲーム全体をフリーズさせることはない。
 // ======================================================
 
+// ======================================================
+// 複合オブジェクトのパーツ変換（親の編集をパーツへ合成する）
+// ======================================================
+//
+// ドッスンの黒目・砲台の砲身・ファイアバーの腕のように、複数のパーツで1体を構成する
+// オブジェクトは18アセット52パーツある。プレイヤーが編集ツールで親を拡大したり傾けたりしても、
+// これまでパーツ側は一切追従せず、本体だけが大きくなって黒目が頭の外へ取り残されていた。
+//
+// 追従しなかった直接の原因は「ピボットのズレ」にある。親本体は
+//     親の描画中心 = 親アンカー + 親の現在サイズ/2
+// で描かれるのに対し、パーツは
+//     パーツの描画中心 = パーツ座標 + パーツサイズ/2
+// で描かれる。親を2倍にすると親の中心だけが右下へ動き、パーツの中心はその場に留まる。
+// ドッスンは本体もパーツ(黒目)も48x48・オフセット(0,0)なので、等倍では両者の中心が
+// ぴったり重なり、2倍にした瞬間だけ黒目が左上へ24pxずれる、という見え方になっていた。
+// つまり「オフセットに倍率を掛ける」だけでは直らない（オフセットが0なので何を掛けても0）。
+// 変換は必ず「親の中心をピボットにして、パーツの中心を動かす」形で定義する必要がある。
+//
+// 記号:
+//   P (px,py) … 親のアンカー座標（enemy.x/y などの左上基準の座標）
+//   Q (qx,qy) … 親アンカー→「配置時の」親中心までのベクトル
+//   s (sx,sy) … 配置時に対する親の倍率（横・縦）
+//   θ (tilt)  … 配置時からの親の傾き（ラジアン）
+//   u (uni)   … パーツ自身に掛ける一様倍率（sx,syの平均をクランプしたもの）
+//   h (hx,hy) … パーツ自身の半サイズ（自前のscaleまで込み、親の倍率は含めない）
+//   L (lx,ly) … パーツのローカルオフセット（親アンカーからの相対位置。これが真の値）
+//
+// 順変換:
+//   v     = L + h - Q                  … 未編集フレームでの「親中心 → パーツ中心」ベクトル
+//   v'    = Rot(θ) * (v.x*sx, v.y*sy)  … 親の編集ぶんを合成（スケール→回転の順で固定）
+//   world = P + (Q.x*sx, Q.y*sy) + v' - h*u
+//
+// 恒等性: sx=sy=u=1, θ=0 のとき world = P + Q + (L + h - Q) - h = P + L となり、
+// 従来の「親座標＋オフセット」と数学的に完全に一致する。
+// つまり編集していない限り既存52パーツの座標は1pxも変わらない。
+// この性質は回帰テスト（全パーツ座標のCSVダンプ差分）でそのまま検証できる。
+//
+// スケールと回転は可換ではないので、順序は必ず「ローカル空間でスケール → そのあと回転」に固定する。
+// ギミックは横幅と縦幅を独立に編集できるため sx != sy になりうる。
+inline void PartLocalToWorld(float px, float py, float qx, float qy,
+                             float sx, float sy, float tilt, float uni,
+                             float hx, float hy, float lx, float ly,
+                             float& outX, float& outY)
+{
+    float vx = (lx + hx - qx) * sx;
+    float vy = (ly + hy - qy) * sy;
+    float c = cosf(tilt), s = sinf(tilt);
+    outX = px + qx * sx + (vx * c - vy * s) - hx * uni;
+    outY = py + qy * sy + (vx * s + vy * c) - hy * uni;
+}
+
+// PartLocalToWorld の逆変換。スクリプトが SetPosition などでワールド座標を直接書いたとき、
+// その結果を「ローカルオフセット」へ引き戻して真の値を更新するために使う。
+//
+// ローカルを真の値として保持し毎フレーム再構築する方式にしてあるのは、
+// 「ワールド座標に差分を足し込む」方式だと回転の反復合成で誤差が溜まり、
+// 編集をリセットしても元の位置へ戻れなくなるため。
+inline void PartWorldToLocal(float px, float py, float qx, float qy,
+                             float sx, float sy, float tilt, float uni,
+                             float hx, float hy, float worldX, float worldY,
+                             float& outLX, float& outLY)
+{
+    float rx = worldX - px - qx * sx + hx * uni;
+    float ry = worldY - py - qy * sy + hy * uni;
+    float c = cosf(-tilt), s = sinf(-tilt);
+    float vx = rx * c - ry * s;
+    float vy = rx * s + ry * c;
+    // 0除算だけは避ける。倍率は呼び出し側でクランプ済みなので通常ここには掛からない
+    float safeSx = (sx > -0.0001f && sx < 0.0001f) ? 0.0001f : sx;
+    float safeSy = (sy > -0.0001f && sy < 0.0001f) ? 0.0001f : sy;
+    outLX = vx / safeSx - hx + qx;
+    outLY = vy / safeSy - hy + qy;
+}
+
 // スクリプトが読み書きする対象（敵/ギミック等）の共通ビュー。
 // インタプリタ本体はEnemy/Gimmick等の実体の型を一切知らず、このフラットな構造体だけを介して
 // 状態を読み書きする。呼び出し側（DrawPixel.cpp）が毎フレーム、対象の実体からこれを組み立てる。
@@ -60,6 +134,24 @@ struct ScriptActor {
     bool hasParent = false;               // このアクターがパーツかどうか
     int partIndex = 0;                    // 親のparts[]内インデックス（同一スクリプトを複数パーツで共有し、
                                            // パーツごとに異なる位相をつけるためのPartIndexレポーターに使う）
+
+    // 複合オブジェクトのパーツ追従 — このパーツが属する親の「姿勢」。
+    // SetLocalOffset / SetLocalOffsetPolar が書くローカルオフセットを、
+    // PartLocalToWorld でワールド座標へ合成するのに使う（記号の意味は同関数のコメント参照）。
+    // 呼び出し側(DrawPixel.cpp)が毎フレーム ParentPose から詰める。
+    // パーツ以外では既定値のままで、その場合の変換は恒等になる。
+    float parentPivotX = 0.0f, parentPivotY = 0.0f; // Q: 親アンカー→配置時の親中心
+    float parentScaleX = 1.0f, parentScaleY = 1.0f; // s: 配置時に対する親の倍率
+    float parentTilt    = 0.0f;                      // θ: 配置時からの親の傾き
+    float parentUniform = 1.0f;                      // u: パーツ自身に掛ける一様倍率（クランプ済み）
+    float selfHalfX = 0.0f, selfHalfY = 0.0f;        // h: パーツ自身の半サイズ
+
+    // パーツのローカルオフセット（親アンカーからの相対位置）の実体へのポインタ。
+    // SetLocalOffset系はワールド座標ではなくこちらを真の値として書き換える。
+    // こうしておくと、スクリプトが動かないフレーム（編集ジェスチャ中・一時停止中・巻き戻し中）でも
+    // 呼び出し側がローカルから毎フレームワールドを組み直せるため、パーツが親に張り付いたままになる。
+    float* partLocalX = nullptr;
+    float* partLocalY = nullptr;
 
     // Feature: 編集リアクション — プレイヤーが編集ツールでこのアクターに加えた変化。
     // 呼び出し側(DrawPixel.cpp)が毎フレーム EditReaction から詰める。
@@ -311,6 +403,14 @@ private:
         if (op == "ParentY") return actor.parentY;                                // 親(複合体本体)のY座標を返す
         if (op == "ParentDirection") return actor.parentDirection;                // 親の向き(+1=右向き/-1=左向き)を返す
         if (op == "PartIndex") return (float)actor.partIndex;                     // 親のparts[]内での自分のインデックスを返す
+        // 複合オブジェクトのパーツ追従 — 親に加えられた編集をパーツ側のスクリプトから読む。
+        // エンジンはパーツを親と一体の剛体として回すので、ドッスンの黒目や砲台の砲身のように
+        // 「親が傾いてもプレイヤーを向き続けてほしい」パーツは、狙った角度からこの傾きを引く。
+        //
+        // ParentAngle（絶対角）ではなく ParentTilt（配置時からの差分）にしてあるのが要点で、
+        // 絶対角を打ち消す実装にすると「最初から斜めに置かれた砲台」が配置意図を失って壊れる。
+        if (op == "ParentTilt")       return actor.parentTilt;                    // 親の配置時からの傾き(ラジアン)
+        if (op == "ParentScaleRatio") return actor.parentUniform;                 // 親の配置時からの倍率(クランプ済み)
 
         // Feature: 編集リアクション — プレイヤーの編集内容をスクリプトから読むためのレポーター群。
         // これを使うと、C++を一切書き換えずにJSONだけで
@@ -453,9 +553,21 @@ private:
         if (op == "SetLocalOffset") {
             // Feature: Composite Multi-Part Objects (Parts-M2) — 親(複合体本体)の現在座標からの相対位置を設定する。
             // パーツ以外(hasParent==false)では意味を持たないため何もしない。
+            //
+            // 複合オブジェクトのパーツ追従 — dx/dy は「ローカル空間の量」として扱い、
+            // 親の倍率・傾きを合成したうえでワールド座標へ落とす。
+            // 親が未編集なら合成は恒等なので、従来どおり parentX + dx になる。
             if (actor.hasParent && actor.x && actor.y) {
-                *actor.x = actor.parentX + GetNumberArg(block, "dx", 0.0f, actor, state);
-                *actor.y = actor.parentY + GetNumberArg(block, "dy", 0.0f, actor, state);
+                float lx = GetNumberArg(block, "dx", 0.0f, actor, state);
+                float ly = GetNumberArg(block, "dy", 0.0f, actor, state);
+                if (actor.partLocalX) *actor.partLocalX = lx;
+                if (actor.partLocalY) *actor.partLocalY = ly;
+                PartLocalToWorld(actor.parentX, actor.parentY,
+                                 actor.parentPivotX, actor.parentPivotY,
+                                 actor.parentScaleX, actor.parentScaleY,
+                                 actor.parentTilt, actor.parentUniform,
+                                 actor.selfHalfX, actor.selfHalfY,
+                                 lx, ly, *actor.x, *actor.y);
             }
             return false;
         }
@@ -463,11 +575,23 @@ private:
             // Feature: Composite Multi-Part Objects (Parts-M2追加) — 親を中心に「角度・半径」で相対位置を設定する。
             // ファイアバーのように「同じ角度・異なる半径」のパーツを並べて回転する棒状の配置を、
             // Cos/Sinを2回書かずに1命令で表現できるようにする糖衣構文。
+            //
+            // 複合オブジェクトのパーツ追従 — 極座標もローカル空間の量として扱い、
+            // SetLocalOffset と同じ変換を通す。これによりファイアバーの腕は
+            // 親を拡大すれば伸び、親を傾ければ腕ごと回る。
             if (actor.hasParent && actor.x && actor.y) {
                 float ang = GetNumberArg(block, "angle", 0.0f, actor, state);
                 float rad = GetNumberArg(block, "radius", 0.0f, actor, state);
-                *actor.x = actor.parentX + cosf(ang) * rad; // 角度と半径から極座標→直交座標に変換してXへ反映
-                *actor.y = actor.parentY + sinf(ang) * rad; // 同様にYへ反映
+                float lx = cosf(ang) * rad; // 角度と半径から極座標→直交座標に変換
+                float ly = sinf(ang) * rad;
+                if (actor.partLocalX) *actor.partLocalX = lx;
+                if (actor.partLocalY) *actor.partLocalY = ly;
+                PartLocalToWorld(actor.parentX, actor.parentY,
+                                 actor.parentPivotX, actor.parentPivotY,
+                                 actor.parentScaleX, actor.parentScaleY,
+                                 actor.parentTilt, actor.parentUniform,
+                                 actor.selfHalfX, actor.selfHalfY,
+                                 lx, ly, *actor.x, *actor.y);
             }
             return false;
         }

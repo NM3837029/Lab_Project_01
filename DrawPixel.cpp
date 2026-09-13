@@ -92,6 +92,22 @@ struct PartInstance {
     int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
     ScriptState scriptState;   // OnSpawn用
     ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+
+    // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
+    // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
+    // 導出値であって真の値ではない。真の値はこの localX/localY のほう。
+    // ワールド座標を積み上げていく方式にすると回転の反復合成で誤差が溜まり、
+    // 編集を元に戻してもパーツが元の位置へ帰ってこなくなるため、ローカルを正とする。
+    float localX = 0.0f, localY = 0.0f;
+    // 直前に ApplyPartsParentPose が書き込んだワールド座標。
+    // 「スクリプトがワールド座標を直接書いたかどうか」をこれとの一致で判定する。
+    // 一致していれば誰も触っていないので localX/localY をそのまま信用でき、
+    // 親の姿勢が変わったフレームでもパーツは正しく追従する。
+    float appliedX = 0.0f, appliedY = 0.0f;
+    // このフレームの親の姿勢（描画と当たり判定が同じ値を見るようここへ写す）。
+    float parentScaleX = 1.0f, parentScaleY = 1.0f; // 親の横・縦倍率
+    float parentTilt    = 0.0f;                      // 親の配置時からの傾き（描画角度に加算する）
+    float parentUniform = 1.0f;                      // パーツ自身の表示倍率・判定サイズに掛ける一様倍率
 };
 
 // 敵1種類分の「定義データ」。enemies.jsonから読み込まれる、いわば敵の設計図。
@@ -726,6 +742,12 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         // オフセットを親座標に加算して、パーツのワールド座標を確定させる
         inst.x = baseX + pd.offsetX;
         inst.y = baseY + pd.offsetY;
+        // 複合オブジェクトのパーツ追従 — 定義上のオフセットがそのまま初期ローカル位置になる。
+        // 親が未編集のあいだ、この値から組み直したワールド座標は上の2行と完全に一致する。
+        inst.localX = pd.offsetX;
+        inst.localY = pd.offsetY;
+        inst.appliedX = inst.x;
+        inst.appliedY = inst.y;
         inst.handle = pd.graphHandle;
         inst.scale = pd.scale;
         inst.hp = pd.hp;
@@ -767,6 +789,146 @@ static float ComputeFitScale(int graphHandle, float logicalW, float logicalH) {
     return (sx < sy) ? sx : sy;
 }
 
+// ===================================================================================
+// 複合オブジェクトのパーツ追従 — 親の姿勢とその適用
+// ===================================================================================
+
+// パーツが親から継承する倍率の上下限。
+//
+// ファイアバー/振り子/回転する棘の輪は当たり判定が 8x8 しかないのに、
+// スケール編集は「マウスの移動量をそのまま width に足す」方式なので、
+// 100px ドラッグしただけで倍率が 13 倍を超える。そのまま腕に掛けると
+// 長さ1700px級のハザードが画面を覆い尽くしてしまう。
+// 描画と当たり判定の両方で必ずこのクランプ済みの値を使うこと
+// （片方だけ掛けると「見えていないのに当たる」最悪のズレになる）。
+static const float PART_RATIO_MIN = 0.25f;
+static const float PART_RATIO_MAX = 4.0f;
+static float ClampPartRatio(float v) {
+    if (!(v > 0.0f)) return 1.0f; // 0・負・NaN は「編集されていない」とみなす
+    if (v < PART_RATIO_MIN) return PART_RATIO_MIN;
+    if (v > PART_RATIO_MAX) return PART_RATIO_MAX;
+    return v;
+}
+
+// 親(敵/ギミック/アイテム)1体ぶんの「このフレームの姿勢」。
+// 各記号の意味は BehaviorScript.h の PartLocalToWorld のコメントを参照。
+struct ParentPose {
+    float px = 0.0f, py = 0.0f; // P: 親のアンカー座標
+    float qx = 0.0f, qy = 0.0f; // Q: 親アンカー→配置時の親中心
+    float sx = 1.0f, sy = 1.0f; // s: 配置時に対する倍率（クランプ済み）
+    float tilt = 0.0f;          // θ: 配置時からの傾き
+    float uniform = 1.0f;       // u: パーツに掛ける一様倍率（クランプ済み）
+};
+
+// 親のアンカー座標・現在の描画サイズ・編集差分から ParentPose を組み立てる。
+//
+// ピボット Q は「現在の半サイズ ÷ 現在の倍率」で逆算する。配置時のサイズを直接持たないのは、
+// ENEMY_SHRINKER の復活補正（基準側にも縮小率が掛かる）や ENEMY_SIZE_SHIFTER の
+// 毎フレームの scale 書き換えといった特殊ケースがあり、
+// 「配置時はこうだったはず」と決め打ちするとピボットが実際の描画中心とズレて、
+// パーツだけが本体から浮いてしまうため。逆算なら P + Q*sx が常に描画中心に一致する。
+//
+// DrawRotaGraph は縦横別倍率を取れないので、パーツ自身の表示倍率は sx と sy の平均にする。
+inline ParentPose MakeParentPose(float px, float py, float curW, float curH,
+                                 float scaleRatio, float heightRatio, float tilt) {
+    ParentPose pose;
+    pose.px = px; pose.py = py;
+    pose.sx = ClampPartRatio(scaleRatio);
+    pose.sy = ClampPartRatio(heightRatio);
+    pose.qx = (curW * 0.5f) / pose.sx;
+    pose.qy = (curH * 0.5f) / pose.sy;
+    pose.tilt = tilt;
+    pose.uniform = ClampPartRatio((pose.sx + pose.sy) * 0.5f);
+    return pose;
+}
+
+// パーツ自身の半サイズ(h)。親の倍率は含めない（含めると変換の中で二重に掛かる）。
+inline void GetPartHalfSize(const PartInstance& p, float& hx, float& hy) {
+    hx = (p.width  * p.scale) * 0.5f;
+    hy = (p.height * p.scale) * 0.5f;
+}
+
+// パーツの当たり判定矩形を求める唯一の入口。
+//
+// 以前はこの式が6箇所へコピーされており、1箇所でも直し忘れると
+// 「見えているのに当たらない」「見えていないのに当たる」という追跡の難しいバグになる。
+// hitboxOffset にも倍率を掛けるのが正しい（従来は生ピクセルのままだったが、
+// 現存する52パーツの hitboxOffset は全て(0,0)なので、この修正に回帰は無い）。
+inline void GetPartHitRect(const PartInstance& p, float& outX, float& outY, float& outW, float& outH) {
+    float m = p.scale * p.parentUniform;
+    outX = p.x + (float)p.hitboxOffsetX * m;
+    outY = p.y + (float)p.hitboxOffsetY * m;
+    outW = (float)p.hitboxWidth  * m;
+    outH = (float)p.hitboxHeight * m;
+}
+
+// パーツのスクリプトを実行した「直後」に呼ぶ。
+//
+// SetLocalOffset / SetLocalOffsetPolar はローカルオフセット自体を書き換えるので、ここでは何もしない。
+// 一方 SetPosition / OffsetPosition のようにワールド座標を直接書くopが使われた場合は、
+// ローカルが実際の位置と食い違ったままになるため、ワールドから逆変換して取り直す。
+//
+// 「前回 Apply が書いた座標と一致するか」で判定しているのがポイント。
+// 現在の姿勢で組み直した座標と比べる実装にすると、親の姿勢が変わったフレームに
+// 「スクリプトが動かした」と誤判定してローカルを取り直してしまい、
+// スクリプトを持たないパーツが永久に親へ追従できなくなる。
+void CapturePartsLocal(std::vector<PartInstance>& parts, const ParentPose& pose) {
+    for (auto& part : parts) {
+        if (part.x == part.appliedX && part.y == part.appliedY) continue; // 誰も触っていない
+        float hx, hy; GetPartHalfSize(part, hx, hy);
+        // SetLocalOffset系ならローカルも同時に更新済みなので、現在のローカルで説明がつく。
+        // その場合は逆変換を通さない（往復の丸め誤差を乗せないため）。
+        float wx = 0.0f, wy = 0.0f;
+        PartLocalToWorld(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                         pose.tilt, pose.uniform, hx, hy, part.localX, part.localY, wx, wy);
+        if (fabsf(part.x - wx) > 0.001f || fabsf(part.y - wy) > 0.001f) {
+            PartWorldToLocal(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                             pose.tilt, pose.uniform, hx, hy, part.x, part.y,
+                             part.localX, part.localY);
+        }
+        part.appliedX = part.x;
+        part.appliedY = part.y;
+    }
+}
+
+// ローカルオフセットと親の姿勢から、パーツのワールド座標を組み直す。
+//
+// 「毎フレーム必ず通る場所」に置くこと。編集ツールでドラッグしている最中は CanUpdate が
+// false を返して全オブジェクトのスクリプトが1ティックも回らないため、
+// スクリプト任せにするとまさにプレイヤーが拡大・回転している最中だけパーツが固まる。
+// ここを通していれば、移動ドラッグ中・一時停止中・巻き戻し中でもパーツは本体に張り付く。
+//
+// ⚠ 必ず CapturePartsLocal より「後」に呼ぶこと。逆順にすると、スクリプトが動かない
+// フレームで「親に張り付いた位置」をローカルとして取り直してしまい、編集差分が毎フレーム
+// 累積して発散する。
+void ApplyPartsParentPose(std::vector<PartInstance>& parts, const ParentPose& pose) {
+    for (auto& part : parts) {
+        float hx, hy; GetPartHalfSize(part, hx, hy);
+        PartLocalToWorld(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                         pose.tilt, pose.uniform, hx, hy, part.localX, part.localY,
+                         part.x, part.y);
+        part.appliedX = part.x;
+        part.appliedY = part.y;
+        part.parentScaleX = pose.sx;
+        part.parentScaleY = pose.sy;
+        part.parentTilt = pose.tilt;
+        part.parentUniform = pose.uniform;
+    }
+}
+
+// ScriptActor へ親の姿勢を流し込む。SetLocalOffset系がローカル→ワールドの合成に使う。
+// 敵・ギミック・アイテムの3つのパーツループが同じ内容を書くため、ここへ集約する。
+void FillScriptPartTransform(ScriptActor& actor, PartInstance& part, const ParentPose& pose) {
+    float hx, hy; GetPartHalfSize(part, hx, hy);
+    actor.parentPivotX = pose.qx; actor.parentPivotY = pose.qy;
+    actor.parentScaleX = pose.sx; actor.parentScaleY = pose.sy;
+    actor.parentTilt = pose.tilt;
+    actor.parentUniform = pose.uniform;
+    actor.selfHalfX = hx; actor.selfHalfY = hy;
+    actor.partLocalX = &part.localX;
+    actor.partLocalY = &part.localY;
+}
+
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
@@ -777,12 +939,17 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // wantBehindParent==falseの呼び出し時はzOrder>=0（親より手前）のパーツだけを描画する
         if ((part.zOrder < 0) != wantBehindParent) continue;
         if (part.handle < 0) continue; // 画像が読み込まれていないパーツは描画しない
-        // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める
-        int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
-        int pcy = (int)(part.y + (part.height * part.scale) / 2.0f - cameraY);
+        // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める。
+        // 複合オブジェクトのパーツ追従 — 親を拡大したぶん(parentUniform)はパーツのサイズにも効くので、
+        // 中心を出すときの半サイズにも同じ倍率を掛ける。掛け忘れると絵の位置が半サイズぶんずれる。
+        float pm = part.scale * part.parentUniform;
+        int pcx = (int)(part.x + (part.width * pm) / 2.0f - cameraX);
+        int pcy = (int)(part.y + (part.height * pm) / 2.0f - cameraY);
         // 新アセット移行対応 — パーツ画像(640x640)をパーツ定義の width/height へ収める倍率を掛ける
         float partFit = ComputeFitScale(part.handle, (float)part.width, (float)part.height);
-        DrawRotaGraph(pcx, pcy, partFit * part.scale, part.angle, part.handle, TRUE);
+        // 親の傾きはパーツ自身の角度に加算する。剛体として親と一緒に回るのが既定の挙動で、
+        // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
+        DrawRotaGraph(pcx, pcy, partFit * pm, part.angle + part.parentTilt, part.handle, TRUE);
     }
 }
 
@@ -1559,6 +1726,37 @@ EditReaction GetGimmickEditReaction(const Gimmick& g) {
     return r;
 }
 
+// ---- 複合オブジェクトのパーツ追従 — 親ごとの ParentPose の作り方 ----
+// 編集差分(EditReaction)は純関数なので、パーツを更新したい場所でいつでも作り直せる。
+
+// 敵の姿勢。敵は倍率を scale 1つでしか持たないので横縦とも同じ値になる。
+// 描画側(DrawPixel.cpp の敵本体描画)が hitboxWidth * scale を中心計算に使っているので、
+// ピボットの逆算にも同じ値を渡してズレないようにする。
+ParentPose MakeEnemyPose(const Enemy& e, const EnemyDef* edef) {
+    EditReaction r = GetEnemyEditReaction(e, edef);
+    return MakeParentPose(e.x, e.y,
+                          (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale,
+                          r.scaleRatio, r.heightRatio, r.tilt);
+}
+
+// ギミックの姿勢。横幅と縦幅を独立に編集できるので sx != sy になりうる。
+// 描画は spriteWidth/spriteHeight を見る（SetGimmickWidth が width と同期させている）ので、
+// ピボットの逆算にもそちらを渡す。
+// 回転橋やちくわブロックのように angle をAIが握る型では GetGimmickEditReaction が
+// tilt を0のままにするため、自動回転が傾け編集と誤解されてパーツごと回る事故は起きない。
+ParentPose MakeGimmickPose(const Gimmick& g) {
+    EditReaction r = GetGimmickEditReaction(g);
+    return MakeParentPose(g.x, g.y, g.spriteWidth, g.spriteHeight,
+                          r.scaleRatio, r.heightRatio, r.tilt);
+}
+
+// アイテムの姿勢。アイテムは編集ツールで選択できない（SelectedTypeにSELECT_ITEMが無い）ため、
+// 編集差分は常に無く、変換は恒等になる。それでも同じ経路を通しておくことで、
+// 「スクリプトが動かないフレームでもパーツが親に張り付く」という利点だけは共有できる。
+ParentPose MakeItemPose(const Item& it) {
+    return MakeParentPose(it.x, it.y, it.width, it.height, 1.0f, 1.0f, 0.0f);
+}
+
 // このギミックが45度以上倒されているかどうか。
 //
 // トゲなら刺が横を向いて無害化、扉なら壁ではなく床になる、というように
@@ -1867,6 +2065,7 @@ void DrawGimmickRotated(const Gimmick& gim, int handle, float camX, float camY,
 //
 // 敵本体・敵のパーツ・ギミック本体・ギミックのパーツの4箇所から呼ばれる。
 // 同じ内容を4回書くとどこかが更新漏れになるので、必ずこの1関数を通す。
+// （アイテムのパーツからは呼ばない。アイテムは編集ツールで選択できず、編集差分が常に空のため）
 // パーツには親の編集内容をそのまま渡す（親を拡大したら舌も伸びる、という直感に合わせる）。
 void FillScriptEditContext(ScriptActor& actor, const EditReaction& r) {
     actor.editScaleRatio = r.scaleRatio;
@@ -6533,6 +6732,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     // パーツは親のtype_enum(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
+                    //
+                    // 複合オブジェクトのパーツ追従 — AI が本体を動かし終えた「今の姿勢」を先に求めておく。
+                    // SetLocalOffset系がローカル→ワールドの合成に使い、ループ後の回収でも同じ値を使う。
+                    ParentPose ePartPose = MakeEnemyPose(enemy, edef);
                     if (edef) {
                         for (auto& part : enemy.parts) {
                             if (!part.isActive) continue;
@@ -6550,6 +6753,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             partActor.parentX = enemy.x; partActor.parentY = enemy.y;
                             partActor.parentDirection = (enemy.direction == 0) ? 1.0f : -1.0f; // 0=右向き, 1=左向き（enemy.directionの規約に合わせる）
                             partActor.partIndex = part.partIndex;
+                            FillScriptPartTransform(partActor, part, ePartPose); // 親の拡大・傾けをパーツの位置計算へ合成する
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
                             partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
@@ -6574,6 +6778,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             };
                             BehaviorInterpreter::Tick(part.scriptState, partActor);
                         }
+                        // 複合オブジェクトのパーツ追従 — スクリプトがワールド座標を直接書いた場合に備えて
+                        // ローカルを取り直す（SetLocalOffset系しか使っていなければ何も起きない）。
+                        // 必ず ApplyPartsParentPose より前で呼ぶこと。
+                        CapturePartsLocal(enemy.parts, ePartPose);
                     }
                 }
                 if (canEnemyAct) {
@@ -6581,6 +6789,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                                enemy.customTimer, enemy.aiState, enemy.patrolLeft, enemy.patrolRight, enemy.auxF1, enemy.auxF2, enemy.auxState, enemy.auxFlag, enemy.auxF3 });
                     if (enemy.history.size() > MAX_HISTORY_FRAMES) enemy.history.erase(enemy.history.begin());
                 }
+            }
+            // 複合オブジェクトのパーツ追従 — ローカルオフセットと親の姿勢からワールド座標を組み直す。
+            // 巻き戻し中・一時停止中・編集ジェスチャ中（CanUpdateがfalse）でスクリプトが1ティックも
+            // 回らないフレームでも必ずここを通るので、パーツは常に本体へ張り付いたままになる。
+            // ドラッグで本体を掴んで動かしている最中にパーツだけ置き去りになる既存の不具合も、これで直る。
+            if (!enemy.parts.empty()) {
+                ApplyPartsParentPose(enemy.parts, MakeEnemyPose(enemy, FindEnemyDef(enemy.assetId)));
             }
         }
 
@@ -6640,10 +6855,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float ph_scaled = (float)player.height * player.scale;
                         for (const auto& part : item.parts) {
                             if (!part.isActive) continue;
-                            float partW = (float)part.hitboxWidth * part.scale;
-                            float partH = (float)part.hitboxHeight * part.scale;
+                            float partHX, partHY, partW, partH;
+                            // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                            GetPartHitRect(part, partHX, partHY, partW, partH);
                             if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                partHX, partHY, partW, partH)) {
                                 item.isCollected = true;
                                 item.isActive = false;
                                 const ItemDef* idef = FindItemDef(item.assetId);
@@ -6678,6 +6894,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     if (item.isActive && !item.isCollected) {
                         const ItemDef* idefForParts = FindItemDef(item.assetId);
+                        // 複合オブジェクトのパーツ追従 — アイテムは編集できないので変換は恒等だが、
+                        // 敵・ギミックと同じ経路に乗せておくことで扱いを1つに統一する。
+                        ParentPose iPartPose = MakeItemPose(item);
                         if (idefForParts) {
                             for (auto& part : item.parts) {
                                 if (!part.isActive) continue;
@@ -6693,6 +6912,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 partActor.hasParent = true;
                                 partActor.parentX = item.x; partActor.parentY = item.y;
                                 partActor.partIndex = part.partIndex;
+                                FillScriptPartTransform(partActor, part, iPartPose);
                                 partActor.playerX = player.x; partActor.playerY = player.y;
                                 partActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
                                 partActor.visualEffect = [&](const std::string& kind, float intensity) {
@@ -6701,12 +6921,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 };
                                 BehaviorInterpreter::Tick(part.scriptState, partActor);
                             }
+                            CapturePartsLocal(item.parts, iPartPose);
                         }
                     }
                     item.history.push_back({ item.x, item.y, item.isCollected });
                     if (item.history.size() > MAX_HISTORY_FRAMES) item.history.erase(item.history.begin());
                 }
             }
+            // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
+            if (!item.parts.empty()) ApplyPartsParentPose(item.parts, MakeItemPose(item));
         }
 
         // 3. 弾の更新（巻き戻し vs 通常物理）
@@ -7121,6 +7344,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     // パーツは親のtype(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
                     const GimmickDef* gdefForParts = FindGimmickDef(gim.assetId);
+                    // 複合オブジェクトのパーツ追従 — ギミック本体が動き終えた「今の姿勢」
+                    ParentPose gPartPose = MakeGimmickPose(gim);
                     if (gdefForParts) {
                         for (auto& part : gim.parts) {
                             if (!part.isActive) continue;
@@ -7134,8 +7359,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             partActor.x = &part.x; partActor.y = &part.y;
                             partActor.scale = &part.scale; partActor.angle = &part.angle;
                             partActor.hasParent = true;
+                            FillScriptEditContext(partActor, gr); // 親に加えられた編集をパーツにも伝える（敵のパーツと揃える）
                             partActor.parentX = gim.x; partActor.parentY = gim.y;
+                            partActor.parentDirection = (gim.direction == 0) ? 1.0f : -1.0f; // 0=正方向, それ以外=反転
                             partActor.partIndex = part.partIndex;
+                            FillScriptPartTransform(partActor, part, gPartPose);
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
                             partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
@@ -7166,15 +7394,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!isPlayerRewinding) {
                                 float pw_ = (float)player.width * player.scale;
                                 float ph_ = (float)player.height * player.scale;
-                                float partW = (float)part.hitboxWidth * part.scale;
-                                float partH = (float)part.hitboxHeight * part.scale;
+                                float partHX, partHY, partW, partH;
+                                // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                GetPartHitRect(part, partHX, partHY, partW, partH);
                                 if (CheckCollision(player.x, player.y, pw_, ph_,
-                                                    part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                    partHX, partHY, partW, partH)) {
                                     player.hp--;
                                     if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
                                 }
                             }
                         }
+                        CapturePartsLocal(gim.parts, gPartPose); // 必ず ApplyPartsParentPose より前
                     }
                 }
                 if (canGimAct) {
@@ -7185,6 +7415,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 gim.lastDeltaX = gim.x - beforeGimX;
                 gim.lastDeltaY = gim.y - beforeGimY;
             }
+            // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
+            if (!gim.parts.empty()) ApplyPartsParentPose(gim.parts, MakeGimmickPose(gim));
         }
 
         // プレイヤーが能動的に使う画面エフェクト操作（敵/ギミックの演出より後に適用し、プレイヤーの意図を優先する）
@@ -7321,12 +7553,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float partCx = 0.0f;
                     for (const auto& part : gimHz.parts) {
                         if (!part.isActive || !part.deadly) continue;
-                        float partW = (float)part.hitboxWidth * part.scale;
-                        float partH = (float)part.hitboxHeight * part.scale;
+                        float partHX, partHY, partW, partH;
+                        // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                        GetPartHitRect(part, partHX, partHY, partW, partH);
                         if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                           part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                           partHX, partHY, partW, partH)) {
                             hitDeadlyPart = true;
-                            partCx = part.x + part.hitboxOffsetX + partW / 2.0f;
+                            partCx = partHX + partW / 2.0f;
                             break;
                         }
                     }
@@ -7368,10 +7601,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         bool hitPart = false;
                         for (const auto& part : enemy.parts) {
                             if (!part.isActive) continue;
-                            float partW = (float)part.hitboxWidth * part.scale;
-                            float partH = (float)part.hitboxHeight * part.scale;
+                            float partHX, partHY, partW, partH;
+                            // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                            GetPartHitRect(part, partHX, partHY, partW, partH);
                             if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                partHX, partHY, partW, partH)) {
                                 hitPart = true;
                                 break;
                             }
@@ -7503,10 +7737,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     const EnemyDef* edefForParts = FindEnemyDef(enemy.assetId);
                                     for (auto& part : enemy.parts) {
                                         if (!part.isActive) continue;
-                                        float partW = (float)part.hitboxWidth * part.scale;
-                                        float partH = (float)part.hitboxHeight * part.scale;
+                                        float partHX, partHY, partW, partH;
+                                        // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                        GetPartHitRect(part, partHX, partHY, partW, partH);
                                         if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale,
-                                                            part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                            partHX, partHY, partW, partH)) {
                                             if (part.hp > 0) {
                                                 part.hp--;
                                                 bool partDied = part.hp <= 0;
@@ -7559,10 +7794,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 const GimmickDef* gdefForPartHit = FindGimmickDef(gim.assetId);
                                 for (auto& part : gim.parts) {
                                     if (!part.isActive) continue;
-                                    float partW = (float)part.hitboxWidth * part.scale;
-                                    float partH = (float)part.hitboxHeight * part.scale;
+                                    float partHX, partHY, partW, partH;
+                                    // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                    GetPartHitRect(part, partHX, partHY, partW, partH);
                                     if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale,
-                                                        part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                        partHX, partHY, partW, partH)) {
                                         if (part.hp > 0) {
                                             part.hp--;
                                             bool partDied = part.hp <= 0;

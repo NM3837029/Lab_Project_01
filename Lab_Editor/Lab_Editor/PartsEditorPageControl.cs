@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
 
@@ -40,6 +40,9 @@ public class PartsEditorPageControl : UserControl
     // 編集対象の敵/ギミック本体が持つ基準スプライト（合成プレビューの中心に薄く表示する目印用）
     private readonly string baseSpritePath;
     private Image? baseSprite;
+    // 本体の論理サイズ（当たり判定の幅・高さ）。0なら未指定で、画像の原寸を基準にする。
+    private readonly float baseLogicalW;
+    private readonly float baseLogicalH;
     // パーツごとのサムネイル画像のキャッシュ。毎回ファイルを読み直すと重いため、一度読み込んだら
     // PartDefインスタンスをキーにして保持しておく（画像が変わった時はInvalidatePartThumbで明示的に破棄する）。
     private readonly Dictionary<PartDef, Image?> _partThumbCache = new();
@@ -101,10 +104,14 @@ public class PartsEditorPageControl : UserControl
     // initialParts   : 編集開始時点でのパーツ一覧。ここではクローンして保持するため、このリスト自体は変更されない。
     // projectRoot    : プロジェクトのルートフォルダ。画像パスの解決に使う。
     // baseSpritePath : 本体の基準スプライトのパス。合成プレビューの中心目印として表示する。
-    public PartsEditorPageControl(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath)
+    // baseLogicalW/H : 本体の論理サイズ（当たり判定の幅・高さ）。0なら画像の原寸で代用する。
+    //                  詳細は WorldScale のコメントを参照。
+    public PartsEditorPageControl(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath, float baseLogicalW = 0f, float baseLogicalH = 0f)
     {
         this.projectRoot = projectRoot;
         this.baseSpritePath = baseSpritePath;
+        this.baseLogicalW = baseLogicalW;
+        this.baseLogicalH = baseLogicalH;
         // 渡されたパーツ一覧をそのまま参照すると、キャンセルしても呼び出し元のデータが
         // 書き換わってしまう恐れがあるため、1件ずつクローンして独立したリストとして保持する。
         parts = initialParts.Select(ClonePart).ToList();
@@ -702,6 +709,37 @@ public class PartsEditorPageControl : UserControl
     private PointF WorldToScreen(Rectangle baseRect, float scale, float ox, float oy)
         => new PointF(baseRect.X + ox * scale, baseRect.Y + oy * scale);
 
+    // 「論理座標1px」がプレビュー上の何ピクセルにあたるかを返す。
+    //
+    // パーツの offset も width/height も、ゲーム側では論理座標（本体の当たり判定サイズと同じ土俵）で
+    // 解釈される。ところが新しい素材は全て 640x640 の共通キャンバスで描かれているため、
+    // 画像の原寸を基準にすると倍率が10倍以上ずれ、プレビューだけまったく別の配置に見えてしまう。
+    // 本体の論理サイズが分かっている場合はそちらを基準にして、ゲーム本体と同じ絵にする。
+    private float WorldScale(Rectangle baseRect)
+    {
+        if (baseLogicalW > 0f) return baseRect.Width / baseLogicalW;
+        if (baseSprite != null && baseSprite.Width > 0) return (float)baseRect.Width / baseSprite.Width;
+        return 1.0f;
+    }
+
+    // パーツの描画矩形を、ゲーム本体とまったく同じ解釈で求める。
+    //
+    // ゲームは offset を「本体の基準座標 → パーツの【左上】」として扱い、表示サイズは
+    // 画像の原寸ではなくパーツ定義の width/height（論理サイズ）で決まる。
+    // プレビューはこれを長らく「→ パーツの【中心】」かつ「画像の原寸基準」と解釈していた。
+    // 既存アセットは全てゲーム側の見え方を頼りに作られている（ドッスンの黒目がその証拠）ので、
+    // ズレていたのはプレビューのほうであり、こちらをゲームに合わせる。
+    private Rectangle GetPartDrawRect(Rectangle baseRect, float scale, PartDef p, float ox, float oy)
+    {
+        var thumb = GetPartThumb(p);
+        float lw = p.width  > 0 ? p.width  : (thumb?.Width  ?? 24);
+        float lh = p.height > 0 ? p.height : (thumb?.Height ?? 24);
+        int pw = Math.Max((int)(lw * scale * p.scale), 6);
+        int ph = Math.Max((int)(lh * scale * p.scale), 6);
+        var pos = WorldToScreen(baseRect, scale, ox, oy);
+        return new Rectangle((int)pos.X, (int)pos.Y, pw, ph);
+    }
+
     // 合成プレビューキャンバスの描画本体。毎フレーム（Invalidateされるたび）呼び出され、
     // 「本体の基準スプライト → 各パーツ（zOrder順）→ 再生中の場合の情報表示 → パーツ0件時の案内」
     // の順に描き重ねていく。
@@ -710,8 +748,8 @@ public class PartsEditorPageControl : UserControl
         // ドット絵をぼかさずくっきり拡大表示するため、補間モードを最近傍法にする。
         e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
         var baseRect = GetBaseDrawRect();
-        // 基準スプライトの実サイズに対する表示倍率。以降、全パーツの座標変換にもこの倍率を使う。
-        float scale = baseSprite != null ? (float)baseRect.Width / baseSprite.Width : 1.0f;
+        // 論理座標1pxがプレビュー上の何pxにあたるか。以降、全パーツの座標変換にもこの倍率を使う。
+        float scale = WorldScale(baseRect);
 
         // 本体の基準スプライトを薄く表示し、外枠と原点（水色の点）を描いて位置の目安にする。
         if (baseSprite != null) e.Graphics.DrawImage(baseSprite, baseRect);
@@ -734,22 +772,21 @@ public class PartsEditorPageControl : UserControl
                 if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
                 if (pose.HasAngle) angleRad = pose.Angle;
             }
-            // ワールド座標を画面座標に変換し、サムネイル画像のサイズ（画像自体のサイズ×表示倍率×パーツのscale値）から
-            // 描画矩形を中心合わせで計算する。
-            var pos = WorldToScreen(baseRect, scale, ox, oy);
+            // ゲーム本体と同じ解釈（offsetはパーツの左上、サイズは論理サイズ）で描画矩形を求める。
+            var rect = GetPartDrawRect(baseRect, scale, p, ox, oy);
             var thumb = GetPartThumb(p);
-            int pw = Math.Max((int)((thumb?.Width ?? 24) * scale * p.scale), 10);
-            int ph = Math.Max((int)((thumb?.Height ?? 24) * scale * p.scale), 10);
-            var rect = new Rectangle((int)pos.X - pw / 2, (int)pos.Y - ph / 2, pw, ph);
+            // 回転の軸はパーツの中心。ゲーム側のDrawRotaGraphも中心を軸に回すので、それに合わせる。
+            float pivotX = rect.X + rect.Width / 2f;
+            float pivotY = rect.Y + rect.Height / 2f;
 
             // 回転角度がある場合は、パーツの中心を軸に回転描画するため一時的に座標系を
             // 「中心へ平行移動→回転→元に戻す」という変換にしてから描き、描画後に元の座標系へ復元する。
             var savedState = angleRad != 0f ? e.Graphics.Save() : null;
             if (angleRad != 0f)
             {
-                e.Graphics.TranslateTransform(pos.X, pos.Y);
+                e.Graphics.TranslateTransform(pivotX, pivotY);
                 e.Graphics.RotateTransform(angleRad * 180f / MathF.PI);
-                e.Graphics.TranslateTransform(-pos.X, -pos.Y);
+                e.Graphics.TranslateTransform(-pivotX, -pivotY);
             }
             // サムネイル画像があればそれを描画し、なければ「画像未設定」を表すオレンジ色の丸で代替表示する。
             if (thumb != null) e.Graphics.DrawImage(thumb, rect);
@@ -799,16 +836,14 @@ public class PartsEditorPageControl : UserControl
     private int FindPartMarkerAt(Point pt)
     {
         var baseRect = GetBaseDrawRect();
-        float scale = baseSprite != null ? (float)baseRect.Width / baseSprite.Width : 1.0f;
+        float scale = WorldScale(baseRect);
         var order = Enumerable.Range(0, parts.Count).OrderByDescending(i => parts[i].zOrder).ToList();
         foreach (int i in order)
         {
             var p = parts[i];
-            var pos = WorldToScreen(baseRect, scale, p.offsetX, p.offsetY);
-            var thumb = GetPartThumb(p);
-            int pw = Math.Max((int)((thumb?.Width ?? 24) * scale * p.scale), 10);
-            int ph = Math.Max((int)((thumb?.Height ?? 24) * scale * p.scale), 10);
-            var rect = new Rectangle((int)pos.X - pw / 2, (int)pos.Y - ph / 2, pw, ph);
+            // クリック判定の矩形は、必ず描画と同じ関数から求める
+            // （別々に書くと「見えている場所と掴める場所が違う」というズレが生まれるため）。
+            var rect = GetPartDrawRect(baseRect, scale, p, p.offsetX, p.offsetY);
             if (rect.Contains(pt)) return i;
         }
         return -1;
@@ -837,7 +872,7 @@ public class PartsEditorPageControl : UserControl
     {
         if (_draggingIndex < 0) return; // ドラッグ中でなければ何もしない
         var baseRect = GetBaseDrawRect();
-        float scale = baseSprite != null ? (float)baseRect.Width / baseSprite.Width : 1.0f;
+        float scale = WorldScale(baseRect);
         if (scale <= 0) return;
         // 画面上のマウス移動量（ピクセル）を、表示倍率で割ってワールド座標系での移動量に変換する。
         float dx = (e.Location.X - _dragMouseStart.X) / scale;

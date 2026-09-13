@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
 
@@ -34,8 +34,10 @@ public delegate void BehaviorScriptEditRequestHandler(string label, JArray initi
 // label          : 編集対象を示すラベル文字列
 // initialParts   : 編集開始時点でのパーツ一覧
 // baseSpritePath : ベースとなるスプライト画像のパス
+// baseLogicalW/H : 本体の論理サイズ(当たり判定の幅・高さ)。パーツのoffsetやwidth/heightは
+//                  この論理座標で解釈されるため、プレビューの倍率計算に必要。0なら画像の原寸で代用する
 // onSaved        : 編集確定時に新しいパーツ一覧を受け取るコールバック
-public delegate void PartsEditRequestHandler(string label, List<PartDef> initialParts, string baseSpritePath, Action<List<PartDef>> onSaved);
+public delegate void PartsEditRequestHandler(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, Action<List<PartDef>> onSaved);
 
 // コモンイベント編集要求
 // ev      : 編集対象のコモンイベント定義

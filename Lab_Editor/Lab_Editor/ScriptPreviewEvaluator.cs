@@ -1,4 +1,4 @@
-using Newtonsoft.Json.Linq;
+﻿using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
 
@@ -126,6 +126,18 @@ public static class ScriptPreviewEvaluator
             case "PlayerX": case "PlayerY": case "DistanceToPlayer": case "DirectionToPlayer":
             case "GetVar":
                 return 0f;
+            // 編集・画面エフェクト系はプレビューには「まだ何も編集されていない状態」しかないので、
+            // 差分を表すものは0、倍率を表すものは1（＝等倍）を返す。
+            // ここに書かなくても default で0になるが、倍率まで0になると
+            // 「拡大に応じて伸びる」タイプのパーツがプレビュー上で長さ0に潰れて見えるため明示する。
+            case "ParentTilt": case "EditTilt": case "SelfAngle": case "ScreenBrightness":
+                return 0f;
+            case "ParentScaleRatio": case "EditScaleRatio": case "EditSpeedRatio":
+            case "SelfScale": case "ScreenZoom":
+                return 1f;
+            // 親の向きは既定の「右向き」を表す +1 とする
+            case "ParentDirection": return 1f;
+            case "ScreenColorFilter": return 0f;
             case "Const": return EvalNumber(obj["value"], time, partIndex);
             case "Add": return EvalNumber(obj["a"], time, partIndex) + EvalNumber(obj["b"], time, partIndex);
             case "Sub": return EvalNumber(obj["a"], time, partIndex) - EvalNumber(obj["b"], time, partIndex);

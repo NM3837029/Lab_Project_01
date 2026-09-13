@@ -844,18 +844,30 @@
                   {
                     "op": "SetLocalOffsetPolar",
                     "angle": {
-                      "op": "DirectionToPlayer"
+                      "op": "Sub",
+                      "a": {
+                        "op": "DirectionToPlayer"
+                      },
+                      "b": {
+                        "op": "ParentTilt"
+                      }
                     },
                     "radius": 10.0
                   },
                   {
                     "op": "SetAngle",
                     "angle": {
-                      "op": "Add",
+                      "op": "Sub",
                       "a": {
-                        "op": "DirectionToPlayer"
+                        "op": "Add",
+                        "a": {
+                          "op": "DirectionToPlayer"
+                        },
+                        "b": 1.5707963
                       },
-                      "b": 1.5707963
+                      "b": {
+                        "op": "ParentTilt"
+                      }
                     }
                   },
                   {
@@ -925,7 +937,13 @@
                       "a": {
                         "op": "Cos",
                         "a": {
-                          "op": "DirectionToPlayer"
+                          "op": "Sub",
+                          "a": {
+                            "op": "DirectionToPlayer"
+                          },
+                          "b": {
+                            "op": "ParentTilt"
+                          }
                         }
                       },
                       "b": 3.0
@@ -935,7 +953,13 @@
                       "a": {
                         "op": "Sin",
                         "a": {
-                          "op": "DirectionToPlayer"
+                          "op": "Sub",
+                          "a": {
+                            "op": "DirectionToPlayer"
+                          },
+                          "b": {
+                            "op": "ParentTilt"
+                          }
                         }
                       },
                       "b": 3.0
@@ -1168,13 +1192,7 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": {
-                            "op": "Mul",
-                            "a": 58.0,
-                            "b": {
-                              "op": "EditScaleRatio"
-                            }
-                          }
+                          "b": 58.0
                         },
                         "body": [
                           {
@@ -1185,13 +1203,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",
@@ -1241,13 +1253,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",
@@ -1351,13 +1357,7 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": {
-                            "op": "Mul",
-                            "a": 58.0,
-                            "b": {
-                              "op": "EditScaleRatio"
-                            }
-                          }
+                          "b": 58.0
                         },
                         "body": [
                           {
@@ -1368,13 +1368,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",
@@ -1424,13 +1418,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",
@@ -1534,13 +1522,7 @@
                             "op": "GetVar",
                             "name": "r"
                           },
-                          "b": {
-                            "op": "Mul",
-                            "a": 58.0,
-                            "b": {
-                              "op": "EditScaleRatio"
-                            }
-                          }
+                          "b": 58.0
                         },
                         "body": [
                           {
@@ -1551,13 +1533,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",
@@ -1607,13 +1583,7 @@
                           {
                             "op": "SetLocalOffsetPolar",
                             "angle": {
-                              "op": "Add",
-                              "a": {
-                                "op": "DirectionToPlayer"
-                              },
-                              "b": {
-                                "op": "EditTilt"
-                              }
+                              "op": "DirectionToPlayer"
                             },
                             "radius": {
                               "op": "Mul",

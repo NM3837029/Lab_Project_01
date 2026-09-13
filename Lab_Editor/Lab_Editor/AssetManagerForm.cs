@@ -1,4 +1,4 @@
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // UI改善（構造改修フェーズ5b）— 中身はAssetManagerPageControlに抽出済み。
 // このクラスは既存の呼び出し元（Form1.cs等）が引き続き `new AssetManagerForm(...).ShowDialog()`
@@ -50,9 +50,9 @@ public class AssetManagerForm : Form
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultScript);
         };
         // パーツ構成の編集要求 → PartsEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
-        page.PartsEditRequested += (label, initialParts, baseSpritePath, onSaved) =>
+        page.PartsEditRequested += (label, initialParts, baseSpritePath, baseLogicalW, baseLogicalH, onSaved) =>
         {
-            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath);
+            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultParts);
         };
         // コモンイベントの編集要求 → CommonEventEditorFormをモーダル表示し、OKなら結果をコールバックで返す。

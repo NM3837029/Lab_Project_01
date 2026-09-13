@@ -1,4 +1,4 @@
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // ======================================================
 // BlockDef - Scratch風ブロックエディタで使用する「ブロックの定義カタログ」
@@ -246,12 +246,43 @@ public static class BlockCatalog
         new BlockDef("Time", "経過フレーム数(全体時計)", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("ParentX", "親(本体)のX座標", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("ParentY", "親(本体)のY座標", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ParentDirection", "親(本体)の向き(右=1/左=-1)", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("PartIndex", "自分のパーツ番号(0始まり)", BlockCategory.Sensing, BlockShape.Reporter),
+
+        // 複合オブジェクトのパーツ追従 — 親に加えられた編集をパーツ側から読むレポーター。
+        // エンジンはパーツを親と一体の剛体として回す／伸ばすので、
+        // ドッスンの黒目や砲台の砲身のように「親が傾いてもプレイヤーを向き続けてほしい」パーツは、
+        // 狙った角度から ParentTilt を引いて打ち消す。
+        new BlockDef("ParentTilt", "親(本体)の傾き(配置時からの差, rad)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ParentScaleRatio", "親(本体)の倍率(配置時から)", BlockCategory.Sensing, BlockShape.Reporter),
+
+        // Feature: 編集リアクション — プレイヤーの編集内容と画面エフェクトを読むレポーター群。
+        //
+        // ⚠ ここへの登録漏れは「無言のデータ消失」になる。BlockScriptSerializer は
+        // カタログに無いopを null として読み飛ばすため、未登録のブロックを含むアセットを
+        // ブロックエディタで開いて保存すると、そのブロックがJSONから消える。
+        // 実行エンジン(BehaviorScript.h)にopを足したら必ずここにも足すこと。
+        new BlockDef("SelfScale", "自分の大きさ(倍率)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("SelfAngle", "自分の角度(rad)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("EditScaleRatio", "編集: 大きさの倍率(配置時から)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("EditTilt", "編集: 傾き(配置時からの差, rad)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("EditSpeedRatio", "編集: 速さの倍率", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenColorFilter", "画面: 色フィルタ番号", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenBrightness", "画面: 明るさ", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenZoom", "画面: ズーム倍率", BlockCategory.Sensing, BlockShape.Reporter),
 
         // ── Sensing: booleans (真偽値) ───────────────────────
         new BlockDef("IsGrounded", "地面に接地している", BlockCategory.Sensing, BlockShape.Boolean),
         new BlockDef("IsWallAhead", "進行方向に壁がある", BlockCategory.Sensing, BlockShape.Boolean),
         new BlockDef("IsGroundAhead", "進行方向の足元に地面がある", BlockCategory.Sensing, BlockShape.Boolean),
+        // Feature: 編集リアクション — 真偽値版。登録漏れがデータ消失になるのは数値版と同じ。
+        new BlockDef("EditFlipped", "編集: 向きを反転された", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("EditPaused", "編集: 一時停止されている", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("EditRewinding", "編集: 巻き戻されている", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("EditEnlarged", "編集: 拡大された", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("EditShrunk", "編集: 縮小された", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("EditTilted", "編集: 傾けられた", BlockCategory.Sensing, BlockShape.Boolean),
+        new BlockDef("IsFastForward", "早送り中", BlockCategory.Sensing, BlockShape.Boolean),
 
         // ── Operators: reporters ─────────────────────────────
         new BlockDef("Const", "数値", BlockCategory.Operators, BlockShape.Reporter,

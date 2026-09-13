@@ -1089,9 +1089,9 @@ public partial class Form1 : Form
         }
 
         // 「パーツ編集」への遷移要求を処理するローカル関数。
-        void HandlePartsEditRequest(string label, List<PartDef> initialParts, string baseSpritePath, Action<List<PartDef>> onSaved)
+        void HandlePartsEditRequest(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, Action<List<PartDef>> onSaved)
         {
-            var page = new PartsEditorPageControl(label, initialParts, projectRoot, baseSpritePath);
+            var page = new PartsEditorPageControl(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
             page.Saved += (s, parts) => { onSaved(parts); shell.GoBack(); };
             page.Cancelled += (s, ev) => shell.GoBack();
             // パーツ編集の中からさらに当たり判定/挙動スクリプトを開く場合も、同じシェル内でページ遷移する
