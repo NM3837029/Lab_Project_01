@@ -1,4 +1,4 @@
-#include "DxLib.h"
+﻿#include "DxLib.h"
 #include <vector>
 #include <stdio.h>
 #include <fstream>
@@ -2619,6 +2619,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         isShowingMessage = false;
         currentMessageText = "";
         currentMessageSpeaker = "";
+        SoundManager::Get().StopAnimalese();
         cameraOverrideX = -1.0f;
         cameraOverrideTimer = 0.0f;
         collectedItemIds.clear();
@@ -3611,10 +3612,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // フレーム数がポーズ解除後の最初のTickでいきなり反映され、Time依存の回転/振動パーツが不連続にジャンプしてしまう。
         if (!isPaused || isStepFrame) BehaviorInterpreter::scriptTimeCounter += 1.0f;
 
+        // Feature 3: サウンドマネージャーの更新
+        // （ポーズ状態に関わらず毎フレーム更新し、会話音シーケンサーの進行と再生完了ハンドルの解放を保証する）
+        SoundManager::Get().Update();
+
         // Feature 3 & 5: 各種マネージャーの更新
         if (!isPaused || isStepFrame) {
             float dt = 1.0f / 60.0f * ts;
-            SoundManager::Get().Update();
             
             // Feature 2: アニメーションの更新
             player.anim.Update(dt);

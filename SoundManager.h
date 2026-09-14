@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "DxLib.h"
 #include <string>
 #include <map>
@@ -107,7 +107,7 @@ public:
             // バックグラウンド再生（他の音と重ねて鳴らせるモード）で1回再生する。
             PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
             // 再生が終わったら後片付け（DeleteSoundMem）できるよう、一時ハンドルとして記録しておく。
-            tempHandles.push_back(dup);
+            AddTempHandle(dup);
         }
     }
 
@@ -147,7 +147,7 @@ public:
                     step.waitMs = stepWait;
 
                     // 文末の疑問符（テキストに「？」が含まれ、最後の文字）はピッチ上昇
-                    if (i + 1 == keys.size() && (utf8Text.find('?') != std::string::npos || utf8Text.find("？") != std::string::npos)) {
+                    if (i + 1 == keys.size() && (utf8Text.find('?') != std::string::npos || utf8Text.find("\xEF\xBC\x9F") != std::string::npos)) {
                         step.pitch *= 1.28f;
                     }
                 }
@@ -163,7 +163,7 @@ public:
             if (handle >= 0) {
                 ChangeVolumeSoundMem((int)(voice.volume * 255), handle);
                 PlaySoundMem(handle, DX_PLAYTYPE_BACK, TRUE);
-                tempHandles.push_back(handle);
+                AddTempHandle(handle);
             }
         }
     }
@@ -196,8 +196,15 @@ public:
                         ChangeVolumeSoundMem((int)(speechVolume * 255), dup);
                         // ピッチ（周波数）を変更（標準44100Hz × pitch倍率）
                         SetFrequencySoundMem((int)(44100 * step.pitch), dup);
-                        PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
-                        tempHandles.push_back(dup);
+                        int playRet = PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
+                        if (playRet == 0) {
+                            AddTempHandle(dup);
+                        } else {
+                            Logger::Error("SoundManager", "Update", "PlaySoundMem failed for Animalese handle");
+                            DeleteSoundMem(dup);
+                        }
+                    } else {
+                        Logger::Error("SoundManager", "Update", "DuplicateSoundMem failed for Animalese sample");
                     }
                 }
                 speechNextTimeMs = now + step.waitMs;
@@ -205,10 +212,16 @@ public:
         }
 
         // 2. 再生が終了した一時ハンドルの解放
+        // 発音開始から一定時間（最低100ms）経過したもののみ CheckSoundMem で完了チェックを行う。
+        // DxLibの非同期再生（DX_PLAYTYPE_BACK）では、再生開始直後の極短時間に
+        // CheckSoundMem が 0（未完了/準備中）を返すことがあるため、即時解放による無音化を防ぐ。
+        int curTime = GetNowCount();
         for (int i = (int)tempHandles.size() - 1; i >= 0; i--) {
-            if (CheckSoundMem(tempHandles[i]) == 0) {
-                DeleteSoundMem(tempHandles[i]);
-                tempHandles.erase(tempHandles.begin() + i);
+            if (curTime - tempHandles[i].startTimeMs >= 100) {
+                if (CheckSoundMem(tempHandles[i].handle) == 0) {
+                    DeleteSoundMem(tempHandles[i].handle);
+                    tempHandles.erase(tempHandles.begin() + i);
+                }
             }
         }
     }
@@ -230,9 +243,11 @@ public:
         // 50音サンプルの解放
         animaleseSynth.ReleaseSamples();
 
-        // PlaySeで複製された、再生完了待ちの一時ハンドルもすべて解放する。
+        // PlaySe/PlayAnimaleseで複製された、再生完了待ちの一時ハンドルもすべて解放する。
         for (size_t i = 0; i < tempHandles.size(); i++) {
-            DeleteSoundMem(tempHandles[i]);
+            if (tempHandles[i].handle >= 0) {
+                DeleteSoundMem(tempHandles[i].handle);
+            }
         }
         // すべてのコンテナと状態を初期状態に戻す。
         tempHandles.clear();
@@ -253,9 +268,21 @@ public:
     }
 
 private:
+    // 再生中の一時ハンドルと再生開始時刻を記録する構造体
+    struct TempSoundHandle {
+        int handle = -1;
+        int startTimeMs = 0;
+    };
+
+    void AddTempHandle(int handle) {
+        if (handle >= 0) {
+            tempHandles.push_back({handle, GetNowCount()});
+        }
+    }
+
     std::map<std::string, SoundEntry> bgmMap; // BGMのID→設定・ハンドルのマップ
     std::map<std::string, SoundEntry> seMap;  // SE（UI音含む）のID→設定・ハンドルのマップ
-    std::vector<int> tempHandles;             // PlaySeで複製した、再生完了待ちの一時ハンドル一覧
+    std::vector<TempSoundHandle> tempHandles; // PlaySe/PlayAnimaleseで複製した、再生完了待ちの一時ハンドル一覧
     std::string currentBgmId;                 // 現在再生中のBGMのID（何も再生していなければ空文字）
     bool isMuted = false;                     // SEのミュート状態（trueならPlaySeが無視される）
     AnimaleseSynthesizer animaleseSynth;      // どうぶつ語プロシージャル音声合成エンジン
