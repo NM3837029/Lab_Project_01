@@ -18,7 +18,8 @@
     "pauseEnabled": true,
     "fastForwardEnabled": true,
     "screenEffectEnabled": true,
-    "objectEditEnabled": true
+    "objectEditEnabled": true,
+    "cutEnabled": true
   },
   "edit_cost_settings": {
     "maxCost": 100.0,
@@ -31,7 +32,8 @@
     "flatMenuToggle": 8.0,
     "flatSpeedChange": 6.0,
     "flatDirectionFlip": 4.0,
-    "flatResetAll": 10.0
+    "flatResetAll": 10.0,
+    "flatCutCreate": 20.0
   },
   "goal": {
     "x": 512.0,

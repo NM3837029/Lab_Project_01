@@ -26,7 +26,7 @@
   },
   "title_screen": {
     "background_image": "img/薄橙色の背景.png",
-    "bgm_id": "",
+    "bgm_id": "bgm_editing_09",
     "elements": [
       {
         "key": "logo",
@@ -66,7 +66,7 @@
         "key": "subtitle",
         "type": "text",
         "visible": true,
-        "text": "編集して進む2Dアクション",
+        "text": "2Dアクションゲームのためのゲームエンジン",
         "image": "",
         "x": 320.0,
         "y": 162.0,
