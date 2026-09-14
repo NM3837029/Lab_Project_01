@@ -132,6 +132,19 @@ public class AssetManagerPageControl : UserControl
     {
         ("ignorePause", "一時停止を無視して動き続ける", 0),
     };
+    // アセットごとに「この編集操作を禁止する」ための共通欄。
+    // ステージ単位の編集ツール設定とは別の軸で、こちらは「このオブジェクトに対して」の可否を決める。
+    // 敵・ギミック・アイテムで同じ並びにしてあるので、1つの配列を3種類とも使い回す。
+    private static readonly (string Field, string Label, int Decimals)[] EditLockParamFields =
+    {
+        ("noScale",  "拡大縮小を禁止", 0),
+        ("noRotate", "回転を禁止", 0),
+        ("noMove",   "移動を禁止", 0),
+        ("noFlip",   "向き反転を禁止", 0),
+        ("noPause",  "一時停止を禁止", 0),
+        ("noRewind", "巻き戻しを禁止", 0),
+        ("noSpeed",  "速度変更を禁止", 0),
+    };
     // type_enum(ギミックのタイプ番号)ごとに表示する挙動パラメータ欄の定義一覧。中身の意味はEnemyParamFieldsと同じ形式。
     // ここに定義が無いtype_enum（＝配列の添字にキーが存在しない番号）は、そのギミックに調整可能なパラメータが
     // 無いことを意味し、その場合はUpdateBehaviorParamsPanel側でパラメータ欄を出さずに従来の説明文だけを表示する。
@@ -1100,15 +1113,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         int typeEnum = GetSelectedTypeEnum(row);
         var fieldMap = isEnemy ? EnemyParamFields : GimmickParamFields;
 
-        // 選択中のtype_enumに対応する調整可能パラメータの定義が存在しない（またはフィールド0件）場合は、
-        // パラメータパネルではなく従来のタイプ一覧説明(rtbTypeHint)を表示する
-        if (!fieldMap.TryGetValue(typeEnum, out var fields) || fields.Length == 0)
-        {
-            pnlBehaviorParams.Visible = false;
-            rtbTypeHint.Visible = true;
-            lblTypeHintTitle.Text = "📋 タイプ説明";
-            return;
-        }
+        // 選択中のtype_enumに対応する調整可能パラメータの定義。
+        //
+        // 【以前の不具合】ここで定義が無いと即 return していたため、
+        // 「全タイプ共通で出したい欄」(CommonEnemyParamFields 等) までいっしょに表示されなくなっていた。
+        // その結果、ParamFields に登録の無いタイプ（カスタムスクリプト等）では
+        // ignorePause が永久に画面へ出てこなかった。
+        // 共通欄だけでも出せるよう、定義が無い場合は空配列として先へ進む。
+        if (!fieldMap.TryGetValue(typeEnum, out var fields)) fields = System.Array.Empty<(string, string, int)>();
 
         // 行に紐づくEnemyDef/GimmickDef本体（既に無ければ新規作成）を取得し、以降このオブジェクトの
         // プロパティへ直接値を読み書きする
@@ -1124,7 +1136,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // ペアとして縦に並べていく。yはこのパネル内でのY座標（次の項目を配置する高さ）を表す
         int y = 4;
         // 敵の場合は、タイプ固有の項目の後ろに全タイプ共通の項目（一時停止無視など）を連結する
-        var effectiveFields = isEnemy ? fields.Concat(CommonEnemyParamFields).ToArray() : fields;
+        // タイプ固有の欄のうしろへ、全タイプ共通の欄を連結する。
+        // 編集禁止フラグは敵・ギミックどちらにもあるので、両方へ付ける。
+        var effectiveFields = isEnemy
+            ? fields.Concat(CommonEnemyParamFields).Concat(EditLockParamFields).ToArray()
+            : fields.Concat(EditLockParamFields).ToArray();
         foreach (var (field, label, decimals) in effectiveFields)
         {
             // フィールド名の文字列からリフレクションでEnemyDef/GimmickDef側のプロパティ情報を取得する。

@@ -39,6 +39,10 @@ public class BackgroundLayer
 {
     // 背景画像のファイル名（相対パス）。
     public string sprite { get; set; } = "";
+    // 画像を使わず単色で塗りたいときの色（"#RRGGBB"）。空なら単色塗りをしない。
+    // 画像が無いレイヤーは今まで「何も描かない層」でしかなく、背景が全部空だと
+    // 画面が黒いままだった。空だけの背景などを画像なしで作れるようにするための設定。
+    public string color { get; set; } = "";
     // 描画順。数値が小さいほど奥（先）に描かれ、大きいほど手前に描かれる。
     public int drawOrder { get; set; } = 0;
     // スクロール速度の倍率。1.0でプレイヤー（前景）と同じ速さで動き、0に近いほどゆっくり動いて
@@ -837,6 +841,18 @@ public class EnemyDef
     // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
     public bool consumePartOnAttack { get; set; } = false;
 
+    // ==== このアセットに対して禁止する編集操作 ====
+    // 「この敵だけは拡大させたくない」といった場ごとの縛りを設定で表せるようにするもの。
+    // 既定は全て false（＝何でも編集できる）なので、既存アセットの挙動は変わらない。
+    // ※ C++側の EnemyDef にも同名フィールドがある。片方だけだと保存時に消える。
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
+
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     // BlockCanvasControlで組み立てたビジュアルスクリプト（ブロックの木構造）をJSON化して保持する。
     public JArray script { get; set; } = new JArray();
@@ -901,6 +917,15 @@ public class GimmickDef
     // 他の挙動パラメータと違い -1 の「未指定」番兵は使わず、素直な bool にしてある
     // （挙動パラメータ欄は bool のプロパティをチェックボックスとして描くため）。
     // 既定値は「今までどおり誰でも壊せる汎用ブロック」。
+    // このギミックに対して禁止する編集操作（詳細は EnemyDef の同名プロパティのコメント参照）
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
+
     public bool breakBySlam { get; set; } = true;    // ドッスンの落下衝撃で壊れる
     public bool breakByRam { get; set; } = true;      // 突進・歩行・巡回の体当たりで壊れる
     public bool breakByBullet { get; set; } = true;   // 弾で壊れる
@@ -944,6 +969,15 @@ public class ItemDef
     // サウンド SE (Feature 3)
     // アイテムを取得した際に再生する効果音のID。
     public string seCollect { get; set; } = "";
+
+    // このアイテムに対して禁止する編集操作（詳細は EnemyDef の同名プロパティのコメント参照）
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
     // Hitbox (Feature: Visual Hitbox Editor)
     // 見た目の画像と当たり判定の大きさ・位置がずれる場合に調整するための値。
     public int hitboxOffsetX { get; set; } = 0;

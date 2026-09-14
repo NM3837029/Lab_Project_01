@@ -1,5 +1,6 @@
 ﻿#include "DxLib.h"
 #include <vector>
+#include <algorithm> // 背景レイヤーを drawOrder 順へ並べ替えるための std::sort
 #include <stdio.h>
 #include <fstream>
 #include <string>
@@ -197,6 +198,23 @@ struct EnemyDef {
     // 既定はfalseなので、パーツを持つ既存の敵（砲台・ドッスン等）の挙動は一切変わらない。
     bool consumePartOnAttack = false;
 
+    // ==== このアセットに対して禁止する編集操作 ====
+    //
+    // 「この敵だけは拡大させたくない」「この足場は動かされたら困る」といった
+    // 場ごとの縛りを、C++を書き換えずにアセット側で設定できるようにするためのフラグ。
+    // 既定は全て false（＝何でも編集できる）なので、既存アセットの挙動は変わらない。
+    //
+    // ステージ単位の EditToolFlags（そのステージで使えるツール）とは別の軸で、
+    // こちらは「このオブジェクトに対して」の可否を決める。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    bool noScale = false;   // 拡大縮小を禁止
+    bool noRotate = false;  // 回転を禁止
+    bool noMove = false;    // 移動を禁止
+    bool noFlip = false;    // 向き反転を禁止
+    bool noPause = false;   // 個別の一時停止を禁止
+    bool noRewind = false;  // 個別の巻き戻しを禁止
+    bool noSpeed = false;   // 速度変更を禁止
+
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
 
@@ -250,6 +268,15 @@ struct GimmickDef {
     // そのせいで「ドッスンでしか壊せないブロック」のような場を作ることができなかった。
     // 壊せる条件をブロック側のデータにすることで、Lab_Editorから場ごとに設計できるようにする。
     //
+    // このギミックに対して禁止する編集操作（詳細は EnemyDef の同名フィールドのコメント参照）
+    bool noScale = false;
+    bool noRotate = false;
+    bool noMove = false;
+    bool noFlip = false;
+    bool noPause = false;
+    bool noRewind = false;
+    bool noSpeed = false;
+
     // ON/OFFは素直に bool で持つ（EnemyDef::ignorePause と同じ）。
     // 他の数値パラメータが使っている -1.0f の「未指定」番兵はここでは使わない。
     // 既定値をこの初期化子に書いておけば、キーを持たない既存アセットは自動的に
@@ -315,6 +342,17 @@ struct ItemDef {
     int hitboxWidth = 32;            // 当たり判定矩形の幅
     int hitboxHeight = 32;           // 当たり判定矩形の高さ
     std::string seCollect = "";      // 取得時に鳴らす効果音ファイル名
+
+    // このアセットに対して禁止する編集操作（詳細は EnemyDef の同名フィールドのコメント参照）。
+    // アイテムは現状ゲーム内編集ツールで選択できないが、
+    // 敵・ギミックと設定の形を揃えておくため同じフラグを持たせてある。
+    bool noScale = false;
+    bool noRotate = false;
+    bool noMove = false;
+    bool noFlip = false;
+    bool noPause = false;
+    bool noRewind = false;
+    bool noSpeed = false;
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
@@ -598,6 +636,14 @@ void LoadAssetDefinitions() {
                     def.verticalTrackSpeed = e.value("verticalTrackSpeed", -1.0f);
                     def.riseSpeed = e.value("riseSpeed", -1.0f);
                     def.consumePartOnAttack = e.value("consumePartOnAttack", false);
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = e.value("noScale",  false);
+                    def.noRotate = e.value("noRotate", false);
+                    def.noMove   = e.value("noMove",   false);
+                    def.noFlip   = e.value("noFlip",   false);
+                    def.noPause  = e.value("noPause",  false);
+                    def.noRewind = e.value("noRewind", false);
+                    def.noSpeed  = e.value("noSpeed",  false);
                     def.sizeAmplitude = e.value("sizeAmplitude", -1.0f);
                     def.sizeFrequency = e.value("sizeFrequency", -1.0f);
                     def.minScale = e.value("minScale", -1.0f);
@@ -646,6 +692,14 @@ void LoadAssetDefinitions() {
                     def.sprite_path = i.value("sprite", "");
                     def.grant_ability = i.value("grant_ability", "");
                     def.seCollect = i.value("seCollect", "");
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = i.value("noScale",  false);
+                    def.noRotate = i.value("noRotate", false);
+                    def.noMove   = i.value("noMove",   false);
+                    def.noFlip   = i.value("noFlip",   false);
+                    def.noPause  = i.value("noPause",  false);
+                    def.noRewind = i.value("noRewind", false);
+                    def.noSpeed  = i.value("noSpeed",  false);
                     def.hitboxOffsetX = i.value("hitboxOffsetX", 0);
                     def.hitboxOffsetY = i.value("hitboxOffsetY", 0);
                     def.hitboxWidth = i.value("hitboxWidth", 32);
@@ -714,6 +768,14 @@ void LoadAssetDefinitions() {
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
                     // 壊せるブロックの破壊条件（詳細は GimmickDef の同名フィールドのコメント参照）
                     def.breakBySlam = g.value("breakBySlam", true);
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = g.value("noScale",  false);
+                    def.noRotate = g.value("noRotate", false);
+                    def.noMove   = g.value("noMove",   false);
+                    def.noFlip   = g.value("noFlip",   false);
+                    def.noPause  = g.value("noPause",  false);
+                    def.noRewind = g.value("noRewind", false);
+                    def.noSpeed  = g.value("noSpeed",  false);
                     def.breakByRam = g.value("breakByRam", true);
                     def.breakByBullet = g.value("breakByBullet", true);
                     def.breakByPlayer = g.value("breakByPlayer", true);
@@ -1519,6 +1581,15 @@ struct ContextMenu {
 struct BackgroundLayer {
     std::string sprite;      // 背景画像のパス
     int handle = -1;         // spriteをLoadGraphした結果のハンドル
+    // 画像を使わず単色で塗りたいときの色（"#RRGGBB"）。空なら単色塗りはしない。
+    // 画像が無いレイヤーは従来ただの何も描かない層になっていて、空だと
+    // ClearDrawScreen の黒がそのまま見えていた。空を塗るだけの背景を作れるようにする。
+    std::string color;
+    int colorRGB = 0;        // colorをGetColorへ通した結果
+    // 色が指定されているかはこのフラグで判断する。
+    // GetColor は32bitカラーだと上位ビットが立って負の値を返すため、
+    // 「colorRGB >= 0 なら指定あり」といった値での判定はできない。
+    bool hasColor = false;
     int drawOrder = 0;       // 描画順（値が小さいほど奥に描画）
     float scrollRate = 0.3f; // カメラ移動に対するスクロール速度の割合（視差効果。1.0でカメラと同速）
     bool loop = true;        // 画像端に達したときに繰り返し表示するか
@@ -1575,6 +1646,46 @@ enum SelectedType {
 //                                「その場で落ち続ける上に足場でもない」壊れた状態になる。
 //   ・GIMMICK_CUSTOM_SCRIPT   … ScriptActor.angle 経由でスクリプトが自由に書き換える
 // これらは回転編集の対象から外し、幅や速度など別の軸で編集させる。
+// ===================================================================================
+// アセットごとの編集禁止
+// ===================================================================================
+//
+// 「この敵だけは拡大させたくない」「この足場は動かされたら困る」といった縛りを、
+// アセット定義のフラグで表せるようにする。
+//
+// ステージ単位の EditToolFlags は「そのステージでどのツールを使えるか」を決めるのに対し、
+// こちらは「このオブジェクトに対して何をしてよいか」を決める別の軸。
+//
+// 形は GimmickAngleIsAiOwned（回転できない型の判定）を一般化したもので、
+// 使い方も同じく「編集ループの中で continue する」。選択は複数同時にできるので、
+// 選択時点ではなくループの中で1体ずつ判定しないと、禁止していない相手まで巻き添えになる。
+enum EditOp {
+    EDITOP_SCALE,  // 拡大縮小（横幅・縦幅を含む）
+    EDITOP_ROTATE, // 回転
+    EDITOP_MOVE,   // 移動
+    EDITOP_FLIP,   // 向き反転
+    EDITOP_PAUSE,  // 個別の一時停止
+    EDITOP_REWIND, // 個別の巻き戻し
+    EDITOP_SPEED,  // 速度変更
+};
+
+// フラグの並びはどのDefでも同じなので、読み出しだけをテンプレートで共有する。
+template <class DefT>
+bool IsDefEditLocked(const DefT* def, EditOp op) {
+    if (def == nullptr) return false; // 定義が引けないものは従来どおり何でも編集できる
+    switch (op) {
+        case EDITOP_SCALE:  return def->noScale;
+        case EDITOP_ROTATE: return def->noRotate;
+        case EDITOP_MOVE:   return def->noMove;
+        case EDITOP_FLIP:   return def->noFlip;
+        case EDITOP_PAUSE:  return def->noPause;
+        case EDITOP_REWIND: return def->noRewind;
+        default:            return def->noSpeed; // EDITOP_SPEED
+    }
+}
+bool IsEnemyEditLocked(const Enemy& e, EditOp op) { return IsDefEditLocked(FindEnemyDef(e.assetId), op); }
+bool IsGimmickEditLocked(const Gimmick& g, EditOp op) { return IsDefEditLocked(FindGimmickDef(g.assetId), op); }
+
 bool GimmickAngleIsAiOwned(GimmickType type) {
     return type == GIMMICK_ROTATING_BRIDGE
         || type == GIMMICK_CHIKUWA_BLOCK
@@ -3429,6 +3540,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             bl.loop = bj.value("loop", true);
                             bl.offsetX = bj.value("offsetX", 0.0f);
                             bl.offsetY = bj.value("offsetY", 0.0f);
+                            // 単色背景。画像が無くても色だけで塗れるようにする。
+                            // "#RRGGBB" 形式だけを受け付け、それ以外は未指定扱い（-1）にする。
+                            bl.color = bj.value("color", "");
+                            if (bl.color.size() == 7 && bl.color[0] == '#') {
+                                try {
+                                    int rv = std::stoi(bl.color.substr(1, 2), nullptr, 16);
+                                    int gv = std::stoi(bl.color.substr(3, 2), nullptr, 16);
+                                    int bv = std::stoi(bl.color.substr(5, 2), nullptr, 16);
+                                    bl.colorRGB = GetColor(rv, gv, bv);
+                                    bl.hasColor = true;
+                                } catch (...) {
+                                    bl.hasColor = false; // 16進として読めない文字が混ざっていた
+                                }
+                            }
                             if (!bl.sprite.empty()) {
                                 std::string path = "assets/" + bl.sprite; // C++側からのパス
                                 bl.handle = LoadGraph(path.c_str());
@@ -4553,7 +4678,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // Feature: 編集リアクション — ギミックにもspeedScaleを持たせたので、
                         // 以前あった「ギミック選択時は何もしない」という除外は不要になった。
                         else if (my >= menu.y + 56 && my <= menu.y + 80) {
-                            if (targetSpeedScale != nullptr) {
+                            // この操作は代表の対象へのポインタ経由で効くので、禁止判定も代表側で行う
+                            bool spdLockedUp = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_SPEED))
+                                            || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_SPEED));
+                            if (targetSpeedScale != nullptr && !spdLockedUp) {
                                 if (editCost >= currentEditCost.flatSpeedChange) {
                                     editCost -= currentEditCost.flatSpeedChange;
                                     *targetSpeedScale += 0.5f;
@@ -4566,7 +4694,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         // 速度 -0.5（Feature: 編集コストゲージ）
                         else if (my >= menu.y + 81 && my <= menu.y + 105) {
-                            if (targetSpeedScale != nullptr) {
+                            bool spdLockedDn = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_SPEED))
+                                            || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_SPEED));
+                            if (targetSpeedScale != nullptr && !spdLockedDn) {
                                 if (editCost >= currentEditCost.flatSpeedChange) {
                                     editCost -= currentEditCost.flatSpeedChange;
                                     *targetSpeedScale -= 0.5f;
@@ -4579,7 +4709,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         // オブジェクトの向きを反転（Feature: 編集コストゲージ）
                         else if (my >= menu.y + 106 && my <= menu.y + 130) {
-                            if (targetDirection != nullptr) {
+                            bool flipLocked = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_FLIP))
+                                           || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_FLIP));
+                            if (targetDirection != nullptr && !flipLocked) {
                                 if (editCost >= currentEditCost.flatDirectionFlip) {
                                     editCost -= currentEditCost.flatDirectionFlip;
                                     *targetDirection = (*targetDirection == 0 ? 1 : 0);
@@ -4796,8 +4928,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             editCost -= currentEditCost.flatMenuToggle;
                             bool nextPaused = !(*targetPaused);
                             for (auto* p : selectedPlayers) p->isPaused = nextPaused;
-                            for (auto* e : selectedEnemies) e->isPaused = nextPaused;
-                            for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
+                            for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = nextPaused; }
+                            for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = nextPaused; }
                         } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
                     }
                     else if (my >= 160 && my <= 175 && targetRewind != nullptr) {
@@ -4805,8 +4937,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             editCost -= currentEditCost.flatMenuToggle;
                             bool nextRewind = !(*targetRewind);
                             for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
-                            for (auto* e : selectedEnemies) e->isRewinding = nextRewind;
-                            for (auto* g : selectedGimmicks) g->isRewinding = nextRewind;
+                            for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = nextRewind; }
+                            for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = nextRewind; }
                         } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
                     }
                     else if (my >= 180 && my <= 195 && targetEnemyType != nullptr) {
@@ -5015,12 +5147,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dy = gy - prevGy;
 
                     for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
+                    // アセット側で禁止されている操作は、選択に混ざっていても飛ばす。
+                    // 選択時点ではなくここで1体ずつ見るのは、複数選択に
+                    // 禁止された相手とそうでない相手が混ざりうるため。
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_MOVE)) continue;
                         e->x += dx; e->y += dy; e->vx = 0; e->vy = 0;
                         e->editDirtyMask |= EDIT_DIRTY_POS;
                         for (auto& h : e->history) { h.x += dx; h.y += dy; }
                     }
                     for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_MOVE)) continue;
                         g->x += dx; g->y += dy;
                         g->editDirtyMask |= EDIT_DIRTY_POS;
                         for (auto& h : g->history) { h.x += dx; h.y += dy; }
@@ -5034,11 +5171,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dw = (float)(lastMouseY - my) * 1.0f;
                     for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
                         e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
                         e->editDirtyMask |= EDIT_DIRTY_SCALE;
                         for (auto& h : e->history) { h.scale = e->scale; } // 編集後の大きさは巻き戻しても維持する
                     }
                     for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_WIDTH;
                         g->width += dw;
                         if (g->width < 10.0f) g->width = 10.0f;
@@ -5056,6 +5195,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (isScalingHeight && selectedType != SELECT_NONE) {
                     float dh = (float)(lastMouseY - my) * 1.0f;
                     for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
                         g->spriteHeight += dh;
                         if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f;
@@ -5075,6 +5215,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float da = (float)(mx - lastMouseX) * 0.02f;
                     for (auto* p : selectedPlayers) { p->angle += da; }
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
                         e->angle += da;
                         e->editDirtyMask |= EDIT_DIRTY_ANGLE;
                         for (auto& h : e->history) { h.angle = e->angle; } // 傾けた姿勢は巻き戻しても維持する
@@ -5082,6 +5223,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // angleをAIが自前の状態に使っている型は回転させない（回すと壊れるため）
                     for (auto* g : selectedGimmicks) {
                         if (GimmickAngleIsAiOwned(g->type)) continue;
+                        if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
                         g->angle += da;
                         g->editDirtyMask |= EDIT_DIRTY_ANGLE;
                         for (auto& h : g->history) { h.angle = g->angle; }
@@ -5093,11 +5235,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dw = (float)(mx - lastMouseX) * 1.0f;
                     for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
                         e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
                         e->editDirtyMask |= EDIT_DIRTY_SCALE;
                         for (auto& h : e->history) { h.scale = e->scale; }
                     }
                     for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         SetGimmickWidth(*g, g->width + dw);
                         g->editDirtyMask |= EDIT_DIRTY_WIDTH;
                     }
@@ -5107,6 +5251,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float da = (float)(mx - lastMouseX) * 0.02f;
                     for (auto* p : selectedPlayers) { p->angle += da; }
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
                         e->angle += da;
                         e->editDirtyMask |= EDIT_DIRTY_ANGLE;
                         for (auto& h : e->history) { h.angle = e->angle; }
@@ -5114,6 +5259,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 回転ドラッグ(R+ドラッグ)と同じ理由でAI所有の型は除外する
                     for (auto* g : selectedGimmicks) {
                         if (GimmickAngleIsAiOwned(g->type)) continue;
+                        if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
                         g->angle += da;
                         g->editDirtyMask |= EDIT_DIRTY_ANGLE;
                         for (auto& h : g->history) { h.angle = g->angle; }
@@ -5124,11 +5270,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dsp = (float)(mx - lastMouseX) * 0.05f;
                     for (auto* p : selectedPlayers) { p->speedScale += dsp; if (p->speedScale < 0) p->speedScale = 0; }
                     for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
                         e->speedScale += dsp; if (e->speedScale < 0) e->speedScale = 0;
                         e->editDirtyMask |= EDIT_DIRTY_SPEED;
                     }
                     // Feature: 編集リアクション — ギミックもspeedScaleを持つようになったのでここで動かせる
                     for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_SPEED)) continue;
                         g->speedScale += dsp; if (g->speedScale < 0) g->speedScale = 0;
                         g->editDirtyMask |= EDIT_DIRTY_SPEED;
                     }
@@ -7425,8 +7573,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             int curMapH = (int)stages[currentStageIdx].map.size();
                             int curMapW = curMapH > 0 ? (int)stages[currentStageIdx].map[0].size() : 0;
                             if (ty >= 0 && ty < curMapH && tx >= 0 && tx < curMapW) {
-                                TileType t = (TileType)stages[currentStageIdx].map[ty][tx];
-                                if (tileDefs[t].isCollidable) {
+                                int t = stages[currentStageIdx].map[ty][tx];
+                                // tileDefs の範囲チェックが必要。ここは isCollidable を読む13箇所のうち
+                                // 唯一ガードが無く、タイル定義を削除したステージを開くと範囲外参照になっていた
+                                // （タイルを削除してもステージ側の古いidは書き換わらないため）。
+                                if (t >= 0 && t < (int)tileDefs.size() && tileDefs[t].isCollidable) {
                                     bullets[i].isActive = false; // 壁に衝突して消滅
                                 }
                             }
@@ -8373,19 +8524,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // ===== deadly タイル判定 =====
+        //
+        // 【重要】以前はプレイヤーの「横中央・体の90%の高さ」という1点しか見ていなかった。
+        // ところが着地補正（CheckGridCollisionY）は必ず y = セル上端 - 体の高さ に揃えるので、
+        // 着地した瞬間に体の下端はちょうどセルの境界に乗る。
+        // その状態で 0.9 の高さを見ると、サンプルされるのは必ず「1つ上のマス」になり、
+        // 立っているマスは絶対に調べられなかった。
+        // つまり「当たり判定あり＋即死」のタイル（棘ブロック）は完全に無害な足場で、
+        // 「当たり判定なし」の棘だけが、落下中にセルへ入り込むおかげで偶然効いていた。
+        //
+        // 1点をやめ、プレイヤーの当たり判定矩形に重なる全タイルを見る形にする。
+        // 接地時に足元のマスを拾うため、下方向へ1pxだけ広げて調べる。
+        // これで「乗る」「横から当たる」「頭をぶつける」の3つが同時に成立するようになる。
         if (currentScene == PLAY && !isPlayerRewinding) {
             float _pw = (float)player.width * player.scale;
             float _ph = (float)player.height * player.scale;
-            int tileRow = (int)((player.y + _ph * 0.9f) / TILE_SIZE);
-            int tileCol = (int)((player.x + _pw * 0.5f) / TILE_SIZE);
             const auto& curStageMap = stages[currentStageIdx].map;
-            if (tileRow >= 0 && tileRow < (int)curStageMap.size() &&
-                tileCol >= 0 && tileCol < (int)curStageMap[0].size()) {
-                int tid = curStageMap[tileRow][tileCol];
-                if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].deadly) {
-                    currentScene = RESULT_GAMEOVER;
+            int mapRows = (int)curStageMap.size();
+            int mapCols = mapRows > 0 ? (int)curStageMap[0].size() : 0;
+            // 端のピクセルが隣のマスへはみ出して誤判定しないよう、右端・下端は1px内側で数える
+            int rowTop = (int)(player.y / TILE_SIZE);
+            // 足元のマスを必ず含める。接地しているとき体の下端はちょうどセル境界に乗るので、
+            // この式は「今まさに立っているマス」を指す。棘ブロックの上に立ったら死ぬ、が成立する条件。
+            int rowBottom = (int)((player.y + _ph) / TILE_SIZE);
+            int colLeft = (int)(player.x / TILE_SIZE);
+            int colRight = (int)((player.x + _pw - 1.0f) / TILE_SIZE);
+            bool touchedDeadly = false;
+            for (int r = rowTop; r <= rowBottom && !touchedDeadly; ++r) {
+                if (r < 0 || r >= mapRows) continue;
+                for (int c = colLeft; c <= colRight; ++c) {
+                    if (c < 0 || c >= mapCols) continue;
+                    int tid = curStageMap[r][c];
+                    if (tid < 0 || tid >= (int)tileDefs.size() || !tileDefs[tid].deadly) continue;
+                    touchedDeadly = true;
+                    break;
                 }
             }
+            if (touchedDeadly) currentScene = RESULT_GAMEOVER;
         }
 
         // 空中足場の描画
@@ -8756,8 +8931,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         };
 
         // Feature 1: 背景レイヤー（遠景）の描画
-        for (const auto& bl : stages[currentStageIdx].backgrounds) {
-            if (bl.handle >= 0) {
+        //
+        // drawOrder の小さい順に描く。以前はベクタの順のまま描いていて drawOrder を完全に無視しており、
+        // Lab_Editor のプレビュー（こちらはソート済み）と前後関係が食い違っていた。
+        // 毎フレーム並べ替えるのは無駄なので、添字だけを並べ替える。
+        {
+            const auto& bgs = stages[currentStageIdx].backgrounds;
+            std::vector<int> bgOrder(bgs.size());
+            for (size_t i = 0; i < bgs.size(); i++) bgOrder[i] = (int)i;
+            std::sort(bgOrder.begin(), bgOrder.end(),
+                      [&bgs](int a, int b) { return bgs[a].drawOrder < bgs[b].drawOrder; });
+            for (int bi : bgOrder) {
+                const BackgroundLayer& bl = bgs[bi];
+                // 画像が無くても色が指定されていれば、その色で画面いっぱいを塗る。
+                // 画像と色の両方がある場合は、色を下地にして画像を重ねる。
+                if (bl.hasColor) {
+                    DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bl.colorRGB, TRUE);
+                }
+                if (bl.handle < 0) continue;
                 int imgW, imgH;
                 GetGraphSize(bl.handle, &imgW, &imgH);
                 if (imgW > 0 && imgH > 0) {

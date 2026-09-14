@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -262,6 +262,7 @@ public class BackgroundSettingsForm : Form
         // layerがnullの場合は各プロパティのデフォルト値（?? の右側）を使う
         row.Cells["colOrder"].Value      = layer?.drawOrder  ?? 0;
         row.Cells["colSprite"].Value     = layer?.sprite     ?? "";
+        row.Cells["colColor"].Value      = layer?.color      ?? "";
         row.Cells["colScrollRate"].Value = layer?.scrollRate ?? 0.5f;
         row.Cells["colLoop"].Value       = layer?.loop       ?? false;
         row.Cells["colOffsetX"].Value    = layer?.offsetX    ?? 0f;
@@ -283,6 +284,23 @@ public class BackgroundSettingsForm : Form
         {
             // 画像ファイル選択ダイアログを開き、選ばれた画像をこの行に設定する
             SelectImageFile(e.RowIndex);
+        }
+        else if (colName == "colBtnColor")
+        {
+            // 単色背景の色を選ぶ。#RRGGBB の文字列としてセルへ入れる
+            // （タイル定義エディタの色選択と同じ扱い方に揃えてある）。
+            using var dlg = new ColorDialog { FullOpen = true };
+            string cur = _grid.Rows[e.RowIndex].Cells["colColor"].Value?.ToString() ?? "";
+            if (cur.Length == 7 && cur[0] == '#')
+            {
+                try { dlg.Color = ColorTranslator.FromHtml(cur); } catch { /* 読めない値は既定色のまま */ }
+            }
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _grid.Rows[e.RowIndex].Cells["colColor"].Value =
+                    $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+                _parallaxPreview.Invalidate();
+            }
         }
         else if (colName == "colBtnDel")
         {
@@ -399,7 +417,20 @@ public class BackgroundSettingsForm : Form
 
         foreach (var row in rows)
         {
-            // 画像パスが未設定の行は描画対象から除外する
+            // 単色指定があれば、まずその色でプレビュー全面を塗る（ゲーム側と同じく色が下地になる）。
+            string colorHex = row.Cells["colColor"].Value?.ToString() ?? "";
+            if (colorHex.Length == 7 && colorHex[0] == '#')
+            {
+                try
+                {
+                    using var fill = new SolidBrush(ColorTranslator.FromHtml(colorHex));
+                    g.FillRectangle(fill, 0, 0, _parallaxPreview.Width, _parallaxPreview.Height);
+                }
+                catch { /* 色として読めない文字列は無視する */ }
+            }
+
+            // 画像パスが未設定の行は、ここから先（画像の描画）は行わない。
+            // 単色だけのレイヤーはこのパスを通る。
             string sprite = row.Cells["colSprite"].Value?.ToString() ?? "";
             if (string.IsNullOrEmpty(sprite)) continue;
             // キャッシュ経由で画像を取得。読み込みに失敗している場合(null)もスキップする
@@ -490,6 +521,7 @@ public class BackgroundSettingsForm : Form
             {
                 drawOrder  = TryInt("colOrder"),
                 sprite     = row.Cells["colSprite"].Value?.ToString()       ?? "",
+                color      = row.Cells["colColor"].Value?.ToString()        ?? "",
                 scrollRate = TryFloat("colScrollRate", 0.5f),
                 loop       = row.Cells["colLoop"].Value is bool b && b,
                 offsetX    = TryFloat("colOffsetX"),
