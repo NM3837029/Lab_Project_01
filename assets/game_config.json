@@ -193,5 +193,35 @@
     "select_label": "ステージ選択へ",
     "victory_text": "クリア！",
     "gameover_text": "ゲームオーバー"
+  },
+  "player_se": {
+    "jump": "se_jump",
+    "land": "",
+    "dash": "",
+    "shoot": "se_shoot",
+    "damage": "se_hit",
+    "death": ""
+  },
+  "edit_se": {
+    "rewind": "ui_rewind",
+    "scale": "ui_edit_apply",
+    "rotate": "ui_edit_apply",
+    "move": "ui_edit_apply",
+    "flip": "ui_edit_apply",
+    "reset": "ui_cancel",
+    "step": "ui_cursor",
+    "pause": "ui_pause",
+    "fast_forward": "ui_fastforward",
+    "color_filter": "ui_color_cycle",
+    "cut": "ui_fastforward",
+    "denied": "ui_denied",
+    "cost_empty": "ui_denied"
+  },
+  "meta_se": {
+    "cursor": "ui_cursor",
+    "decide": "ui_decide",
+    "cancel": "ui_cancel",
+    "clear": "",
+    "gameover": ""
   }
 }

@@ -980,10 +980,13 @@ public partial class Form1 : Form
         // 現在ステージが開かれていればそのファイル名とBGM設定を渡し、画面側でステージへのBGM割り当ても行えるようにする。
         string? stageName = currentStage != null && !string.IsNullOrEmpty(currentStageFile) ? currentStageFile : null;
         string stageBgmId = currentStage?.BgmId ?? "";
+        // プレイヤー操作音・編集ツール音・UI音は game_config.json 側の設定なので、こちらも渡す
+        var gameCfg = GameConfig.Load(assetsPath);
         var form = new SoundAssignmentForm(assets.Enemies, assets.Gimmicks, assets.Items,
-            assets.Se, assets.UiSe, assets.Bgm, stageName, stageBgmId);
+            assets.Se, assets.UiSe, assets.Bgm, stageName, stageBgmId, gameCfg);
         if (form.ShowDialog() == DialogResult.OK)
         {
+            form.ResultGameConfig.Save(assetsPath);
             // 敵・ギミック・アイテムそれぞれに割り当てられたサウンドIDの変更をアセット定義に反映して保存する。
             assets.Enemies = form.ResultEnemies;
             assets.Gimmicks = form.ResultGimmicks;

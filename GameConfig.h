@@ -93,6 +93,56 @@ namespace GameCfg {
         int itemTotal = 0;       // そのステージのアイテム総数（エディタが自動計算して書く）
     };
 
+    // ------------------------------------------------------------
+    // 効果音の割り当て
+    //
+    // これまでプレイヤーの操作音・編集ツールの音・UIの音は、すべて
+    // DrawPixel.cpp の中に "jump" / "ui_pause" といったリテラルで直書きされていた。
+    // そのためサウンド割り当て画面から触れず、音を変えるにはコードを書き換えるしかなかった。
+    // ここへ出しておくと、Lab_Editor の「サウンド割り当て」から設定できるようになる。
+    //
+    // 値は効果音の「id」（se.json / ui_se.json の id）であって、ファイル名ではない。
+    // 空文字は「鳴らさない」を意味する（SoundManager::PlaySe が空idを無視する）。
+
+    // プレイヤーの操作に紐づく効果音。
+    struct PlayerSe {
+        std::string jump   = "se_jump";  // ジャンプした瞬間
+        std::string land   = "";          // 着地した瞬間
+        std::string dash   = "";          // ダッシュを始めた瞬間
+        std::string shoot  = "se_shoot"; // 弾を撃った瞬間
+        std::string damage = "se_hit";   // ダメージを受けた瞬間
+        std::string death  = "";          // 力尽きた瞬間（ゲームオーバーへ移る）
+    };
+
+    // ゲーム内編集ツールの操作音。
+    //
+    // 従来は「失敗したときだけ ui_denied が鳴り、成功したときは無音」という
+    // 一貫性の無い状態だった。成功側にも音を割り当てられるようにする。
+    struct EditSe {
+        std::string rewind    = "ui_rewind";     // 巻き戻し中
+        std::string scale     = "ui_edit_apply"; // 拡大縮小を確定した
+        std::string rotate    = "ui_edit_apply"; // 回転を確定した
+        std::string move      = "ui_edit_apply"; // 移動を確定した
+        std::string flip      = "ui_edit_apply"; // 向きを反転した
+        std::string reset     = "ui_cancel";     // 編集をリセットした
+        std::string step      = "ui_cursor";     // コマ送りした
+        std::string pause      = "ui_pause";       // 一時停止/解除
+        std::string fastForward = "ui_fastforward"; // 早送りの切替
+        std::string colorFilter = "ui_color_cycle"; // 色フィルタの切替
+        std::string cut         = "ui_fastforward"; // タイムラインのカット確定
+        std::string denied    = "ui_denied";     // 操作が拒否された
+        std::string costEmpty = "ui_denied";     // 編集ゲージを使い切った
+    };
+
+    // タイトル・セレクト・リザルトなど、ゲーム外の画面で鳴る音。
+    struct MetaSe {
+        std::string cursor   = "ui_cursor"; // メニューのカーソル移動
+        std::string decide   = "ui_decide"; // 決定
+        std::string cancel   = "ui_cancel"; // 戻る・キャンセル
+        std::string clear    = "";           // ステージクリア
+        std::string gameover = "";           // ゲームオーバー
+    };
+
     struct GameConfig {
         int version = 1;
         std::string windowTitle = "Lab Project 01";
@@ -126,6 +176,11 @@ namespace GameCfg {
         std::string selectLabel = "STAGE SELECT";
         std::string victoryText = "VICTORY!";
         std::string gameoverText = "GAME OVER";
+
+        // 効果音の割り当て（詳細は上の各構造体のコメント参照）
+        PlayerSe playerSe;
+        EditSe   editSe;
+        MetaSe   metaSe;
 
         // key に一致する要素を探す。無ければ nullptr。
         const Element* FindElement(const std::string& key) const {
@@ -296,6 +351,41 @@ namespace GameCfg {
             out.selectLabel = r.value("select_label", out.selectLabel);
             out.victoryText = r.value("victory_text", out.victoryText);
             out.gameoverText = r.value("gameover_text", out.gameoverText);
+        }
+
+        // 効果音の割り当て。キーが無ければ構造体の既定値（＝従来と同じ音）がそのまま残る。
+        if (j.contains("player_se") && j["player_se"].is_object()) {
+            const json& s = j["player_se"];
+            out.playerSe.jump   = s.value("jump",   out.playerSe.jump);
+            out.playerSe.land   = s.value("land",   out.playerSe.land);
+            out.playerSe.dash   = s.value("dash",   out.playerSe.dash);
+            out.playerSe.shoot  = s.value("shoot",  out.playerSe.shoot);
+            out.playerSe.damage = s.value("damage", out.playerSe.damage);
+            out.playerSe.death  = s.value("death",  out.playerSe.death);
+        }
+        if (j.contains("edit_se") && j["edit_se"].is_object()) {
+            const json& s = j["edit_se"];
+            out.editSe.rewind    = s.value("rewind",     out.editSe.rewind);
+            out.editSe.scale     = s.value("scale",      out.editSe.scale);
+            out.editSe.rotate    = s.value("rotate",     out.editSe.rotate);
+            out.editSe.move      = s.value("move",       out.editSe.move);
+            out.editSe.flip      = s.value("flip",       out.editSe.flip);
+            out.editSe.reset     = s.value("reset",      out.editSe.reset);
+            out.editSe.step      = s.value("step",       out.editSe.step);
+            out.editSe.pause       = s.value("pause",        out.editSe.pause);
+            out.editSe.fastForward = s.value("fast_forward", out.editSe.fastForward);
+            out.editSe.colorFilter = s.value("color_filter", out.editSe.colorFilter);
+            out.editSe.cut         = s.value("cut",          out.editSe.cut);
+            out.editSe.denied    = s.value("denied",     out.editSe.denied);
+            out.editSe.costEmpty = s.value("cost_empty", out.editSe.costEmpty);
+        }
+        if (j.contains("meta_se") && j["meta_se"].is_object()) {
+            const json& s = j["meta_se"];
+            out.metaSe.cursor   = s.value("cursor",   out.metaSe.cursor);
+            out.metaSe.decide   = s.value("decide",   out.metaSe.decide);
+            out.metaSe.cancel   = s.value("cancel",   out.metaSe.cancel);
+            out.metaSe.clear    = s.value("clear",    out.metaSe.clear);
+            out.metaSe.gameover = s.value("gameover", out.metaSe.gameover);
         }
 
         Logger::Info("GameCfg", "LoadGameConfig",

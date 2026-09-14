@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
@@ -27,6 +27,9 @@ public class SoundAssignmentForm : Form
     public List<ItemDef> ResultItems { get; private set; } = new();
     // ステージが読み込まれていない場合はnullのまま（呼び出し側はBgmIdを一切更新しない）
     public string? ResultStageBgmId { get; private set; }
+    // 保存確定後のゲーム全体設定（プレイヤー操作音・編集ツール音・UI音を反映済み）。
+    // これらはアセットではなく game_config.json 側の設定なので、別枠で返す。
+    public GameConfig ResultGameConfig { get; private set; } = new();
 
     // 編集中の敵/ギミック/アイテムのデータ（コンストラクタで渡された元データの複製）
     private List<EnemyDef> _enemies;
@@ -38,6 +41,34 @@ public class SoundAssignmentForm : Form
 
     // 敵/ギミック/アイテムそれぞれのSE割り当てを表形式で編集するグリッド
     private DataGridView _gridEnemy = null!, _gridGimmick = null!, _gridItem = null!;
+    // プレイヤー操作・編集ツール・UIのSE割り当てグリッド。
+    // 「項目名 / 効果音ID」の2列だけの単純な表で、行の並びは下の *Rows 配列が決める。
+    private DataGridView _gridPlayer = null!, _gridEdit = null!, _gridMeta = null!;
+    private Panel _sectionPlayer = null!, _sectionEdit = null!, _sectionMeta = null!;
+    // 編集中のゲーム全体設定
+    private readonly GameConfig _config;
+
+    // 各グリッドの行定義：(表示ラベル, GameConfig側のプロパティ名)。
+    // プロパティ名をキーにしてリフレクションで読み書きするので、
+    // 項目を増やすときはここへ1行足すだけで済む。
+    private static readonly (string Label, string Prop)[] PlayerSeRows =
+    {
+        ("ジャンプ", "jump"), ("着地", "land"), ("ダッシュ", "dash"),
+        ("射撃", "shoot"), ("被弾", "damage"), ("力尽きる", "death"),
+    };
+    private static readonly (string Label, string Prop)[] EditSeRows =
+    {
+        ("巻き戻し", "rewind"), ("拡大縮小を確定", "scale"), ("回転を確定", "rotate"),
+        ("移動を確定", "move"), ("向きを反転", "flip"), ("編集をリセット", "reset"),
+        ("コマ送り", "step"), ("一時停止/解除", "pause"), ("早送り切替", "fast_forward"),
+        ("色フィルタ切替", "color_filter"), ("カット確定", "cut"),
+        ("操作できない", "denied"), ("編集ゲージ切れ", "cost_empty"),
+    };
+    private static readonly (string Label, string Prop)[] MetaSeRows =
+    {
+        ("カーソル移動", "cursor"), ("決定", "decide"), ("戻る", "cancel"),
+        ("ステージクリア", "clear"), ("ゲームオーバー", "gameover"),
+    };
     // ステージBGMを選択するプルダウン
     private ComboBox _cmbStageBgm = null!;
     // 各カテゴリの表示/非表示を切り替えるためのセクションパネル（タグの絞り込みチェックボックスと連動）
@@ -58,13 +89,16 @@ public class SoundAssignmentForm : Form
 
     public SoundAssignmentForm(List<EnemyDef> enemies, List<GimmickDef> gimmicks, List<ItemDef> items,
         List<SoundDef> se, List<SoundDef> uiSe, List<SoundDef> bgm,
-        string? currentStageName, string currentStageBgmId)
+        string? currentStageName, string currentStageBgmId, GameConfig config)
     {
         // 元データを直接編集しないよう、まず複製を作ってから編集対象とする（clone-and-return方式）
         _enemies = CloneList(enemies);
         _gimmicks = CloneList(gimmicks);
         _items = CloneList(items);
         _currentStageName = currentStageName;
+        // ゲーム全体設定も同じ理由で複製する。丸ごとJSON経由で複製すれば
+        // [JsonExtensionData] に入っている未知のキーも失わずに持ち越せる。
+        _config = JsonConvert.DeserializeObject<GameConfig>(JsonConvert.SerializeObject(config)) ?? new GameConfig();
 
         // 「未設定（鳴らさない）」を選べるよう、先頭に空文字の選択肢を追加した候補配列を作る。
         // SE候補は通常の効果音カタログとUI用効果音カタログの両方を結合したもの
@@ -178,11 +212,23 @@ public class SoundAssignmentForm : Form
 
         _sectionStage = BuildStageSection(bgmChoices, currentStageBgmId);
 
-        // 表示順（上から）：アイテム→ギミック→敵→ステージ の順にスクロールパネルへ積む
+        // プレイヤー操作・編集ツール・UIのSE。
+        // これらは従来 DrawPixel.cpp にリテラルで直書きされていて、この画面から触れなかった。
+        _gridPlayer = BuildKeyValueGrid(PlayerSeRows, _config.player_se, seChoices);
+        _sectionPlayer = BuildSection("🎮 プレイヤー操作のSE", _gridPlayer, 200);
+        _gridEdit = BuildKeyValueGrid(EditSeRows, _config.edit_se, seChoices);
+        _sectionEdit = BuildSection("✏️ 編集ツールのSE", _gridEdit, 330);
+        _gridMeta = BuildKeyValueGrid(MetaSeRows, _config.meta_se, seChoices);
+        _sectionMeta = BuildSection("🏁 タイトル・リザルトのSE", _gridMeta, 180);
+
+        // 表示順（上から）：アイテム→ギミック→敵→プレイヤー→編集ツール→UI→ステージ
+        pnlScroll.Controls.Add(_sectionStage);
+        pnlScroll.Controls.Add(_sectionMeta);
+        pnlScroll.Controls.Add(_sectionEdit);
+        pnlScroll.Controls.Add(_sectionPlayer);
         pnlScroll.Controls.Add(_sectionItem);
         pnlScroll.Controls.Add(_sectionGimmick);
         pnlScroll.Controls.Add(_sectionEnemy);
-        pnlScroll.Controls.Add(_sectionStage);
 
         Controls.Add(pnlScroll);
         Controls.Add(pnlBottom);
@@ -251,6 +297,40 @@ public class SoundAssignmentForm : Form
             }
         }
         return grid;
+    }
+
+    // 「項目名 / 効果音ID」の2列だけのグリッドを組み立てる。
+    //
+    // 敵やギミックのように1行が1アセットではなく、1行が1つの設定項目になる形。
+    // 値の読み書きは rows で指定したプロパティ名を使ったリフレクションで行うので、
+    // 項目が増えても Read 側に対応する処理を書き足す必要が無い。
+    private DataGridView BuildKeyValueGrid((string Label, string Prop)[] rows, object target, string[] seChoices)
+    {
+        var grid = BuildGrid(new[]
+        {
+            ("label", "項目", 180, true), ("value", "効果音ID", 180, false),
+        }, seChoices);
+        foreach (var (label, prop) in rows)
+        {
+            string cur = target.GetType().GetProperty(prop)?.GetValue(target) as string ?? "";
+            // カタログに無いIDが設定されていた場合、コンボボックスへ入れると例外になるので空に落とす
+            // （DataError は握り潰される設定だが、値が消えたことに気づけるよう空表示で揃える）
+            if (!seChoices.Contains(cur)) cur = "";
+            grid.Rows.Add(label, cur);
+        }
+        grid.CellValueChanged += (s, e) => PushHistory();
+        return grid;
+    }
+
+    // 「項目名 / 効果音ID」グリッドの内容を、対応する設定オブジェクトへ書き戻す。
+    private static void ApplyKeyValueGrid(DataGridView grid, (string Label, string Prop)[] rows, object target)
+    {
+        for (int i = 0; i < rows.Length && i < grid.Rows.Count; i++)
+        {
+            var prop = target.GetType().GetProperty(rows[i].Prop);
+            if (prop == null) continue;
+            prop.SetValue(target, grid.Rows[i].Cells["value"].Value?.ToString() ?? "");
+        }
     }
 
     // ステージBGM割り当てセクションを組み立てる。
@@ -395,6 +475,11 @@ public class SoundAssignmentForm : Form
         ResultItems = ReadItemsFromGrid();
         // ステージが選択されていない場合はnullのままにし、呼び出し側にBGM未変更であることを伝える
         ResultStageBgmId = _currentStageName != null ? (_cmbStageBgm.SelectedItem as string ?? "") : null;
+        // プレイヤー操作・編集ツール・UIのSEを設定オブジェクトへ書き戻して返す
+        ApplyKeyValueGrid(_gridPlayer, PlayerSeRows, _config.player_se);
+        ApplyKeyValueGrid(_gridEdit, EditSeRows, _config.edit_se);
+        ApplyKeyValueGrid(_gridMeta, MetaSeRows, _config.meta_se);
+        ResultGameConfig = _config;
         DialogResult = DialogResult.OK;
         Close();
     }

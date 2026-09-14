@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
@@ -32,6 +32,13 @@ public class GameConfig
     public StageSelectConfig stage_select { get; set; } = new();
     public List<StageEntry> stages { get; set; } = new();
     public ResultConfig result { get; set; } = new();
+
+    // 効果音の割り当て。C++側の GameConfig.h の PlayerSe / EditSe / MetaSe と対応する。
+    // 以前はプレイヤーの操作音も編集ツールの音も DrawPixel.cpp に直書きされていて、
+    // 「サウンド割り当て」画面から触れなかった。
+    public PlayerSeConfig player_se { get; set; } = new();
+    public EditSeConfig edit_se { get; set; } = new();
+    public MetaSeConfig meta_se { get; set; } = new();
 
     [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
 
@@ -183,6 +190,52 @@ public class StageEntry
     // そのステージのアイテム総数。セレクト画面の「3 / 7」表示に使う。
     // 起動時に全ステージJSONをパースせずに済むよう、エディタ側が数えて書き込む。
     public int item_total { get; set; }
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+// プレイヤーの操作に紐づく効果音。値は se.json / ui_se.json の id（ファイル名ではない）。
+// 空文字は「鳴らさない」を意味する。
+public class PlayerSeConfig
+{
+    public string jump { get; set; } = "se_jump";
+    public string land { get; set; } = "";
+    public string dash { get; set; } = "";
+    public string shoot { get; set; } = "se_shoot";
+    public string damage { get; set; } = "se_hit";
+    public string death { get; set; } = "";
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+// ゲーム内編集ツールの操作音。
+public class EditSeConfig
+{
+    public string rewind { get; set; } = "ui_rewind";
+    public string scale { get; set; } = "ui_edit_apply";
+    public string rotate { get; set; } = "ui_edit_apply";
+    public string move { get; set; } = "ui_edit_apply";
+    public string flip { get; set; } = "ui_edit_apply";
+    public string reset { get; set; } = "ui_cancel";
+    public string step { get; set; } = "ui_cursor";
+    public string pause { get; set; } = "ui_pause";
+    public string fast_forward { get; set; } = "ui_fastforward";
+    public string color_filter { get; set; } = "ui_color_cycle";
+    public string cut { get; set; } = "ui_fastforward";
+    public string denied { get; set; } = "ui_denied";
+    public string cost_empty { get; set; } = "ui_denied";
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+// タイトル・セレクト・リザルトなど、ゲーム外の画面で鳴る音。
+public class MetaSeConfig
+{
+    public string cursor { get; set; } = "ui_cursor";
+    public string decide { get; set; } = "ui_decide";
+    public string cancel { get; set; } = "ui_cancel";
+    public string clear { get; set; } = "";
+    public string gameover { get; set; } = "";
 
     [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
 }
