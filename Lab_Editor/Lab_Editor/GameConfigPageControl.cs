@@ -298,14 +298,20 @@ public class GameConfigPageControl : UserControl
         _dgvStages.DataError += (s, e) => { e.ThrowException = false; };
 
         var bar = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = UiTheme.PanelBackLight };
-        var btnUp = UiTheme.CreateButton("▲ 上へ", new Point(8, 6), new Size(80, 26));
-        var btnDown = UiTheme.CreateButton("▼ 下へ", new Point(94, 6), new Size(80, 26));
-        var btnThumb = UiTheme.CreateButton("サムネイルを選ぶ", new Point(184, 6), new Size(140, 26));
-        var lblHint = UiTheme.CreateLabel("並び順がそのまま「前のステージ」の順序になります", new Point(336, 11));
+        // 追加・削除はグリッドの末尾の空行とDelキーでもできたが、どこにも書いていないため
+        // 事実上使えない機能になっていた。明示的なボタンとして出す。
+        var btnAdd = UiTheme.CreateButton("＋ 追加", new Point(8, 6), new Size(80, 26));
+        var btnDel = UiTheme.CreateButton("🗑 削除", new Point(94, 6), new Size(80, 26));
+        var btnUp = UiTheme.CreateButton("▲ 上へ", new Point(180, 6), new Size(80, 26));
+        var btnDown = UiTheme.CreateButton("▼ 下へ", new Point(266, 6), new Size(80, 26));
+        var btnThumb = UiTheme.CreateButton("サムネイルを選ぶ", new Point(352, 6), new Size(140, 26));
+        var lblHint = UiTheme.CreateLabel("並び順が「前のステージ」の順序になります", new Point(502, 11));
+        btnAdd.Click += (s, e) => AddStageRows();
+        btnDel.Click += (s, e) => DeleteStageRow();
         btnUp.Click += (s, e) => MoveStageRow(-1);
         btnDown.Click += (s, e) => MoveStageRow(+1);
         btnThumb.Click += (s, e) => PickThumbnailForCurrentRow();
-        bar.Controls.AddRange(new Control[] { btnUp, btnDown, btnThumb, lblHint });
+        bar.Controls.AddRange(new Control[] { btnAdd, btnDel, btnUp, btnDown, btnThumb, lblHint });
 
         // Fill を先に、Top を後から
         page.Controls.Add(_dgvStages);
@@ -461,6 +467,18 @@ public class GameConfigPageControl : UserControl
             _dgvMenu.Rows.Add(m.label, ActionToLabel(m.action));
 
         // ステージ一覧
+        //
+        // ファイル選択のコンボ列は assets/stages/ にあるファイルだけを候補に持っている。
+        // 設定に「もう存在しないステージ」が残っていると、そのセルは候補に無い値を
+        // 表示できず、DataErrorのあと別のファイル名に化けて見える。
+        // そのまま保存すると設定が黙って別のステージを指してしまうので、
+        // 存在しないファイル名も候補へ足して、書かれているとおりに表示する。
+        if (_dgvStages.Columns["file"] is DataGridViewComboBoxColumn fileCombo)
+        {
+            foreach (var st in _cfg.stages)
+                if (!string.IsNullOrEmpty(st.file) && !fileCombo.Items.Contains(st.file))
+                    fileCombo.Items.Add(st.file);
+        }
         _dgvStages.Rows.Clear();
         foreach (var s in _cfg.stages)
             _dgvStages.Rows.Add(s.file, s.name, s.thumbnail, UnlockToLabel(s.unlock),
@@ -614,6 +632,155 @@ public class GameConfigPageControl : UserControl
         _suppress = true;
         _dgvStages.Rows[rowIndex].Cells["item_total"].Value = total;
         _suppress = false;
+    }
+
+    // 「＋ 追加」— まだ一覧に載っていないステージファイルを選ばせて行を足す。
+    //
+    // ステージファイルそのものはメイン画面で作るものなので、ここでは
+    // 「作ったステージをゲームのステージ一覧へ載せる」ことだけを担当する。
+    // 既に載っているファイルは候補から外す（同じステージが二重に並ぶと、
+    // 「前のステージをクリア」の連鎖がどちらを指すのか分からなくなるため）。
+    private void AddStageRows()
+    {
+        // 既に一覧へ載っているファイル名を集める
+        var already = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataGridViewRow r in _dgvStages.Rows)
+        {
+            if (r.IsNewRow) continue;
+            string f = r.Cells["file"].Value?.ToString() ?? "";
+            if (!string.IsNullOrEmpty(f)) already.Add(f);
+        }
+
+        var candidates = ListUserStages().Where(f => !already.Contains(f)).ToList();
+        if (candidates.Count == 0)
+        {
+            MessageBox.Show(
+                "追加できるステージファイルがありません。" + Environment.NewLine +
+                "assets/stages/ にあるステージは、すべて一覧へ載っています。" + Environment.NewLine + Environment.NewLine +
+                "新しいステージはメイン画面の「新規ステージ」で作ってから、ここへ追加してください。",
+                "ステージを追加");
+            return;
+        }
+
+        using var dlg = new Form
+        {
+            Text = "ステージを追加",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(380, 320),
+            Font = UiTheme.Base,
+        };
+        dlg.Controls.Add(UiTheme.CreateLabel("一覧へ追加するステージを選んでください（複数選べます）", new Point(12, 10)));
+        var lst = new ListBox
+        {
+            Location = new Point(12, 34),
+            Size = new Size(356, 220),
+            SelectionMode = SelectionMode.MultiExtended,
+            Font = UiTheme.Base,
+        };
+        foreach (var c in candidates) lst.Items.Add(c);
+        dlg.Controls.Add(lst);
+
+        var ok = UiTheme.CreateButton("追加", new Point(184, 268), new Size(84, 28));
+        UiTheme.StylePrimaryButton(ok);
+        ok.DialogResult = DialogResult.OK;
+        var cancel = UiTheme.CreateButton("キャンセル", new Point(276, 268), new Size(92, 28));
+        cancel.DialogResult = DialogResult.Cancel;
+        dlg.Controls.Add(ok);
+        dlg.Controls.Add(cancel);
+        dlg.AcceptButton = ok;
+        dlg.CancelButton = cancel;
+
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK || lst.SelectedItems.Count == 0) return;
+
+        // ファイル選択のコンボ列は画面を開いた時点の一覧で作られている。
+        // その後に作られたステージを選ぶとDataErrorになるので、候補を入れ直しておく。
+        if (_dgvStages.Columns["file"] is DataGridViewComboBoxColumn combo)
+        {
+            combo.Items.Clear();
+            foreach (var f in ListUserStages()) combo.Items.Add(f);
+        }
+
+        foreach (string file in lst.SelectedItems)
+        {
+            // 表示名は拡張子を外したファイル名を初期値にする（あとで自由に直せる）。
+            string display = Path.GetFileNameWithoutExtension(file);
+            // 1本目だけ「常に選べる」。2本目以降は既定を「前のステージをクリア」にして、
+            // 追加しただけで最初から全部選べてしまうことを防ぐ。
+            bool isFirst = _dgvStages.Rows.Cast<DataGridViewRow>().Count(r => !r.IsNewRow) == 0;
+            int idx = _dgvStages.Rows.Add(file, display, "",
+                                          isFirst ? "常に選べる" : "前のステージをクリア", "", 0);
+            RefreshItemTotal(idx);
+        }
+        _dgvStages.CurrentCell = _dgvStages.Rows[_dgvStages.Rows.Count - 1].Cells["name"];
+    }
+
+    // 「🗑 削除」— 選んでいる行を一覧から外す。
+    // ステージファイルそのものを消すかどうかは別に確認する（取り返しがつかないため既定は外すだけ）。
+    private void DeleteStageRow()
+    {
+        var cur = _dgvStages.CurrentRow;
+        if (cur == null || cur.IsNewRow)
+        { MessageBox.Show("先に削除する行を選んでください。", "ステージを削除"); return; }
+
+        string file = cur.Cells["file"].Value?.ToString() ?? "";
+        string display = cur.Cells["name"].Value?.ToString() ?? file;
+
+        using var dlg = new Form
+        {
+            Text = "ステージを削除",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(420, 172),
+            Font = UiTheme.Base,
+        };
+        var lbl = new Label
+        {
+            Text = "「" + display + "」をゲームのステージ一覧から外します。" + Environment.NewLine +
+                   "ステージファイル自体は残るので、あとで追加し直せます。",
+            Location = new Point(12, 12),
+            Size = new Size(396, 42),
+        };
+        dlg.Controls.Add(lbl);
+        var chkFile = new CheckBox
+        {
+            Text = "ステージファイル（" + file + "）も削除する",
+            Location = new Point(12, 62),
+            Size = new Size(396, 22),
+            Enabled = !string.IsNullOrEmpty(file),
+        };
+        dlg.Controls.Add(chkFile);
+        var warn = new Label
+        {
+            Text = "※ ファイルを削除すると元に戻せません。",
+            Location = new Point(28, 86),
+            Size = new Size(380, 20),
+            ForeColor = Color.Firebrick,
+            Font = new Font("Meiryo UI", 8f),
+        };
+        dlg.Controls.Add(warn);
+
+        var ok = UiTheme.CreateButton("削除", new Point(224, 124), new Size(84, 28));
+        ok.DialogResult = DialogResult.OK;
+        var cancel = UiTheme.CreateButton("キャンセル", new Point(316, 124), new Size(92, 28));
+        cancel.DialogResult = DialogResult.Cancel;
+        dlg.Controls.Add(ok);
+        dlg.Controls.Add(cancel);
+        dlg.AcceptButton = cancel; // 既定はキャンセル側に置く（Enter連打での事故を防ぐ）
+        dlg.CancelButton = cancel;
+
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+
+        if (chkFile.Checked && !string.IsNullOrEmpty(file))
+        {
+            try { File.Delete(Path.Combine(_stagesPath, file)); }
+            catch (Exception ex) { MessageBox.Show("ファイルを削除できませんでした: " + ex.Message, "ステージを削除"); }
+        }
+        _dgvStages.Rows.Remove(cur);
     }
 
     private void MoveStageRow(int delta)

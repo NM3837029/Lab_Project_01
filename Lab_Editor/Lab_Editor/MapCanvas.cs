@@ -267,7 +267,10 @@ public class MapCanvas : Panel
         {
             var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == gi.Id);
             string icon = AssetIcons.ForGimmick(def?.type_enum ?? -1);
-            DrawPlacedObject(g, gi.X, gi.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, gi.Scale),
+            // 横縦で別々の倍率を掛ける（ゲーム側のローダと同じ計算）
+            float gimW = (def?.hitboxWidth > 0 ? def.hitboxWidth : GAME_TILE) * (gi.Scale > 0 ? gi.Scale : 1f);
+            float gimH = (def?.hitboxHeight > 0 ? def.hitboxHeight : GAME_TILE) * (gi.ScaleY > 0 ? gi.ScaleY : 1f);
+            DrawPlacedObject(g, gi.X, gi.Y, new SizeF(gimW, gimH),
                              def?.sprite, gi.Angle, icon,
                              SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220));
         }
@@ -884,14 +887,40 @@ public class MapCanvas : Panel
         var propScale = target.GetType().GetProperty("Scale");
         var propAngle = target.GetType().GetProperty("Angle");
         if (propScale == null || propAngle == null) return;
+        // ギミックだけ縦の倍率を別に持つ（ゲーム内の編集ツールが横=Sドラッグ／縦=Wドラッグで
+        // 別々に変える作りなので、配置ごとの初期値も同じ粒度にしてある）。
+        var propScaleY = target.GetType().GetProperty("ScaleY");
         float curScale = (float)(propScale.GetValue(target) ?? 1.0f);
+        float curScaleY = propScaleY != null ? (float)(propScaleY.GetValue(target) ?? 1.0f) : curScale;
         float curAngle = (float)(propAngle.GetValue(target) ?? 0f);
 
-        using var dlg = new PlacedTransformForm(curScale, curAngle);
+        // 角度をAIが自前の状態として使っている型（自動回転する橋・ちくわブロック等）は
+        // ゲーム内でも回転できないので、この画面でも触らせない。
+        bool angleIsAiOwned = false;
+        if (target is PlacedGimmick pgm)
+        {
+            int te = Assets?.Gimmicks.FirstOrDefault(d => d.id == pgm.Id)?.type_enum ?? -1;
+            angleIsAiOwned = GimmickAngleIsAiOwned(te);
+        }
+
+        using var dlg = new PlacedTransformForm(curScale, curScaleY, curAngle,
+                                                separateAxes: propScaleY != null,
+                                                angleIsAiOwned: angleIsAiOwned);
         if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
         propScale.SetValue(target, dlg.ResultScale);
+        propScaleY?.SetValue(target, dlg.ResultScaleY);
         propAngle.SetValue(target, dlg.ResultAngle);
         Fire(); Invalidate();
+    }
+
+    // 角度をAIが自前の状態に使っているギミックの種類。
+    // これらは角度が「今どこまで動いたか」を表す内部状態なので、編集として回してはいけない。
+    // ゲーム側の GimmickAngleIsAiOwned（DrawPixel.cpp）と同じ並びを保つこと。
+    private static bool GimmickAngleIsAiOwned(int typeEnum)
+    {
+        return typeEnum == 1     // GIMMICK_ROTATING_BRIDGE（自動で回る橋）
+            || typeEnum == 11    // GIMMICK_CHIKUWA_BLOCK（ちくわブロック）
+            || typeEnum == 24;   // GIMMICK_CUSTOM_SCRIPT（挙動スクリプトが角度を握る）
     }
 
     // Feature: 選択/削除ロジックの改善 — 複数重なっている場合はクリック位置に最も近い中心を持つものを優先する

@@ -344,6 +344,8 @@ public class StageData
                         Y = g["y"]?.Value<float>() ?? 0,
                         Param = g["param"]?.Value<string>() ?? "",
                         Scale = g["scale"]?.Value<float>() ?? 1.0f,
+                        // scaleY を省略した既存ステージは等方拡大として読む（ゲーム側と同じ既定）
+                        ScaleY = g["scaleY"]?.Value<float>() ?? g["scale"]?.Value<float>() ?? 1.0f,
                         Angle = g["angle"]?.Value<float>() ?? 0f
                     });
 
@@ -450,6 +452,7 @@ public class StageData
             var gj = new JObject { ["id"] = g.Id, ["x"] = g.X, ["y"] = g.Y };
             if (!string.IsNullOrEmpty(g.Param)) gj["param"] = g.Param;
             if (g.Scale != 1.0f) gj["scale"] = g.Scale;
+            if (g.ScaleY != 1.0f) gj["scaleY"] = g.ScaleY;
             if (g.Angle != 0f) gj["angle"] = g.Angle;
             ga.Add(gj);
         }
@@ -766,9 +769,15 @@ public class PlacedGimmick
     // このギミック固有の追加パラメータ（ギミックの種類によって意味が変わる文字列）。
     [System.ComponentModel.DisplayName("パラメータ")]
     public string Param { get; set; } = "";
-    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）
-    [System.ComponentModel.DisplayName("大きさ")]
+    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）。
+    //
+    // ギミックだけ横幅と縦幅を別々に持つ。ゲーム内の編集ツールが
+    // 横幅(Sドラッグ)と縦幅(Wドラッグ)を独立して変える作りになっているためで、
+    // 配置ごとの初期値も同じ粒度で持てないと「編集機能と同じ反応」にならない。
+    [System.ComponentModel.DisplayName("横の大きさ")]
     public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("縦の大きさ")]
+    public float ScaleY { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
 }

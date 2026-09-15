@@ -328,7 +328,9 @@ struct PlacedGimmick {
     float x, y;   // ステージ内でのスポーン座標
     std::string stringParam = ""; // ポータルの遷移先など
     // 配置ごとの大きさと角度。PlacedEnemy と同じ理由で保持する。
+    // ギミックは横幅と縦幅を別々に持つ（ゲーム内の編集ツールがそうなっているため）。
     float scale = 1.0f;
+    float scaleY = 1.0f;
     float angle = 0.0f;
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
@@ -1515,6 +1517,18 @@ struct Enemy {
     float        editBaseY = 0.0f;      // 配置時のY
     int          editBaseDirection = 0; // 配置時の向き
     unsigned int editDirtyMask = 0u;    // EditDirtyBitsの論理和
+
+    // Feature: 配置ごとの初期姿勢 — ステージJSONの scale / angle は
+    // 「最初からその編集がかけられている」という意味で扱う。
+    //
+    // そのためには編集リアクションの基準(editBase*)を**アセット既定の姿勢のまま**に
+    // 据え置く必要がある。基準まで配置後の値にしてしまうと差が0になり、
+    // 「拡大して置いた敵が重くならない」「傾けて置いたドッスンが傾いた方向へ落ちない」という
+    // 見た目だけの変更になってしまう（実際それが最初の実装の不具合だった）。
+    bool         hasSpawnEdit = false;  // 配置ごとの scale / angle 指定があったか
+    float        spawnBaseScale = 1.0f; // アセット既定の scale（リアクションの基準）
+    float        spawnBaseAngle = 0.0f; // アセット既定の angle
+    unsigned int spawnDirtyMask = 0u;   // 配置時点で立てておくダーティビット
 };
 
 // ギミック1個分の実行時状態。GimmickDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・状態を持つ。
@@ -1578,6 +1592,13 @@ struct Gimmick {
     float        editBaseWidth = 0.0f, editBaseHeight = 0.0f;
     float        editBaseAngle = 0.0f;
     unsigned int editDirtyMask = 0u;
+
+    // Feature: 配置ごとの初期姿勢（考え方は Enemy の同名フィールドのコメント参照）。
+    // ギミックは scale を持たず横幅・縦幅を別々に編集するため、基準も幅・高さで持つ。
+    bool         hasSpawnEdit = false;
+    float        spawnBaseWidth = 0.0f, spawnBaseHeight = 0.0f;
+    float        spawnBaseAngle = 0.0f;
+    unsigned int spawnDirtyMask = 0u;
 };
 
 // 弾1発分の実行時状態。
@@ -3682,6 +3703,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // スケールを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
                             // scale!=1.0のアセット（例: dossun, 太陽）で当たり判定がスプライトから大きくズレていた）
                             jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * placedScale, y + hy * placedScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, placedScale, placedAngle, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            // 配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
+                            // 基準はアセット既定（倍率は defScale、角度は0）なので、
+                            // ゲーム内の編集ツールで同じ倍率・角度にしたときと同じ反応になる。
+                            {
+                                Enemy& placedEnemy = jsonStage.enemies.back();
+                                float scaleMul = ej.value("scale", 1.0f);
+                                if (scaleMul != 1.0f || placedAngle != 0.0f) {
+                                    placedEnemy.hasSpawnEdit = true;
+                                    placedEnemy.spawnBaseScale = defScale;
+                                    placedEnemy.spawnBaseAngle = 0.0f;
+                                    if (scaleMul != 1.0f)    placedEnemy.spawnDirtyMask |= EDIT_DIRTY_SCALE;
+                                    if (placedAngle != 0.0f) placedEnemy.spawnDirtyMask |= EDIT_DIRTY_ANGLE;
+                                }
+                            }
                         }
                     }
 
@@ -3709,16 +3744,38 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 初期角度。手動橋(GIMMICK_MANUAL_BRIDGE=2)は「プレイヤーがR+ドラッグで倒して渡る」ギミックなので、
                             // 指定が無ければ縦向き(=渡れない状態)で始める。従来は常に0(水平)で置かれ、最初から渡れてしまっていた。
                             float initAngle = gj.value("angle", (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f);
-                            // 配置ごとの大きさ。ギミックは scale を持たないので、
-                            // 読み込み時に表示サイズと当たり判定へ直接掛ける（アイテムと同じ扱い）。
+                            // 配置ごとの大きさ。ギミックは scale を持たず、ゲーム内の編集ツールでも
+                            // 横幅(Sドラッグ)と縦幅(Wドラッグ)を別々に変えるので、こちらも別々に受ける。
+                            // scaleY を省略した場合は scale と同じ値＝等方拡大になる。
                             float gimScale = gj.value("scale", 1.0f);
                             if (gimScale <= 0.0f) gimScale = 1.0f;
-                            float gw = pw * gimScale, gh = ph * gimScale;
-                            float gsw = sw * gimScale, gsh = sh * gimScale;
-                            Gimmick newGim{ (GimmickType)t_enum, x + hx * gimScale, y + hy * gimScale, gw, gh, gsw, gsh, (float)hx, (float)hy, gw, gh, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
+                            float gimScaleY = gj.value("scaleY", gimScale);
+                            if (gimScaleY <= 0.0f) gimScaleY = gimScale;
+                            float gw = pw * gimScale, gh = ph * gimScaleY;
+                            float gsw = sw * gimScale, gsh = sh * gimScaleY;
+                            Gimmick newGim{ (GimmickType)t_enum, x + hx * gimScale, y + hy * gimScaleY, gw, gh, gsw, gsh, (float)hx, (float)hy, gw, gh, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
                             newGim.assetId = id;
                             newGim.param = param;
                             newGim.handle = gHandle;
+                            // 敵と同じく、配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
+                            // 角度の基準は「そのタイプの既定の姿勢」。手動橋は縦向き(1.5708)が既定なので、
+                            // そこを0にしてしまうと置いただけで「倒された」と誤解されてしまう。
+                            // angle をAIが自前の状態に使う型（自動回転橋・ちくわブロック等）は、
+                            // 角度を編集として解釈しない（GetGimmickEditReaction 側でも弾いている）。
+                            {
+                                float defaultAngle = (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f;
+                                bool sizeEdited = (gimScale != 1.0f || gimScaleY != 1.0f);
+                                bool angleEdited = (initAngle != defaultAngle) && !GimmickAngleIsAiOwned((GimmickType)t_enum);
+                                if (sizeEdited || angleEdited) {
+                                    newGim.hasSpawnEdit = true;
+                                    newGim.spawnBaseWidth = (float)pw;
+                                    newGim.spawnBaseHeight = (float)ph;
+                                    newGim.spawnBaseAngle = defaultAngle;
+                                    if (gimScale != 1.0f)  newGim.spawnDirtyMask |= EDIT_DIRTY_WIDTH;
+                                    if (gimScaleY != 1.0f) newGim.spawnDirtyMask |= EDIT_DIRTY_HEIGHT;
+                                    if (angleEdited)       newGim.spawnDirtyMask |= EDIT_DIRTY_ANGLE;
+                                }
+                            }
                             jsonStage.gimmicks.push_back(newGim);
                         }
                     }
@@ -3923,12 +3980,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Feature: 編集リアクション — 「プレイヤーが何を編集したか」は配置時の値との差で判定する。
             // ResetStageは起動時・ステージ切替・死亡・リトライの全経路が必ず通る唯一の合流点なので、
             // ここで焼いておけば基準値が未設定のまま動き出す個体は存在しない。
-            enemy.editBaseScale     = enemy.scale;
-            enemy.editBaseAngle     = enemy.angle;
+            // 配置ごとの大きさ・角度が指定されている個体は、その指定を
+            // 「最初からプレイヤーが編集した状態」として扱う。基準はアセット既定の姿勢に据え置く
+            // （ここを現在値にしてしまうと差が0になり、見た目だけ変わって挙動が素のままになる）。
+            if (enemy.hasSpawnEdit) {
+                enemy.editBaseScale = enemy.spawnBaseScale;
+                enemy.editBaseAngle = enemy.spawnBaseAngle;
+                enemy.editDirtyMask = enemy.spawnDirtyMask;
+            } else {
+                enemy.editBaseScale = enemy.scale;
+                enemy.editBaseAngle = enemy.angle;
+                enemy.editDirtyMask = EDIT_DIRTY_NONE;
+            }
             enemy.editBaseX         = enemy.x;
             enemy.editBaseY         = enemy.y;
             enemy.editBaseDirection = enemy.direction;
-            enemy.editDirtyMask     = EDIT_DIRTY_NONE;
         }
 
         items = stage.items;
@@ -3963,10 +4029,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             gim.direction      = 0;
             gim.editBaseX      = gim.x;
             gim.editBaseY      = gim.y;
-            gim.editBaseWidth  = gim.width;
-            gim.editBaseHeight = gim.height;
-            gim.editBaseAngle  = gim.angle;
-            gim.editDirtyMask  = EDIT_DIRTY_NONE;
+            // 敵と同じく、配置ごとの指定がある個体は基準をアセット既定の大きさ・角度に据え置く
+            if (gim.hasSpawnEdit) {
+                gim.editBaseWidth  = gim.spawnBaseWidth;
+                gim.editBaseHeight = gim.spawnBaseHeight;
+                gim.editBaseAngle  = gim.spawnBaseAngle;
+                gim.editDirtyMask  = gim.spawnDirtyMask;
+            } else {
+                gim.editBaseWidth  = gim.width;
+                gim.editBaseHeight = gim.height;
+                gim.editBaseAngle  = gim.angle;
+                gim.editDirtyMask  = EDIT_DIRTY_NONE;
+            }
         }
 
         platforms = stage.platforms;
@@ -10054,6 +10128,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             PlacedGimmick pg = {def_idx, e["x"], e["y"], ""};
                                             if (e.contains("param")) pg.stringParam = e["param"];
                                             pg.scale = e.value("scale", 1.0f);
+                                            pg.scaleY = e.value("scaleY", pg.scale);
                                             pg.angle = e.value("angle", 0.0f);
                                             editorPlacedGimmicks.push_back(pg);
                                         }
@@ -10143,6 +10218,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     json j = { {"id", gimmickDefs[g.def_idx].id}, {"x", g.x}, {"y", g.y} };
                     if (g.stringParam != "") j["param"] = g.stringParam;
                     if (g.scale != 1.0f) j["scale"] = g.scale;
+                    if (g.scaleY != 1.0f) j["scaleY"] = g.scaleY;
                     if (g.angle != 0.0f) j["angle"] = g.angle;
                     stageData["gimmicks"].push_back(j);
                 }
