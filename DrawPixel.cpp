@@ -2910,6 +2910,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int uiPauseHandle = LoadGraph("img/UI一時停止中.png");        // 一時停止中(||)アイコン
     int energyHandle = LoadGraph("img/エネルギー.png");           // 編集コストゲージのアイコン
     int cursorHandle = LoadGraph("img/マウスホイール.png");       // ゲーム内マウスカーソル（実物は矢印の絵）
+    // 押せるものの上に来たときの指差しカーソル。実物のマウスカーソルと同じ振る舞いにするための素材。
+    int cursorPointHandle = LoadGraph("img/マウスカーソル指差し.png");
     int goalHandle = LoadGraph("img/ゴール.png");                 // ゴール地点
     int checkpointHandle = LoadGraph("img/チェックポイント.png"); // チェックポイントの旗
     int switchOnHandle = LoadGraph("img/スイッチオン.png");       // 押し込まれた状態のスイッチ
@@ -2940,6 +2942,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "img/UI一時停止中.png",      uiPauseHandle },
             { "img/エネルギー.png",        energyHandle },
             { "img/マウスホイール.png",    cursorHandle },
+            { "img/マウスカーソル指差し.png", cursorPointHandle },
             { "img/ゴール.png",            goalHandle },
             { "img/チェックポイント.png",  checkpointHandle },
             { "img/スイッチオン.png",      switchOnHandle },
@@ -4396,6 +4399,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool leftEdge = kLeft && !mPrevLeft, rightEdge = kRight && !mPrevRight;
         bool decideEdge = kDecide && !mPrevDecide, cancelEdge = kCancel && !mPrevCancel;
 
+        // 押せるものの上にカーソルがあるか。
+        // この画面のボタン・マス目は既に hover を計算しているので、それをそのまま拾う。
+        bool metaPointing = false;
+
         // ゲームプレイ側と同じ脱出口。早期continueでメインループ末尾の判定を飛ばすため、
         // これが無いとタイトル画面から十字キー全押しで抜けられなくなる。
         if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
@@ -4449,7 +4456,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
                     int x2 = x1 + GameCfg::ToScreenLen(w), y2 = y1 + GameCfg::ToScreenLen(h);
                     bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
-                    if (hover) titleCursor = i; // マウスを乗せたらカーソルもそこへ移す
+                    if (hover) { titleCursor = i; metaPointing = true; } // マウスを乗せたらカーソルもそこへ移す
                     MetaDrawButton(l, t, w, h, gameConfig.menuItems[i].label,
                                    menu->fontSize, (titleCursor == i), true);
                     if (hover && clickEdge) chosen = i;
@@ -4509,7 +4516,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
                 int x2 = x1 + GameCfg::ToScreenLen(g.cellW), y2 = y1 + GameCfg::ToScreenLen(g.cellH);
                 bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
-                if (hover) selectCursor = i;
+                if (hover) { selectCursor = i; metaPointing = true; }
                 bool hot = (selectCursor == i);
 
                 // 枠
@@ -4567,6 +4574,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int x1 = GameCfg::ToScreenX(bl), y1 = GameCfg::ToScreenY(bt);
                 int x2 = x1 + GameCfg::ToScreenLen(bw), y2 = y1 + GameCfg::ToScreenLen(bh);
                 bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                if (hover) metaPointing = true;
                 MetaDrawButton(bl, bt, bw, bh, gameConfig.backLabel, 16, hover, true);
                 if ((hover && clickEdge) || cancelEdge) {
                     SoundManager::Get().PlaySe(gameConfig.metaSe.cancel);
@@ -4588,6 +4596,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         mPrevClick = click; mPrevUp = kUp; mPrevDown = kDown;
         mPrevLeft = kLeft; mPrevRight = kRight;
         mPrevDecide = kDecide; mPrevCancel = kCancel;
+
+        // ゲーム内マウスカーソル。
+        // この2画面はボタンとステージのマス目をマウスで押せるので、プレイ中と同じ見た目にする。
+        // ここで描かないと、プレイから戻ってきたときに SetMouseDispFlag(FALSE) だけが残り、
+        // カーソルが1つも見えない画面になってしまう（描画末尾はcontinueで飛ばされるため）。
+        {
+            bool useOwnCursor = (cursorHandle >= 0);
+            SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
+            if (useOwnCursor) {
+                bool usePoint = metaPointing && cursorPointHandle >= 0;
+                int drawHandle = usePoint ? cursorPointHandle : cursorHandle;
+                // ずらし量の根拠はプレイ中のカーソル描画側のコメントを参照
+                const int cursorSize = 40;
+                int tipX = usePoint ? 13 : 12;
+                int tipY = 6;
+                DrawExtendGraph(mx - tipX, my - tipY, mx - tipX + cursorSize, my - tipY + cursorSize,
+                                drawHandle, TRUE);
+            }
+        }
 
         // 早期continueでメインループ末尾を飛ばすため、ここで自分で締める。
         // SoundManager::Update は再生し終わったSEのハンドルを回収する処理で、
@@ -10343,17 +10370,94 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ただし専用エディタモード(ImGui)のときだけはOSカーソルのままにする。
         // ImGuiのウィンドウはこの後に描かれるため、自前カーソルだとImGuiの上に出せず
         // パネル上でカーソルが見えなくなってしまうから。
+        //
+        // 指差しカーソル —
+        // 実物のマウスカーソルは、押せるものの上へ来ると矢印から指差しの手に変わる。
+        // ゲーム内カーソルも同じにしておかないと、「ここは押せるのか、それとも
+        // 背景なのか」を試しにクリックしてみないと判別できない。
+        // 判定は下の ShouldPointCursor にまとめてあり、実際にクリックを受け付ける箇所と
+        // 同じ矩形・同じ有効条件を見ている（見た目と操作がズレないようにするため）。
         {
             bool useOwnCursor = !isDedicatedEditorMode && cursorHandle >= 0;
             SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
             if (useOwnCursor) {
                 int cmx = 0, cmy = 0;
                 GetMousePoint(&cmx, &cmy);
-                // 素材の矢印の先端は 640x640 キャンバス上の (188, 93) 付近にある。
-                // 表示サイズ40pxに縮めると先端は左上から (12, 6) の位置に来るので、
-                // その分だけ左上へずらして描くと、絵の先端が実際のマウス座標と一致する。
+
+                // 今カーソルの下にあるものが「押せるもの」かどうか。
+                bool pointing = false;
+                {
+                    // 1) 一時停止／再開ボタン（常に押せる。コスト不足なら拒否音が鳴るが押せることに変わりはない）
+                    if (cmx >= PAUSE_BUTTON_X1 && cmx <= PAUSE_BUTTON_X2 &&
+                        cmy >= PAUSE_BUTTON_Y1 && cmy <= PAUSE_BUTTON_Y2) {
+                        pointing = true;
+                    }
+                    // 2) 開いているコンテキストメニューの上
+                    else if (menu.isOpen &&
+                             cmx >= menu.x && cmx <= menu.x + menu.width &&
+                             cmy >= menu.y && cmy <= menu.y + menu.height) {
+                        pointing = true;
+                    }
+                    // 3) インスペクタの操作行。
+                    // 対象ポインタがnullptrの行は「その対象では意味を持たない」＝押しても何も起きないので、
+                    // クリック処理と同じくnullチェックを通ったものだけを押せる扱いにする。
+                    else if (objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - 240 &&
+                             ((cmy >= 80  && cmy <= 95  && targetScale != nullptr) ||
+                              (cmy >= 100 && cmy <= 115 && targetAngle != nullptr) ||
+                              (cmy >= 120 && cmy <= 135 && targetSpeedScale != nullptr) ||
+                              (cmy >= 140 && cmy <= 155 && targetPaused != nullptr) ||
+                              (cmy >= 160 && cmy <= 175 && targetRewind != nullptr) ||
+                              (cmy >= 180 && cmy <= 195 && targetEnemyType != nullptr))) {
+                        pointing = true;
+                    }
+                    // 4) 下部のタイムライン帯（カットの作成・選択ができるとき）
+                    else if (cutOpEnabled && cmy >= WINDOW_HEIGHT - 60 && cmy <= WINDOW_HEIGHT - 20) {
+                        pointing = true;
+                    }
+                    // 5) モニター内の、編集対象にできるオブジェクト。
+                    // 右クリックでの選択判定と同じ矩形を見る（プレイヤーは表示サイズ、
+                    // 敵は当たり判定×倍率、ギミックはスプライトサイズ）。
+                    else if (isEditMode && objectEditOpEnabled &&
+                             cmx >= monitorX && cmx <= monitorX + SCREEN_WIDTH &&
+                             cmy >= monitorY && cmy <= monitorY + SCREEN_HEIGHT) {
+                        float wx = (float)(cmx - monitorX) + cameraX;
+                        float wy = (float)(cmy - monitorY) + cameraY;
+                        if (wx >= player.x && wx <= player.x + player.width * player.scale &&
+                            wy >= player.y && wy <= player.y + player.height * player.scale) {
+                            pointing = true;
+                        }
+                        if (!pointing) {
+                            for (const auto& eHov : enemies) {
+                                if (!eHov.isActive) continue;
+                                float ew = (float)eHov.hitboxWidth * eHov.scale;
+                                float eh = (float)eHov.hitboxHeight * eHov.scale;
+                                if (wx >= eHov.x && wx <= eHov.x + ew &&
+                                    wy >= eHov.y && wy <= eHov.y + eh) { pointing = true; break; }
+                            }
+                        }
+                        if (!pointing) {
+                            for (const auto& gHov : gimmicks) {
+                                // タイムラインカットはワールド座標を持たない（x,y,w,hが全て0）ので、
+                                // ここで判定するとマップ左上の1点が常に押せる扱いになってしまう。
+                                if (!gHov.isActive || gHov.isTimelineCut) continue;
+                                if (wx >= gHov.x && wx <= gHov.x + gHov.spriteWidth &&
+                                    wy >= gHov.y && wy <= gHov.y + gHov.spriteHeight) { pointing = true; break; }
+                            }
+                        }
+                    }
+                }
+
+                // 指差しの絵が読めなかった場合は従来どおり矢印のまま（描画が消えるより良い）
+                bool usePoint = pointing && cursorPointHandle >= 0;
+                int drawHandle = usePoint ? cursorPointHandle : cursorHandle;
+                // 絵の「指す先」をマウス座標へ合わせるためのずらし量。
+                // 矢印の先端は 640x640 キャンバス上の (188, 93)、指差しの指先は (212, 99) 付近にある。
+                // 表示サイズ40pxに縮めると左上から (12, 6) / (13, 6) の位置に来るので、その分だけ左上へずらす。
                 const int cursorSize = 40;
-                DrawExtendGraph(cmx - 12, cmy - 6, cmx - 12 + cursorSize, cmy - 6 + cursorSize, cursorHandle, TRUE);
+                int tipX = usePoint ? 13 : 12;
+                int tipY = 6;
+                DrawExtendGraph(cmx - tipX, cmy - tipY, cmx - tipX + cursorSize, cmy - tipY + cursorSize,
+                                drawHandle, TRUE);
             }
         }
 

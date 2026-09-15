@@ -9,7 +9,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 1,
@@ -21,7 +27,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 2,
@@ -33,7 +45,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 3,
@@ -45,7 +63,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 4,
@@ -57,7 +81,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 5,
@@ -69,7 +99,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 6,
@@ -81,7 +117,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 7,
@@ -93,7 +135,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 8,
@@ -105,7 +153,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 9,
@@ -117,7 +171,13 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   },
   {
     "id": 10,
@@ -129,6 +189,12 @@
     "srcX": 0,
     "srcY": 0,
     "srcW": 0,
-    "srcH": 0
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   }
 ]
