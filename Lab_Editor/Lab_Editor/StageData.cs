@@ -898,6 +898,13 @@ public class EnemyDef
     public float spreadRotationStep { get; set; } = -1.0f;       // 拡散弾タイプ：1斉射ごとに発射角度をずらす量（ラジアン）。渦巻き弾幕になる
     public float verticalTrackSpeed { get; set; } = -1.0f;       // 浮遊タイプ：浮遊の中心高度をプレイヤーの高さへ寄せる速さ（px/フレーム）
     public float riseSpeed { get; set; } = -1.0f;                // 落下タイプ：着地後、元の高さへ戻る速さ（px/フレーム）。0以下なら瞬間復帰
+
+    // 跳ね回る節足敵（機械いもむし）専用の調整項目。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で追加すること。
+    // 片方だけだと、エディタで保存した瞬間にキーが消えるか、ゲームが読まないかのどちらかになる。
+    public float bounceSpeed { get; set; } = -1.0f;              // 頭が直進する速さ（px/フレーム）。重力を受けないので常にこの速さで飛ぶ
+    public float bounceRandomness { get; set; } = -1.0f;         // 跳ね返るたびに反射角へ足す乱れの最大値（度）。0なら物理どおりの正反射
+    public float segmentGap { get; set; } = -1.0f;               // 胴体の節と節の間隔（px）
     // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
     // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
     public bool consumePartOnAttack { get; set; } = false;

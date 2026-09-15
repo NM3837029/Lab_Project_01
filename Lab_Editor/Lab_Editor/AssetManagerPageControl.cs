@@ -123,6 +123,7 @@ public class AssetManagerPageControl : UserControl
         [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // type_enum=19: ズーム撹乱敵(Zoom Disruptor)
         // type_enum=21: 飛びかかり(Pouncer)。項目名は突進(Dash Charger)と共通のものを流用しているが、
         // dashSpeedMult は「突進速度」ではなく「飛びかかりの水平初速」、dashDuration は滞空時間の上限を意味する。
+        [22] = new[] { ("bounceSpeed", "飛ぶ速さ(px/フレーム)", 2), ("bounceRandomness", "跳ね返り角の乱れ(度)", 0), ("segmentGap", "胴体の節の間隔(px)", 0) }, // type_enum=22: 跳ね回る節足敵(Bouncing Worm)
         [21] = new[] { ("moveSpeed", "走行速度係数", 2), ("triggerRange", "飛びかかり発動距離(px)", 0), ("chargeTime", "溜め時間(フレーム)", 0), ("jumpPowerMult", "飛びかかりジャンプ力係数", 2), ("dashSpeedMult", "飛びかかり水平速度係数", 2), ("dashDuration", "滞空時間の上限(フレーム)", 0), ("cooldownTime", "着地後の硬直(フレーム)", 0), ("consumePartOnAttack", "命中するたび胴体を1節消費する", 0) },
     };
     // 敵のtype_enumに関係なく、どのタイプでも共通で出す挙動パラメータ欄。
@@ -194,6 +195,7 @@ public class AssetManagerPageControl : UserControl
         (18, "18 = 色調整敵 (Color Shifter)", "射程内で画面の色調を変化させます（新画面エフェクト機能と連携）。"),
         (19, "19 = ズーム撹乱敵 (Zoom Disruptor)", "射程内で画面ズームを周期的に揺さぶります（新画面エフェクト機能と連携）。"),
         (20, "20 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
+        (22, "22 = 跳ね回る節足敵 (Bouncing Worm)", "重力を受けず、向いている方向へまっすぐ飛び続けます。壁・床・天井に当たるとランダムな角度で跳ね返るので、同じ軌道を繰り返しません。パーツ(parts)に胴体を並べておくと、頭が通った跡を一定間隔で辿って連なります。回転ツールで向きを変えると、そのまま進む方向が変わります。"),
         (21, "21 = 飛びかかり (Pouncer)", "普段は高速で地上を追いかけ、射程に入ると溜めてから放物線を描いて飛びかかります。着地後の硬直が反撃の窓になります。パーツ(parts)を持たせて「命中するたび胴体を1節消費する」を有効にすると、攻撃するほど短くなり、使い切ると力尽きる相手になります。"),
     };
     // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— 敵タイプ(EnemyTypes)には元々あった

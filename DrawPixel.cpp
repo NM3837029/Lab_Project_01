@@ -191,6 +191,11 @@ struct EnemyDef {
     bool radialFire = false;            // SPREAD_SHOOTER: trueなら正面ファンではなく360度全方位へ均等に撃つ
     float spreadRotationStep = -1.0f;   // SPREAD_SHOOTER: 1斉射ごとに発射角度をずらす量(ラジアン)。渦巻き弾幕を作る
     float verticalTrackSpeed = -1.0f;   // FLOATER: 浮遊の中心高度をプレイヤーのYへ寄せる速さ(px/フレーム)。0なら従来どおり高さ固定
+
+    // ---- BOUNCING_WORM（跳ね回る節足敵）----
+    float bounceSpeed = -1.0f;          // 頭が直進する速さ(px/フレーム)。重力を受けないので常にこの速さで飛ぶ
+    float bounceRandomness = -1.0f;     // 跳ね返るたびに反射角へ足す乱れの最大値(度)。0なら物理どおりの正反射
+    float segmentGap = -1.0f;           // 胴体の節と節の間隔(px)。頭の軌跡をこの距離ごとに辿って並ぶ
     float riseSpeed = -1.0f;            // FALLER: クールダウン後に元の高さへ戻る速さ(px/フレーム)。0以下なら従来どおり瞬間復帰
     // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
     // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
@@ -502,6 +507,16 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.dashDuration, 120.0f);  // 空中に居られる上限フレーム（着地を取り逃した時の保険）
             fill(def.cooldownTime, 45.0f);   // 着地後の硬直＝反撃の窓
             break;
+        case 22: // BOUNCING_WORM（跳ね回る節足敵）
+            // 速さはプレイヤーの歩行(4px/f)より少し遅い程度。これより速いと、
+            // 重力を受けず直進してくる相手なので反応して避けるのが現実的でなくなる。
+            fill(def.bounceSpeed, 3.0f);
+            // 反射角の乱れ。正反射のままだと軌道が読み切れて簡単な障害物になり、
+            // 大きすぎると壁に沿って滑るような不自然な跳ね方になるので、その中間に置く。
+            fill(def.bounceRandomness, 25.0f);
+            // 節の間隔。頭の当たり判定(32px)より少し詰めて、繋がって見えるようにする。
+            fill(def.segmentGap, 22.0f);
+            break;
         default: break;
     }
 }
@@ -648,6 +663,9 @@ void LoadAssetDefinitions() {
                     def.radialFire = e.value("radialFire", false);
                     def.spreadRotationStep = e.value("spreadRotationStep", -1.0f);
                     def.verticalTrackSpeed = e.value("verticalTrackSpeed", -1.0f);
+                    def.bounceSpeed = e.value("bounceSpeed", -1.0f);
+                    def.bounceRandomness = e.value("bounceRandomness", -1.0f);
+                    def.segmentGap = e.value("segmentGap", -1.0f);
                     def.riseSpeed = e.value("riseSpeed", -1.0f);
                     def.consumePartOnAttack = e.value("consumePartOnAttack", false);
                     // このアセットで禁止する編集操作（未指定なら全て許可）
@@ -1291,6 +1309,7 @@ enum EnemyType {
     ENEMY_ZOOM_DISRUPTOR,     // ズーム撹乱敵：射程内で画面ズームを揺さぶる（新画面エフェクト連携）
     ENEMY_CUSTOM_SCRIPT,      // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで挙動を自作する
     ENEMY_POUNCER,            // 飛びかかり：普段は高速で地上を追い、射程に入ると溜めてから放物線ジャンプで飛びかかる
+    ENEMY_BOUNCING_WORM,      // 跳ね回る節足敵：重力を受けず直進し、壁・床に当たるとランダムな角度で跳ね返る。胴体のパーツが頭の軌跡を辿って連なる
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
@@ -1786,6 +1805,21 @@ namespace {
 // 角度差を (-PI, PI] へ畳む。
 // 回転ドラッグは angle に加算し続けるだけなので、5回転させれば差は31.4radにもなる。
 // そのまま「45度以上か」を判定すると常に真になってしまうため、必ずここを通してから使う。
+// 跳ね返りの角度を散らすための疑似乱数。戻り値は -1.0〜1.0。
+//
+// rand() を使ってはいけない。このゲームは巻き戻しが中核の機能で、
+// 巻き戻して同じ場面をもう一度再生したときに軌道が変わってしまうと、
+// 「巻き戻して跳ね返り先を見てから動く」という遊び方そのものが成立しなくなる。
+// 「何回目の跳ね返りか」と「どこで跳ね返ったか」だけから決まる値にしておけば、
+// 何度再生しても必ず同じ角度になる。
+float BounceJitterUnit(int bounceIndex, float seedX, float seedY) {
+    unsigned int h = (unsigned int)(bounceIndex + 1) * 2654435761u;
+    h ^= (unsigned int)(int)(seedX * 16.0f) * 40503u;
+    h ^= (unsigned int)(int)(seedY * 16.0f) * 2246822519u;
+    h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+    return ((float)(h & 0xFFFFu) / 32767.5f) - 1.0f;
+}
+
 float NormalizeAngle(float a) {
     while (a >   EDIT_PI) a -= 2.0f * EDIT_PI;
     while (a <= -EDIT_PI) a += 2.0f * EDIT_PI;
@@ -1824,6 +1858,7 @@ const char* EnemyTypeName(EnemyType t) {
         case ENEMY_ZOOM_DISRUPTOR:     return "ZOOM_DISRUPTOR";
         case ENEMY_CUSTOM_SCRIPT:      return "CUSTOM_SCRIPT";
         case ENEMY_POUNCER:            return "POUNCER";
+        case ENEMY_BOUNCING_WORM:      return "BOUNCING_WORM";
         default:                       return "UNKNOWN";
     }
 }
@@ -7654,6 +7689,136 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             BehaviorInterpreter::Tick(enemy.scriptState, actor);
                             break;
                         }
+
+                        case ENEMY_BOUNCING_WORM: {
+                            // 跳ね回る節足敵（機械いもむし）—
+                            // 重力を受けず、向いている方向へひたすら直進する。壁・床・天井に当たると
+                            // 反射し、そのたびに角度が少し乱れるので同じ軌道を繰り返さない。
+                            // 胴体はパーツとして頭の軌跡を辿る（追従処理はパーツ更新の直後にある）。
+                            //
+                            // 編集リアクション：
+                            //  ・回転     → 回した向きがそのまま進行方向になる。狙った所へ飛ばせる。
+                            //  ・向き反転 → 進行方向を左右に鏡写しする。
+                            //  ・拡大／縮小 → 体が大きいほど遅く、小さいほど速い（重さの比喩）。
+                            //  ・速度     → そのまま飛ぶ速さに掛かる（共通のets経由）。
+                            const float WORM_PI = 3.14159265f;
+                            float speedW = (edef ? edef->bounceSpeed : 3.0f);
+                            // 大きくすると重くて遅く、小さくすると軽くて速い。
+                            // 他の型（WALKER等）が erMass で表しているのと同じ比喩を、飛ぶ速さへ適用する。
+                            speedW *= erMass;
+                            if (speedW < 0.1f) speedW = 0.1f;
+                            float jitterMaxW = (edef ? edef->bounceRandomness : 25.0f) * (WORM_PI / 180.0f);
+
+                            // --- 進行方向(auxF1)の決定 ---
+                            //
+                            // この敵は向きを角度だけで表す。ところが描画側は direction==1 のとき
+                            // 絵を左右反転して描くので、「画面で見えている向き」は
+                            //     見た目の向き = angle + (direction==1 ? 180度 : 0)
+                            // になる。プレイヤーが回転ツールで angle を変えても、反転ツールで
+                            // direction を変えても、この1つの式を通して進行方向へ反映される。
+                            float dirOffsetW = (enemy.direction == 1) ? WORM_PI : 0.0f;
+                            if (!enemy.auxFlag) {
+                                // ステージのローダは全ての敵を direction=1（左向き）で作る。
+                                // この敵は角度だけで向きを表すので、置かれた瞬間に正面(0)へ揃える。
+                                // 揃えないと絵が左右反転された状態で描かれ、
+                                // 「45度で置いたのに逆向きへ飛んでいく」ことになる。
+                                enemy.direction = 0;
+                                enemy.editBaseDirection = 0; // 反転されたと誤解されないよう基準も合わせる
+                                dirOffsetW = 0.0f;
+                                enemy.auxF1 = enemy.angle;   // 置かれたときの角度がそのまま進む向き
+                                enemy.auxF2 = enemy.angle;
+                                enemy.auxF3 = 0.0f;          // 跳ね返った回数
+                                enemy.auxFlag = true;
+                            } else {
+                                // auxF2 には「前のフレームに自分が表した見た目の向き」を控えてある。
+                                // 今の見た目の向きがそれと違っていれば、その差はプレイヤーの編集なので受け取る。
+                                float shownW = NormalizeAngle(enemy.angle + dirOffsetW);
+                                if (fabsf(NormalizeAngle(shownW - enemy.auxF2)) > 0.0005f) {
+                                    enemy.auxF1 = shownW;
+                                }
+                            }
+                            float headingW = NormalizeAngle(enemy.auxF1);
+                            erTiltHandled = true; // 角度は自分で解釈するので、共通の「傾けたら滑る」を効かせない
+
+                            // --- 地形との当たり判定 ---
+                            // 自分の当たり判定の矩形が、通行できないタイルに重なるかどうかを見る。
+                            // UpdatePhysicsCollisions は「軸ごとに押し戻す」処理なので反射には使えず、
+                            // ここでは「その位置へ行けるか」だけを知りたいため専用の判定を置く。
+                            auto solidAtW = [&](float px, float py) -> bool {
+                                const auto& mpW = stages[currentStageIdx].map;
+                                if (mpW.empty()) return false;
+                                float bw = (float)enemy.hitboxWidth * enemy.scale;
+                                float bh = (float)enemy.hitboxHeight * enemy.scale;
+                                int c0 = (int)(px / TILE_SIZE), c1 = (int)((px + bw - 1.0f) / TILE_SIZE);
+                                int r0 = (int)(py / TILE_SIZE), r1 = (int)((py + bh - 1.0f) / TILE_SIZE);
+                                for (int rr = r0; rr <= r1; rr++) {
+                                    if (rr < 0 || rr >= (int)mpW.size()) continue;
+                                    for (int cc = c0; cc <= c1; cc++) {
+                                        if (cc < 0 || cc >= (int)mpW[rr].size()) continue;
+                                        int tid = mpW[rr][cc];
+                                        if (tid > 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            float bwW = (float)enemy.hitboxWidth * enemy.scale;
+                            float bhW = (float)enemy.hitboxHeight * enemy.scale;
+                            float mapRightW = (float)(stages[currentStageIdx].map.empty() ? 0 : stages[currentStageIdx].map[0].size()) * TILE_SIZE;
+                            float mapBottomW = (float)(stages[currentStageIdx].map.size()) * TILE_SIZE;
+                            // ステージの外枠も壁として扱う。これが無いと画面外へ出てしまい、
+                            // 共通処理の座標クランプに引っかかって端に張り付いたまま動かなくなる。
+                            auto blockedW = [&](float px, float py) -> bool {
+                                if (px < 0.0f || px > mapRightW - bwW) return true;
+                                if (py < 0.0f || py > mapBottomW - bhW) return true;
+                                return solidAtW(px, py);
+                            };
+
+                            float stepW = speedW * ets;
+                            float nvx = cosf(headingW) * stepW;
+                            float nvy = sinf(headingW) * stepW;
+                            bool hitX = blockedW(enemy.x + nvx, enemy.y);
+                            bool hitY = blockedW(enemy.x, enemy.y + nvy);
+                            // 角にちょうど飛び込んだ場合。片軸ずつでは当たらないので、両方を反転して跳ね返す。
+                            if (!hitX && !hitY && blockedW(enemy.x + nvx, enemy.y + nvy)) { hitX = true; hitY = true; }
+
+                            if (hitX || hitY) {
+                                float rx = hitX ? -nvx : nvx;
+                                float ry = hitY ? -nvy : nvy;
+                                float reflected = atan2f(ry, rx);
+                                // 正反射に乱れを足す。跳ね返るたびに違う方向へ散るようにするためで、
+                                // 乱数は巻き戻しても同じ値になるものを使う（BounceJitterUnitのコメント参照）。
+                                float jitter = BounceJitterUnit((int)enemy.auxF3, enemy.x, enemy.y) * jitterMaxW;
+                                float candidate = NormalizeAngle(reflected + jitter);
+                                // 乱れのせいで壁の内側を向いてしまうことがある。その場合は乱れを諦めて正反射に戻す
+                                // （そのまま進ませると壁にめり込んで抜け出せなくなる）。
+                                if (blockedW(enemy.x + cosf(candidate) * stepW, enemy.y + sinf(candidate) * stepW)) {
+                                    candidate = NormalizeAngle(reflected);
+                                }
+                                // それでも塞がっている（袋小路・角に詰まった）ときは、
+                                // 抜けられる向きが見つかるまで少しずつ回して逃がす。
+                                if (blockedW(enemy.x + cosf(candidate) * stepW, enemy.y + sinf(candidate) * stepW)) {
+                                    for (int tryI = 1; tryI <= 8; tryI++) {
+                                        float alt = NormalizeAngle(candidate + (WORM_PI / 4.0f) * tryI);
+                                        if (!blockedW(enemy.x + cosf(alt) * stepW, enemy.y + sinf(alt) * stepW)) { candidate = alt; break; }
+                                    }
+                                }
+                                headingW = candidate;
+                                enemy.auxF3 += 1.0f;
+                                if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack);
+                            }
+
+                            // 重力ぶんは読まずに毎フレーム速度を組み直すので、落下は自然に打ち消される。
+                            enemy.vx = cosf(headingW) * stepW;
+                            enemy.vy = sinf(headingW) * stepW;
+                            enemy.auxF1 = headingW;
+                            // 頭は必ず進行方向を向く。描画側が direction==1 で絵を反転するぶんを
+                            // ここで引いておくと、反転されていても頭は進行方向を向いたままになる。
+                            enemy.angle = NormalizeAngle(headingW - dirOffsetW);
+                            // 表した見た目の向きを控える。次のフレームで
+                            // 「プレイヤーが回した/反転したのか、自分が書いたのか」を見分けるのに使う。
+                            enemy.auxF2 = headingW;
+                            break;
+                        }
                     }
 
                     // ================= Feature: 編集リアクション（共通の後処理）=================
@@ -7771,6 +7936,80 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // ドラッグで本体を掴んで動かしている最中にパーツだけ置き去りになる既存の不具合も、これで直る。
             if (!enemy.parts.empty()) {
                 ApplyPartsParentPose(enemy.parts, MakeEnemyPose(enemy, FindEnemyDef(enemy.assetId)));
+
+                // 跳ね回る節足敵の胴体 — 頭の通った跡を一定距離ごとに辿って並ぶ。
+                //
+                // 他の型のパーツは親に固定オフセットで貼り付く剛体だが、この敵の胴体は
+                // 「頭が通った場所を、少し遅れて順番に通る」という別の繋がり方をする。
+                // そのため ApplyPartsParentPose が置いた位置をここで上書きする。
+                //
+                // 軌跡は専用のバッファを持たず、巻き戻し用の履歴(history)をそのまま使う。
+                // 履歴は巻き戻しで実際に巻き戻るので、胴体も何もしなくても正しく巻き戻る。
+                // 別のバッファを持つと、巻き戻したときに胴体だけ未来の形のまま残ってしまう。
+                if (enemy.type == ENEMY_BOUNCING_WORM) {
+                    const EnemyDef* wdef = FindEnemyDef(enemy.assetId);
+                    float gapW = (wdef && wdef->segmentGap > 0.0f) ? wdef->segmentGap : 22.0f;
+                    gapW *= enemy.scale; // 拡大された個体は節の間隔も一緒に広がる
+                    if (gapW < 1.0f) gapW = 1.0f;
+
+                    // 頭の中心。節も中心を軌跡へ合わせる（左上を合わせると大きさが違うときにずれる）。
+                    float headHalfW = (float)enemy.hitboxWidth * enemy.scale * 0.5f;
+                    float headHalfH = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                    float trailX = enemy.x, trailY = enemy.y; // 履歴を遡る現在地（頭の左上座標系）
+                    float accW = 0.0f;                        // 直前の節からの距離
+                    size_t hIdx = enemy.history.size();
+                    float aheadCx = enemy.x + headHalfW, aheadCy = enemy.y + headHalfH; // 1つ前の節（最初は頭）の中心
+
+                    for (auto& seg : enemy.parts) {
+                        if (!seg.isActive) continue;
+                        bool placed = false;
+                        while (hIdx > 0) {
+                            const EnemyState& hs = enemy.history[--hIdx];
+                            float dxW = hs.x - trailX, dyW = hs.y - trailY;
+                            float segLen = sqrtf(dxW * dxW + dyW * dyW);
+                            if (accW + segLen >= gapW) {
+                                // ちょうど gapW になる位置は、たいてい履歴の2点の間にある。
+                                // 手前の点で止めると1フレームぶん行き過ぎて節の間隔がばらつくので、
+                                // 2点の間を按分して正確な位置を取る。
+                                float t = (segLen > 0.0001f) ? ((gapW - accW) / segLen) : 1.0f;
+                                trailX += dxW * t;
+                                trailY += dyW * t;
+                                hIdx++; // この履歴点はまだ使い切っていないので、次の節のために戻す
+                                accW = 0.0f;
+                                placed = true;
+                                break;
+                            }
+                            accW += segLen;
+                            trailX = hs.x; trailY = hs.y;
+                        }
+                        if (!placed) {
+                            // 出現直後などで履歴が足りないときは、進行方向の逆へ等間隔に並べて繋げる。
+                            // 何もしないと節が全部同じ場所に重なって1つの塊に見えてしまう。
+                            trailX -= cosf(enemy.auxF1) * gapW;
+                            trailY -= sinf(enemy.auxF1) * gapW;
+                            accW = 0.0f;
+                        }
+                        float segHalfW = seg.width * seg.scale * seg.parentUniform * 0.5f;
+                        float segHalfH = seg.height * seg.scale * seg.parentUniform * 0.5f;
+                        float segCx = trailX + headHalfW;
+                        float segCy = trailY + headHalfH;
+                        seg.x = segCx - segHalfW;
+                        seg.y = segCy - segHalfH;
+                        // 節は1つ前の節（先頭なら頭）のほうを向く。向きが揃うと1本の胴に見える。
+                        float toAheadX = aheadCx - segCx, toAheadY = aheadCy - segCy;
+                        if (toAheadX * toAheadX + toAheadY * toAheadY > 0.01f) {
+                            // 親の傾き(parentTilt)は描画時に加算されるので、ここでは引いて打ち消す。
+                            // 引かないと、頭を回すたびに胴体が二重に回ってしまう。
+                            seg.angle = atan2f(toAheadY, toAheadX) - seg.parentTilt;
+                        }
+                        aheadCx = segCx; aheadCy = segCy;
+                        // ここで書いたワールド座標を「適用済み」として控えておく。
+                        // 次フレームの CapturePartsLocal が「スクリプトが動かした」と誤解して
+                        // ローカルオフセットへ焼き込んでしまうのを防ぐ。
+                        seg.appliedX = seg.x;
+                        seg.appliedY = seg.y;
+                    }
+                }
             }
         }
 
