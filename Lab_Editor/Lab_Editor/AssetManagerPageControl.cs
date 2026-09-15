@@ -593,12 +593,12 @@ public class AssetManagerPageControl : UserControl
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
         // SelectionChanged: 行の選択が変わったら、他グリッドの選択解除・プレビュー更新・
         // 挙動パラメータパネル更新・タイプ説明欄更新をまとめて行う
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Enemy); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: true); UpdateTypeHint(); };
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Enemy); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Enemy); UpdateTypeHint(); };
         // CurrentCellDirtyStateChanged: コンボボックス等、値が変わった瞬間にCommitEditしないと
         // CellValueChangedが即座には発火しない列があるため、変更中フラグが立ったら即コミットする
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
         // CellValueChanged: type_enum列の値が変わったら、挙動パラメータパネルとアイコン表示を更新する
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, isEnemy: true); RefreshIconCell(dgv, e.RowIndex, isEnemy: true, isGimmick: false); } };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, AssetKind.Enemy); RefreshIconCell(dgv, e.RowIndex, isEnemy: true, isGimmick: false); } };
         return dgv;
     }
 
@@ -633,6 +633,10 @@ public class AssetManagerPageControl : UserControl
             new DataGridViewTextBoxColumn { Name="hitboxHeight", Visible=false },
             new DataGridViewTextBoxColumn { Name="sprite", HeaderText="画像パス", FillWeight=200, ReadOnly=true },
             new DataGridViewButtonColumn  { Name="btnHitbox", HeaderText="Hitbox", Text="🎯", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="この行の当たり判定(Hitbox)を編集します" },
+            // ギミックには倍率(scale)が無く、当たり判定の大きさがそのまま表示サイズを兼ねている。
+            // それでも「大きさを決めたい」需要は敵と変わらないので、同じ📏ボタンから
+            // プリセットや px 指定で決められるようにする（結果は当たり判定へ書き戻される）。
+            new DataGridViewButtonColumn  { Name="btnSize",   HeaderText="Size",   Text="📏", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="ゲーム内での大きさを決めます" },
             new DataGridViewButtonColumn  { Name="btnSprite", HeaderText="📁選択", Text="📁", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="スプライト画像ファイルを選択します" },
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30, ToolTipText="この行を削除します" },
         });
@@ -640,9 +644,9 @@ public class AssetManagerPageControl : UserControl
         // イベント配線はCreateEnemyGridとほぼ同様。DataErrorだけ追加で拾っており、
         // コンボボックスセルで想定外の値が入った際に詳細ログを残す(HandleDataError参照)。
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Gimmick); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, isEnemy: false); UpdateTypeHint(); };
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Gimmick); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Gimmick); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, isEnemy: false); RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: true); } };
+        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, AssetKind.Gimmick); RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: true); } };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -679,6 +683,8 @@ public class AssetManagerPageControl : UserControl
             new DataGridViewTextBoxColumn { Name="sprite",        HeaderText="画像パス",  FillWeight=180, ReadOnly=true },
             new DataGridViewTextBoxColumn { Name="grant_ability", HeaderText="付与能力",  FillWeight=100 },
             new DataGridViewButtonColumn  { Name="btnHitbox", HeaderText="Hitbox", Text="🎯", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="この行の当たり判定(Hitbox)を編集します" },
+            // アイテムもギミックと同じく当たり判定＝表示サイズ。📏から決められるようにする。
+            new DataGridViewButtonColumn  { Name="btnSize",   HeaderText="Size",   Text="📏", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="ゲーム内での大きさを決めます" },
             new DataGridViewButtonColumn  { Name="btnSprite", HeaderText="📁選択", Text="📁", UseColumnTextForButtonValue=true, FillWeight=35, ToolTipText="スプライト画像ファイルを選択します" },
             new DataGridViewButtonColumn  { Name="btnDel",    HeaderText="🗑削除",  Text="🗑", UseColumnTextForButtonValue=true, FillWeight=30, ToolTipText="この行を削除します" },
         });
@@ -686,7 +692,9 @@ public class AssetManagerPageControl : UserControl
         // アイテムのSelectionChangedでは、敵/ギミックと違いUpdateBehaviorParamsPanelを呼ばない
         // （アイテムには挙動パラメータの概念が無いため）。
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Item); UpdatePreview(dgv); UpdateTypeHint(); };
+        // アイテムにも編集禁止フラグの欄を出すため、敵・ギミックと同じくパラメータパネルを更新する。
+        // 以前はここを呼んでいなかったので、ItemDef に禁止フラグがあっても画面に出る場所が無かった。
+        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Item); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Item); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
         dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: false); };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
@@ -744,15 +752,31 @@ public class AssetManagerPageControl : UserControl
         }
         else if (colName == "btnSize")
         {
-            // 表示サイズ(拡大率scale)調整ボタン。敵グリッドにしか存在しない列だが、
-            // ハンドラ自体は共通なので、画像が未選択の場合のガードだけここで行っている。
+            // 「大きさ」ボタン。敵・ギミック・アイテムの3グリッド共通。
             string spritePath = dgv.Rows[e.RowIndex].Cells["sprite"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(spritePath)) { MessageBox.Show("先に画像を選択してください。", "サイズ調整", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+            if (string.IsNullOrEmpty(spritePath)) { MessageBox.Show("先に画像を選択してください。", "大きさの設定", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
             string fullPath = Path.Combine(projectRoot, spritePath);
-            float curScale = FloatCell(dgv.Rows[e.RowIndex], "scale", 1.0f);
+            var row = dgv.Rows[e.RowIndex];
 
-            // HitboxEditRequestedと同様、実際のサイズ調整UIはホスト側に委ね、結果だけscale列へ反映する
-            SizeEditRequested?.Invoke(fullPath, curScale, rScale => dgv.Rows[e.RowIndex].Cells["scale"].Value = rScale);
+            // 倍率(scale)と論理サイズ(width/height)を持つのは敵だけ。
+            // ギミックとアイテムは当たり判定の大きさがそのまま表示サイズなので、
+            // 論理サイズの代わりに当たり判定を渡し、倍率は使わないモードで開く。
+            bool hasScale = dgv.Columns.Contains("scale");
+            float curScale = hasScale ? FloatCell(row, "scale", 1.0f) : 1.0f;
+            int hbW = IntCell(row, "hitboxWidth", 32);
+            int hbH = IntCell(row, "hitboxHeight", 32);
+            int logW = dgv.Columns.Contains("width") ? IntCell(row, "width", hbW) : hbW;
+            int logH = dgv.Columns.Contains("height") ? IntCell(row, "height", hbH) : hbH;
+
+            // HitboxEditRequestedと同様、実際のUIはホスト側に委ね、結果だけ各列へ反映する。
+            // 当たり判定も一緒に返ってくるので、見た目だけ変わって判定が置き去りになることがない。
+            SizeEditRequested?.Invoke(fullPath, curScale, logW, logH, hbW, hbH, hasScale,
+                (rScale, rHbW, rHbH) =>
+                {
+                    if (hasScale) row.Cells["scale"].Value = rScale;
+                    row.Cells["hitboxWidth"].Value = rHbW;
+                    row.Cells["hitboxHeight"].Value = rHbH;
+                });
         }
         else if (colName == "btnDel")
         {
@@ -1096,7 +1120,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         combo.Value = vals[picker.SelectedType];
         // タイプが変わったので、挙動パラメータパネルとアイコン表示も手動で更新しておく
         // （コンボボックスの値をコード側からセットした場合、CellValueChangedが発火しないことがあるための保険）
-        UpdateBehaviorParamsPanel(dgv, isEnemy: kind == AssetKind.Enemy);
+        UpdateBehaviorParamsPanel(dgv, kind);
         RefreshIconCell(dgv, row.Index, isEnemy: kind == AssetKind.Enemy, isGimmick: kind == AssetKind.Gimmick);
     }
 
@@ -1105,13 +1129,21 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // EnemyParamFields/GimmickParamFields（クラス冒頭で定義した「どのtype_enumにどのフィールドを
     // 表示するか」のテーブル）を元に、リフレクション(GetProperty/GetValue/SetValue)でEnemyDef/GimmickDef
     // の該当プロパティへ直接読み書きするNumericUpDownをその場で動的に生成している。
-    private void UpdateBehaviorParamsPanel(DataGridView dgv, bool isEnemy)
+    // kind には Enemy / Gimmick / Item のいずれかを渡す。
+    // 以前は「敵かギミックか」の2択(bool)で、アイテムはこの経路をそもそも通っていなかった。
+    // 編集禁止フラグは3種類すべてに存在するため、アイテムも受けられる形へ広げてある。
+    private void UpdateBehaviorParamsPanel(DataGridView dgv, AssetKind kind)
     {
         // 何も選択されていなければパラメータパネルを隠し、タイプ説明欄を出す
         if (dgv.SelectedRows.Count == 0) { pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; return; }
         var row = dgv.SelectedRows[0];
+        bool isEnemy = (kind == AssetKind.Enemy);
         int typeEnum = GetSelectedTypeEnum(row);
-        var fieldMap = isEnemy ? EnemyParamFields : GimmickParamFields;
+        // アイテムには挙動パラメータのテーブルが無い（調整項目そのものが無い）ので、
+        // 共通欄＝編集禁止フラグだけを出す。
+        var fieldMap = isEnemy ? EnemyParamFields
+                     : (kind == AssetKind.Gimmick ? GimmickParamFields
+                        : new Dictionary<int, (string, string, int)[]>());
 
         // 選択中のtype_enumに対応する調整可能パラメータの定義。
         //
@@ -1124,7 +1156,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
 
         // 行に紐づくEnemyDef/GimmickDef本体（既に無ければ新規作成）を取得し、以降このオブジェクトの
         // プロパティへ直接値を読み書きする
-        object paramsObj = isEnemy ? GetOrCreateEnemyParams(row) : GetOrCreateGimmickParams(row);
+        object paramsObj = kind == AssetKind.Enemy   ? GetOrCreateEnemyParams(row)
+                         : kind == AssetKind.Gimmick ? GetOrCreateGimmickParams(row)
+                         : (object)GetOrCreateItemParams(row);
         // これから複数のNumericUpDownのValueをプログラム側から設定するため、その間はValueChangedの
         // 中身をスキップさせるフラグを立てておく（フィールド宣言のコメント参照。無限ループ・誤書き込み防止）
         _isUpdatingBehaviorPanel = true;
@@ -1135,6 +1169,23 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // fields配列（(プロパティ名, ラベル文言, 小数点桁数)の並び）を1件ずつ、ラベル+NumericUpDownの
         // ペアとして縦に並べていく。yはこのパネル内でのY座標（次の項目を配置する高さ）を表す
         int y = 4;
+        // アイテムはゲーム内の編集ツールの選択対象になっていない（SELECT_ITEM が存在しない）。
+        // 設定は保存されるが今のところ効き目が無いので、そのことを画面に明記して誤解を防ぐ。
+        if (kind == AssetKind.Item)
+        {
+            var note = new Label
+            {
+                Text = "※ アイテムは今のところゲーム内の編集ツールで選択できないため、"
+                     + Environment.NewLine
+                     + "   以下の設定は保存されますが、まだ効果がありません。",
+                Location = new Point(4, y),
+                Size = new Size(236, 32),
+                Font = new Font("Meiryo UI", 7.5f),
+                ForeColor = Color.DimGray,
+            };
+            pnlBehaviorParams.Controls.Add(note);
+            y += 36;
+        }
         // 敵の場合は、タイプ固有の項目の後ろに全タイプ共通の項目（一時停止無視など）を連結する
         // タイプ固有の欄のうしろへ、全タイプ共通の欄を連結する。
         // 編集禁止フラグは敵・ギミックどちらにもあるので、両方へ付ける。

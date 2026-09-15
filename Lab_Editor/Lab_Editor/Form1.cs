@@ -1074,12 +1074,12 @@ public partial class Form1 : Form
         }
 
         // 「サイズ編集」への遷移要求を処理するローカル関数。考え方はHandleHitboxRequestと同じ。
-        void HandleSizeRequest(string fullPath, float curScale, Action<float> onSaved)
+        void HandleSizeRequest(string fullPath, float curScale, int lw, int lh, int hw, int hh, bool hasScale, Action<float, int, int> onSaved)
         {
-            var page = new SizeEditorPageControl(fullPath, curScale);
-            page.Saved += (s, ev) => { onSaved(page.ResultScale); shell.GoBack(); };
+            var page = new SizeEditorPageControl(fullPath, curScale, lw, lh, hw, hh, hasScale);
+            page.Saved += (s, ev) => { onSaved(page.ResultScale, page.ResultHitboxWidth, page.ResultHitboxHeight); shell.GoBack(); };
             page.Cancelled += (s, ev) => shell.GoBack();
-            shell.NavigateTo(page, "サイズ編集", page.PrimaryActionButton, page.SecondaryActionButton);
+            shell.NavigateTo(page, "大きさの設定", page.PrimaryActionButton, page.SecondaryActionButton);
         }
 
         // 「挙動スクリプト編集」への遷移要求を処理するローカル関数。考え方は上と同じ。
@@ -1139,7 +1139,9 @@ public partial class Form1 : Form
     // タイル（地形パーツ）の定義を編集する専用画面を開く。保存されたらアセットとパレット・キャンバス表示を更新する。
     private void btnTileEditor_Click(object? sender, EventArgs e)
     {
-        var form = new TileEditorForm(assetsPath, assets.Tiles);
+        // アセット定義も渡す。タイル定義エディタから「壊せるブロック（ギミック）」の
+        // 破壊条件へ辿り着けるようにするため（ユーザーはまずタイルとして探しに来るため）。
+        var form = new TileEditorForm(assetsPath, assets.Tiles, assets);
         if (form.ShowDialog() == DialogResult.OK)
         { assets = AssetDefinitions.LoadFromFolder(assetsPath); RefreshPalette(); if (currentStage != null) { mapCanvas.Assets = assets; mapCanvas.RefreshTileColors(); } }
     }

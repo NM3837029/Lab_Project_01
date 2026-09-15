@@ -316,12 +316,20 @@ std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義�
 struct PlacedEnemy {
     int def_idx;  // enemyDefs配列内でのインデックス（この敵がどの種類の敵かを指す）
     float x, y;   // ステージ内でのスポーン座標（ワールド座標）
+    // 配置ごとの大きさ（1.0 = アセットの標準サイズ）と角度（ラジアン）。
+    // ゲーム内のImGuiエディタはこれらを編集しないが、保持しないと
+    // Lab_Editor で付けた値が「ここから一度保存した瞬間に消える」ことになる。
+    float scale = 1.0f;
+    float angle = 0.0f;
 };
 // ステージ上に実際に配置された「ギミック1個分」の情報。
 struct PlacedGimmick {
     int def_idx;  // gimmickDefs配列内でのインデックス
     float x, y;   // ステージ内でのスポーン座標
     std::string stringParam = ""; // ポータルの遷移先など
+    // 配置ごとの大きさと角度。PlacedEnemy と同じ理由で保持する。
+    float scale = 1.0f;
+    float angle = 0.0f;
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
@@ -426,6 +434,10 @@ std::vector<ItemDef> itemDefs; // 読み込み済みのアイテム定義（item
 struct PlacedItem {
     int def_idx;  // itemDefs配列内でのインデックス（このアイテムがどの種類かを指す）
     float x, y;   // ステージ内でのスポーン座標
+    // 配置ごとの大きさと角度。PlacedEnemy と同じ理由で保持する
+    // （ここで持たないと、Lab_Editor で付けた値がこの画面からの保存で消える）。
+    float scale = 1.0f;
+    float angle = 0.0f;
 };
 std::vector<PlacedItem> editorPlacedItems; // 現在編集中/プレイ中のステージに配置されているアイテムの一覧
 
@@ -1211,7 +1223,27 @@ struct TileDefinition {
     int handle;            // 描画に使う画像ハンドル
     bool isCollidable;     // trueなら地形として衝突判定の対象になる（プレイヤー・敵が乗れる/ぶつかる）
     bool deadly = false;   // 返った場合ただちゲームオーバー
-    const char* name;      // デバッグ表示・エディタ表示用の名前
+    std::string name;      // デバッグ表示・エディタ表示用の名前。
+                           // 以前は const char* で "Custom" 固定になっており、
+                           // タイル定義エディタで付けた名前がゲーム側へ一切届いていなかった。
+    std::string color;     // タイル定義エディタで指定される色（"#RRGGBB"）。
+                           // 画像が無いタイルを塗り分けるために使う。
+    int colorRGB = 0;      // color を GetColor で解決した値。hasColor が false のときは無意味。
+    bool hasColor = false; // color が指定されていたか。
+                           // GetColor は32bitカラーだと負値を返すので「>=0なら有効」では判定できない。
+
+    // Feature: タイル破壊 — このタイルを「どの壊し方で」壊せるか。
+    // ギミックの壊せるブロック（GimmickDef の breakByXxx）と同じ考え方を、
+    // 地形タイルそのものへ広げたもの。既定は全て false なので、
+    // 設定しない限り従来どおりタイルは絶対に壊れない。
+    bool breakBySlam = false;   // ドッスンの落下叩きつけ
+    bool breakByRam = false;    // 敵の体当たり・突進
+    bool breakByBullet = false; // 弾
+    bool breakByPlayer = false; // プレイヤーの操作（編集ツールでの破壊）
+    std::string breakSe; // 壊れたときに鳴らす効果音ID（se.json / ui_se.json のid）。空なら無音。
+    // 壊すのに必要な相手の大きさ（scale）。0以下なら大きさを問わない。
+    // 「拡大した敵の突進でなければ壊せない壁」をJSONだけで作れるようにするための条件。
+    float breakMinScale = 0.0f;
     // Feature: タイル表示範囲調整機能 — spriteが複数タイルをまとめたタイルセット画像の場合に、
     // そのうちどの矩形部分を表示に使うかを指定する。srcW/srcHが0のままなら画像全体を使う
     // （tileDefs構築直後の解決ループで画像サイズへ解決される。従来互換）。
@@ -1380,6 +1412,9 @@ struct Item {
 
     std::string assetId = ""; // ItemDef.id への参照（SE検索用）
     int handle = -1;          // ItemDef.graphHandle（カスタムスプライト）。-1ならcoinHandleを使う
+    // 配置ごとの回転角（ラジアン）。ステージJSONの "angle" から入る。
+    // 敵やギミックと違い、アイテムはAIで角度を変えないので表示専用。
+    float angle = 0.0f;
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartInstance> parts; // このアイテムを構成する追加パーツ（無ければ空のまま）
@@ -1604,6 +1639,11 @@ struct StageData {
     char name[64] = "";      // ステージ名（表示用）
     std::string sourceFile = ""; // assets/stages/ 配下のファイル名（GoToStageでの再読み込み判定に使用）
     std::vector<std::vector<int>> map; // 地形タイルマップ（[行][列]にTileTypeの数値が入る2次元配列）
+    // Feature: タイル破壊 — 壊される前の地形。
+    // map は実行時に書き換わるようになったので、リトライやステージ再入場で元へ戻すには
+    // 「一度も壊れていないマップ」を別に持っておく必要がある。
+    // ステージ読み込み直後に map の複製を入れ、ResetStage でここから戻す。
+    std::vector<std::vector<int>> pristineMap;
 
     std::vector<std::vector<int>> decoMapBack;  // プレイヤーより奥に描画される装飾タイルマップ
     std::vector<std::vector<int>> decoMapFront; // プレイヤーより手前に描画される装飾タイルマップ
@@ -2923,6 +2963,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int srcY = t.value("srcY", 0);
                     int srcW = t.value("srcW", 0);
                     int srcH = t.value("srcH", 0);
+                    // Feature: タイル破壊 — 壊し方ごとの可否と、壊すのに要る相手の大きさ
+                    bool bSlam = t.value("breakBySlam", false);
+                    bool bRam = t.value("breakByRam", false);
+                    bool bBullet = t.value("breakByBullet", false);
+                    bool bPlayer = t.value("breakByPlayer", false);
+                    float bMinScale = t.value("breakMinScale", 0.0f);
+                    std::string bSe = t.value("breakSe", "");
+                    // name / color はエディタが以前から書き出していたのに、ゲーム側が読んでいなかった。
+                    std::string tname = t.value("name", "");
+                    std::string tcolor = t.value("color", "");
 
                     int handle = -1;
                     if (!spritePath.empty()) {
@@ -2944,6 +2994,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (handle != -1) tileDefs[tid].handle = handle;
                         tileDefs[tid].srcX = srcX; tileDefs[tid].srcY = srcY;
                         tileDefs[tid].srcW = srcW; tileDefs[tid].srcH = srcH;
+                        if (!tname.empty()) tileDefs[tid].name = tname;
+                        tileDefs[tid].color = tcolor;
+                        tileDefs[tid].breakBySlam = bSlam;
+                        tileDefs[tid].breakByRam = bRam;
+                        tileDefs[tid].breakByBullet = bBullet;
+                        tileDefs[tid].breakByPlayer = bPlayer;
+                        tileDefs[tid].breakMinScale = bMinScale;
+                        tileDefs[tid].breakSe = bSe;
                     } else if (tid >= (int)tileDefs.size()) {
                         // 新規タイルを追加
                         TileDefinition newTile;
@@ -2951,12 +3009,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         newTile.handle = (handle != -1) ? handle : jimenHandle; // デフォルト画像
                         newTile.isCollidable = collidable;
                         newTile.deadly = deadly;
-                        newTile.name = "Custom";
+                        // 以前は "Custom" 固定で、エディタで付けた名前が無視されていた
+                        newTile.name = tname.empty() ? std::string("Custom") : tname;
+                        newTile.color = tcolor;
                         newTile.srcX = srcX; newTile.srcY = srcY;
                         newTile.srcW = srcW; newTile.srcH = srcH;
+                        newTile.breakBySlam = bSlam;
+                        newTile.breakByRam = bRam;
+                        newTile.breakByBullet = bBullet;
+                        newTile.breakByPlayer = bPlayer;
+                        newTile.breakMinScale = bMinScale;
+                        newTile.breakSe = bSe;
                         tileDefs.push_back(newTile);
                     }
                 }
+            }
+        }
+
+        // Feature: タイル定義の色 — "#RRGGBB" を実際の描画色へ解決しておく。
+        // GetColor は32bitカラーモードでは負の値を返すため、
+        // 「解決できたか」は値の符号ではなく hasColor で持つ（>=0 判定では絶対に通らない）。
+        for (auto& td : tileDefs) {
+            if (td.color.size() == 7 && td.color[0] == '#') {
+                int rr = (int)strtol(td.color.substr(1, 2).c_str(), nullptr, 16);
+                int gg = (int)strtol(td.color.substr(3, 2).c_str(), nullptr, 16);
+                int bb = (int)strtol(td.color.substr(5, 2).c_str(), nullptr, 16);
+                td.colorRGB = GetColor(rr, gg, bb);
+                td.hasColor = true;
             }
         }
 
@@ -3594,10 +3673,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
+                            // 配置ごとの大きさ・角度。アセット定義の値を「その種類の標準」として、
+                            // 配置単位で上書きできるようにする（同じ敵を大小並べる、最初から傾けて置く、など）。
+                            // キーが無ければ 1.0 / 0 なので、既存ステージの見え方は一切変わらない。
+                            float placedScale = defScale * ej.value("scale", 1.0f);
+                            float placedAngle = ej.value("angle", 0.0f);
                             // hitboxOffsetX/Y は元画像のピクセル座標系で指定されるため、hitboxWidth/Height と同様に
-                            // defScaleを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
+                            // スケールを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
                             // scale!=1.0のアセット（例: dossun, 太陽）で当たり判定がスプライトから大きくズレていた）
-                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * defScale, y + hy * defScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * placedScale, y + hy * placedScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, placedScale, placedAngle, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
                         }
                     }
 
@@ -3625,7 +3709,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 初期角度。手動橋(GIMMICK_MANUAL_BRIDGE=2)は「プレイヤーがR+ドラッグで倒して渡る」ギミックなので、
                             // 指定が無ければ縦向き(=渡れない状態)で始める。従来は常に0(水平)で置かれ、最初から渡れてしまっていた。
                             float initAngle = gj.value("angle", (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f);
-                            Gimmick newGim{ (GimmickType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
+                            // 配置ごとの大きさ。ギミックは scale を持たないので、
+                            // 読み込み時に表示サイズと当たり判定へ直接掛ける（アイテムと同じ扱い）。
+                            float gimScale = gj.value("scale", 1.0f);
+                            if (gimScale <= 0.0f) gimScale = 1.0f;
+                            float gw = pw * gimScale, gh = ph * gimScale;
+                            float gsw = sw * gimScale, gsh = sh * gimScale;
+                            Gimmick newGim{ (GimmickType)t_enum, x + hx * gimScale, y + hy * gimScale, gw, gh, gsw, gsh, (float)hx, (float)hy, gw, gh, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
                             newGim.assetId = id;
                             newGim.param = param;
                             newGim.handle = gHandle;
@@ -3652,9 +3742,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
-                            Item newItem{ (ItemType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, false, false, {} };
+                            // 配置ごとの大きさ。アイテムはランタイムに scale を持たないので、
+                            // 読み込み時に表示サイズと当たり判定へ直接掛けてしまう。
+                            float itemScale = ij.value("scale", 1.0f);
+                            if (itemScale <= 0.0f) itemScale = 1.0f;
+                            float isw = sw * itemScale, ish = sh * itemScale;
+                            float ipw = pw * itemScale, iph = ph * itemScale;
+                            Item newItem{ (ItemType)t_enum, x + hx * itemScale, y + hy * itemScale, ipw, iph, isw, ish, (float)hx, (float)hy, ipw, iph, true, false, false, {} };
                             newItem.assetId = id;
                             newItem.handle = iHandle;
+                            newItem.angle = ij.value("angle", 0.0f);
                             jsonStage.items.push_back(newItem);
                         }
                     }
@@ -3693,9 +3790,75 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         Logger::Info("System", "WinMain", "No stages loaded, creating default stage");
     }
 
+    // Feature: タイル破壊 — 壊したマスの記録。
+    //
+    // 壊せるブロック（ギミック）は isActive を false にするだけで済むが、
+    // 地形タイルは「衝突判定・描画・敵の足場プローブ」が全て同じ map を読む共有データなので、
+    // 壊したあと元へ戻すには、どのマスに何が入っていたかを別に覚えておく必要がある。
+    //
+    // framesSinceBroken は「壊れてから経った時間」。通常フレームで増え、巻き戻し中は減る。
+    // 0まで戻れば復活＝巻き戻しで壊れたブロックが元に戻る、という振る舞いになる
+    // （ギミックの壊せるブロックと揃えた）。
+    // MAX_HISTORY_FRAMES を超えたものは巻き戻しても届かないので、記録から外して確定させる。
+    struct BrokenTile {
+        int row, col;            // 壊れたマス
+        int originalId;          // 壊れる前に入っていたタイルID
+        float framesSinceBroken; // 壊れてから経過したフレーム数（巻き戻し中は減る）
+    };
+    std::vector<BrokenTile> brokenTiles;
+
+    // 指定マスのタイルを、その壊し方・その相手の大きさで壊せるなら壊す。壊したら true。
+    //
+    // TryBreakGimmick と同じ形にしてあるので、壊す側は「どのマスを」「どう壊したか」
+    // 「相手はどのくらいの大きさか」だけを渡せばよい。
+    // attackerScale には敵の scale を渡す。大きさという概念が無い壊し方では 0 以下を渡す。
+    auto TryBreakTile = [&](int row, int col, BreakCause cause, float attackerScale) -> bool {
+        if (currentStageIdx < 0 || currentStageIdx >= (int)stages.size()) return false;
+        auto& mp = stages[currentStageIdx].map;
+        if (row < 0 || row >= (int)mp.size()) return false;
+        if (col < 0 || col >= (int)mp[row].size()) return false;
+        int tid = mp[row][col];
+        // 空マス(0)と、tiles.json に定義の無いIDは対象外。
+        // 定義が引けないタイルを壊さないのは、破壊条件が読めない以上
+        // 「壊してよいかどうか」を判断できないため（TryBreakGimmick と同じ方針）。
+        if (tid <= 0 || tid >= (int)tileDefs.size()) return false;
+        const TileDefinition& td = tileDefs[tid];
+
+        // 1) この壊し方が許可されているか
+        bool allowed = false;
+        switch (cause) {
+            case BREAK_SLAM:   allowed = td.breakBySlam;   break;
+            case BREAK_RAM:    allowed = td.breakByRam;    break;
+            case BREAK_BULLET: allowed = td.breakByBullet; break;
+            case BREAK_PLAYER: allowed = td.breakByPlayer; break;
+            default:           allowed = false;            break; // タイルは傾かないので BREAK_TIP は無い
+        }
+        if (!allowed) return false;
+
+        // 2) 相手の大きさが足りているか（「拡大した敵の突進でなければ壊せない壁」を作れる条件）
+        if (attackerScale > 0.0f && td.breakMinScale > 0.0f && attackerScale < td.breakMinScale) return false;
+
+        mp[row][col] = 0;
+        brokenTiles.push_back({ row, col, tid, 0.0f });
+        if (!td.breakSe.empty()) SoundManager::Get().PlaySe(td.breakSe);
+        return true;
+    };
+
     // 死亡時にステージ全体を初期化し、ゲームの整合性を保証するラムダヘルパー
     auto ResetStage = [&]() {
         Logger::Info("System", "ResetStage", "Begin ResetStage");
+
+        // Feature: タイル破壊 — 壊れた地形を元へ戻す。
+        // 初回は今の地形が「無傷の状態」なのでそれを控え、2回目以降はそこから丸ごと戻す。
+        // ここに置けば、JSONステージ／C++直書きステージ／別ステージへの切り替えの
+        // どの経路から来ても必ず無傷の地形で始まる。
+        {
+            auto& mutableStage = stages[currentStageIdx];
+            if (mutableStage.pristineMap.empty()) mutableStage.pristineMap = mutableStage.map;
+            else                                  mutableStage.map = mutableStage.pristineMap;
+            brokenTiles.clear();
+        }
+
         const auto& stage = stages[currentStageIdx];
 
         // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
@@ -4507,6 +4670,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!isAnyRewindActive) for (auto& b : bullets)  if (b.isRewinding)  { isAnyRewindActive = true; break; }
         if (!isAnyRewindActive) for (auto& it : items)   if (it.isRewinding) { isAnyRewindActive = true; break; }
 
+        // Feature: タイル破壊 — 壊したマスの巻き戻し復活。
+        //
+        // 壊れてからの経過フレームを、通常再生では増やし、巻き戻し中は減らす。
+        // 0まで戻ったマスは元のタイルへ戻す＝「巻き戻せば壊したブロックが直る」。
+        // 履歴の深さ(MAX_HISTORY_FRAMES)を超えたものは巻き戻しても届かないので記録から外す。
+        //
+        // 復活は「そのマスにプレイヤーが重なっていないとき」だけ行う。
+        // 重なったまま戻すと地形の中にめり込み、抜け出せなくなるため、
+        // 重なっている間は復活を先送りして、退いた瞬間に戻す。
+        if (!isPaused) {
+            auto& mpBroken = stages[currentStageIdx].map;
+            float phW = player.width * player.scale, phH = player.height * player.scale;
+            for (size_t bi = 0; bi < brokenTiles.size(); ) {
+                BrokenTile& bt = brokenTiles[bi];
+                if (isAnyRewindActive) bt.framesSinceBroken -= finalTimeScale;
+                else                   bt.framesSinceBroken += finalTimeScale;
+
+                if (bt.framesSinceBroken <= 0.0f) {
+                    float tx = (float)(bt.col * TILE_SIZE), ty = (float)(bt.row * TILE_SIZE);
+                    bool overlapsPlayer = (player.x < tx + TILE_SIZE && player.x + phW > tx &&
+                                           player.y < ty + TILE_SIZE && player.y + phH > ty);
+                    if (!overlapsPlayer) {
+                        if (bt.row < (int)mpBroken.size() && bt.col < (int)mpBroken[bt.row].size())
+                            mpBroken[bt.row][bt.col] = bt.originalId;
+                        brokenTiles.erase(brokenTiles.begin() + bi);
+                        continue;
+                    }
+                    bt.framesSinceBroken = 0.0f; // 退くまで復活を待つ
+                } else if (bt.framesSinceBroken > (float)MAX_HISTORY_FRAMES) {
+                    // 巻き戻しでは届かない過去になったので、壊れたまま確定させる
+                    brokenTiles.erase(brokenTiles.begin() + bi);
+                    continue;
+                }
+                bi++;
+            }
+        }
+
         // Feature: カット機能の復活 — このブロックには「個別オブジェクト編集」と「タイムラインカット」の
         // 2系統の操作が同居している。どちらか一方だけを許可したステージを作れるように、
         // 入口はORで通し、実際の操作ごとに objectEditOpEnabled / cutOpEnabled を個別に見る。
@@ -5004,6 +5204,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 blockClicked = true;
                                 break;
                             }
+                        }
+                    }
+
+                    // Feature: タイル破壊 — ギミックのブロックが無ければ、地形タイルの側を叩く。
+                    // タイル定義エディタで「プレイヤーが壊せる」を立てたタイルだけが割れる。
+                    if (!blockClicked) {
+                        if (TryBreakTile((int)(gy / TILE_SIZE), (int)(gx / TILE_SIZE), BREAK_PLAYER, 0.0f)) {
+                            blockClicked = true;
                         }
                     }
 
@@ -5857,6 +6065,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         }
                                     }
                                 }
+                                // Feature: タイル破壊 — 進路上の地形タイルも同じ条件で押し割る。
+                                // 体の高さぶんを半マス刻みで見るのは、1点だけだと背の高い個体が
+                                // 壁の一部しか割らずにその場で引っかかってしまうため。
+                                int ramColT = (int)(ramX / TILE_SIZE);
+                                for (float fy = 2.0f; fy < bodyH; fy += TILE_SIZE * 0.5f) {
+                                    if (TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), ramColT, BREAK_RAM, enemy.scale)) {
+                                        wallAheadP = false;
+                                        turnByTerrain = false;
+                                    }
+                                }
                             }
 
                             if (er.tilted) {
@@ -6138,6 +6356,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             TryBreakGimmick(gimW, BREAK_RAM, enemy.scale);
                                         }
                                     }
+                                    // Feature: タイル破壊 — 進路上の地形タイルも押し割る
+                                    int ramColW = (int)(ramXw / TILE_SIZE);
+                                    float bodyHw = (float)enemy.hitboxHeight * enemy.scale;
+                                    for (float fy = 2.0f; fy < bodyHw; fy += TILE_SIZE * 0.5f) {
+                                        TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), ramColW, BREAK_RAM, enemy.scale);
+                                    }
                                 }
 
                                 float aheadX = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale + 8.0f);
@@ -6268,6 +6492,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                                       enemy.y < gimD.y + gimD.spriteHeight);
                                         }
                                         if (ramHit) TryBreakGimmick(gimD, BREAK_RAM, enemy.scale);
+                                    }
+                                    // Feature: タイル破壊 — 突進の先端が入ったマスの地形も割る。
+                                    // 傾けた突進では進行方向そのものが変わるので、
+                                    // ギミック側と同じく先端1点（向きベクトルぶん外へ出した点）で見る。
+                                    {
+                                        if (er.tilted) {
+                                            float tipX = enemy.x + ramHalfW + dashHx * (ramHalfW + 8.0f);
+                                            float tipY = enemy.y + ramHalfH + dashHy * (ramHalfH + 8.0f);
+                                            TryBreakTile((int)(tipY / TILE_SIZE), (int)(tipX / TILE_SIZE), BREAK_RAM, enemy.scale);
+                                        } else {
+                                            float tipX = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                            int colD = (int)(tipX / TILE_SIZE);
+                                            float bodyHd = (float)enemy.hitboxHeight * enemy.scale;
+                                            for (float fy = 2.0f; fy < bodyHd; fy += TILE_SIZE * 0.5f) {
+                                                TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), colD, BREAK_RAM, enemy.scale);
+                                            }
+                                        }
                                     }
                                 }
                                 enemy.customTimer -= ets;
@@ -6475,6 +6716,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
                                             if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
                                                 TryBreakGimmick(gimF, BREAK_SLAM, enemy.scale);
+                                            }
+                                        }
+                                        // Feature: タイル破壊 — 衝撃波の届く範囲の地形タイルも砕く。
+                                        // 円の外接矩形ぶんのマスを走査し、マスの中心が半径内にあるものだけ壊す
+                                        // （矩形のまま壊すと、見えている衝撃波の円より広く壊れて不自然になる）。
+                                        {
+                                            int rowLo = (int)((ecyF - shockwaveRadiusF) / TILE_SIZE);
+                                            int rowHi = (int)((ecyF + shockwaveRadiusF) / TILE_SIZE);
+                                            int colLo = (int)((ecxF - shockwaveRadiusF) / TILE_SIZE);
+                                            int colHi = (int)((ecxF + shockwaveRadiusF) / TILE_SIZE);
+                                            for (int rr = rowLo; rr <= rowHi; rr++) {
+                                                for (int cc = colLo; cc <= colHi; cc++) {
+                                                    float tcx = (cc + 0.5f) * TILE_SIZE, tcy = (rr + 0.5f) * TILE_SIZE;
+                                                    float ddx = tcx - ecxF, ddy = tcy - ecyF;
+                                                    if (sqrtf(ddx * ddx + ddy * ddy) > shockwaveRadiusF) continue;
+                                                    TryBreakTile(rr, cc, BREAK_SLAM, enemy.scale);
+                                                }
                                             }
                                         }
                                         enemy.auxState = 2;
@@ -8405,6 +8663,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                         }
 
+                        // Feature: タイル破壊 — 弾が地形タイルに当たった場合。
+                        // 弾の中心が入っているマスを見る。壊せたらその弾は消える（ブロックと同じ扱い）。
+                        if (bullets[i].isActive) {
+                            float bcx = bullets[i].x + 8.0f * bullets[i].scale;
+                            float bcy = bullets[i].y + 8.0f * bullets[i].scale;
+                            if (TryBreakTile((int)(bcy / TILE_SIZE), (int)(bcx / TILE_SIZE), BREAK_BULLET, bullets[i].scale)) {
+                                bullets[i].isActive = false;
+                            }
+                        }
+
                         // Feature: Composite Multi-Part Objects (Parts-M4/M6) — プレイヤーの弾がギミックのパーツにヒット
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
@@ -8975,14 +9243,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             for (int tx = 0; tx < mapColCount; tx++) {
                 int tid = currentMap[ty][tx];
                 if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
-                if (tileDefs[tid].handle < 0) continue;
+                // 画像も色も無いタイルは描きようがないので飛ばす。
+                // 以前は handle < 0 だけで飛ばしていたため、タイル定義エディタで色だけ
+                // 指定したタイルがゲーム画面に一切現れなかった。
+                if (tileDefs[tid].handle < 0 && !tileDefs[tid].hasColor) continue;
                 int drawX = tx * TILE_SIZE - (int)cameraX;
                 int drawY = ty * TILE_SIZE - (int)cameraY;
                 if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
-                    // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
-                    DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
-                        tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
-                        tileDefs[tid].handle, TRUE);
+                    if (tileDefs[tid].handle >= 0) {
+                        // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
+                        DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
+                            tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
+                            tileDefs[tid].handle, TRUE);
+                    } else {
+                        // 画像が無く色だけ指定されているタイルは、その色で1マスを塗る
+                        DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].colorRGB, TRUE);
+                    }
                     if (isDebugDrawMode && tileDefs[tid].isCollidable) {
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
                     }
@@ -9002,7 +9278,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)(item.y - cameraY);
                 int useHandle = item.handle >= 0 ? item.handle : coinHandle;
-                DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
+                if (item.angle == 0.0f) {
+                    DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
+                } else {
+                    // 配置で角度が付いているときだけ回転描画に切り替える。
+                    // DrawRotaGraph3 は中心を軸に縦横別倍率で回せるので、拡大描画の見え方を保ったまま回せる。
+                    int imgW = 0, imgH = 0;
+                    GetGraphSize(useHandle, &imgW, &imgH);
+                    if (imgW > 0 && imgH > 0) {
+                        DrawRotaGraph3(icx + (int)(item.spriteWidth / 2.0f), icy + (int)(item.spriteHeight / 2.0f),
+                                       imgW / 2, imgH / 2,
+                                       (double)item.spriteWidth / imgW, (double)item.spriteHeight / imgH,
+                                       item.angle, useHandle, TRUE, FALSE);
+                    }
+                }
                 DrawPartsPass(item.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
@@ -9748,7 +10037,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         std::string id = e["id"];
                                         int def_idx = -1;
                                         for(int k=0; k<enemyDefs.size(); k++) { if(enemyDefs[k].id == id) { def_idx=k; break; } }
-                                        if (def_idx >= 0) editorPlacedEnemies.push_back({def_idx, e["x"], e["y"]});
+                                        if (def_idx >= 0) {
+                                            PlacedEnemy pe = {def_idx, e["x"], e["y"]};
+                                            pe.scale = e.value("scale", 1.0f);
+                                            pe.angle = e.value("angle", 0.0f);
+                                            editorPlacedEnemies.push_back(pe);
+                                        }
                                     }
                                 }
                                 if (j.contains("gimmicks")) {
@@ -9759,6 +10053,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         if (def_idx >= 0) {
                                             PlacedGimmick pg = {def_idx, e["x"], e["y"], ""};
                                             if (e.contains("param")) pg.stringParam = e["param"];
+                                            pg.scale = e.value("scale", 1.0f);
+                                            pg.angle = e.value("angle", 0.0f);
                                             editorPlacedGimmicks.push_back(pg);
                                         }
                                     }
@@ -9768,7 +10064,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         std::string id = e["id"];
                                         int def_idx = -1;
                                         for(int k=0; k<itemDefs.size(); k++) { if(itemDefs[k].id == id) { def_idx=k; break; } }
-                                        if (def_idx >= 0) editorPlacedItems.push_back({def_idx, e["x"], e["y"]});
+                                        if (def_idx >= 0) {
+                                            PlacedItem pi = {def_idx, e["x"], e["y"]};
+                                            pi.scale = e.value("scale", 1.0f);
+                                            pi.angle = e.value("angle", 0.0f);
+                                            editorPlacedItems.push_back(pi);
+                                        }
                                     }
                                 }
                                 if (j.contains("player_capabilities")) {
@@ -9815,21 +10116,41 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             ImGui::Separator();
             if (ImGui::Button(u8"ステージを保存 (Save)")) {
-                json stageData;
+                // 【重要】既存ファイルを読み込んでから上書きする。
+                //
+                // 以前はここで空の json を作って enemies/gimmicks/items/player_capabilities だけを
+                // 書き出していたため、この保存を1回押すだけで地形マップ・背景・トリガー・BGM・
+                // 巡回範囲といった他の全ての情報が消えていた（Lab_Editorで作ったステージが壊れる）。
+                // 既存の内容を土台にして、この画面が扱う3つの配列だけを差し替える。
+                json stageData = json::object();
+                {
+                    std::ifstream prev("assets/stages/" + currentStageFileName);
+                    if (prev.is_open()) {
+                        json loaded = json::parse(prev, nullptr, false);
+                        if (!loaded.is_discarded() && loaded.is_object()) stageData = loaded;
+                    }
+                }
                 stageData["enemies"] = json::array();
                 for (auto& e : editorPlacedEnemies) {
                     json j = { {"id", enemyDefs[e.def_idx].id}, {"x", e.x}, {"y", e.y} };
+                    // 既定値のときはキーを書かない（既存ステージに余計な差分を出さないため）
+                    if (e.scale != 1.0f) j["scale"] = e.scale;
+                    if (e.angle != 0.0f) j["angle"] = e.angle;
                     stageData["enemies"].push_back(j);
                 }
                 stageData["gimmicks"] = json::array();
                 for (auto& g : editorPlacedGimmicks) {
                     json j = { {"id", gimmickDefs[g.def_idx].id}, {"x", g.x}, {"y", g.y} };
                     if (g.stringParam != "") j["param"] = g.stringParam;
+                    if (g.scale != 1.0f) j["scale"] = g.scale;
+                    if (g.angle != 0.0f) j["angle"] = g.angle;
                     stageData["gimmicks"].push_back(j);
                 }
                 stageData["items"] = json::array();
                 for (auto& i : editorPlacedItems) {
                     json j = { {"id", itemDefs[i.def_idx].id}, {"x", i.x}, {"y", i.y} };
+                    if (i.scale != 1.0f) j["scale"] = i.scale;
+                    if (i.angle != 0.0f) j["angle"] = i.angle;
                     stageData["items"].push_back(j);
                 }
                 stageData["player_capabilities"] = {

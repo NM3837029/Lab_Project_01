@@ -30,6 +30,21 @@ public class TileDef
     // srcW, srcH : 切り出す矩形の幅・高さ（ピクセル単位）
     public int srcW { get; set; } = 0;
     public int srcH { get; set; } = 0;
+
+    // Feature: タイル破壊 — このタイルを「どの壊し方で」壊せるか。
+    // 壊せるブロック（ギミック）の breakByXxx と同じ考え方を地形タイルへ広げたもの。
+    // 既定は全て false なので、ここを立てない限りタイルは従来どおり絶対に壊れない。
+    // 【重要】C++側(DrawPixel.cpp の TileDefinition)と必ず対で追加すること。
+    // 片方だけだと、エディタで保存した瞬間にキーが消える／ゲームが読まない、のどちらかになる。
+    public bool breakBySlam { get; set; } = false;   // ドッスンの落下衝撃で壊れる
+    public bool breakByRam { get; set; } = false;    // 敵の体当たり・突進で壊れる
+    public bool breakByBullet { get; set; } = false; // 弾で壊れる
+    public bool breakByPlayer { get; set; } = false; // プレイヤーの直接操作（クリック）で壊れる
+    // 壊すのに必要な相手の大きさ(scale)。0以下なら大きさを問わない。
+    // 「拡大した敵の突進でなければ壊せない壁」をJSONだけで作るための条件。
+    public float breakMinScale { get; set; } = 0.0f;
+    // 壊れたときに鳴らす効果音ID（se.json / ui_se.json のid）。空なら無音。
+    public string breakSe { get; set; } = "";
 }
 
 // ===== 背景レイヤー定義 (Feature 1) =====
@@ -314,7 +329,9 @@ public class StageData
                         X = e["x"]?.Value<float>() ?? 0,
                         Y = e["y"]?.Value<float>() ?? 0,
                         PatrolLeft = e["patrol_left"]?.Value<float>() ?? -1,
-                        PatrolRight = e["patrol_right"]?.Value<float>() ?? -1
+                        PatrolRight = e["patrol_right"]?.Value<float>() ?? -1,
+                        Scale = e["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = e["angle"]?.Value<float>() ?? 0f
                     });
 
             // ギミック — 配置座標とオプションパラメータ(param)を読み込む。
@@ -325,7 +342,9 @@ public class StageData
                         Id = g["id"]?.Value<string>() ?? "",
                         X = g["x"]?.Value<float>() ?? 0,
                         Y = g["y"]?.Value<float>() ?? 0,
-                        Param = g["param"]?.Value<string>() ?? ""
+                        Param = g["param"]?.Value<string>() ?? "",
+                        Scale = g["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = g["angle"]?.Value<float>() ?? 0f
                     });
 
             // アイテム — 配置座標を読み込む。
@@ -335,7 +354,9 @@ public class StageData
                     {
                         Id = i["id"]?.Value<string>() ?? "",
                         X = i["x"]?.Value<float>() ?? 0,
-                        Y = i["y"]?.Value<float>() ?? 0
+                        Y = i["y"]?.Value<float>() ?? 0,
+                        Scale = i["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = i["angle"]?.Value<float>() ?? 0f
                     });
 
             // プラットフォーム — 当たり判定用の矩形（始点・終点座標）の一覧を読み込む。
@@ -415,6 +436,9 @@ public class StageData
             var ej = new JObject { ["id"] = e.Id, ["x"] = e.X, ["y"] = e.Y };
             if (e.PatrolLeft >= 0) ej["patrol_left"] = e.PatrolLeft;
             if (e.PatrolRight >= 0) ej["patrol_right"] = e.PatrolRight;
+            // 既定値と同じなら書かない（既存ステージへ余計な差分を出さないため）
+            if (e.Scale != 1.0f) ej["scale"] = e.Scale;
+            if (e.Angle != 0f) ej["angle"] = e.Angle;
             ea.Add(ej);
         }
         j["enemies"] = ea;
@@ -425,12 +449,22 @@ public class StageData
         {
             var gj = new JObject { ["id"] = g.Id, ["x"] = g.X, ["y"] = g.Y };
             if (!string.IsNullOrEmpty(g.Param)) gj["param"] = g.Param;
+            if (g.Scale != 1.0f) gj["scale"] = g.Scale;
+            if (g.Angle != 0f) gj["angle"] = g.Angle;
             ga.Add(gj);
         }
         j["gimmicks"] = ga;
 
-        // アイテム — id・座標のみのシンプルな構造なのでSelectで一括変換する。
-        j["items"] = new JArray(Items.Select(i => new JObject { ["id"] = i.Id, ["x"] = i.X, ["y"] = i.Y }));
+        // アイテム — 大きさ・角度は既定値のときだけ省略する（敵・ギミックと同じ扱い）。
+        var ia2 = new JArray();
+        foreach (var i in Items)
+        {
+            var ij = new JObject { ["id"] = i.Id, ["x"] = i.X, ["y"] = i.Y };
+            if (i.Scale != 1.0f) ij["scale"] = i.Scale;
+            if (i.Angle != 0f) ij["angle"] = i.Angle;
+            ia2.Add(ij);
+        }
+        j["items"] = ia2;
 
         // プラットフォーム — 始点・終点座標をそのままJSONオブジェクトへ変換する。
         j["platforms"] = new JArray(Platforms.Select(p =>
@@ -707,6 +741,14 @@ public class PlacedEnemy
     // 巡回行動をする敵の場合の、巡回範囲の右端座標。-1は「未設定（巡回しない）」を意味する。
     [System.ComponentModel.DisplayName("巡回右端")]
     public float PatrolRight { get; set; } = -1;
+    // 配置ごとの大きさ・角度の初期値。
+    // アセット定義の大きさは「その種類の標準」で、ここはそれを配置単位で上書きする。
+    // 同じ敵を大小いくつも並べたい、最初から傾けて置きたい、といった調整に使う。
+    // 既定値（1.0 / 0）のときはステージJSONへ書き出さないので、既存ステージの差分は増えない。
+    [System.ComponentModel.DisplayName("大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // マップ上に実際に1体配置されたギミック1個分の情報。
@@ -724,6 +766,11 @@ public class PlacedGimmick
     // このギミック固有の追加パラメータ（ギミックの種類によって意味が変わる文字列）。
     [System.ComponentModel.DisplayName("パラメータ")]
     public string Param { get; set; } = "";
+    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）
+    [System.ComponentModel.DisplayName("大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // マップ上に実際に1個配置されたアイテム1個分の情報。
@@ -738,6 +785,11 @@ public class PlacedItem
     // 配置するY座標。
     [System.ComponentModel.DisplayName("Y座標")]
     public float Y { get; set; }
+    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）
+    [System.ComponentModel.DisplayName("大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // 当たり判定用の矩形1個分の情報（足場・壁など、見た目のタイルとは別に判定だけを持たせたい場合に使う）。

@@ -38,10 +38,11 @@ public class AssetManagerForm : Form
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.HitboxOffsetX, form.HitboxOffsetY, form.HitboxWidth, form.HitboxHeight);
         };
         // 表示サイズ(スケール)の編集要求 → SizeEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
-        page.SizeEditRequested += (fullPath, curScale, onSaved) =>
+        page.SizeEditRequested += (fullPath, curScale, lw, lh, hw, hh, hasScale, onSaved) =>
         {
-            using var form = new SizeEditorForm(fullPath, curScale);
-            if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultScale);
+            using var form = new SizeEditorForm(fullPath, curScale, lw, lh, hw, hh, hasScale);
+            if (form.ShowDialog(this) == DialogResult.OK)
+                onSaved(form.ResultScale, form.ResultHitboxWidth, form.ResultHitboxHeight);
         };
         // 挙動スクリプトの編集要求 → BehaviorScriptEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
         page.BehaviorScriptEditRequested += (label, initialScript, onSaved) =>

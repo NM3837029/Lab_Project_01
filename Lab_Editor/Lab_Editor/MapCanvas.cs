@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Drawing.Drawing2D;
 
 namespace Lab_Editor;
@@ -97,6 +97,12 @@ public class MapCanvas : Panel
 
     // タイル通行設定（Tile ID → (当たり判定あり, 即死)）。MZ風の通行設定可視化用に使う。
     private Dictionary<int, (bool collidable, bool deadly)> _tileMeta = new();
+
+    // 敵/ギミック/アイテムのスプライト（画像パス → Image）。
+    // 従来これらは種類に関係なく20pxの四角＋絵文字で描かれていて、
+    // 「実際に置いたらどのくらいの大きさなのか」がエディタ上で分からなかった。
+    // 読めなかった場合も null を覚えておき、毎回ファイルを探しにいかないようにする。
+    private readonly Dictionary<string, Image?> _assetImages = new();
 
     // タイル画像・スプライト画像を読み込む際の基準となるアセットフォルダのパス。
     public string AssetsPath { get; set; } = "";
@@ -245,27 +251,35 @@ public class MapCanvas : Panel
         // 7.5. 敵の巡回範囲プレビュー（MZ の移動ルートプレビュー風の点線表示）。
         DrawPatrolRanges(g);
 
-        // 8. 敵（type_enumごとのアイコンで表示。テキスト表記のみでは判別しにくいため）
+        // 8. 敵 — 実際のスプライトを、実際の大きさで描く。
+        // 画像が無い／読めない場合は従来どおりの絵文字マーカーへ落とす。
         foreach (var en in Stage.Enemies)
         {
-            // 配置済みの敵IDから、対応する敵定義のtype_enumを引いてアイコン文字を決定する（定義が見つからない場合は-1として扱う）。
-            string icon = AssetIcons.ForEnemy(Assets?.Enemies.FirstOrDefault(d => d.id == en.Id)?.type_enum ?? -1);
-            // 現在選択中のオブジェクトであればマゼンタで強調表示する。
-            DrawMarker(g, en.X, en.Y, icon, SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50), 11f);
+            var def = Assets?.Enemies.FirstOrDefault(d => d.id == en.Id);
+            string icon = AssetIcons.ForEnemy(def?.type_enum ?? -1);
+            DrawPlacedObject(g, en.X, en.Y, ObjectWorldSize(def?.width ?? 0, def?.height ?? 0, def?.scale ?? 1f, en.Scale),
+                             def?.sprite, en.Angle, icon,
+                             SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50));
         }
 
-        // 9. ギミック（敵と同様、type_enumに応じたアイコンで描画）
+        // 9. ギミック — ギミック定義は width/height を持たず、当たり判定サイズが表示サイズを兼ねている
         foreach (var gi in Stage.Gimmicks)
         {
-            string icon = AssetIcons.ForGimmick(Assets?.Gimmicks.FirstOrDefault(d => d.id == gi.Id)?.type_enum ?? -1);
-            DrawMarker(g, gi.X, gi.Y, icon, SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220), 11f);
+            var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == gi.Id);
+            string icon = AssetIcons.ForGimmick(def?.type_enum ?? -1);
+            DrawPlacedObject(g, gi.X, gi.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, gi.Scale),
+                             def?.sprite, gi.Angle, icon,
+                             SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220));
         }
 
-        // 10. アイテム（同上のロジックでアイコン表示）
+        // 10. アイテム（ギミックと同じくhitboxサイズが表示サイズ）
         foreach (var it in Stage.Items)
         {
-            string icon = AssetIcons.ForItem(Assets?.Items.FirstOrDefault(d => d.id == it.Id)?.type_enum ?? -1);
-            DrawMarker(g, it.X, it.Y, icon, SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0), 11f);
+            var def = Assets?.Items.FirstOrDefault(d => d.id == it.Id);
+            string icon = AssetIcons.ForItem(def?.type_enum ?? -1);
+            DrawPlacedObject(g, it.X, it.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale),
+                             def?.sprite, it.Angle, icon,
+                             SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0));
         }
 
         // 11. トリガー矩形 (Feature 5)。1件以上存在する場合のみ描画処理を呼ぶ（無駄な呼び出しを避ける）。
@@ -430,6 +444,78 @@ public class MapCanvas : Panel
     // label           : マーカー中央に表示する短いラベル文字（例："P"、絵文字アイコンなど）
     // color            : マーカーの塗りつぶし色・枠線色の基準色
     // fontSize         : ラベル文字のフォントサイズ（省略時は7）
+    // 配置物のワールド上の表示サイズを求める。
+    // 定義が引けない／サイズ未設定のアセットはマス目1つぶんとして扱う
+    // （0を返すと描画も当たり判定も消えてしまうため）。
+    private static SizeF ObjectWorldSize(int defW, int defH, float defScale, float placedScale)
+    {
+        float w = (defW > 0 ? defW : GAME_TILE) * (defScale > 0 ? defScale : 1f) * (placedScale > 0 ? placedScale : 1f);
+        float h = (defH > 0 ? defH : GAME_TILE) * (defScale > 0 ? defScale : 1f) * (placedScale > 0 ? placedScale : 1f);
+        return new SizeF(w, h);
+    }
+
+    // 画像パスからスプライトを取得する（キャッシュ付き）。読めなければ null。
+    // ファイルを掴んだままにするとゲーム本体が同じ画像を読めなくなるため、
+    // タイル画像と同じく FileStream 経由で読み切ってから Bitmap にする。
+    private Image? GetAssetImage(string? spritePath)
+    {
+        if (string.IsNullOrEmpty(spritePath)) return null;
+        if (_assetImages.TryGetValue(spritePath, out var cached)) return cached;
+        Image? img = null;
+        string p = System.IO.Path.Combine(AppPaths.ProjectRoot, spritePath);
+        if (!System.IO.File.Exists(p) && !string.IsNullOrEmpty(AssetsPath))
+            p = System.IO.Path.Combine(AssetsPath, spritePath);
+        if (System.IO.File.Exists(p))
+        {
+            try
+            {
+                using var fs = new System.IO.FileStream(p, System.IO.FileMode.Open, System.IO.FileAccess.Read);
+                img = new Bitmap(Image.FromStream(fs));
+            }
+            catch { img = null; }
+        }
+        _assetImages[spritePath] = img; // 読めなかったことも覚えて再探索を避ける
+        return img;
+    }
+
+    // 配置済みオブジェクトを1つ描く。
+    // 画像があれば実サイズで、無ければ従来どおりの絵文字マーカーで描く。
+    private void DrawPlacedObject(Graphics g, float worldX, float worldY, SizeF worldSize,
+                                  string? spritePath, float angleRad, string icon, Color color)
+    {
+        var img = GetAssetImage(spritePath);
+        if (img == null)
+        {
+            DrawMarker(g, worldX, worldY, icon, color, 11f);
+            return;
+        }
+        var rect = ToScreenRect(worldX, worldY, worldSize.Width, worldSize.Height);
+        // 画面外は描かない（大きなステージでの描画コストを抑える）
+        if (rect.Right < 0 || rect.Left > Width || rect.Bottom < 0 || rect.Top > Height) return;
+        // つぶれて見えなくならないよう最低サイズを与える
+        if (rect.Width < 4) rect.Width = 4;
+        if (rect.Height < 4) rect.Height = 4;
+
+        var saved = angleRad != 0f ? g.Save() : null;
+        if (angleRad != 0f)
+        {
+            // ゲーム本体と同じく中心を軸に回す
+            float cx = rect.X + rect.Width / 2f, cy = rect.Y + rect.Height / 2f;
+            g.TranslateTransform(cx, cy);
+            g.RotateTransform(angleRad * 180f / (float)Math.PI);
+            g.TranslateTransform(-cx, -cy);
+        }
+        g.DrawImage(img, rect);
+        if (saved != null) g.Restore(saved);
+
+        // 選択中は枠を重ねて、どれを掴んでいるか分かるようにする
+        if (color == Color.Magenta)
+        {
+            using var pen = new Pen(color, 2);
+            g.DrawRectangle(pen, rect);
+        }
+    }
+
     private void DrawMarker(Graphics g, float worldX, float worldY, string label, Color color, float fontSize = 7f)
     {
         float scale = (float)TILE_SIZE / GAME_TILE;
@@ -722,9 +808,90 @@ public class MapCanvas : Panel
         }
         else
         {
-            // タイル系以外のモードでは、配置済みオブジェクト（敵/ギミック/アイテム/トリガー）の削除を試みる。
-            DoDelete(cx, cy);
+            // タイル系以外のモードでは、クリックした配置物に対するメニューを出す。
+            //
+            // 以前はここで即座に削除していた。確認も取り消しも無いうえ、
+            // 「サイズや角度を調整したい」ときに触れる入口がどこにも無かった。
+            // 削除はメニューの中へ移してある（消しゴムツールでの削除は今までどおり）。
+            ShowObjectMenu(cx, cy);
         }
+    }
+
+    // 右クリックした配置物に対するメニューを出す。
+    // 何も無い場所ではメニューを出さない（空振りで出ると何に対する操作か紛らわしいため）。
+    private void ShowObjectMenu(int cx, int cy)
+    {
+        if (Stage == null) return;
+        object? target = FindObjectAt(cx, cy);
+        if (target == null) return;
+
+        // メニューを出す前に選択しておく。どれに対する操作なのかが見た目で分かるようにするため。
+        SelectedObject = target;
+        ObjectSelected?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+
+        var menu = new ContextMenuStrip();
+        // トリガーには大きさ・角度の概念が無いので、その場合は削除だけを出す。
+        bool canTransform = target is PlacedEnemy || target is PlacedGimmick || target is PlacedItem;
+        if (canTransform)
+        {
+            var miEdit = new ToolStripMenuItem("大きさ・角度を編集...");
+            miEdit.Click += (s, e) => EditPlacedTransform(target);
+            menu.Items.Add(miEdit);
+            menu.Items.Add(new ToolStripSeparator());
+        }
+        var miDel = new ToolStripMenuItem("削除");
+        miDel.Click += (s, e) =>
+        {
+            if (target is PlacedEnemy pe) Stage.Enemies.Remove(pe);
+            else if (target is PlacedGimmick pg) Stage.Gimmicks.Remove(pg);
+            else if (target is PlacedItem pi) Stage.Items.Remove(pi);
+            else if (target is EventTrigger tr) Stage.Triggers.Remove(tr);
+            SelectedObject = null;
+            Fire(); Invalidate();
+        };
+        menu.Items.Add(miDel);
+        menu.Show(PointToScreen(new Point(cx, cy)));
+    }
+
+    // クリック位置にある配置物を1つ返す（DoSelect と同じ「中心がいちばん近いもの」の選び方）。
+    private object? FindObjectAt(int cx, int cy)
+    {
+        if (Stage == null) return null;
+        var (wx, wy) = ToWorld(cx, cy);
+        object? best = null;
+        float bestDist = float.MaxValue;
+        void Consider(object obj)
+        {
+            var (fx, fy, fw, fh) = GetFootprint(obj);
+            if (wx < fx || wx > fx + fw || wy < fy || wy > fy + fh) return;
+            float ccx = fx + fw / 2f, ccy = fy + fh / 2f;
+            float dist = (wx - ccx) * (wx - ccx) + (wy - ccy) * (wy - ccy);
+            if (dist < bestDist) { bestDist = dist; best = obj; }
+        }
+        foreach (var e in Stage.Enemies) Consider(e);
+        foreach (var gi in Stage.Gimmicks) Consider(gi);
+        foreach (var it in Stage.Items) Consider(it);
+        foreach (var t in Stage.Triggers) Consider(t);
+        return best;
+    }
+
+    // 配置ごとの大きさ・角度を編集する小さなダイアログを出す。
+    // 対象の型が違ってもプロパティ名は同じ（Scale / Angle）なので、
+    // 3種類ぶんの分岐を書かずにリフレクションで読み書きする。
+    private void EditPlacedTransform(object target)
+    {
+        var propScale = target.GetType().GetProperty("Scale");
+        var propAngle = target.GetType().GetProperty("Angle");
+        if (propScale == null || propAngle == null) return;
+        float curScale = (float)(propScale.GetValue(target) ?? 1.0f);
+        float curAngle = (float)(propAngle.GetValue(target) ?? 0f);
+
+        using var dlg = new PlacedTransformForm(curScale, curAngle);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        propScale.SetValue(target, dlg.ResultScale);
+        propAngle.SetValue(target, dlg.ResultAngle);
+        Fire(); Invalidate();
     }
 
     // Feature: 選択/削除ロジックの改善 — 複数重なっている場合はクリック位置に最も近い中心を持つものを優先する
