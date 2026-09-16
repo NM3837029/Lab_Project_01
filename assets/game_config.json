@@ -151,13 +151,13 @@
       "item_total": 17
     },
     {
-      "file": "stage_edit_trial.json",
-      "name": "編集棟のこころみ",
+      "file": "stage4_tate_tower.json",
+      "name": "たての塔",
       "thumbnail": "",
       "order": 2,
       "unlock": "prev_clear",
       "require": [],
-      "item_total": 17
+      "item_total": 15
     },
     {
       "file": "stage4_tate_tower.json",

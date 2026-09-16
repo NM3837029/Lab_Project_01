@@ -35,6 +35,7 @@
     "flatResetAll": 10.0,
     "flatCutCreate": 20.0
   },
+  "bgm_id": "bgm_editing_05",
   "map": [
     [
       0,
@@ -3734,6 +3735,7 @@
   "backgrounds": [
     {
       "sprite": "img/薄橙色の背景.png",
+      "color": "",
       "drawOrder": 0,
       "scrollRate": 0.5,
       "loop": true,
@@ -3744,12 +3746,30 @@
   "triggers": [],
   "enemies": [
     {
-      "id": "enemy_imomushi",
-      "x": 960.0,
-      "y": 288.0
+      "id": "enemy_dossun",
+      "x": 320.0,
+      "y": 192.0
+    },
+    {
+      "id": "enemy_dossun",
+      "x": 736.0,
+      "y": 128.0,
+      "scale": 2.0,
+      "angle": 0.7853982
     }
   ],
   "gimmicks": [],
-  "items": [],
+  "items": [
+    {
+      "id": "item_unlock_cut",
+      "x": 544.0,
+      "y": 320.0
+    },
+    {
+      "id": "item_unlock_screeneffect",
+      "x": 576.0,
+      "y": 288.0
+    }
+  ],
   "platforms": []
 }
