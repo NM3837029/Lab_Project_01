@@ -3065,7 +3065,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 新規タイルを追加
                         TileDefinition newTile;
                         newTile.type = (TileType)tid;
-                        newTile.handle = (handle != -1) ? handle : jimenHandle; // デフォルト画像
+                        // 画像を指定していないタイルは handle を -1 のままにして、色で塗らせる。
+                        // 以前はここで無条件に地面緑へフォールバックしていたため、
+                        // 「画像なし・色だけ」で作った新しいタイルが必ず地面緑の見た目になり、
+                        // 既存の地形と見分けがつかなくなっていた（色指定が効くのは既定の11種だけだった）。
+                        // パスが書かれているのに読めなかった場合だけ、従来どおり地面緑で代用する。
+                        newTile.handle = (handle != -1) ? handle
+                                       : (spritePath.empty() ? -1 : jimenHandle);
                         newTile.isCollidable = collidable;
                         newTile.deadly = deadly;
                         // 以前は "Custom" 固定で、エディタで付けた名前が無視されていた
@@ -5736,6 +5742,48 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // --- バッファへの描画 / 物理更新 ---
         SetDrawScreen(gameScreen);
         ClearDrawScreen();
+
+        // 【描画順】背景はこのフェーズの一番最初に描くこと。
+        //
+        // 以前この背景描画はゴール・チェックポイント・ギミックを描いたあとに置かれていた。
+        // 背景は画面全体を塗るので、先に描かれていたそれらを毎フレーム塗り潰してしまう。
+        // これまで表面化しなかったのは、既存ステージが1つも背景レイヤーを持っておらず
+        // ループの中身が一度も走っていなかったため。背景を付けた途端に
+        // 「ギミックとゴールが消える」という形で出る。
+        // Feature 1: 背景レイヤー（遠景）の描画
+        //
+        // drawOrder の小さい順に描く。以前はベクタの順のまま描いていて drawOrder を完全に無視しており、
+        // Lab_Editor のプレビュー（こちらはソート済み）と前後関係が食い違っていた。
+        // 毎フレーム並べ替えるのは無駄なので、添字だけを並べ替える。
+        {
+            const auto& bgs = stages[currentStageIdx].backgrounds;
+            std::vector<int> bgOrder(bgs.size());
+            for (size_t i = 0; i < bgs.size(); i++) bgOrder[i] = (int)i;
+            std::sort(bgOrder.begin(), bgOrder.end(),
+                      [&bgs](int a, int b) { return bgs[a].drawOrder < bgs[b].drawOrder; });
+            for (int bi : bgOrder) {
+                const BackgroundLayer& bl = bgs[bi];
+                // 画像が無くても色が指定されていれば、その色で画面いっぱいを塗る。
+                // 画像と色の両方がある場合は、色を下地にして画像を重ねる。
+                if (bl.hasColor) {
+                    DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bl.colorRGB, TRUE);
+                }
+                if (bl.handle < 0) continue;
+                int imgW, imgH;
+                GetGraphSize(bl.handle, &imgW, &imgH);
+                if (imgW > 0 && imgH > 0) {
+                    float parallaxCamX = cameraX * bl.scrollRate;
+                    float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
+                    float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
+                    float drawY = -parallaxCamY + bl.offsetY;
+                    DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
+                    if (bl.loop) {
+                        DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
+                    }
+                }
+            }
+        }
+
 
         auto CheckCollision = [](float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
             return (x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2);
@@ -9537,40 +9585,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
         };
-
-        // Feature 1: 背景レイヤー（遠景）の描画
-        //
-        // drawOrder の小さい順に描く。以前はベクタの順のまま描いていて drawOrder を完全に無視しており、
-        // Lab_Editor のプレビュー（こちらはソート済み）と前後関係が食い違っていた。
-        // 毎フレーム並べ替えるのは無駄なので、添字だけを並べ替える。
-        {
-            const auto& bgs = stages[currentStageIdx].backgrounds;
-            std::vector<int> bgOrder(bgs.size());
-            for (size_t i = 0; i < bgs.size(); i++) bgOrder[i] = (int)i;
-            std::sort(bgOrder.begin(), bgOrder.end(),
-                      [&bgs](int a, int b) { return bgs[a].drawOrder < bgs[b].drawOrder; });
-            for (int bi : bgOrder) {
-                const BackgroundLayer& bl = bgs[bi];
-                // 画像が無くても色が指定されていれば、その色で画面いっぱいを塗る。
-                // 画像と色の両方がある場合は、色を下地にして画像を重ねる。
-                if (bl.hasColor) {
-                    DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bl.colorRGB, TRUE);
-                }
-                if (bl.handle < 0) continue;
-                int imgW, imgH;
-                GetGraphSize(bl.handle, &imgW, &imgH);
-                if (imgW > 0 && imgH > 0) {
-                    float parallaxCamX = cameraX * bl.scrollRate;
-                    float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
-                    float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
-                    float drawY = -parallaxCamY + bl.offsetY;
-                    DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
-                    if (bl.loop) {
-                        DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
-                    }
-                }
-            }
-        }
 
         // Feature 1: 装飾レイヤー (背面) の描画
         DrawLayer(stages[currentStageIdx].decoMapBack);

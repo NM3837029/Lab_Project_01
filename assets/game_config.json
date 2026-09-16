@@ -185,6 +185,33 @@
       "unlock": "always",
       "require": [],
       "item_total": 0
+    },
+    {
+      "file": "hills.json",
+      "name": "かたむく丘",
+      "thumbnail": "",
+      "order": 6,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 16
+    },
+    {
+      "file": "horinuki.json",
+      "name": "ほりぬきの坑道",
+      "thumbnail": "",
+      "order": 7,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 18
+    },
+    {
+      "file": "tatekou.json",
+      "name": "わきあがる縦坑",
+      "thumbnail": "",
+      "order": 8,
+      "unlock": "prev_clear",
+      "require": [],
+      "item_total": 24
     }
   ],
   "result": {
