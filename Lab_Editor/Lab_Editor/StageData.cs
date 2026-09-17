@@ -894,6 +894,10 @@ public class EnemyDef
     // ここに無いキーは、エディタでアセットを保存し直した瞬間にenemies.jsonから黙って消える。
     // いずれも false / -1 が「従来どおりの挙動」を意味する既定値。
     public bool ignorePause { get; set; } = false;               // trueならプレイヤーの一時停止を無視して動き続ける（幽霊タイプ用）
+    // trueなら、プレイヤーが回転させても本体の絵は傾かない（回るのはパーツだけ）。
+    // 砲台のように「本体＝台座／回るのは砲身パーツ」という構成の敵で使う。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
+    public bool bodyIgnoresTilt { get; set; } = false;
     public bool radialFire { get; set; } = false;                // 拡散弾タイプ：trueなら正面ファンではなく360度全方位へ撃つ
     public float spreadRotationStep { get; set; } = -1.0f;       // 拡散弾タイプ：1斉射ごとに発射角度をずらす量（ラジアン）。渦巻き弾幕になる
     public float verticalTrackSpeed { get; set; } = -1.0f;       // 浮遊タイプ：浮遊の中心高度をプレイヤーの高さへ寄せる速さ（px/フレーム）

@@ -1,4 +1,6 @@
 {
+  "map_w": 96,
+  "map_h": 15,
   "player_start": {
     "x": 64.0,
     "y": 384.0
@@ -31,150 +33,12 @@
     "flatSpeedChange": 6.0,
     "flatDirectionFlip": 4.0,
     "flatResetAll": 10.0,
-    "flatCutCreate": 20.0,
-    "cutCostPerTile": 1.2
+    "flatCutCreate": 20.0
   },
   "goal": {
     "x": 2976.0,
     "y": 384.0
   },
-  "bgm_id": "",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#8CC8F0",
-      "drawOrder": 0,
-      "scrollRate": 0.3,
-      "loop": false,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
-  "enemies": [
-    {
-      "id": "enemy_houdai",
-      "x": 896.0,
-      "y": 380.0
-    },
-    {
-      "id": "enemy_dossun",
-      "x": 1472.0,
-      "y": 320.0
-    },
-    {
-      "id": "enemy_drone",
-      "x": 1952.0,
-      "y": 288.0
-    },
-    {
-      "id": "enemy_drone",
-      "x": 2048.0,
-      "y": 288.0
-    },
-    {
-      "id": "enemy_maru",
-      "x": 2496.0,
-      "y": 384.0,
-      "patrol_left": 2272.0,
-      "patrol_right": 2528.0
-    },
-    {
-      "id": "enemy_totsushin",
-      "x": 2784.0,
-      "y": 376.0
-    }
-  ],
-  "gimmicks": [
-    {
-      "id": "gim_chomper",
-      "x": 2400.0,
-      "y": 384.0
-    }
-  ],
-  "items": [
-    {
-      "id": "item_coin",
-      "x": 224.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_coin",
-      "x": 288.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_coin",
-      "x": 352.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_coin",
-      "x": 416.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_coin",
-      "x": 480.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_coin",
-      "x": 544.0,
-      "y": 256.0
-    },
-    {
-      "id": "item_energy",
-      "x": 960.0,
-      "y": 382.0
-    },
-    {
-      "id": "item_coin",
-      "x": 768.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 832.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 1408.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 1536.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_energy",
-      "x": 1824.0,
-      "y": 382.0
-    },
-    {
-      "id": "item_coin",
-      "x": 2208.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 2240.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 2944.0,
-      "y": 384.0
-    },
-    {
-      "id": "item_coin",
-      "x": 3008.0,
-      "y": 384.0
-    }
-  ],
-  "map_w": 96,
-  "map_h": 15,
   "map": [
     [
       0,
@@ -902,7 +766,7 @@
       1,
       0,
       0,
-      0,
+      1,
       0,
       0,
       1,
@@ -1095,7 +959,7 @@
       0,
       0,
       0,
-      11,
+      1,
       0,
       0,
       0,
@@ -1198,7 +1062,7 @@
       1,
       1,
       1,
-      0,
+      12,
       0,
       0,
       0,
@@ -1291,12 +1155,12 @@
       7,
       0,
       0,
-      1,
       0,
       0,
       0,
       0,
       0,
+      12,
       0,
       0,
       0,
@@ -1389,7 +1253,7 @@
       0,
       0,
       0,
-      1,
+      11,
       0,
       0,
       0,
@@ -4591,6 +4455,145 @@
       0
     ]
   ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#8CC8F0",
+      "drawOrder": 0,
+      "scrollRate": 0.3,
+      "loop": false,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [],
+  "enemies": [
+    {
+      "id": "enemy_houdai",
+      "x": 896.0,
+      "y": 380.0
+    },
+    {
+      "id": "enemy_dossun",
+      "x": 1472.0,
+      "y": 320.0
+    },
+    {
+      "id": "enemy_drone",
+      "x": 1952.0,
+      "y": 288.0
+    },
+    {
+      "id": "enemy_drone",
+      "x": 2048.0,
+      "y": 288.0
+    },
+    {
+      "id": "enemy_maru",
+      "x": 2496.0,
+      "y": 384.0,
+      "patrol_left": 2272.0,
+      "patrol_right": 2528.0
+    },
+    {
+      "id": "enemy_totsushin",
+      "x": 2784.0,
+      "y": 376.0
+    }
+  ],
+  "gimmicks": [
+    {
+      "id": "gim_chomper",
+      "x": 2400.0,
+      "y": 384.0
+    }
+  ],
+  "items": [
+    {
+      "id": "item_coin",
+      "x": 224.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_coin",
+      "x": 288.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_coin",
+      "x": 352.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_coin",
+      "x": 416.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_coin",
+      "x": 480.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_coin",
+      "x": 544.0,
+      "y": 256.0
+    },
+    {
+      "id": "item_energy",
+      "x": 960.0,
+      "y": 382.0
+    },
+    {
+      "id": "item_coin",
+      "x": 768.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 832.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 1408.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 1536.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_energy",
+      "x": 1824.0,
+      "y": 382.0
+    },
+    {
+      "id": "item_coin",
+      "x": 2208.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 2240.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 2944.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 3008.0,
+      "y": 384.0
+    },
+    {
+      "id": "item_coin",
+      "x": 1312.0,
+      "y": 352.0
+    }
+  ],
   "platforms": []
 }

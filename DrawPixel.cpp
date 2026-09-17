@@ -183,6 +183,18 @@ struct EnemyDef {
     //   無いとエディタで保存した瞬間にこのキーが黙って消えてしまう。
     bool ignorePause = false;
 
+    // 「本体の絵は回転させない」型かどうか。
+    //
+    // 砲台のように本体が台座で、回る部分がパーツ（砲身）として分かれている敵は、
+    // プレイヤーの回転を本体の絵にまで掛けると台座ごと傾いてしまう。
+    // 回るべきはパーツだけなので、この型では本体を配置時の姿勢のまま描く。
+    // パーツ側は parentTilt を読んで従来どおり回るので、砲身の動きは変わらない。
+    //
+    // 既定は false。ドッスン（本体＋黒目）のように「全体が回るのが正しい」型は
+    // これまでと完全に同じ見た目になる。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    bool bodyIgnoresTilt = false;
+
     // ==== 敵の行動改良（新ロスター向けに追加したパラメータ） ====
     // いずれも -1 / false のままなら従来の挙動と完全に同じになるようにしてあるので、
     // このキーを書いていない既存の enemies.json は無変更で動く。
@@ -658,6 +670,8 @@ void LoadAssetDefinitions() {
                     def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
                     // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
                     def.ignorePause = e.value("ignorePause", false);
+                    // 本体の絵を回転させない型か（砲台の台座など。既定false＝従来どおり全体が回る）
+                    def.bodyIgnoresTilt = e.value("bodyIgnoresTilt", false);
                     // 敵の行動改良で追加したパラメータ。未指定なら false / -1 のままにしておき、
                     // ApplyEnemyDefaultParams() が「従来の挙動と完全に同じ」値を後から補完する。
                     def.radialFire = e.value("radialFire", false);
@@ -1544,6 +1558,13 @@ struct Enemy {
     // 据え置く必要がある。基準まで配置後の値にしてしまうと差が0になり、
     // 「拡大して置いた敵が重くならない」「傾けて置いたドッスンが傾いた方向へ落ちない」という
     // 見た目だけの変更になってしまう（実際それが最初の実装の不具合だった）。
+    // 本体の絵を傾けない型（砲台の台座など）が使う「置かれたときの姿勢」。
+    //
+    // editBaseAngle を使えないのは、AIMED_SHOOTER が手動照準を一発で消費するときに
+    // editBaseAngle へ現在の角度を焼き直すため。一度撃つと基準が傾いた角度に変わり、
+    // 以後は台座まで傾いて描かれてしまう（＝直したはずの不具合が撃った瞬間に再発する）。
+    // こちらは ResetStage で一度だけ焼き、以後どのAIも触らない。
+    float        bodyRestAngle = 0.0f;
     bool         hasSpawnEdit = false;  // 配置ごとの scale / angle 指定があったか
     float        spawnBaseScale = 1.0f; // アセット既定の scale（リアクションの基準）
     float        spawnBaseAngle = 0.0f; // アセット既定の angle
@@ -2009,6 +2030,32 @@ void GetEnemyHeading(const Enemy& e, const EditReaction& r, EnemyRestAxis axis,
     outY = bx * s + by * c;
 }
 
+// 傾けたぶんだけを回した向きを返す。反転のバイアスは乗せない。
+//
+// GetEnemyHeading は「反転ツールを使ったら基準軸も向いている側へ振る」ために
+// 30度のバイアス(EDIT_FLIP_BIAS)を足す。跳ぶ・落ちる型ではそれが正しいが、
+// 砲台系（STATIONARY / AIMED_SHOOTER）の反転は「弾の所属が味方側になる」という
+// まったく別の意味しか持たない。
+// それらでバイアスまで乗ってしまうと、砲身の絵は傾けた向き（＝ParentTiltそのもの）を
+// 指しているのに、弾だけ30度ずれた方向へ飛ぶ。
+// 実測でも、反転させて70度傾けた砲台の弾は水平から10度「下」へ飛んでいて、
+// 狙ったはずの壊せるタイルの下にある地面へ当たっていた
+// （＝「反転させた砲台で撃っても壊せるブロックが壊れない」の原因）。
+// 砲身と弾を必ず一致させるため、この2型ではこちらを使う。
+void GetEnemyTiltOnlyHeading(const Enemy& e, const EditReaction& r, EnemyRestAxis axis,
+                             float& outX, float& outY) {
+    float bx = 0.0f, by = 0.0f;
+    float facing = (e.direction == 0) ? 1.0f : -1.0f;
+    switch (axis) {
+        case REST_DOWN:    bx = 0.0f;    by =  1.0f; break;
+        case REST_UP:      bx = 0.0f;    by = -1.0f; break;
+        default:           bx = facing;  by =  0.0f; break; // REST_FORWARD
+    }
+    float c = cosf(r.tilt), s = sinf(r.tilt); // 時計回り（DrawRotaGraph と同じ向き）
+    outX = bx * c - by * s;
+    outY = bx * s + by * c;
+}
+
 // ギミック1個ぶんの編集差分を求める。
 // 敵と違いギミックは横幅と縦幅を独立に編集できるので、scaleRatio/heightRatioが別々の値になる。
 EditReaction GetGimmickEditReaction(const Gimmick& g) {
@@ -2102,31 +2149,71 @@ enum BreakCause {
 //
 // attackerScale には敵の scale を渡す。相手の大きさという概念が無い壊し方
 // （プレイヤーの操作・自重崩壊）では 0 以下を渡せば大きさ判定は行われない。
+// 「大きさが足りなくて壊せなかった」ことを、その場に出すための記録。
+//
+// 破壊の条件を満たさないとき、これまで画面には何も出なかった。
+// とくに breakMinScale（拡大しないと壊せない）は満たしていないことに気付く
+// 手がかりが一切無く、プレイヤーからは「壊れないブロック」にしか見えない。
+// 条件そのものを緩めるのではなく、条件が見えるようにするための仕組み。
+//
+// 直近の1件だけ覚えておけば足りる。同時に何か所も弾かれる場面は無く、
+// 何件も並べるとかえって画面が読めなくなるため。
+struct BreakSizeHint {
+    float x = 0.0f, y = 0.0f;    // 表示するワールド座標（対象の左上）
+    float timer = 0.0f;          // 残り表示フレーム
+    float need = 0.0f;           // 必要だった大きさ（倍率）
+    bool  justTriggered = false; // このフレームに新しく立ったか（音を1回だけ鳴らすため）
+};
+BreakSizeHint g_breakSizeHint;
+
+// 大きさ不足で弾かれたことを記録する。呼ぶのは TryBreakGimmick / TryBreakTile の2か所。
+void NoteBreakTooSmall(float x, float y, float need) {
+    // 敵が壁へ押し付けられていると毎フレーム弾かれる。
+    // そのたびに鳴らすと音が途切れず鳴り続けるので、
+    // 表示が終わりかけてから改めて鳴らし直す（＝1秒に1回程度に間引く）。
+    if (g_breakSizeHint.timer <= 30.0f) g_breakSizeHint.justTriggered = true;
+    g_breakSizeHint.x = x;
+    g_breakSizeHint.y = y;
+    g_breakSizeHint.need = need;
+    g_breakSizeHint.timer = 90.0f;
+}
+
 bool TryBreakGimmick(Gimmick& gim, BreakCause cause, float attackerScale) {
     if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) return false;
+    // 定義が引けないブロックは「どの壊し方でも壊せる」従来どおりの挙動へ落とす。
+    //
+    // 以前はここで false を返して絶対に壊れないようにしていたが、
+    // FindGimmickDef は assetId の完全一致でしか引かないため、
+    // assetId を持たないブロック（C++直書きステージに置かれたもの等）が
+    // 破壊条件を導入した時点から一切壊せなくなっていた。
+    // 条件が読めないときは「制限なし」と解釈するほうが、
+    // 壊せるはずのブロックが無言で壊れないより壊れ方として健全。
     const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-    if (gdef == nullptr) return false; // 定義が引けないブロックは壊さない（条件が読めないため）
 
     // 1) この壊し方が許可されているか
-    bool allowed = false;
-    switch (cause) {
-        case BREAK_SLAM:   allowed = gdef->breakBySlam;   break;
-        case BREAK_RAM:    allowed = gdef->breakByRam;    break;
-        case BREAK_BULLET: allowed = gdef->breakByBullet; break;
-        case BREAK_PLAYER: allowed = gdef->breakByPlayer; break;
-        default:           allowed = gdef->breakByTip;    break; // BREAK_TIP
+    bool allowed = true;
+    if (gdef != nullptr) {
+        switch (cause) {
+            case BREAK_SLAM:   allowed = gdef->breakBySlam;   break;
+            case BREAK_RAM:    allowed = gdef->breakByRam;    break;
+            case BREAK_BULLET: allowed = gdef->breakByBullet; break;
+            case BREAK_PLAYER: allowed = gdef->breakByPlayer; break;
+            default:           allowed = gdef->breakByTip;    break; // BREAK_TIP
+        }
     }
     if (!allowed) return false;
 
     // 2) 相手の大きさが足りているか。
     // 「拡大した敵の体当たりでなければ壊せない壁」のような場を、
     // C++を書き換えずにブロック側の設定だけで作れるようにするための条件。
-    if (attackerScale > 0.0f && gdef->breakMinScale > 0.0f && attackerScale < gdef->breakMinScale) {
+    float needScale = (gdef != nullptr) ? gdef->breakMinScale : 0.0f;
+    if (attackerScale > 0.0f && needScale > 0.0f && attackerScale < needScale) {
+        NoteBreakTooSmall(gim.x, gim.y, needScale); // 「あと少し大きくすれば壊せる」ことを画面へ出す
         return false;
     }
 
     gim.isActive = false;
-    SoundManager::Get().PlaySe(gdef->seActivate);
+    if (gdef != nullptr) SoundManager::Get().PlaySe(gdef->seActivate);
     return true;
 }
 
@@ -3937,7 +4024,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!allowed) return false;
 
         // 2) 相手の大きさが足りているか（「拡大した敵の突進でなければ壊せない壁」を作れる条件）
-        if (attackerScale > 0.0f && td.breakMinScale > 0.0f && attackerScale < td.breakMinScale) return false;
+        if (attackerScale > 0.0f && td.breakMinScale > 0.0f && attackerScale < td.breakMinScale) {
+            NoteBreakTooSmall((float)(col * TILE_SIZE), (float)(row * TILE_SIZE), td.breakMinScale);
+            return false;
+        }
 
         mp[row][col] = 0;
         brokenTiles.push_back({ row, col, tid, 0.0f });
@@ -4036,6 +4126,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 enemy.editBaseAngle = enemy.angle;
                 enemy.editDirtyMask = EDIT_DIRTY_NONE;
             }
+            // 本体の絵を傾けない型が使う「置かれたときの姿勢」。
+            // 編集の基準(editBase*)とは別物なので、配置ごとの角度指定があっても現在値で焼く
+            // （傾けて置いた砲台の台座は、その傾きのまま立っているのが正しい）。
+            enemy.bodyRestAngle     = enemy.angle;
             enemy.editBaseX         = enemy.x;
             enemy.editBaseY         = enemy.y;
             enemy.editBaseDirection = enemy.direction;
@@ -6380,7 +6474,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // 反転は使わない。この型の反転は既に「味方撃ちになる」という別の意味を持っており、
                                     // そこへ狙いの変更まで重ねると1操作が2つの意味を持ってしまうため。
                                     erTiltHandled = true;
-                                    GetEnemyHeading(enemy, er, REST_UP, dirXs, dirYs);
+                                    // 反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, dirXs, dirYs);
                                 }
                                 // 弾を体の外へ出してから撃つ（砲口の位置）。
                                 //
@@ -6873,8 +6968,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         float eh_scaledF = (float)enemy.hitboxHeight * enemy.scale;
                                         float pw_scaledF = (float)player.width * player.scale;
                                         float ph_scaledF = (float)player.height * player.scale;
-                                        float ecxF = enemy.x + ew_scaledF / 2.0f;
-                                        float ecyF = enemy.y + eh_scaledF;
+                                        // 衝撃の中心は「ぶつかった面」に置く。
+                                        //
+                                        // 以前はここを常に「足元の中心」(x+幅/2, y+高さ) にしていた。
+                                        // 真下へ落ちるドッスンならそれで正しいが、
+                                        // プレイヤーが横向きに回したドッスンは壁に体当たりするので、
+                                        // 衝撃の中心が進行方向と反対側（＝体の後ろ）に来てしまい、
+                                        // 目の前の壊せる壁が衝撃波の半径から外れて一切壊れなかった。
+                                        // 実測では、等倍のドッスンが壁に密着していても
+                                        // 壁のマス中心までの距離が半径をわずかに超え、判定そのものが走らなかった。
+                                        //
+                                        // 体の中心から落下方向へ半身ぶんずらした点を中心にすれば、
+                                        // どの向きに回しても「ぶつかった面」が衝撃の中心になる。
+                                        // 真下へ落ちる場合 (fallHx=0, fallHy=1) は
+                                        // (x+幅/2, y+高さ/2+高さ/2) となり従来と完全に同じ値になるので、
+                                        // 既存ステージのドッスンの挙動は変わらない。
+                                        float ecxF = enemy.x + ew_scaledF / 2.0f + fallHx * (ew_scaledF / 2.0f);
+                                        float ecyF = enemy.y + eh_scaledF / 2.0f + fallHy * (eh_scaledF / 2.0f);
                                         float pcxF = player.x + pw_scaledF / 2.0f;
                                         float pcyF = player.y + ph_scaledF / 2.0f;
                                         float ddxF = pcxF - ecxF, ddyF = pcyF - ecyF;
@@ -7089,7 +7199,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 bool aimedByEdit = er.tilted;
                                 if (aimedByEdit) {
                                     erTiltHandled = true;
-                                    GetEnemyHeading(enemy, er, REST_UP, dirXa, dirYa);
+                                    // 反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, dirXa, dirYa);
                                 }
                                 enemy.direction = (dirXa < 0.0f) ? 1 : 0;
 
@@ -8224,6 +8335,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 唯一ガードが無く、タイル定義を削除したステージを開くと範囲外参照になっていた
                                 // （タイルを削除してもステージ側の古いidは書き換わらないため）。
                                 if (t >= 0 && t < (int)tileDefs.size() && tileDefs[t].isCollidable) {
+                                    // 壊せるタイルなら、消える前にこの場で壊す。
+                                    //
+                                    // 【重要】ここで壊さないと壊せるタイルは弾では絶対に壊せない。
+                                    // 弾の破壊判定はずっと下の「プレイヤーの弾の当たり判定」側にあるが、
+                                    // そこへ行く前にこの壁衝突で isActive を落としてしまうため、
+                                    // 下の判定は毎回 isActive==false で素通りしていた。
+                                    // 「反転させた砲台で壊せるブロックを撃っても壊れない」の直接の原因がこれ。
+                                    // 壊せない壁に当たった場合は従来どおり消えるだけ。
+                                    if (bullets[i].isPlayerOwned) {
+                                        TryBreakTile(ty, tx, BREAK_BULLET, bullets[i].scale);
+                                    }
                                     bullets[i].isActive = false; // 壁に衝突して消滅
                                 }
                             }
@@ -9689,16 +9811,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 「今どういう状態か」を示す必要がある無敵中(SHIELD)だけに限定する。
                 if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
                 else SetDrawBright(255, 255, 255);
+                // 本体の絵に掛ける角度。
+                //
+                // 砲台のように「本体＝台座／回るのはパーツ（砲身）だけ」という構成の敵は、
+                // プレイヤーの回転をここへ掛けると台座まで傾いてしまう。
+                // その型では配置されたときの姿勢(bodyRestAngle)のまま描き、
+                // 回転はパーツ側の parentTilt だけに効かせる。
+                float bodyAngle = enemy.angle;
+                {
+                    const EnemyDef* drawDef = FindEnemyDef(enemy.assetId);
+                    if (drawDef != nullptr && drawDef->bodyIgnoresTilt) bodyAngle = enemy.bodyRestAngle;
+                }
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
-                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, enemy.angle, enemy.direction != 0);
+                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, enemy.direction != 0);
                 } else if (enemy.direction == 0) {
                     // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
-                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE);
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE);
                 } else {
-                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE, TRUE);
                 }
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
@@ -9812,6 +9945,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float bulletFit = ComputeFitScale(bullets[i].handle, (float)BULLET_DRAW_SIZE, (float)BULLET_DRAW_SIZE) * bullets[i].scale;
                 DrawRotaGraph(bcx, bcy, bulletFit, bulletAngle, bullets[i].handle, TRUE);
             }
+        }
+
+        // 「大きさが足りなくて壊せなかった」ことを、その場に出す。
+        //
+        // 敵やギミックの絵に隠れないよう、ワールド座標の描画の最後に置く。
+        // 表示するのは必要な倍率だけで、どう大きくするかは書かない
+        //  （拡大のしかたは既に手元にある操作なので、足りないのは「いくつ要るか」だけ）。
+        if (g_breakSizeHint.timer > 0.0f) {
+            if (g_breakSizeHint.justTriggered) {
+                // 「その操作では通らない」ことを伝える既存の音を流用する
+                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                g_breakSizeHint.justTriggered = false;
+            }
+            int hintX = (int)(g_breakSizeHint.x - cameraX);
+            int hintY = (int)(g_breakSizeHint.y - cameraY);
+            char hintBuf[64];
+            sprintf_s(hintBuf, sizeof(hintBuf), u8"%.1f倍以上で壊せる", g_breakSizeHint.need);
+            // 地形の上に直接書くと背景の色に溶けて読めないので、暗い下地を敷いてから書く
+            int hintW = GetDrawStringWidth(hintBuf, (int)strlen(hintBuf));
+            // 対象が画面の端にあると文字が切れて読めなくなるので、文字の箱だけ画面内へ寄せる
+            // （枠は対象のマスに残したままなので、どのマスの話かは分かる）。
+            int textX = hintX;
+            if (textX + hintW + 4 > SCREEN_WIDTH) textX = SCREEN_WIDTH - hintW - 4;
+            if (textX < 4) textX = 4;
+            int textY = hintY - 24;
+            if (textY < 2) textY = hintY + TILE_SIZE + 4; // 上に出ないときはマスの下へ回す
+            DrawBox(textX - 4, textY - 2, textX + hintW + 4, textY + 20, GetColor(30, 26, 24), TRUE);
+            DrawString(textX, textY, hintBuf, GetColor(255, 210, 120));
+            // どのマスの話なのかを枠で示す（文字だけだと対象が分からない）
+            DrawBox(hintX, hintY, hintX + TILE_SIZE, hintY + TILE_SIZE, GetColor(255, 210, 120), FALSE);
+            if (!isPaused) g_breakSizeHint.timer -= 1.0f; // 一時停止中は減らさず、読む時間を作る
         }
 
         // OSD：コイン枚数と編集コストゲージ（正しくプレビューされるようにgameScreen内に描画）

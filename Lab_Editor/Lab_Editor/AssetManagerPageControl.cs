@@ -132,6 +132,7 @@ public class AssetManagerPageControl : UserControl
     private static readonly (string Field, string Label, int Decimals)[] CommonEnemyParamFields =
     {
         ("ignorePause", "一時停止を無視して動き続ける", 0),
+        ("bodyIgnoresTilt", "回転しても本体の絵は傾けない（回るのはパーツだけ）", 0),
     };
     // アセットごとに「この編集操作を禁止する」ための共通欄。
     // ステージ単位の編集ツール設定とは別の軸で、こちらは「このオブジェクトに対して」の可否を決める。

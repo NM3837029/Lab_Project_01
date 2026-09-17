@@ -71,7 +71,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_imomushi",
@@ -895,7 +896,8 @@
           }
         ]
       }
-    ]
+    ],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_houdai",
@@ -1050,7 +1052,8 @@
           }
         ]
       }
-    ]
+    ],
+    "bodyIgnoresTilt": true
   },
   {
     "id": "enemy_dossun",
@@ -1192,7 +1195,8 @@
           }
         ]
       }
-    ]
+    ],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_maboroshi",
@@ -1266,7 +1270,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_taiyou",
@@ -1340,7 +1345,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_drone",
@@ -1414,7 +1420,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_honeycomb",
@@ -1488,7 +1495,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_kikagaku",
@@ -1562,7 +1570,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_bero",
@@ -2154,7 +2163,8 @@
           }
         ]
       }
-    ]
+    ],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_pyon",
@@ -2228,7 +2238,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_kotei_hou",
@@ -2302,7 +2313,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_sakuteki",
@@ -2376,7 +2388,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_aruki",
@@ -2450,7 +2463,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_oikake",
@@ -2524,7 +2538,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_totsushin",
@@ -2598,7 +2613,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_tobi",
@@ -2672,7 +2688,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_tate",
@@ -2746,7 +2763,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_tempo",
@@ -2820,7 +2838,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_kurayami",
@@ -2894,7 +2913,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_irozome",
@@ -2968,7 +2988,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_yugami",
@@ -3042,7 +3063,8 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": []
+    "parts": [],
+    "bodyIgnoresTilt": false
   },
   {
     "id": "enemy_kikai_imomushi",
@@ -3219,6 +3241,7 @@
         "deadly": false,
         "script": []
       }
-    ]
+    ],
+    "bodyIgnoresTilt": false
   }
 ]
