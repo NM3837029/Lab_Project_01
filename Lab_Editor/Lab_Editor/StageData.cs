@@ -722,6 +722,15 @@ public class EditCostSettings
     [System.ComponentModel.DisplayName("カット作成")]
     [System.ComponentModel.Category("コスト(単発)")]
     public float flatCutCreate { get; set; } = 20.0f;
+
+    // カットで飛ばす区間の長さに応じて、1タイルあたり上乗せされる消費量。
+    // ゲーム内の総コストは flatCutCreate + cutCostPerTile × 飛ばすタイル数 で、
+    // 「長く飛ばすほど高くつく」ぶんをこちらが受け持つ（プレイ中の表示は "CUT COST = 20 + 1.2 / tile"）。
+    // ※このプロパティが無いと、ゲーム側が書いたcutCostPerTileをLab_Editorの保存時に取りこぼしてしまう。
+    //   実際、この欄を足すまでは、エディタで保存し直したステージから毎回この設定が消えていた。
+    [System.ComponentModel.DisplayName("カット/1タイル")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float cutCostPerTile { get; set; } = 1.2f;
 }
 
 // ===== 配置オブジェクト =====

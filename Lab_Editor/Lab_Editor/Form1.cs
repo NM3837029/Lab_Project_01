@@ -206,6 +206,7 @@ public partial class Form1 : Form
             numEditFlatDirectionFlip.Value = (decimal)Math.Clamp(currentStage.EditCost.flatDirectionFlip, 0, 999);
             numEditFlatResetAll.Value = (decimal)Math.Clamp(currentStage.EditCost.flatResetAll, 0, 999);
             numEditFlatCutCreate.Value = (decimal)Math.Clamp(currentStage.EditCost.flatCutCreate, 0, 999);
+            numEditCutPerTile.Value = (decimal)Math.Clamp(currentStage.EditCost.cutCostPerTile, 0, 999);
 
             // マップサイズ（幅・高さ）の数値を反映する。
             numMapW.Value = currentStage.MapW;
@@ -792,6 +793,7 @@ public partial class Form1 : Form
         currentStage.EditCost.flatDirectionFlip = (float)numEditFlatDirectionFlip.Value;
         currentStage.EditCost.flatResetAll = (float)numEditFlatResetAll.Value;
         currentStage.EditCost.flatCutCreate = (float)numEditFlatCutCreate.Value;
+        currentStage.EditCost.cutCostPerTile = (float)numEditCutPerTile.Value;
 
         // ここまでの内容をすべてJSONファイルとして書き出す。
         currentStage.SaveToFile(Path.Combine(stagesPath, currentStageFile));
@@ -922,6 +924,19 @@ public partial class Form1 : Form
         { MessageBox.Show($"ゲーム実行ファイルが見つかりません:\n{exePath}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         try { Process.Start(new ProcessStartInfo { FileName = exePath, WorkingDirectory = projectRoot }); }
         catch (Exception ex) { MessageBox.Show($"起動失敗:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    // 「ファイル」→「配布用パッケージを作る」。遊ぶ人に渡すzipを作る画面を開く。
+    //
+    // 開く前に編集中のステージを保存しておく。
+    // 配布物には assets\stages\ の中身がそのまま入るので、保存していない編集は
+    // 黙って配布物から漏れる。あとから「直したはずなのに直っていない」と気付くより、
+    // ここで確実に書き出しておくほうがよい。
+    private void btnDeployPackage_Click(object? sender, EventArgs e)
+    {
+        if (currentStage != null && !string.IsNullOrEmpty(currentStageFile)) SaveCurrentStage();
+        using var form = new DeployForm(projectRoot);
+        form.ShowDialog(this);
     }
 
     // ゲーム全体の設定（タイトル画面・ステージ一覧・テーマ色など）を編集する画面を開く。
