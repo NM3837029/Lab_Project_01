@@ -121,7 +121,7 @@
     "breakBySlam": false,
     "breakByRam": false,
     "breakByBullet": false,
-    "breakByPlayer": false,
+    "breakByPlayer": true,
     "breakMinScale": 0.0,
     "breakSe": ""
   },

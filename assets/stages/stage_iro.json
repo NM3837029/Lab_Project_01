@@ -33,7 +33,8 @@
     "flatSpeedChange": 6.0,
     "flatDirectionFlip": 4.0,
     "flatResetAll": 10.0,
-    "flatCutCreate": 50.0
+    "flatCutCreate": 50.0,
+    "cutCostPerTile": 1.2
   },
   "goal": {
     "x": 2912.0,
@@ -4637,13 +4638,7 @@
   ],
   "backgrounds": [],
   "triggers": [],
-  "enemies": [
-    {
-      "id": "enemy_taiyou",
-      "x": 1312.0,
-      "y": 352.0
-    }
-  ],
+  "enemies": [],
   "gimmicks": [
     {
       "id": "gim_color_lock",
