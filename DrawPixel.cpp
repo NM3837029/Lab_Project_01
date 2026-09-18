@@ -7940,6 +7940,45 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 角にちょうど飛び込んだ場合。片軸ずつでは当たらないので、両方を反転して跳ね返す。
                             if (!hitX && !hitY && blockedW(enemy.x + nvx, enemy.y + nvy)) { hitX = true; hitY = true; }
 
+                            // --- 体当たりで壊す ---
+                            //
+                            // この敵は「向きを変えて壁へぶつけさせる道具」として使う相手なので、
+                            // ぶつかった先が壊せるものなら壊す。可否はこれまでどおり
+                            // ブロック／タイル側の設定（breakByRam・breakMinScale）が決める。
+                            //
+                            // 壊せる相手は、壊した瞬間に道が開く。そこで跳ね返ってしまうと
+                            // 開けた穴へ入らずその場で往復するだけになるので、
+                            // 壊して進めるようになった場合は反射させずにそのまま直進させる。
+                            bool brokeW = false;
+                            if (hitX || hitY) {
+                                // ぶつかりに行った先の矩形へ重なるマスを全部調べる。
+                                // 斜めに飛ぶ敵なので、当たった軸だけを進めた位置が実際の接触点になる。
+                                float tgtXw = enemy.x + (hitX ? nvx : 0.0f);
+                                float tgtYw = enemy.y + (hitY ? nvy : 0.0f);
+                                int bc0 = (int)(tgtXw / TILE_SIZE), bc1 = (int)((tgtXw + bwW - 1.0f) / TILE_SIZE);
+                                int br0 = (int)(tgtYw / TILE_SIZE), br1 = (int)((tgtYw + bhW - 1.0f) / TILE_SIZE);
+                                for (int rr = br0; rr <= br1; rr++) {
+                                    for (int cc = bc0; cc <= bc1; cc++) {
+                                        if (TryBreakTile(rr, cc, BREAK_RAM, enemy.scale)) brokeW = true;
+                                    }
+                                }
+                            }
+                            // 壊せるブロック（ギミック）は地形タイルと違って当たり判定に入っていないので、
+                            // ぶつかった瞬間ではなく「体が重なっているか」で見る。
+                            // 素通りするだけで壊せないと、地形タイルとの扱いが食い違ってしまう。
+                            for (auto& gimW2 : gimmicks) {
+                                if (gimW2.type != GIMMICK_BREAKABLE_BLOCK || !gimW2.isActive) continue;
+                                if (enemy.x + bwW <= gimW2.x || enemy.x >= gimW2.x + gimW2.spriteWidth) continue;
+                                if (enemy.y + bhW <= gimW2.y || enemy.y >= gimW2.y + gimW2.spriteHeight) continue;
+                                TryBreakGimmick(gimW2, BREAK_RAM, enemy.scale);
+                            }
+
+                            if (brokeW && !blockedW(enemy.x + nvx, enemy.y + nvy)) {
+                                // 壊して道が開いた。跳ね返らずにそのまま突き抜ける。
+                                hitX = false;
+                                hitY = false;
+                            }
+
                             if (hitX || hitY) {
                                 float rx = hitX ? -nvx : nvx;
                                 float ry = hitY ? -nvy : nvy;
