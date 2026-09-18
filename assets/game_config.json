@@ -135,7 +135,7 @@
     {
       "file": "stage1_hajimari.json",
       "name": "はじまりの草原",
-      "thumbnail": "",
+      "thumbnail": "img/thumb_hajimari.png",
       "order": 0,
       "unlock": "always",
       "require": [],
@@ -144,72 +144,54 @@
     {
       "file": "stage2_hensyu.json",
       "name": "編集のとびら",
-      "thumbnail": "",
+      "thumbnail": "img/thumb_hensyu.png",
       "order": 1,
-      "unlock": "prev_clear",
+      "unlock": "always",
       "require": [],
       "item_total": 17
     },
     {
       "file": "stage4_tate_tower.json",
       "name": "たての塔",
-      "thumbnail": "",
+      "thumbnail": "img/thumb_tower.png",
       "order": 2,
-      "unlock": "prev_clear",
-      "require": [],
-      "item_total": 15
-    },
-    {
-      "file": "stage4_tate_tower.json",
-      "name": "たての塔",
-      "thumbnail": "",
-      "order": 3,
-      "unlock": "prev_clear",
+      "unlock": "always",
       "require": [],
       "item_total": 15
     },
     {
       "file": "stage_iro.json",
       "name": "いろの回廊",
-      "thumbnail": "",
-      "order": 4,
-      "unlock": "prev_clear",
+      "thumbnail": "img/thumb_iro.png",
+      "order": 3,
+      "unlock": "always",
       "require": [],
       "item_total": 13
     },
     {
-      "file": "stage_edit_reaction_test.json",
-      "name": "編集リアクション検証",
-      "thumbnail": "",
-      "order": 5,
-      "unlock": "always",
-      "require": [],
-      "item_total": 0
-    },
-    {
       "file": "hills.json",
       "name": "かたむく丘",
-      "thumbnail": "",
-      "order": 6,
-      "unlock": "prev_clear",
+      "thumbnail": "img/thumb_hills.png",
+      "order": 4,
+      "unlock": "always",
       "require": [],
-      "item_total": 16
+      "item_total": 17
     },
     {
       "file": "horinuki.json",
       "name": "ほりぬきの坑道",
-      "thumbnail": "",
-      "order": 7,
-      "unlock": "prev_clear",
+      "thumbnail": "img/thumb_horinuki.png",
+      "order": 5,
+      "unlock": "always",
       "require": [],
       "item_total": 18
     },
     {
       "file": "tatekou.json",
       "name": "わきあがる縦坑",
-      "thumbnail": "",
-      "order": 8,
-      "unlock": "prev_clear",
+      "thumbnail": "img/thumb_tatekou.png",
+      "order": 6,
+      "unlock": "always",
       "require": [],
       "item_total": 24
     }
