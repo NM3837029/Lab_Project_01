@@ -6532,6 +6532,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             //  ・速度0    → 跳ばなくなり、その場の台になる。
                             float jumpInterval = (edef ? edef->actionInterval : 90.0f) * er.scaleRatio;
                             float jumpPowerMult = (edef ? edef->jumpPowerMult : 0.7f) * er.scaleRatio;
+                            // 傾けは「跳ぶ向き」の指定。跳ぶまでの待機中に床を滑らせない。
+                            if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets;
                             enemy.vx = 0.0f;
 
@@ -6582,6 +6584,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float projSpeed = (edef ? edef->projectileSpeed : 0.6f) * erMass;
                             float ffAtkMultS = edef ? edef->fastForwardAttackMult : 2.2f;
                             enemy.vx = 0.0f;
+                            // 【重要】傾けは「狙いを決める操作」なので、共通の後処理にある
+                            // 「傾けた向きへ坂道を滑る」反応を二重に掛けてはいけない。
+                            // これまで erTiltHandled を撃つ瞬間（＝イベントの起きたフレーム）にしか
+                            // 立てていなかったため、狙いを付けてから撃つまでのあいだ毎フレーム
+                            // 横へ押され続け、その場に据え付けたはずの砲台が床を滑って移動していた。
+                            // 傾いている間はずっと「自分で解釈済み」と宣言しておく。
+                            if (er.tilted) erTiltHandled = true;
 
                             float pCenterXs = player.x + (player.width * player.scale) / 2.0f;
                             float pCenterYs = player.y + (player.height * player.scale) / 2.0f;
@@ -7305,6 +7314,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float shootInterval = edef ? edef->actionInterval : 130.0f;
                             float projSpeed = (edef ? edef->projectileSpeed : 0.55f) * erMass;
                             enemy.vx = 0.0f;
+                            // 【重要】傾けは「狙いを決める操作」なので、共通の後処理にある
+                            // 「傾けた向きへ坂道を滑る」反応を二重に掛けてはいけない。
+                            // これまで erTiltHandled を撃つ瞬間（＝イベントの起きたフレーム）にしか
+                            // 立てていなかったため、狙いを付けてから撃つまでのあいだ毎フレーム
+                            // 横へ押され続け、その場に据え付けたはずの砲台が床を滑って移動していた。
+                            // 傾いている間はずっと「自分で解釈済み」と宣言しておく。
+                            if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets * erFfAtk;
                             if (enemy.customTimer >= shootInterval) {
                                 float pCenterX = player.x + (player.width * player.scale) / 2.0f;
@@ -7478,6 +7494,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float rangeMax = (edef ? edef->teleportRangeMax : 220.0f) * er.scaleRatio;
                             float rangeSpan = std::max<float>(0.0f, rangeMax - rangeMin);
                             enemy.vx = 0.0f;
+                            // 傾けは「出現する方角」の指定。ワープの合間に床を滑らせないよう、
+                            // 砲台と同じく傾いている間はずっと解釈済みにしておく。
+                            if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets;
                             if (enemy.customTimer >= interval) {
                                 float sideX = (rand() % 2 == 0) ? 1.0f : -1.0f;
