@@ -995,52 +995,33 @@
                 "op": "Forever",
                 "body": [
                   {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "EditTilted"
+                    "op": "SetLocalOffsetPolar",
+                    "angle": {
+                      "op": "Sub",
+                      "a": {
+                        "op": "ParentAim"
+                      },
+                      "b": {
+                        "op": "ParentTilt"
+                      }
                     },
-                    "body": [
-                      {
-                        "op": "SetLocalOffsetPolar",
-                        "angle": -1.5707963,
-                        "radius": 10.0
-                      },
-                      {
-                        "op": "SetAngle",
-                        "angle": 0.0
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "SetLocalOffsetPolar",
-                        "angle": {
-                          "op": "Sub",
-                          "a": {
-                            "op": "DirectionToPlayer"
-                          },
-                          "b": {
-                            "op": "ParentTilt"
-                          }
+                    "radius": 10.0
+                  },
+                  {
+                    "op": "SetAngle",
+                    "angle": {
+                      "op": "Sub",
+                      "a": {
+                        "op": "Add",
+                        "a": {
+                          "op": "ParentAim"
                         },
-                        "radius": 10.0
+                        "b": 1.5707963
                       },
-                      {
-                        "op": "SetAngle",
-                        "angle": {
-                          "op": "Sub",
-                          "a": {
-                            "op": "Add",
-                            "a": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "b": 1.5707963
-                          },
-                          "b": {
-                            "op": "ParentTilt"
-                          }
-                        }
+                      "b": {
+                        "op": "ParentTilt"
                       }
-                    ]
+                    }
                   },
                   {
                     "op": "Wait",

@@ -1558,6 +1558,14 @@ struct Enemy {
     // 据え置く必要がある。基準まで配置後の値にしてしまうと差が0になり、
     // 「拡大して置いた敵が重くならない」「傾けて置いたドッスンが傾いた方向へ落ちない」という
     // 見た目だけの変更になってしまう（実際それが最初の実装の不具合だった）。
+    // 砲台系がこのフレームに狙っている向き（ワールド角・ラジアン）。
+    //
+    // 狙いの決め方は本体の1箇所だけに置き、砲身パーツは ParentAim でこの値を読む。
+    // パーツ側が DirectionToPlayer から狙いを組み直していたころは、
+    // 本体が追尾をやめる条件（反転など）を足すたびに「砲身は自分を向いているのに
+    // 弾は別の方向へ飛ぶ」という食い違いが生まれていた。
+    float aimAngle = 0.0f;
+
     // 本体の絵を傾けない型（砲台の台座など）が使う「置かれたときの姿勢」。
     //
     // editBaseAngle を使えないのは、AIMED_SHOOTER が手動照準を一発で消費するときに
@@ -6578,7 +6586,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 編集リアクション：
                             //  ・傾ける   → 照準ロック。追尾をやめ、傾けた向きへ固定で撃ち続ける。
                             //  ・拡大／縮小 → 弾の大きさと速さが変わる。
-                            //  ・向き反転 → 味方撃ちになり、撃った弾が他の敵に当たる。
+                            //  ・向き反転 → プレイヤーを追うのをやめ、反対側（背中側）へ撃つようになる。
+                            //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
                             //  ・暗転     → 溜めの予告ズームが弱まり、いつ撃たれるか読みにくくなる。
                             float shootInterval = edef ? edef->actionInterval : 120.0f;
                             float projSpeed = (edef ? edef->projectileSpeed : 0.6f) * erMass;
@@ -6596,7 +6605,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float pCenterYs = player.y + (player.height * player.scale) / 2.0f;
                             float eCenterXs = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
                             float eCenterYs = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
-                            enemy.direction = (pCenterXs < eCenterXs) ? 1 : 0;
+                            // ---- このフレームの狙い（毎フレーム決める）----
+                            // 砲身のようなパーツは ParentAim でこの結果を読むので、絵と弾が必ず一致する。
+                            {
+                                float ax = pCenterXs - eCenterXs, ay = pCenterYs - eCenterYs;
+                                float ad = sqrtf(ax * ax + ay * ay);
+                                if (ad < 1.0f) ad = 1.0f;
+                                ax /= ad; ay /= ad;
+                                if (er.tilted) {
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
+                                } else if (erFlipEdited) {
+                                    // 反転＝プレイヤーに背を向ける。追尾をやめ、左右を裏返した向きを狙う。
+                                    ax = -ax;
+                                }
+                                enemy.aimAngle = atan2f(ay, ax);
+                                enemy.direction = (ax < 0.0f) ? 1 : 0;
+                            }
 
                             enemy.customTimer += ets * (isFastForward ? ffAtkMultS : 1.0f);
 
@@ -6609,20 +6633,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             if (enemy.customTimer >= shootInterval) {
-                                float dxS = pCenterXs - eCenterXs;
-                                float dyS = pCenterYs - eCenterYs;
-                                float distS = sqrtf(dxS * dxS + dyS * dyS);
-                                if (distS < 1.0f) distS = 1.0f;
-                                float dirXs = dxS / distS;
-                                float dirYs = dyS / distS;
-                                if (er.tilted) {
-                                    // 照準ロック：追尾をやめ、砲口が向いている方向へ固定射撃する。
-                                    // 反転は使わない。この型の反転は既に「味方撃ちになる」という別の意味を持っており、
-                                    // そこへ狙いの変更まで重ねると1操作が2つの意味を持ってしまうため。
-                                    erTiltHandled = true;
-                                    // 反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
-                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, dirXs, dirYs);
-                                }
+                                // 狙いは毎フレーム上で決めてある。ここではその向きへ撃つだけ。
+                                float dirXs = cosf(enemy.aimAngle);
+                                float dirYs = sinf(enemy.aimAngle);
                                 // 弾を体の外へ出してから撃つ（砲口の位置）。
                                 //
                                 // 従来は自分の中心にそのまま湧かせていた。敵の弾はプレイヤーにしか当たらないので
@@ -7308,7 +7321,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             //             スイッチや壊せるブロックを撃たせたいたびに狙いを付け直す操作になる。
                             //  ・拡大   → 大きく遅い弾。空中で追い越せるので足場感覚で扱える。
                             //  ・縮小   → 小さく速い弾。避けにくいが、当たり判定も小さい。
-                            //  ・向き反転 → 弾の所属がプレイヤー側に変わり、他の敵に当たる「味方撃ち砲台」になる。
+                            //  ・向き反転 → プレイヤーを追うのをやめ、反対側（背中側）へ撃つようになる。
+                            //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
                             //  ・早送り → 発射間隔が詰まる。
                             //  ・暗転   → 狙いがぶれる（プレイヤーの位置を正確に掴めなくなる）。
                             float shootInterval = edef ? edef->actionInterval : 130.0f;
@@ -7322,40 +7336,53 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 傾いている間はずっと「自分で解釈済み」と宣言しておく。
                             if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets * erFfAtk;
+
+                            // ---- このフレームの狙いを決める（撃つ瞬間だけでなく毎フレーム）----
+                            //
+                            // 砲身パーツは ParentAim でこの結果を読むので、絵と弾の向きが必ず一致する。
+                            // 以前はパーツ側が DirectionToPlayer から狙いを組み直していたため、
+                            // 本体が追尾をやめる条件を足すたびに食い違いが生まれていた。
+                            {
+                                float eCx = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                                float eCy = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
+                                float pCx = player.x + (player.width * player.scale) / 2.0f;
+                                float pCy = player.y + (player.height * player.scale) / 2.0f;
+                                float ax = pCx - eCx, ay = pCy - eCy;
+                                float ad = sqrtf(ax * ax + ay * ay);
+                                if (ad < 1.0f) ad = 1.0f;
+                                ax /= ad; ay /= ad;
+                                if (er.tilted) {
+                                    // 手動照準。反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
+                                } else if (erFlipEdited) {
+                                    // 反転＝プレイヤーに背を向ける。追尾をやめ、左右を裏返した向きを狙う。
+                                    // 高さの狙いはそのまま残すので、背中側の壁や敵へ素直に当てられる。
+                                    // 「反転させたのに自分を狙い続ける」＝絵と動きが食い違う、が一番の混乱の元だった。
+                                    ax = -ax;
+                                }
+                                enemy.aimAngle = atan2f(ay, ax);
+                                // 絵の向きは狙いに従わせる（台座と砲身と弾が必ず同じ側を向く）
+                                enemy.direction = (ax < 0.0f) ? 1 : 0;
+                            }
+
                             if (enemy.customTimer >= shootInterval) {
-                                float pCenterX = player.x + (player.width * player.scale) / 2.0f;
-                                float pCenterY = player.y + (player.height * player.scale) / 2.0f;
                                 float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
                                 float eCenterY = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
 
-                                // 暗転中は狙いがぶれる。明るさが下がるほどブレ幅が大きくなる
-                                if (fxCurBright < 0.6f) {
-                                    float jitter = (1.0f - fxCurBright) * 160.0f;
-                                    pCenterX += (float)(rand() % 201 - 100) / 100.0f * jitter;
-                                    pCenterY += (float)(rand() % 201 - 100) / 100.0f * jitter;
-                                }
-
-                                float dxA = pCenterX - eCenterX;
-                                float dyA = pCenterY - eCenterY;
-                                float distA = sqrtf(dxA * dxA + dyA * dyA);
-                                if (distA < 1.0f) distA = 1.0f;
-                                float dirXa = dxA / distA;
-                                float dirYa = dyA / distA;
-
-                                // 傾けられていたら、追尾をやめて砲身の向いている方向へ撃つ。
-                                // 基準は真上（砲口の向き）なので、未編集なら従来どおりプレイヤーを狙う。
-                                //
-                                // 条件を「傾けられたか」だけにしてあるのは、砲身パーツのスクリプトが
-                                // 同じ EditTilted で見た目を切り替えるため。ここに反転を足すと
-                                // 「砲身はプレイヤーを向いているのに弾は別方向へ飛ぶ」食い違いが復活する。
-                                // この型の反転は既に「味方撃ちになる」という別の意味を持っている。
+                                float dirXa = cosf(enemy.aimAngle);
+                                float dirYa = sinf(enemy.aimAngle);
                                 bool aimedByEdit = er.tilted;
-                                if (aimedByEdit) {
-                                    erTiltHandled = true;
-                                    // 反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
-                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, dirXa, dirYa);
+
+                                // 暗転中は狙いがぶれる。明るさが下がるほどブレ幅が大きくなる。
+                                // ブレは「撃った一発」にだけ乗せる。毎フレームの狙い(aimAngle)に乗せると
+                                // 砲身が細かく震えて、どこを狙っているのか読めなくなるため。
+                                if (fxCurBright < 0.6f) {
+                                    float jitter = (1.0f - fxCurBright) * 0.6f;
+                                    float shake = (float)(rand() % 201 - 100) / 100.0f * jitter;
+                                    float shaken = enemy.aimAngle + shake;
+                                    dirXa = cosf(shaken);
+                                    dirYa = sinf(shaken);
                                 }
-                                enemy.direction = (dirXa < 0.0f) ? 1 : 0;
 
                                 // 弾を体の外（砲口の位置）から撃つ。理由はSTATIONARY側の同じ処理のコメント参照。
                                 // 反転させた砲台の弾は他の敵に当たるようになるので、自分にも当たってしまう。
@@ -8246,6 +8273,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             partActor.hasParent = true;
                             partActor.parentX = enemy.x; partActor.parentY = enemy.y;
                             partActor.parentDirection = (enemy.direction == 0) ? 1.0f : -1.0f; // 0=右向き, 1=左向き（enemy.directionの規約に合わせる）
+                            partActor.parentAim = enemy.aimAngle; // 砲身など「本体の狙い」に追従するパーツ用
                             partActor.partIndex = part.partIndex;
                             FillScriptPartTransform(partActor, part, ePartPose); // 親の拡大・傾けをパーツの位置計算へ合成する
                             partActor.playerX = player.x; partActor.playerY = player.y;

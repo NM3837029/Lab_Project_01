@@ -131,6 +131,12 @@ struct ScriptActor {
     float parentX = 0.0f, parentY = 0.0f; // 親(複合体本体)の現在のワールド座標
     float parentDirection = 1.0f;         // 親の向き（+1=右向き/-1=左向き）。SetLocalOffset等で
                                            // 進行方向に応じてパーツを反転させたい場合に使う
+    // 親が「今どこを狙っているか」のワールド角（ラジアン）。砲台系だけが意味のある値を入れる。
+    //
+    // 砲身のようなパーツが DirectionToPlayer から狙いを組み直すと、本体側が
+    // 追尾をやめた（反転された等）ときに絵と弾がすれ違う。狙いの決定は本体の1箇所に集め、
+    // パーツはその結果を読むだけにするためのセンサー。
+    float parentAim = 0.0f;
     bool hasParent = false;               // このアクターがパーツかどうか
     int partIndex = 0;                    // 親のparts[]内インデックス（同一スクリプトを複数パーツで共有し、
                                            // パーツごとに異なる位相をつけるためのPartIndexレポーターに使う）
@@ -402,6 +408,9 @@ private:
         if (op == "ParentX") return actor.parentX;                                // 親(複合体本体)のX座標を返す
         if (op == "ParentY") return actor.parentY;                                // 親(複合体本体)のY座標を返す
         if (op == "ParentDirection") return actor.parentDirection;                // 親の向き(+1=右向き/-1=左向き)を返す
+        // 親が今狙っている向き（ワールド角）。砲身のパーツはこれを読めば、
+        // 本体が追尾をやめても弾の向きと必ず一致する。
+        if (op == "ParentAim")       return actor.parentAim;
         if (op == "PartIndex") return (float)actor.partIndex;                     // 親のparts[]内での自分のインデックスを返す
         // 複合オブジェクトのパーツ追従 — 親に加えられた編集をパーツ側のスクリプトから読む。
         // エンジンはパーツを親と一体の剛体として回すので、ドッスンの黒目や砲台の砲身のように
