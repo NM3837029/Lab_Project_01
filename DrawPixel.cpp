@@ -1728,6 +1728,17 @@ struct StageData {
     // Feature: 編集コストゲージ（ステージ単位設定）
     EditToolFlags editToolFlags;         // このステージで許可する編集ツールの設定
     EditCostSettings editCostSettings;   // このステージでの編集コストゲージの数値設定
+
+    // このステージでのプレイヤーの基本性能（歩く速さ・ジャンプ力・使える行動）。
+    //
+    // 【重要】ステージごとに持つこと。
+    // 以前はステージJSONの player_capabilities を読み込み時にグローバルの editorPlayerCaps へ
+    // 直接書いていたため、一度読み込んだステージへ戻っても能力が読み直されず、
+    // 「直前に遊んだステージの速さとジャンプ力のまま別のステージが始まる」状態になっていた
+    // （＝プレイヤーの性能が勝手に変わる）。
+    // 編集ツールの許可(editToolFlags)や編集コスト(editCostSettings)と同じく、
+    // ステージ側が持ち、ResetStage で現在のステージのものを反映する。
+    PlayerCapabilities playerCaps;
 };
 
 // エディタ上で現在何が選択されているかを表す種別。
@@ -3679,15 +3690,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         jsonStage.goalY = sj["goal"].value("y", -1.0f);
                     }
 
-                    // プレイヤー能力
+                    // プレイヤー能力。
+                    // 読み込んだステージ自身に持たせ、実際に使う値(editorPlayerCaps)へは
+                    // ResetStage が「今から始めるステージのもの」を反映する。
+                    // ここで直接グローバルを書くと、読み込んだ順番で性能が決まってしまう。
                     if (sj.contains("player_capabilities")) {
                         auto caps = sj["player_capabilities"];
-                        editorPlayerCaps.canDoubleJump = caps.value("canDoubleJump", false);
-                        editorPlayerCaps.canDash = caps.value("canDash", false);
-                        editorPlayerCaps.canShootFireball = caps.value("canShootFireball", false);
-                        editorPlayerCaps.canFly = caps.value("canFly", false);
-                        editorPlayerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
-                        editorPlayerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
+                        jsonStage.playerCaps.canDoubleJump = caps.value("canDoubleJump", false);
+                        jsonStage.playerCaps.canDash = caps.value("canDash", false);
+                        jsonStage.playerCaps.canShootFireball = caps.value("canShootFireball", false);
+                        jsonStage.playerCaps.canFly = caps.value("canFly", false);
+                        jsonStage.playerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
+                        jsonStage.playerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
                     }
 
                     // 編集ツール許可設定（ステージ単位、キー未指定時はデフォルト全部true）
@@ -4075,6 +4089,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         const auto& stage = stages[currentStageIdx];
+
+        // このステージのプレイヤー性能を反映する。
+        // アイテムで解放した行動（ダッシュ等）もここで一度ステージ側の設定へ戻る。
+        // 解放アイテムはステージ内に置かれていてリセットで復活するので、状態は食い違わない。
+        editorPlayerCaps = stage.playerCaps;
 
         // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
         currentEditTools = stage.editToolFlags;
@@ -10919,6 +10938,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (i.scale != 1.0f) j["scale"] = i.scale;
                     if (i.angle != 0.0f) j["angle"] = i.angle;
                     stageData["items"].push_back(j);
+                }
+                // 保存と同時に、メモリ上のステージが持つ性能も更新する。
+                // ここを忘れると、保存したのに ResetStage で保存前の値へ戻ってしまう。
+                if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size()) {
+                    stages[currentStageIdx].playerCaps = editorPlayerCaps;
                 }
                 stageData["player_capabilities"] = {
                     {"canDoubleJump", editorPlayerCaps.canDoubleJump},
