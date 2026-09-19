@@ -6074,21 +6074,38 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 player.vy += GRAVITY * pts; 
-                
+
+                // このフレームで実際に動く量を、縦も横も同じ時間スケールで出す。
+                //
+                // 以前は横だけ pts を掛け、縦は player.vy をそのまま足していた。
+                // 重力は pts ぶん加速するので、早送り中(pts=2)は
+                //   ・横は2倍進む
+                //   ・縦は等倍しか進まないのに落ちる勢いだけ2倍で増える
+                // という食い違った放物線になり、ジャンプしている間だけ動きが変わって見えた。
+                // ダッシュ中はさらに横が2倍なので、跳んだ瞬間に前へ滑っていくように見える。
+                //
+                // 当たり判定側は「速度」ではなく「このフレームの移動量」を基準に
+                // めり込み許容値(vy + 8px 等)を決めているので、判定にも同じ値を渡す。
+                // 床や天井に当たると判定側がこの値を0にするので、それを見て本体の速度を止める。
+                float stepVy = player.vy * pts;
+
                 // X/Y方向の移動と衝突判定を共通化
-                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, player.vy, player.vy,
+                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, stepVy, stepVy,
                                                           player.width, player.height, player.scale,
                                                           stages[currentStageIdx].map, tileDefs, gimmicks);
 
                 // 従来の足場との着地衝突判定
-                bool platGrounded = CheckPlatformCollision(player.x, player.y, player.vy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex);
+                bool platGrounded = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex);
                 // Feature: 編集リアクション（共通層）— 個別に一時停止した敵は足場になる。
                 // 相手が何であっても必ず通用する手札として用意することで、
                 // 「届かない高さは、そこにいる敵を止めて踏み台にする」という解法がどのステージでも成立する。
                 if (!platGrounded) {
-                    platGrounded = CheckFrozenEnemyPlatform(player.x, player.y, player.vy,
+                    platGrounded = CheckFrozenEnemyPlatform(player.x, player.y, stepVy,
                                                             player.width, player.height, player.scale, enemies);
                 }
+                // 何かに当たって移動量が0にされたなら、速度そのものも止める。
+                // pts が0（速度0に編集された）のときは移動していないだけなので触らない。
+                if (pts > 0.0f && stepVy == 0.0f) player.vy = 0.0f;
                 
                 if (isGrounded || platGrounded) {
                     // 着地音。空中から地面に着いた瞬間だけ鳴らす。
