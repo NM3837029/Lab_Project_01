@@ -120,13 +120,13 @@
     "heading_y": 34.0,
     "heading_font_size": 30,
     "grid": {
-      "x": 64.0,
+      "x": 41.0,
       "y": 92.0,
-      "cols": 3,
-      "cell_w": 160.0,
-      "cell_h": 116.0,
-      "gap_x": 16.0,
-      "gap_y": 16.0
+      "cols": 4,
+      "cell_w": 132.0,
+      "cell_h": 100.0,
+      "gap_x": 10.0,
+      "gap_y": 12.0
     },
     "back_label": "もどる",
     "locked_label": "？ ？ ？"
@@ -212,6 +212,15 @@
       "unlock": "always",
       "require": [],
       "item_total": 24
+    },
+    {
+      "file": "haguruma.json",
+      "name": "はぐるまの回廊",
+      "thumbnail": "img/thumb_haguruma.png",
+      "order": 9,
+      "unlock": "always",
+      "require": [],
+      "item_total": 16
     }
   ],
   "result": {

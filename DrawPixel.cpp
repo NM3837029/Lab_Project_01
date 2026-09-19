@@ -9634,18 +9634,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 押されているかどうかは更新側(重量スイッチとドアの開閉ロジック)が
                 // customTimer に控えているので、判定を書き写さずそれを読む。
                 {
-                    float needW = (swDef ? swDef->triggerWidthThreshold : 140.0f)
-                                * GetGimmickEditReaction(gim).MassMul();
                     bool pressed = (gim.customTimer > 0.5f);
                     int gaugeColor = pressed ? GetColor(120, 230, 120) : GetColor(255, 190, 90);
                     int gy1 = y1 - 12;
-                    int gx2 = (int)(gim.x + needW - cameraX);
-                    DrawLine(x1, gy1, gx2, gy1, gaugeColor);
-                    DrawLine(x1, gy1 - 4, x1, gy1 + 4, gaugeColor);          // 左の爪
-                    DrawLine(gx2, gy1 - 4, gx2, gy1 + 4, gaugeColor);        // 右の爪
-                    char needBuf[32];
-                    sprintf_s(needBuf, sizeof(needBuf), "%.0fpx", needW);
-                    DrawString(x1, gy1 - 20, needBuf, gaugeColor);
+                    // param に enemyweight を含むスイッチは「敵の重さ」で入る。
+                    // こちらは必要な幅がまったく別の基準（箱の1/4）になるので、
+                    // 箱向けの目安線を出すとかえって誤解させる。何で押せるのかだけを示す。
+                    if (gim.param.find("enemyweight") != std::string::npos) {
+                        DrawString(x1, gy1 - 20, "ENEMY", gaugeColor);
+                    } else {
+                        float needW = (swDef ? swDef->triggerWidthThreshold : 140.0f)
+                                    * GetGimmickEditReaction(gim).MassMul();
+                        int gx2 = (int)(gim.x + needW - cameraX);
+                        DrawLine(x1, gy1, gx2, gy1, gaugeColor);
+                        DrawLine(x1, gy1 - 4, x1, gy1 + 4, gaugeColor);          // 左の爪
+                        DrawLine(gx2, gy1 - 4, gx2, gy1 + 4, gaugeColor);        // 右の爪
+                        char needBuf[32];
+                        sprintf_s(needBuf, sizeof(needBuf), "%.0fpx", needW);
+                        DrawString(x1, gy1 - 20, needBuf, gaugeColor);
+                    }
                 }
             }
             else if (gim.type == GIMMICK_SCALABLE_BOX) {
