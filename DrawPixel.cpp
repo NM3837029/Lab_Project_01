@@ -3568,6 +3568,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     float groundY = 400.0f;
     bool isPaused = false, isEditMode = true, isFastForward = false, isStepFrame = false, isDebugDrawMode = false;
+    // コマ送りをどちら向きに送ったか。→なら+1、←なら-1。
+    // 世界の進み方そのものは前向きの1フレームで変わらない（巻き戻しとは別物）。
+    // この符号を読むのはコマ送りリフトだけで、送る向きで上がるか下がるかが決まる。
+    float stepFrameDir = 1.0f;
     float editCost = 100.0f; // 編集コストゲージ現在値（ResetStageで currentEditCost.maxCost に上書きされる）
     bool lastF3 = false;
     bool isDragging = false, isScaling = false, isScalingHeight = false, isRotating = false;
@@ -4880,8 +4884,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (currF3 && !lastF3) isDebugDrawMode = !isDebugDrawMode;
         lastF3 = currF3;
 
-        isStepFrame = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
-        lastStepKey = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
+        // コマ送りは → で1コマ進める。← も同じく1コマ進めるが、コマ送りリフトだけは逆向きへ動く。
+        // 「上げすぎたら下げ直す」を巻き戻し(R)なしでできるようにするため
+        // （リフトは上限まで上がると止まるので、←が無いと一度行き過ぎると戻せなかった）。
+        {
+            static bool lastStepKeyL = false;
+            bool stepFwd  = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
+            bool stepBack = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_LEFT)  && !lastStepKeyL);
+            isStepFrame = (stepFwd || stepBack);
+            stepFrameDir = stepBack ? -1.0f : 1.0f;
+            lastStepKey  = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
+            lastStepKeyL = (CheckHitKey(KEY_INPUT_LEFT)  != 0);
+        }
         if (isStepFrame) SoundManager::Get().PlaySe(gameConfig.editSe.step); // コマ送り1回ぶんの音
 
         static bool lastLeftClick = false;
@@ -8624,13 +8638,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float travel = (gdef ? gdef->travelDistance : 128.0f) * gr.scaleRatio;
                         float stepInc = (gdef ? gdef->stepIncrement : 0.15f) * gim.speedScale;
                         if (isStepFrame) {
-                            gim.customTimer += stepInc * grDir;
-                            if (gim.customTimer > 1.0f) gim.customTimer = 0.0f;
-                            if (gim.customTimer < 0.0f) gim.customTimer = 1.0f;
+                            // 送った向き（→=+1 / ←=-1）にそのまま従う。
+                            // 端で折り返さず止めるのは、上限を越えた瞬間に一番下へ瞬間移動していたため。
+                            // 乗っている側から見ると足場が消えて落とされるのと同じで、
+                            // 「1コマずつ確かめながら上げる」という操作と噛み合わなかった。
+                            gim.customTimer += stepInc * grDir * stepFrameDir;
+                            if (gim.customTimer > 1.0f) gim.customTimer = 1.0f;
+                            if (gim.customTimer < 0.0f) gim.customTimer = 0.0f;
                         }
-                        // 傾けた向きへ進ませる。傾き0なら従来どおり真下(+Y)方向への昇降になる。
-                        gim.x = gim.editBaseX - sinf(gr.tilt) * travel * gim.customTimer;
-                        gim.y = gim.editBaseY + cosf(gr.tilt) * travel * gim.customTimer;
+                        // 基準の向きは「真上」。コマを送るほど上がっていく。
+                        //
+                        // 以前はここが +Y（真下）で、assets側が travelDistance に負の値を書いて
+                        // 上昇させるつもりでいた。ところが未指定を表す番兵も負の値なので、
+                        // ApplyGimmickDefaultParams が -160 を既定値 128 で上書きしてしまい、
+                        // 「コマを送ると下がっていく」状態になっていた。
+                        // 距離は必ず正の値として扱い、向きは式の側で持つ。
+                        // 逆に下げたい場合は従来どおり「向き反転」で grDir が -1 になる。
+                        gim.x = gim.editBaseX + sinf(gr.tilt) * travel * gim.customTimer;
+                        gim.y = gim.editBaseY - cosf(gr.tilt) * travel * gim.customTimer;
                     }
                     else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
                         // 編集リアクション：45度以上傾けると自重で崩れる。
@@ -10078,7 +10103,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 一時停止中の[→]がコマ送り）。ここが実装とズレていると、編集ツール前提のステージが
         // 「操作が分からないから詰む」だけの理不尽なものになってしまうため、必ず同期させること。
         if (isPaused) {
-            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]: Step 1 Frame  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
+            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]/[LEFT]: Step 1 Frame (Lift Up/Down)  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
             DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, RightClick for Menu", GetColor(200, 200, 200));
         } else {
             DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]:Move  [W]:Jump  [SHIFT]:Dash  [ENTER]/Click Screen:Shot", GetColor(50, 255, 50));
