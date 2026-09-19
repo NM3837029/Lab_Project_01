@@ -2252,6 +2252,26 @@ void GetGimmickCollisionBox(const Gimmick& gim, float& outX, float& outY, float&
     outY = cy - outH * 0.5f;
 }
 
+// 選択中のギミックに出す「つまみ」の大きさ(px)と位置。
+//
+// 大きさを変える操作は、もともと「Sキーを押しながら、まだ選んでいない相手をクリックして、
+// そのまま縦にドラッグ」でしか動かなかった。横幅なのに縦へ引く、しかも一度選んだあとは
+// Sを押しても移動になる、という状態で、知らなければまず辿り着けない操作だった。
+// つまみを出して直接引っぱれるようにする。
+//
+// 描画と当たり判定の両方がこの関数を通るので、見えている場所とつかめる場所が食い違わない。
+const float GIM_HANDLE_SIZE = 14.0f;
+
+// outWx/outWy … 横幅のつまみ（右辺の中央）の左上
+// outHx/outHy … 縦幅のつまみ（上辺の中央）の左上
+void GetGimmickResizeHandles(const Gimmick& g, float& outWx, float& outWy, float& outHx, float& outHy) {
+    float half = GIM_HANDLE_SIZE * 0.5f;
+    outWx = g.x + g.spriteWidth - half;
+    outWy = g.y + g.spriteHeight * 0.5f - half;
+    outHx = g.x + g.spriteWidth * 0.5f - half;
+    outHy = g.y - half;
+}
+
 // ギミックの横幅・縦幅を変える唯一の入口。
 // 判定側はwidth/heightを、描画側はspriteWidth/spriteHeightを見るという二重管理になっているため、
 // どちらか片方だけ書き換えると「見た目と判定がズレる」不具合になる。必ずここを通す。
@@ -5447,9 +5467,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
                     mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
                     
+                    // 選択中のギミックの「つまみ」をつかんだかどうかを最初に見る。
+                    // ここで拾えなかった場合だけ、従来どおりブロック叩き・移動・選択へ進む。
+                    // 先に見るのは、つまみが相手の絵の上に重なっているため
+                    // （後回しにすると、つまみを狙ったつもりのクリックが移動や破壊になってしまう）。
+                    bool grabbedHandle = false;
+                    for (auto* g : selectedGimmicks) {
+                        if (!g->isActive) continue;
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue; // 大きさを変えられない相手にはつまみを出していない
+                        float hwX, hwY, hhX, hhY;
+                        GetGimmickResizeHandles(*g, hwX, hwY, hhX, hhY);
+                        // つまみはワールド座標で持ち、画面へは等倍で転送されるので、
+                        // マウス座標からカメラとモニタのぶんを引けばそのまま比較できる。
+                        if (gx >= hwX && gx <= hwX + GIM_HANDLE_SIZE && gy >= hwY && gy <= hwY + GIM_HANDLE_SIZE) {
+                            isScaling = true; lastMouseX = mx; lastMouseY = my; baseScale = g->width;
+                            grabbedHandle = true; break;
+                        }
+                        if (gx >= hhX && gx <= hhX + GIM_HANDLE_SIZE && gy >= hhY && gy <= hhY + GIM_HANDLE_SIZE) {
+                            isScalingHeight = true; lastMouseX = mx; lastMouseY = my; baseScale = g->spriteHeight;
+                            grabbedHandle = true; break;
+                        }
+                    }
+
                     // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
-                    bool blockClicked = false;
+                    // つまみをつかんでいた場合は、この先の破壊も選択も移動も行わない。
+                    bool blockClicked = grabbedHandle;
                     for (auto& gim : gimmicks) {
+                        if (grabbedHandle) break;
                         if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
                         if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
                             gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
@@ -5493,10 +5537,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
 
                         if (clickedOnSelected) {
-                            // グループドラッグを開始
-                            isDragging = true;
+                            // 既に選んである相手を再クリックした場合。
+                            //
+                            // ここは以前、押されているキーを一切見ずに必ず移動を始めていた。
+                            // そのため「選ぶ → Sを押しながら引っぱる」という自然な手順では
+                            // 一度も拡大できず、Sを押しながら"まだ選んでいない"相手を
+                            // クリックし直すしか方法が無かった。
+                            // 新規選択側と同じ振り分けをここにも置く（つまみを足した今も、
+                            // 従来のキー操作を覚えている人のために残す）。
                             lastMouseX = mx;
                             lastMouseY = my;
+                            if (CheckHitKey(KEY_INPUT_S)) {
+                                isScaling = true;
+                                if (!selectedGimmicks.empty())      baseScale = selectedGimmicks[0]->width;
+                                else if (!selectedEnemies.empty())  baseScale = selectedEnemies[0]->scale;
+                                else if (!selectedPlayers.empty())  baseScale = selectedPlayers[0]->scale;
+                            } else if (CheckHitKey(KEY_INPUT_W) && !selectedGimmicks.empty()) {
+                                isScalingHeight = true;
+                                baseScale = selectedGimmicks[0]->spriteHeight;
+                            } else if (CheckHitKey(KEY_INPUT_R)) {
+                                isRotating = true;
+                                if (!selectedGimmicks.empty())      baseAngle = selectedGimmicks[0]->angle;
+                                else if (!selectedEnemies.empty())  baseAngle = selectedEnemies[0]->angle;
+                                else if (!selectedPlayers.empty())  baseAngle = selectedPlayers[0]->angle;
+                            } else {
+                                // 何も押されていなければ従来どおりグループドラッグ
+                                isDragging = true;
+                            }
                         }
                         else {
                             // 新しいオブジェクトをクリックした場合、そのオブジェクトのみを選択
@@ -5630,8 +5697,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     lastMouseY = my;
                 }
                 if (isScaling && selectedType != SELECT_NONE) {
+                    // 敵・プレイヤーは縦のマウス移動で一様に拡大縮小（従来どおり）。
+                    // ギミックの横幅だけは横のマウス移動で変える。
+                    // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
                     float ds = (float)(lastMouseY - my) * 0.01f;
-                    float dw = (float)(lastMouseY - my) * 1.0f;
+                    float dw = (float)(mx - lastMouseX) * 1.0f;
                     for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
                     for (auto* e : selectedEnemies) {
                         if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
@@ -5654,14 +5724,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
                     }
                     lastMouseY = my;
+                    lastMouseX = mx;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
                     float dh = (float)(lastMouseY - my) * 1.0f;
                     for (auto* g : selectedGimmicks) {
                         if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
+                        // 下端を固定して上へ伸ばす。
+                        //
+                        // 以前は y を据え置いたまま高さだけ増やしていたので、
+                        // 地面に置いた箱は下へ伸びて地面にめり込み、上端はまったく動かなかった。
+                        // 「箱を高くして登る」という遊び方がそもそも成立していなかった。
+                        // editBaseY も同じだけ動かすのは、動く足場のように毎フレーム
+                        // editBaseY から位置を組み直す型でも下端を保つため。
+                        float beforeH = g->spriteHeight;
                         g->spriteHeight += dh;
                         if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f;
+                        float grownH = g->spriteHeight - beforeH;
+                        g->y -= grownH;
+                        g->editBaseY -= grownH;
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
@@ -9508,6 +9590,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 SetDrawBright(255, 255, 255);
+
+                // 「どれだけ広げれば足りるのか」をスイッチの上に出す。
+                //
+                // これが無いと、箱をどこまで広げればよいのかを当てずっぽうで探すことになる。
+                // 必要な幅は「スイッチ自身を広げると緩む」という既存の反応を含めて求める。
+                // 押されているかどうかは更新側(重量スイッチとドアの開閉ロジック)が
+                // customTimer に控えているので、判定を書き写さずそれを読む。
+                {
+                    float needW = (swDef ? swDef->triggerWidthThreshold : 140.0f)
+                                * GetGimmickEditReaction(gim).MassMul();
+                    bool pressed = (gim.customTimer > 0.5f);
+                    int gaugeColor = pressed ? GetColor(120, 230, 120) : GetColor(255, 190, 90);
+                    int gy1 = y1 - 12;
+                    int gx2 = (int)(gim.x + needW - cameraX);
+                    DrawLine(x1, gy1, gx2, gy1, gaugeColor);
+                    DrawLine(x1, gy1 - 4, x1, gy1 + 4, gaugeColor);          // 左の爪
+                    DrawLine(gx2, gy1 - 4, gx2, gy1 + 4, gaugeColor);        // 右の爪
+                    char needBuf[32];
+                    sprintf_s(needBuf, sizeof(needBuf), "%.0fpx", needW);
+                    DrawString(x1, gy1 - 20, needBuf, gaugeColor);
+                }
             }
             else if (gim.type == GIMMICK_SCALABLE_BOX) {
                 // 拡大可能ブロック画像を描画（カスタムスプライト優先）
@@ -9996,6 +10099,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
                     DrawBox((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), GetColor(255, 255, 0), FALSE);
+
+                    // 大きさを変える「つまみ」。右辺が横幅、上辺が縦幅。
+                    // 引っぱれない相手には出さない（出ているのに動かない、を作らないため）。
+                    if (!IsGimmickEditLocked(*g, EDITOP_SCALE)) {
+                        float hwX, hwY, hhX, hhY;
+                        GetGimmickResizeHandles(*g, hwX, hwY, hhX, hhY);
+                        int hs = (int)GIM_HANDLE_SIZE;
+                        int wx1 = (int)(hwX - cameraX), wy1 = (int)(hwY - cameraY);
+                        int hx1 = (int)(hhX - cameraX), hy1 = (int)(hhY - cameraY);
+                        int fill = GetColor(255, 235, 120), edge = GetColor(40, 36, 30);
+                        // 横つまみ（右辺の中央）：左右を向いた矢印を線で描く。
+                        // 文字で「⇔」と描くとフォント次第で豆腐になるので、図形で描く。
+                        DrawBox(wx1, wy1, wx1 + hs, wy1 + hs, fill, TRUE);
+                        DrawBox(wx1, wy1, wx1 + hs, wy1 + hs, edge, FALSE);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + hs - 3, wy1 + hs / 2, edge);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + 6, wy1 + hs / 2 - 3, edge);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + 6, wy1 + hs / 2 + 3, edge);
+                        DrawLine(wx1 + hs - 3, wy1 + hs / 2, wx1 + hs - 6, wy1 + hs / 2 - 3, edge);
+                        DrawLine(wx1 + hs - 3, wy1 + hs / 2, wx1 + hs - 6, wy1 + hs / 2 + 3, edge);
+                        // 縦つまみ（上辺の中央）：上下を向いた矢印
+                        DrawBox(hx1, hy1, hx1 + hs, hy1 + hs, fill, TRUE);
+                        DrawBox(hx1, hy1, hx1 + hs, hy1 + hs, edge, FALSE);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2, hy1 + hs - 3, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2 - 3, hy1 + 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2 + 3, hy1 + 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + hs - 3, hx1 + hs / 2 - 3, hy1 + hs - 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + hs - 3, hx1 + hs / 2 + 3, hy1 + hs - 6, edge);
+                        // 引っぱっている間は今の値をその場に出す（何pxまで広げたのかが分からないと止め所が無い）
+                        if (isScaling || isScalingHeight) {
+                            char szBuf[32];
+                            sprintf_s(szBuf, sizeof(szBuf), isScaling ? "W:%.0f" : "H:%.0f",
+                                      isScaling ? g->spriteWidth : g->spriteHeight);
+                            int tx = (int)(g->x - cameraX);
+                            int ty = (int)(g->y - cameraY) - 20;
+                            DrawBox(tx - 3, ty - 2, tx + 60, ty + 18, GetColor(30, 26, 24), TRUE);
+                            DrawString(tx, ty, szBuf, GetColor(255, 235, 120));
+                        }
+                    }
                 }
             }
         }
@@ -10104,7 +10245,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 「操作が分からないから詰む」だけの理不尽なものになってしまうため、必ず同期させること。
         if (isPaused) {
             DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]/[LEFT]: Step 1 Frame (Lift Up/Down)  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
-            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, RightClick for Menu", GetColor(200, 200, 200));
+            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, Drag the Handles to Resize, [R]+Drag to Rotate, RightClick for Menu", GetColor(200, 200, 200));
         } else {
             DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]:Move  [W]:Jump  [SHIFT]:Dash  [ENTER]/Click Screen:Shot", GetColor(50, 255, 50));
             DrawString(10, SCREEN_HEIGHT - 22, "EDIT: [R]:Rewind  [SPACE]:Pause  [F]:FastFwd  [T]:Color  [Z]:Zoom  [X]:Dark  [C]:Bright  [M]:Mute", GetColor(120, 220, 255));
