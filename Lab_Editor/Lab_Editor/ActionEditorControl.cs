@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
@@ -391,12 +391,16 @@ internal class LongTextEditForm : Form
     private Panel previewPanel = null!;
 
     // Feature: UI改善（提案書 EV-4）— ゲーム内メッセージボックスの実寸・実際の描画方式に合わせたプレビュー。
-    // DrawPixel.cpp の isShowingMessage 描画ブロックを参照：boxX=20,boxY=SCREEN_HEIGHT-110,boxW=SCREEN_WIDTH-40,boxH=90、
-    // かつ DrawString は自動改行を一切行わない単一行描画のため、長い文章は折り返されずボックスからはみ出す。
-    // ここでは「折り返されて見える」という誤った期待を与えないよう、あえて折り返さずに実機同様1行で表示し、
-    // 収まりきらない場合は明示的に警告する。
-    // GameBoxW/GameBoxH: ゲーム内メッセージボックスの想定サイズ（プレビュー描画のスケール計算に使用）
-    private const int GameBoxW = 600, GameBoxH = 90;
+    // DrawPixel.cpp の isShowingMessage 描画ブロックを参照：boxX=20, boxW=SCREEN_WIDTH-40、
+    // 枠の高さは 90 + (行数-1)×20 で、下端が画面下から20pxの位置に来るよう上へ伸びる。
+    //
+    // 実機は本文の改行で行を分けて1行ずつ描く（最大3行）。ただし1行の中では折り返しも省略もしないので、
+    // 長すぎる行は枠から流れ出て読めなくなる。ここでも同じ分け方で描き、
+    // はみ出す行だけを名指しで警告する（「折り返してくれる」という誤解を与えないため）。
+    // GameBoxW/GameBoxH1: ゲーム内メッセージボックスの横幅と、1行だけのときの高さ
+    private const int GameBoxW = 600, GameBoxH1 = 90;
+    private const int GameLineH = 20;   // 実機の行送り(px)
+    private const int GameMaxLines = 3; // 実機が描く行数の上限。これを超えた行は表示されない
     private const int EstCharPx = 16; // ShowMessage表示時はSetFontSizeが呼ばれないため、DxLib既定フォントの概算幅(px)を使用
 
     public LongTextEditForm(string initial)
@@ -424,7 +428,7 @@ internal class LongTextEditForm : Form
 
         var lblPreviewTitle = new Label
         {
-            Text = "🎮 ゲーム内での見え方（実機は自動改行されないため、はみ出す場合があります）",
+            Text = "🎮 ゲーム内での見え方（改行で行が分かれます。1行が長すぎるとはみ出します）",
             Location = new Point(10, 155),
             Size = new Size(384, 16),
             Font = new Font("Meiryo UI", 7.5f),
@@ -446,34 +450,54 @@ internal class LongTextEditForm : Form
     }
 
     // プレビュー領域の描画処理。実機（DrawPixel.cpp）のメッセージボックスの寸法・描画方式を
-    // できるだけ忠実に再現し、折り返しなしの1行表示ではみ出すかどうかを視覚的に確認できるようにする。
+    // できるだけ忠実に再現し、行ごとにはみ出すかどうかを視覚的に確認できるようにする。
     private void PreviewPanel_Paint(object? sender, PaintEventArgs e)
     {
         var g = e.Graphics;
+
+        // 実機と同じ分け方で行に割る。CRLFでもLFでも同じ結果になるようCRを落としてから分ける。
+        // 実機は上限を超えた行を描かないので、ここでも同じ位置で切って「出ない行」を見せない。
+        string[] allLines = txt.Text.Replace("\r", "").Split('\n');
+        int shownCount = Math.Min(allLines.Length, GameMaxLines);
+
         // プレビュー領域の実際の幅から、ゲーム内ボックス寸法(GameBoxW)に対する拡大縮小率を求める
         float scale = (float)previewPanel.Width / GameBoxW;
-        var boxRect = new RectangleF(2, 2, GameBoxW * scale - 4, GameBoxH * scale - 4);
+        int gameBoxH = GameBoxH1 + (shownCount - 1) * GameLineH;
+        var boxRect = new RectangleF(2, 2, GameBoxW * scale - 4, gameBoxH * scale - 4);
         // ゲーム内と同様、半透明の黒背景に白枠のメッセージボックスを描画する
         using (var bg = new SolidBrush(Color.FromArgb(220, 0, 0, 0))) g.FillRectangle(bg, boxRect);
         g.DrawRectangle(Pens.White, boxRect.X, boxRect.Y, boxRect.Width, boxRect.Height);
 
-        // 改行文字を除去し、実機のDrawStringと同じく改行を無視した1行のテキストとして扱う
-        string text = txt.Text.Replace("\r", "").Replace("\n", " ");
-        // ボックス内に収まるおおよその文字数を概算し、それを超える場合は「はみ出す」と判定する
-        int usableChars = Math.Max(1, (int)((GameBoxW - 24) / (float)EstCharPx));
-        bool overflow = text.Length > usableChars;
-        // 収まりきらない分は「…」で省略して表示する（実際のゲームでは省略されず切れて見えるが、
-        // ここではプレビュー上の可読性を優先して省略表示にしている）
-        string shown = overflow ? text.Substring(0, usableChars) + "…" : text;
+        // 1行に収まるおおよその文字数。全角を1文字ぶんとして数える（実機のフォント幅の概算）
+        int usableChars = Math.Max(1, (GameBoxW - 24) / EstCharPx);
+        bool anyOverflow = false;
 
         using var font = new Font("MS Gothic", 9f);
-        g.DrawString(shown, font, Brushes.White, boxRect.X + 8 * scale, boxRect.Y + 8 * scale);
+        for (int i = 0; i < shownCount; i++)
+        {
+            string line = allLines[i];
+            bool overflow = line.Length > usableChars;
+            if (overflow) anyOverflow = true;
+            // 収まりきらない分は「…」で省略して表示する（実際のゲームでは省略されず切れて見えるが、
+            // ここではプレビュー上の可読性を優先して省略表示にしている）
+            string shown = overflow ? line.Substring(0, usableChars) + "…" : line;
+            // はみ出す行だけ色を変えて、どの行を縮めればよいかがその場で分かるようにする
+            var brush = overflow ? Brushes.OrangeRed : Brushes.White;
+            g.DrawString(shown, font, brush,
+                         boxRect.X + 8 * scale, boxRect.Y + (8 + i * GameLineH) * scale);
+        }
 
-        // はみ出す場合は、想定文字数と現在の文字数を明示した警告文をボックス下部に表示する
-        if (overflow)
+        // 行数オーバーと行の長さオーバーは原因が別なので、警告も別々に出す。
+        if (allLines.Length > GameMaxLines)
         {
             using var warnFont = new Font("Meiryo UI", 7.5f, FontStyle.Bold);
-            g.DrawString($"⚠ 約{usableChars}文字を超えるとボックスからはみ出します（現在{text.Length}文字・改行は無視されます）",
+            g.DrawString($"⚠ 実機に出るのは最初の{GameMaxLines}行までです（現在{allLines.Length}行）",
+                warnFont, Brushes.OrangeRed, 2, previewPanel.Height - 30);
+        }
+        if (anyOverflow)
+        {
+            using var warnFont = new Font("Meiryo UI", 7.5f, FontStyle.Bold);
+            g.DrawString($"⚠ 赤い行は約{usableChars}文字を超えています。その行は枠からはみ出します",
                 warnFont, Brushes.OrangeRed, 2, previewPanel.Height - 16);
         }
     }

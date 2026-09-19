@@ -133,10 +133,28 @@
   },
   "stages": [
     {
+      "file": "tutorial_1_kihon.json",
+      "name": "そうさのきほん",
+      "thumbnail": "img/thumb_tutorial1.png",
+      "order": 0,
+      "unlock": "always",
+      "require": [],
+      "item_total": 9
+    },
+    {
+      "file": "tutorial_2_hensyu.json",
+      "name": "へんしゅうのきほん",
+      "thumbnail": "img/thumb_tutorial2.png",
+      "order": 1,
+      "unlock": "always",
+      "require": [],
+      "item_total": 8
+    },
+    {
       "file": "stage1_hajimari.json",
       "name": "はじまりの草原",
       "thumbnail": "img/thumb_hajimari.png",
-      "order": 0,
+      "order": 2,
       "unlock": "always",
       "require": [],
       "item_total": 15
@@ -145,7 +163,7 @@
       "file": "stage2_hensyu.json",
       "name": "編集のとびら",
       "thumbnail": "img/thumb_hensyu.png",
-      "order": 1,
+      "order": 3,
       "unlock": "always",
       "require": [],
       "item_total": 17
@@ -154,7 +172,7 @@
       "file": "stage4_tate_tower.json",
       "name": "たての塔",
       "thumbnail": "img/thumb_tower.png",
-      "order": 2,
+      "order": 4,
       "unlock": "always",
       "require": [],
       "item_total": 15
@@ -163,7 +181,7 @@
       "file": "stage_iro.json",
       "name": "いろの回廊",
       "thumbnail": "img/thumb_iro.png",
-      "order": 3,
+      "order": 5,
       "unlock": "always",
       "require": [],
       "item_total": 13
@@ -172,7 +190,7 @@
       "file": "hills.json",
       "name": "かたむく丘",
       "thumbnail": "img/thumb_hills.png",
-      "order": 4,
+      "order": 6,
       "unlock": "always",
       "require": [],
       "item_total": 17
@@ -181,7 +199,7 @@
       "file": "horinuki.json",
       "name": "ほりぬきの坑道",
       "thumbnail": "img/thumb_horinuki.png",
-      "order": 5,
+      "order": 7,
       "unlock": "always",
       "require": [],
       "item_total": 18
@@ -190,7 +208,7 @@
       "file": "tatekou.json",
       "name": "わきあがる縦坑",
       "thumbnail": "img/thumb_tatekou.png",
-      "order": 6,
+      "order": 8,
       "unlock": "always",
       "require": [],
       "item_total": 24

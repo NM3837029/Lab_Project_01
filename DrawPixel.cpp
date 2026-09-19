@@ -4703,9 +4703,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // 「もどる」ボタン
+            //
+            // 画面下の中央ではなく左上に置く。
+            // ステージが9本(3行)になると一覧の3行目が y=356〜472 まで伸び、
+            // 下中央に置いたままでは真ん中のカードの名前と進捗をボタンが覆い隠してしまう。
+            // 見出しは中央寄せなので、左上の余白はどの本数でも必ず空いている。
             {
                 float bw = 140.0f, bh = 34.0f;
-                float bl = 320.0f - bw * 0.5f, bt = 418.0f;
+                float bl = 16.0f, bt = 20.0f;
                 int x1 = GameCfg::ToScreenX(bl), y1 = GameCfg::ToScreenY(bt);
                 int x2 = x1 + GameCfg::ToScreenLen(bw), y2 = y1 + GameCfg::ToScreenLen(bh);
                 bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
@@ -9388,7 +9393,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // ステージギミックの描画
         for (const auto& gim : gimmicks) {
-            if (!gim.isActive) continue;
+            // 色ロック足場・明暗ロック足場は、条件が合っていない間 isActive=false になる型。
+            // この2つは「まだ実体化していない」ことを半透明のゴーストで示す描画を自前で持っているのに、
+            // ここで一律に弾いていたためその分岐へ到達できず、条件が合うまで完全に消えていた。
+            // どこに足場が現れるのかが画面に無いと、色や明るさを切り替える手掛かりが一切無くなる。
+            bool drawsGhostWhenInactive = (gim.type == GIMMICK_COLOR_LOCK_PLATFORM
+                                        || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM);
+            if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
@@ -10078,12 +10089,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (isShowingMessage) {
             // UI素材化 — 半透明の黒箱から UIウィンドウ.png の枠へ差し替える。
             // 背景がクリーム色になるので、文字は白ではなく暗いインク色で描く。
-            int boxX = 20, boxY = SCREEN_HEIGHT - 110, boxW = SCREEN_WIDTH - 40, boxH = 90;
+            //
+            // 複数行対応 — DrawString は自動折り返しも改行もしない1行描画なので、
+            // 長い説明を書くと枠からはみ出して読めなくなっていた（1行＝全角28文字が限界）。
+            // 「どのキーを押すのか」と「押すと何が起きるのか」は1行に収まらないことが多く、
+            // 操作を教える文章がそもそも書けない状態だった。
+            // メッセージ本文の改行で行を分け、1行ずつ描く。
+            //
+            // Lab_Editor のメッセージ編集欄は複数行テキストボックスなので、
+            // 保存されるのは CRLF になる。エディタを通さず手でJSONを書けば LF になる。
+            // どちらで来ても同じように読めるよう、CR は行末から取り除いてから描く。
+            std::vector<std::string> msgLines;
+            {
+                std::string cur;
+                for (char ch : currentMessageText) {
+                    if (ch == '\n') { msgLines.push_back(cur); cur.clear(); }
+                    else if (ch != '\r') { cur += ch; }
+                }
+                msgLines.push_back(cur);
+                // 枠に収まる行数で打ち切る。溢れたぶんを詰めて描くと枠の外へ流れ出てしまう
+                const size_t MSG_MAX_LINES = 3;
+                if (msgLines.size() > MSG_MAX_LINES) msgLines.resize(MSG_MAX_LINES);
+            }
+            // 枠の高さは行数に合わせて伸ばす。1行しか無いときは従来と同じ 90px のままにして、
+            // 既存ステージのメッセージの見え方を変えない。
+            const int MSG_LINE_H = 20;
+            int boxX = 20, boxW = SCREEN_WIDTH - 40;
+            int boxH = 90 + ((int)msgLines.size() - 1) * MSG_LINE_H;
+            int boxY = SCREEN_HEIGHT - 20 - boxH;
             DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle);
             if (!currentMessageSpeaker.empty()) {
                 DrawString(boxX + 18, boxY + 14, currentMessageSpeaker.c_str(), UiInkAccent());
             }
-            DrawString(boxX + 18, boxY + (currentMessageSpeaker.empty() ? 20 : 38), currentMessageText.c_str(), UiInk());
+            int lineY = boxY + (currentMessageSpeaker.empty() ? 20 : 38);
+            for (const auto& line : msgLines) {
+                DrawString(boxX + 18, lineY, line.c_str(), UiInk());
+                lineY += MSG_LINE_H;
+            }
             DrawString(boxX + boxW - 118, boxY + boxH - 26, "[ENTER] to close", UiInkSub());
         }
 
