@@ -2357,6 +2357,45 @@ inline float SnapEditAngle(float a) {
     return (fabsf(a - nearest) <= tol) ? nearest : a;
 }
 
+// ============================================================================
+// 取り消し（Ctrl+Z）用のデータ。使い方と考え方は WinMain 内の「取り消し／やり直し」の説明を参照。
+// ============================================================================
+// 編集で変わりうる値を1個体ぶん写し取ったもの。kind は 0=プレイヤー 1=敵 2=ギミック、
+// index は enemies / gimmicks の添字（プレイヤーは0）。
+struct EditSnap {
+    int kind = 0, index = 0;
+    float x = 0.0f, y = 0.0f, scale = 1.0f, angle = 0.0f, speedScale = 1.0f;
+    float width = 0.0f, height = 0.0f, spriteWidth = 0.0f, spriteHeight = 0.0f, editBaseY = 0.0f; // ギミックのみ
+    int direction = 0;
+    bool paused = false, rewinding = false;
+    unsigned int mask = 0u; // editDirtyMask
+};
+// どの項目が変わったか（取り消し時に、変わった項目だけを戻すためのビット）
+enum EditField : unsigned int {
+    EF_POS = 1u << 0, EF_SCALE = 1u << 1, EF_ANGLE = 1u << 2, EF_SPEED = 1u << 3, EF_DIR = 1u << 4,
+    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8
+};
+inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
+    unsigned int f = 0;
+    if (a.x != b.x || a.y != b.y) f |= EF_POS;
+    if (a.scale != b.scale) f |= EF_SCALE;
+    if (a.angle != b.angle) f |= EF_ANGLE;
+    if (a.speedScale != b.speedScale) f |= EF_SPEED;
+    if (a.direction != b.direction) f |= EF_DIR;
+    if (a.paused != b.paused) f |= EF_PAUSE;
+    if (a.rewinding != b.rewinding) f |= EF_REWIND;
+    if (a.mask != b.mask) f |= EF_MASK;
+    if (a.width != b.width || a.height != b.height || a.spriteWidth != b.spriteWidth
+        || a.spriteHeight != b.spriteHeight || a.editBaseY != b.editBaseY) f |= EF_SIZE;
+    return f;
+}
+// 1回の編集操作の記録。before/after は同じ個体を同じ順に並べたもの。fields は個体ごとの「変わった項目」。
+struct EditUndoEntry {
+    std::vector<EditSnap> before, after;
+    std::vector<unsigned int> fields;
+    float cost = 0.0f; // この操作で消費したコスト（取り消すと全額返す）
+};
+
 // 画面エフェクト系の編集ツール（T=色フィルタ / X=暗転 / C=明転 / Z=ズーム / F=早送り）の現在値。
 //
 // これらはWinMain内のローカル変数なので、そのままでは名前空間スコープの判定関数から読めない。
@@ -3765,6 +3804,192 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
     };
 
+    // ===== 取り消し（Ctrl+Z）／やり直し（Ctrl+Y） =====
+    //
+    // 「すべてリセット」（コスト10）が唯一の戻し方だったため、試しに触ってみるのが怖かった。
+    // 1手ずつ戻せるようにする。
+    //
+    // 記録の単位は「1回の編集操作」：
+    //   ・マウスを押してから離すまでの1ジェスチャ（移動・拡縮・回転・つまみ・INSPECTORのドラッグ）
+    //   ・メニュー／ダブルクリックの1操作（反転・速度・一時停止・巻き戻し・リセット）
+    //   ・0.4秒以内に続いたホイール操作（まとめて1手）
+    // 各操作の前後で、選択している物の「編集で変わりうる値」を写し取っておき、
+    // 差があった項目だけを戻す／やり直す。
+    //
+    // 【なぜ差があった項目だけか】世界が動いている間に拡縮した敵は、取り消すころには別の場所へ歩いている。
+    // 位置まで一式を戻すと、大きさを戻しただけのつもりが敵が元の場所へ瞬間移動してしまう。
+    //
+    // 【なぜ添字で覚えるか】生ポインタだと、gimmicks.push_back（Gキー・カット作成）で配列が作り直された
+    // 瞬間にすべて無効になる。種別と添字なら、末尾への追加ではずれない。
+    // 配列の途中を消す操作（カットの削除）をしたときは、記録ごと捨てる。
+    std::vector<EditUndoEntry> undoStack, redoStack;
+    const size_t EDIT_UNDO_MAX = 50;
+    bool gestureActive = false;                 // ジェスチャの記録中か
+    std::vector<EditSnap> gestureBefore;        // ジェスチャを始める前の状態
+    bool wheelUndoOpen = false;                 // ホイール操作の記録中か（0.4秒以内の続きはまとめる）
+    std::vector<EditSnap> wheelUndoBefore;
+    int wheelUndoLastMs = 0;
+
+    // 1個体ぶんの現在値を写し取る
+    auto CaptureSnap = [&](int kind, int index) -> EditSnap {
+        EditSnap sn; sn.kind = kind; sn.index = index;
+        if (kind == 0) {
+            sn.x = player.x; sn.y = player.y; sn.scale = player.scale; sn.angle = player.angle;
+            sn.speedScale = player.speedScale; sn.direction = player.direction;
+            sn.paused = player.isPaused; sn.rewinding = player.isRewinding;
+        } else if (kind == 1 && index >= 0 && index < (int)enemies.size()) {
+            const Enemy& e = enemies[index];
+            sn.x = e.x; sn.y = e.y; sn.scale = e.scale; sn.angle = e.angle;
+            sn.speedScale = e.speedScale; sn.direction = e.direction;
+            sn.paused = e.isPaused; sn.rewinding = e.isRewinding; sn.mask = e.editDirtyMask;
+        } else if (kind == 2 && index >= 0 && index < (int)gimmicks.size()) {
+            const Gimmick& g = gimmicks[index];
+            sn.x = g.x; sn.y = g.y; sn.angle = g.angle;
+            sn.speedScale = g.speedScale; sn.direction = g.direction;
+            sn.paused = g.isPaused; sn.rewinding = g.isRewinding; sn.mask = g.editDirtyMask;
+            sn.width = g.width; sn.height = g.height; sn.spriteWidth = g.spriteWidth; sn.spriteHeight = g.spriteHeight;
+            sn.editBaseY = g.editBaseY;
+        }
+        return sn;
+    };
+    // 今の選択すべてを写し取る
+    auto CaptureSelection = [&](std::vector<EditSnap>& out) {
+        out.clear();
+        for (auto* p : selectedPlayers) { (void)p; out.push_back(CaptureSnap(0, 0)); }
+        for (auto* e : selectedEnemies) {
+            int i = (int)(e - enemies.data());
+            if (i >= 0 && i < (int)enemies.size()) out.push_back(CaptureSnap(1, i));
+        }
+        for (auto* g : selectedGimmicks) {
+            int i = (int)(g - gimmicks.data());
+            if (i >= 0 && i < (int)gimmicks.size()) out.push_back(CaptureSnap(2, i));
+        }
+    };
+    // 「like」と同じ個体を、今の値で写し取る（選択が変わっていても、同じ物の前後を比べられる）
+    auto CaptureLike = [&](const std::vector<EditSnap>& like, std::vector<EditSnap>& out) {
+        out.clear();
+        for (const auto& sn : like) out.push_back(CaptureSnap(sn.kind, sn.index));
+    };
+    auto SameTargets = [&](const std::vector<EditSnap>& a, const std::vector<EditSnap>& b) -> bool {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); i++) if (a[i].kind != b[i].kind || a[i].index != b[i].index) return false;
+        return true;
+    };
+
+    // 差のあった項目だけを書き戻す。履歴の書き換え方は、各編集操作（ドラッグ・拡縮・回転）と同じ。
+    auto ApplySnaps = [&](const std::vector<EditSnap>& v, const std::vector<unsigned>& fl) {
+        for (size_t i = 0; i < v.size() && i < fl.size(); i++) {
+            const EditSnap& sn = v[i]; unsigned f = fl[i];
+            if (sn.kind == 0) {
+                if (f & EF_POS)    { player.x = sn.x; player.y = sn.y; player.vx = 0.0f; player.vy = 0.0f; }
+                if (f & EF_SCALE)  player.scale = sn.scale;
+                if (f & EF_ANGLE)  player.angle = sn.angle;
+                if (f & EF_SPEED)  player.speedScale = sn.speedScale;
+                if (f & EF_DIR)    player.direction = sn.direction;
+                if (f & EF_PAUSE)  player.isPaused = sn.paused;
+                if (f & EF_REWIND) player.isRewinding = sn.rewinding;
+            } else if (sn.kind == 1 && sn.index >= 0 && sn.index < (int)enemies.size()) {
+                Enemy& e = enemies[sn.index];
+                if (f & EF_POS) {
+                    float dx = sn.x - e.x, dy = sn.y - e.y;
+                    e.x = sn.x; e.y = sn.y; e.vx = 0.0f; e.vy = 0.0f;
+                    for (auto& h : e.history) { h.x += dx; h.y += dy; }
+                }
+                if (f & EF_SCALE)  { e.scale = sn.scale; for (auto& h : e.history) h.scale = e.scale; }
+                if (f & EF_ANGLE)  { e.angle = sn.angle; for (auto& h : e.history) h.angle = e.angle; }
+                if (f & EF_SPEED)  e.speedScale = sn.speedScale;
+                if (f & EF_DIR)    e.direction = sn.direction;
+                if (f & EF_PAUSE)  e.isPaused = sn.paused;
+                if (f & EF_REWIND) e.isRewinding = sn.rewinding;
+                if (f & EF_MASK)   e.editDirtyMask = sn.mask;
+            } else if (sn.kind == 2 && sn.index >= 0 && sn.index < (int)gimmicks.size()) {
+                Gimmick& g = gimmicks[sn.index];
+                if (f & EF_POS) {
+                    float dx = sn.x - g.x, dy = sn.y - g.y;
+                    g.x = sn.x; g.y = sn.y;
+                    for (auto& h : g.history) { h.x += dx; h.y += dy; }
+                }
+                if (f & EF_SIZE) {
+                    g.width = sn.width; g.height = sn.height;
+                    g.spriteWidth = sn.spriteWidth; g.spriteHeight = sn.spriteHeight;
+                    g.editBaseY = sn.editBaseY;
+                }
+                if (f & EF_ANGLE)  { g.angle = sn.angle; for (auto& h : g.history) h.angle = g.angle; }
+                if (f & EF_SPEED)  g.speedScale = sn.speedScale;
+                if (f & EF_DIR)    g.direction = sn.direction;
+                if (f & EF_PAUSE)  g.isPaused = sn.paused;
+                if (f & EF_REWIND) g.isRewinding = sn.rewinding;
+                if (f & EF_MASK)   g.editDirtyMask = sn.mask;
+            }
+        }
+    };
+
+    // 記録を全部捨てる（ステージの作り直し・配列の途中を消す操作のとき）
+    auto ClearEditUndo = [&]() {
+        undoStack.clear(); redoStack.clear();
+        gestureActive = false; gestureBefore.clear();
+        wheelUndoOpen = false; wheelUndoBefore.clear();
+    };
+
+    // 1回の編集操作を記録する。before は操作の直前の状態、cost はその操作が消費したコスト。
+    //   ignorePos … 位置の差は記録しない（世界が動いている間に続いたホイール操作用。
+    //               敵が勝手に歩いた分まで「編集」として戻してしまうのを避ける）
+    auto PushUndo = [&](const std::vector<EditSnap>& before, float cost, bool ignorePos) {
+        if (before.empty()) return;
+        EditUndoEntry en;
+        en.before = before;
+        CaptureLike(before, en.after);
+        bool anyReal = false;
+        for (size_t i = 0; i < en.before.size(); i++) {
+            unsigned f = EditSnapDiff(en.before[i], en.after[i]);
+            if (ignorePos) f &= ~(unsigned)EF_POS;
+            en.fields.push_back(f);
+            // 「編集した印(editDirtyMask)」だけが変わった操作は記録しない。
+            // 何も動かさずに物をクリックしただけでも印は付くため、残すと取り消しの履歴が空打ちで埋まる。
+            if (f & ~(unsigned)EF_MASK) anyReal = true;
+        }
+        if (!anyReal && cost <= 0.0f) return;
+        en.cost = cost;
+        undoStack.push_back(en);
+        if (undoStack.size() > EDIT_UNDO_MAX) undoStack.erase(undoStack.begin());
+        redoStack.clear(); // 新しい編集をしたら、やり直しの先は無くなる
+    };
+
+    // ホイール操作の記録を確定する。他の編集操作の前（順番が入れ替わらないように）と、0.4秒経ったときに呼ぶ。
+    auto FlushWheelUndo = [&]() {
+        if (!wheelUndoOpen) return;
+        PushUndo(wheelUndoBefore, 0.0f, true);
+        wheelUndoOpen = false;
+        wheelUndoBefore.clear();
+    };
+
+    auto EditUndo = [&]() -> bool {
+        FlushWheelUndo();
+        if (undoStack.empty()) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        EditUndoEntry en = undoStack.back();
+        undoStack.pop_back();
+        ApplySnaps(en.before, en.fields);
+        // 消費したコストは全額返す（試行錯誤を罰しない）
+        editCost += en.cost;
+        if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
+        redoStack.push_back(en);
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        return true;
+    };
+    auto EditRedo = [&]() -> bool {
+        if (redoStack.empty()) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        const EditUndoEntry& top = redoStack.back();
+        // やり直しはもう一度その操作をするのと同じなので、コストが足りなければできない
+        if (editCost < top.cost) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        EditUndoEntry en = top;
+        redoStack.pop_back();
+        editCost -= en.cost;
+        ApplySnaps(en.after, en.fields);
+        undoStack.push_back(en);
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        return true;
+    };
+
     // 可変地面は、横幅を絵のタイル幅の整数倍に丸める（半端な幅だと絵が切れる）。
     auto SnapGroundWidth = [&](Gimmick& g) {
         if (g.type != GIMMICK_SCALABLE_GROUND) return;
@@ -3840,24 +4065,31 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // 一時停止／巻き戻しの切り替え。複数選択でも定額（対象数に関わらず一発分のコスト）。
     // 禁止されている相手は飛ばす。成功したら true。
+    // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
     auto EditTogglePause = [&]() -> bool {
         if (targetPaused == nullptr) return false;
         if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
         bool next = !(*targetPaused);
         for (auto* p : selectedPlayers) p->isPaused = next;
         for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = next; }
         for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = next; }
+        PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
         return true;
     };
     auto EditToggleRewind = [&]() -> bool {
         if (targetRewind == nullptr) return false;
         if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
         bool next = !(*targetRewind);
         for (auto* p : selectedPlayers) p->isRewinding = next;
         for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = next; }
         for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = next; }
+        PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
         return true;
     };
 
@@ -3868,6 +4100,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
         if (!any || editCost < currentEditCost.flatSpeedChange) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatSpeedChange;
         for (auto* p : selectedPlayers) { p->speedScale += delta; if (p->speedScale < 0.0f) p->speedScale = 0.0f; }
         for (auto* e : selectedEnemies) {
@@ -3880,6 +4114,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->speedScale += delta; if (g->speedScale < 0.0f) g->speedScale = 0.0f;
             g->editDirtyMask |= EDIT_DIRTY_SPEED;
         }
+        PushUndo(undoBefore, currentEditCost.flatSpeedChange, false);
         return true;
     };
 
@@ -3891,6 +4126,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
         if (!any || editCost < currentEditCost.flatDirectionFlip) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatDirectionFlip;
         for (auto* p : selectedPlayers) p->direction = (p->direction == 0 ? 1 : 0);
         for (auto* e : selectedEnemies) {
@@ -3904,6 +4141,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->editDirtyMask |= EDIT_DIRTY_DIR;
         }
         SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
+        PushUndo(undoBefore, currentEditCost.flatDirectionFlip, false);
         return true;
     };
 
@@ -3915,6 +4153,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     auto EditResetAll = [&]() -> bool {
         if (selectedType == SELECT_NONE) return false;
         if (editCost < currentEditCost.flatResetAll) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatResetAll;
         for (auto* p : selectedPlayers) {
             p->scale = 1.0f; p->angle = 0.0f; p->speedScale = 1.0f; p->isPaused = false; p->isRewinding = false;
@@ -3939,6 +4179,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->editDirtyMask = EDIT_DIRTY_NONE;
         }
         SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
+        PushUndo(undoBefore, currentEditCost.flatResetAll, false);
         return true;
     };
 
@@ -4577,6 +4818,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         selectedEnemies.clear();
         selectedGimmicks.clear();
         isAreaSelecting = false;
+        ClearEditUndo(); // 敵・ギミックの配列が作り直されるので、添字で覚えた記録は使えない
 
         selectedType = SELECT_NONE;
         targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
@@ -5496,6 +5738,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
                                     if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
                                 }
+                                ClearEditUndo(); // 添字がずれるので、取り消しの記録は使えなくなる
                                 selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                 selectedType = SELECT_NONE;
                                 targetGimmick = nullptr;
@@ -5573,6 +5816,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 && mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT
                 && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate
                 && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting) {
+                // 取り消し用：0.4秒以内に続いたホイールは、同じ対象に対する1手としてまとめる。
+                {
+                    std::vector<EditSnap> cur;
+                    CaptureSelection(cur);
+                    int nowMs = GetNowCount();
+                    if (wheelUndoOpen && (nowMs - wheelUndoLastMs > 400 || !SameTargets(wheelUndoBefore, cur))) FlushWheelUndo();
+                    if (!wheelUndoOpen) { wheelUndoBefore = cur; wheelUndoOpen = true; }
+                    wheelUndoLastMs = nowMs;
+                }
                 if (editCtrlHeld) {
                     ApplyAngleDelta((float)wheelRot * (EDIT_KNOB_PI / 12.0f));
                     SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
@@ -5580,6 +5832,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     ApplyScaleDelta((float)wheelRot * 0.1f, (float)wheelRot * 32.0f, true);
                     SoundManager::Get().PlaySe(gameConfig.editSe.scale);
                 }
+            }
+            // ホイールが止まって0.4秒たったら、まとめた操作を確定する
+            if (wheelUndoOpen && GetNowCount() - wheelUndoLastMs > 400) FlushWheelUndo();
+
+            // Ctrl+Z で取り消し、Ctrl+Y でやり直し。押した瞬間に1回だけ効く。
+            // タイムラインのカットを打ちかけているとき（1点目だけ打った状態）の Ctrl+Z は、その打ちかけを捨てる。
+            // ジェスチャ（ドラッグ等）の最中は受け付けない。
+            {
+                static bool lastUndoKey = false, lastRedoKey = false;
+                bool undoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Z);
+                bool redoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Y);
+                if (objectEditOpEnabled && !gestureActive && !isAreaSelecting && !menu.isOpen) {
+                    if (undoNow && !lastUndoKey) {
+                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                        else EditUndo();
+                    }
+                    if (redoNow && !lastRedoKey) EditRedo();
+                }
+                lastUndoKey = undoNow; lastRedoKey = redoNow;
             }
 
             // エディタUI / ドラッグ操作
@@ -5981,6 +6252,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                 }
 
+                // 取り消し用：ジェスチャ（押してから離すまで）を始めた最初のフレームで、変形が掛かる前の状態を覚える。
+                // 変形はこの下で掛かるので、必ずここ（変形より前）で写し取る。
+                {
+                    bool gestureNow = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate
+                                   || isInspScale || isInspAngle || isInspSpeed;
+                    if (gestureNow && !gestureActive) {
+                        FlushWheelUndo();
+                        CaptureSelection(gestureBefore);
+                        gestureActive = true;
+                    }
+                }
+
                 // つまみのドラッグ。つかんでいる間は世界が止まるので、狙いを付けてゆっくり合わせられる。
                 //   拡縮 … 右下の角が指に付いてくる。つかんだ瞬間のずれは持ち越す（急に大きさが跳ねない）
                 //   回転 … 中心から指への向きがそのまま角度になる。15度の倍数の近くでは吸い付く
@@ -6114,6 +6397,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 従来、編集ツールは「拒否されたときだけ音が鳴り、成功したときは無音」という
                 // 一貫性の無い状態だった。掴んでいる間ずっと鳴らすとうるさいので、
                 // マウスを離して確定した瞬間に1回だけ鳴らす。
+                // 取り消し用：ジェスチャが終わったので、前後の差を1手として記録する
+                if (gestureActive) { PushUndo(gestureBefore, 0.0f, false); gestureActive = false; gestureBefore.clear(); }
                 if (isScaling || isScalingHeight || isHandleScale) SoundManager::Get().PlaySe(gameConfig.editSe.scale);
                 else if (isRotating || isHandleRotate)             SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
                 else if (isDragging)                               SoundManager::Get().PlaySe(gameConfig.editSe.move);
@@ -9321,7 +9606,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
         bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
         if (currentScene == PLAY && canPlayerAct) {
-            zHeldThisFrame = CheckHitKey(KEY_INPUT_Z) != 0;
+            // Ctrl+Z は取り消しなので、ズームの Z としては数えない（コストを使ってしまう）
+            zHeldThisFrame = (CheckHitKey(KEY_INPUT_Z) != 0) && !editCtrlHeld;
             xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
             cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
             bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
@@ -10896,6 +11182,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(24, 354, "つまみ：引いて変形", gc);
                 DrawString(24, 374, "ダブルクリック：反転", gc);
                 DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
+                DrawString(24, 414, "Ctrl+Z：取り消し", gc);
+                DrawString(24, 434, "Ctrl+Y：やり直し", gc);
             }
 
             DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle); // 右パネル（インスペクター）
