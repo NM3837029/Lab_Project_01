@@ -6584,9 +6584,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // （一時停止はCanUpdate経由で既にタイマーごと止まるため、丁寧に近づけば安全という差別化になる）。
                             //
                             // 編集リアクション：
-                            //  ・傾ける   → 照準ロック。追尾をやめ、傾けた向きへ固定で撃ち続ける。
+                            //  ・傾ける   → 手動照準。その瞬間に追尾を止め、傾けた向きへ次の一発を撃つ。
                             //  ・拡大／縮小 → 弾の大きさと速さが変わる。
-                            //  ・向き反転 → プレイヤーを追うのをやめ、反対側（背中側）へ撃つようになる。
+                            //  ・向き反転 → その瞬間に追尾を止め、向けられた側へ真横に次の一発を撃つ。
                             //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
                             //  ・暗転     → 溜めの予告ズームが弱まり、いつ撃たれるか読みにくくなる。
                             float shootInterval = edef ? edef->actionInterval : 120.0f;
@@ -6607,16 +6607,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float eCenterYs = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
                             // ---- このフレームの狙い（毎フレーム決める）----
                             // 砲身のようなパーツは ParentAim でこの結果を読むので、絵と弾が必ず一致する。
+                            // 照準砲台と同じ約束：編集された瞬間に追尾を止め、向けられた方向へ1発撃ち、
+                            // 撃ったら編集を消費して追尾へ戻る。編集中はプレイヤーの位置を見ない。
+                            bool aimedByEditS = (er.tilted || erFlipEdited);
                             {
-                                float ax = pCenterXs - eCenterXs, ay = pCenterYs - eCenterYs;
-                                float ad = sqrtf(ax * ax + ay * ay);
-                                if (ad < 1.0f) ad = 1.0f;
-                                ax /= ad; ay /= ad;
+                                float ax, ay;
                                 if (er.tilted) {
                                     GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
                                 } else if (erFlipEdited) {
-                                    // 反転＝プレイヤーに背を向ける。追尾をやめ、左右を裏返した向きを狙う。
-                                    ax = -ax;
+                                    ax = (enemy.direction == 1) ? -1.0f : 1.0f;
+                                    ay = 0.0f;
+                                } else {
+                                    ax = pCenterXs - eCenterXs; ay = pCenterYs - eCenterYs;
+                                    float ad = sqrtf(ax * ax + ay * ay);
+                                    if (ad < 1.0f) ad = 1.0f;
+                                    ax /= ad; ay /= ad;
                                 }
                                 enemy.aimAngle = atan2f(ay, ax);
                                 enemy.direction = (ax < 0.0f) ? 1 : 0;
@@ -6665,6 +6670,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     }
                                 }
                                 enemy.customTimer = 0.0f;
+                                if (aimedByEditS) {
+                                    // 撃ったら編集を消費して追尾へ戻す（基準を今の姿勢・向きへ置き直す）
+                                    enemy.editBaseAngle = enemy.angle;
+                                    enemy.editBaseDirection = enemy.direction;
+                                    enemy.editDirtyMask &= ~(unsigned int)(EDIT_DIRTY_ANGLE | EDIT_DIRTY_DIR);
+                                }
                             }
                             break;
                         }
@@ -7321,7 +7332,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             //             スイッチや壊せるブロックを撃たせたいたびに狙いを付け直す操作になる。
                             //  ・拡大   → 大きく遅い弾。空中で追い越せるので足場感覚で扱える。
                             //  ・縮小   → 小さく速い弾。避けにくいが、当たり判定も小さい。
-                            //  ・向き反転 → プレイヤーを追うのをやめ、反対側（背中側）へ撃つようになる。
+                            //  ・向き反転 → その瞬間に追尾を止め、向けられた側へ真横に次の一発を撃つ。
                             //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
                             //  ・早送り → 発射間隔が詰まる。
                             //  ・暗転   → 狙いがぶれる（プレイヤーの位置を正確に掴めなくなる）。
@@ -7342,23 +7353,32 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 砲身パーツは ParentAim でこの結果を読むので、絵と弾の向きが必ず一致する。
                             // 以前はパーツ側が DirectionToPlayer から狙いを組み直していたため、
                             // 本体が追尾をやめる条件を足すたびに食い違いが生まれていた。
+                            //
+                            // 【この型の約束】編集された瞬間に追尾を止め、向けられた方向へ1発撃ち、
+                            //                 撃ったら編集を消費して追尾へ戻る。
+                            // 編集されている間の狙いは、プレイヤーの位置をいっさい見ない。
+                            // 「反転させたのに、相手の動きに合わせて砲身が動き続ける」のでは
+                            // 追尾を止めたことにならないため。
+                            bool aimedByEdit = (er.tilted || erFlipEdited);
                             {
-                                float eCx = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
-                                float eCy = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
-                                float pCx = player.x + (player.width * player.scale) / 2.0f;
-                                float pCy = player.y + (player.height * player.scale) / 2.0f;
-                                float ax = pCx - eCx, ay = pCy - eCy;
-                                float ad = sqrtf(ax * ax + ay * ay);
-                                if (ad < 1.0f) ad = 1.0f;
-                                ax /= ad; ay /= ad;
+                                float ax, ay;
                                 if (er.tilted) {
-                                    // 手動照準。反転バイアスを乗せない＝砲身の絵が指している向きへそのまま撃つ
+                                    // 傾け＝手動照準。傾けた向きそのものを狙う。
                                     GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
                                 } else if (erFlipEdited) {
-                                    // 反転＝プレイヤーに背を向ける。追尾をやめ、左右を裏返した向きを狙う。
-                                    // 高さの狙いはそのまま残すので、背中側の壁や敵へ素直に当てられる。
-                                    // 「反転させたのに自分を狙い続ける」＝絵と動きが食い違う、が一番の混乱の元だった。
-                                    ax = -ax;
+                                    // 反転＝真横（向けられた側）へ固定。プレイヤーの高さも追わない。
+                                    ax = (enemy.direction == 1) ? -1.0f : 1.0f;
+                                    ay = 0.0f;
+                                } else {
+                                    // 未編集：プレイヤーを追う
+                                    float eCx = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                                    float eCy = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
+                                    float pCx = player.x + (player.width * player.scale) / 2.0f;
+                                    float pCy = player.y + (player.height * player.scale) / 2.0f;
+                                    ax = pCx - eCx; ay = pCy - eCy;
+                                    float ad = sqrtf(ax * ax + ay * ay);
+                                    if (ad < 1.0f) ad = 1.0f;
+                                    ax /= ad; ay /= ad;
                                 }
                                 enemy.aimAngle = atan2f(ay, ax);
                                 // 絵の向きは狙いに従わせる（台座と砲身と弾が必ず同じ側を向く）
@@ -7371,7 +7391,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                                 float dirXa = cosf(enemy.aimAngle);
                                 float dirYa = sinf(enemy.aimAngle);
-                                bool aimedByEdit = er.tilted;
 
                                 // 暗転中は狙いがぶれる。明るさが下がるほどブレ幅が大きくなる。
                                 // ブレは「撃った一発」にだけ乗せる。毎フレームの狙い(aimAngle)に乗せると
@@ -7422,8 +7441,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // なお editBaseAngle は EnemyState に入っていないため巻き戻しても消費は戻らない。
                                 // これは FALLER が復帰先(editBaseX/Y)を書き換えるのと同じ既存の割り切りに揃えてある。
                                 if (aimedByEdit) {
+                                    // 撃ったら編集を消費して追尾へ戻す。
+                                    // 基準を今の姿勢・今の向きへ置き直すと差が0になり、
+                                    // 次のフレームから er.tilted も erFlipEdited も false に戻る。
                                     enemy.editBaseAngle = enemy.angle;
-                                    enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_ANGLE;
+                                    enemy.editBaseDirection = enemy.direction;
+                                    enemy.editDirtyMask &= ~(unsigned int)(EDIT_DIRTY_ANGLE | EDIT_DIRTY_DIR);
                                 }
                             }
                             break;
