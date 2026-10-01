@@ -6,7 +6,7 @@
     "hp": 2,
     "width": 32,
     "height": 32,
-    "sprite": "img/普通の敵.png",
+    "sprite": "img/72_20260921220222.png",
     "seSpawn": "",
     "seAttack": "",
     "seDamage": "se_enemy_damage",
@@ -54,6 +54,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -71,8 +72,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_imomushi",
@@ -81,7 +81,7 @@
     "hp": 5,
     "width": 34,
     "height": 34,
-    "sprite": "img/芋虫顔.png",
+    "sprite": "img/芋虫頭.png",
     "seSpawn": "",
     "seAttack": "se_enemy_pounce",
     "seDamage": "se_enemy_damage",
@@ -129,6 +129,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -149,7 +150,7 @@
     "parts": [
       {
         "id": "body0",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -16.0,
         "offsetY": 6.0,
         "width": 24,
@@ -256,7 +257,7 @@
       },
       {
         "id": "body1",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -32.0,
         "offsetY": 6.0,
         "width": 24,
@@ -363,7 +364,7 @@
       },
       {
         "id": "body2",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -48.0,
         "offsetY": 6.0,
         "width": 24,
@@ -470,7 +471,7 @@
       },
       {
         "id": "body3",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -64.0,
         "offsetY": 6.0,
         "width": 24,
@@ -577,7 +578,7 @@
       },
       {
         "id": "body4",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -80.0,
         "offsetY": 6.0,
         "width": 24,
@@ -684,7 +685,7 @@
       },
       {
         "id": "body5",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -96.0,
         "offsetY": 6.0,
         "width": 24,
@@ -791,7 +792,7 @@
       },
       {
         "id": "body6",
-        "sprite": "img/芋虫胴.png",
+        "sprite": "img/芋虫胴体.png",
         "offsetX": -112.0,
         "offsetY": 6.0,
         "width": 24,
@@ -896,8 +897,7 @@
           }
         ]
       }
-    ],
-    "bodyIgnoresTilt": false
+    ]
   },
   {
     "id": "enemy_houdai",
@@ -954,6 +954,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": true,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -1033,8 +1034,7 @@
           }
         ]
       }
-    ],
-    "bodyIgnoresTilt": true
+    ]
   },
   {
     "id": "enemy_dossun",
@@ -1091,6 +1091,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": 2.5,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -1176,8 +1177,7 @@
           }
         ]
       }
-    ],
-    "bodyIgnoresTilt": false
+    ]
   },
   {
     "id": "enemy_maboroshi",
@@ -1186,7 +1186,7 @@
     "hp": 3,
     "width": 36,
     "height": 36,
-    "sprite": "img/幽霊のような敵.png",
+    "sprite": "img/80_20260924170915.png",
     "seSpawn": "",
     "seAttack": "",
     "seDamage": "se_enemy_damage",
@@ -1234,6 +1234,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": true,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -1251,8 +1252,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_taiyou",
@@ -1261,7 +1261,7 @@
     "hp": 4,
     "width": 44,
     "height": 44,
-    "sprite": "img/太陽のような敵.png",
+    "sprite": "img/82_20260924172628.png",
     "seSpawn": "",
     "seAttack": "se_shoot_alt",
     "seDamage": "se_enemy_damage",
@@ -1309,6 +1309,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": true,
     "spreadRotationStep": 0.39,
     "verticalTrackSpeed": -1.0,
@@ -1326,8 +1327,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_drone",
@@ -1336,7 +1336,7 @@
     "hp": 2,
     "width": 34,
     "height": 34,
-    "sprite": "img/機械的な敵.png",
+    "sprite": "img/81_20260924171553.png",
     "seSpawn": "",
     "seAttack": "",
     "seDamage": "se_enemy_damage",
@@ -1384,6 +1384,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": 0.55,
@@ -1401,8 +1402,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_honeycomb",
@@ -1411,7 +1411,7 @@
     "hp": 3,
     "width": 36,
     "height": 36,
-    "sprite": "img/ハニカムな敵.png",
+    "sprite": "img/83_20260924173312.png",
     "seSpawn": "",
     "seAttack": "",
     "seDamage": "se_enemy_damage",
@@ -1459,6 +1459,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -1476,8 +1477,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_kikagaku",
@@ -1534,6 +1534,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -1551,8 +1552,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_bero",
@@ -1609,6 +1609,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2144,8 +2145,7 @@
           }
         ]
       }
-    ],
-    "bodyIgnoresTilt": false
+    ]
   },
   {
     "id": "enemy_pyon",
@@ -2202,6 +2202,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2219,8 +2220,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_kotei_hou",
@@ -2277,6 +2277,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2294,8 +2295,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_sakuteki",
@@ -2352,6 +2352,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2369,8 +2370,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_aruki",
@@ -2427,6 +2427,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2444,8 +2445,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_oikake",
@@ -2502,6 +2502,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2519,8 +2520,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_totsushin",
@@ -2577,6 +2577,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2594,8 +2595,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_tobi",
@@ -2652,6 +2652,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2669,8 +2670,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_tate",
@@ -2727,6 +2727,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2744,8 +2745,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_tempo",
@@ -2802,6 +2802,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2819,8 +2820,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_kurayami",
@@ -2877,6 +2877,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2894,8 +2895,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_irozome",
@@ -2952,6 +2952,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -2969,8 +2970,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_yugami",
@@ -3027,6 +3027,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -3044,8 +3045,7 @@
     "noSpeed": false,
     "script": [],
     "edit_reactions": {},
-    "parts": [],
-    "bodyIgnoresTilt": false
+    "parts": []
   },
   {
     "id": "enemy_kikai_imomushi",
@@ -3102,6 +3102,7 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
     "verticalTrackSpeed": -1.0,
@@ -3222,7 +3223,81 @@
         "deadly": false,
         "script": []
       }
-    ],
-    "bodyIgnoresTilt": false
+    ]
+  },
+  {
+    "id": "enemy_1",
+    "name": "新敵",
+    "type_enum": 0,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/72_20260921220222.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
   }
 ]
