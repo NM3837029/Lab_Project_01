@@ -2305,6 +2305,58 @@ void SetGimmickHeight(Gimmick& g, float h) {
     g.spriteHeight = h;
 }
 
+// ============================================================================
+// 編集つまみ（敵・プレイヤーの拡縮／回転、ギミックの回転）
+//
+// ギミックの横幅・縦幅にだけあったつまみを、敵とプレイヤーにも広げる。
+// 変形がキー操作（S／R を押しながらドラッグ）でしか出来なかったため、
+// 「どうやって大きくするのか」が画面から読み取れなかった。
+//
+// 選択枠（敵は当たり判定の矩形、ギミックは絵の矩形）に対して
+//   ・拡縮つまみ … 右下の角。外へ引くと大きくなる（敵・プレイヤーのみ。ギミックは既存の辺のつまみ）
+//   ・回転つまみ … 枠の中心から「今の角度の真上」へ伸ばした先の丸。つまみごと対象の回転に合わせて回る
+// を出す。描画と当たり判定が同じ関数を通るので、見えている場所とつかめる場所は食い違わない。
+// ============================================================================
+struct EditBox { float x, y, w, h; };
+inline EditBox EnemyEditBox(const Enemy& e)     { return { e.x, e.y, (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale }; }
+inline EditBox PlayerEditBox(const Player& p)   { return { p.x, p.y, (float)p.width * p.scale, (float)p.height * p.scale }; }
+inline EditBox GimmickEditBox(const Gimmick& g) { return { g.x, g.y, g.spriteWidth, g.spriteHeight }; }
+
+const float EDIT_KNOB_PI          = 3.14159265f;
+const float EDIT_KNOB_RADIUS = 7.0f;   // 回転つまみ（丸）の半径(px)。つかめる範囲はこれより少し広く取る
+const float EDIT_KNOB_GAP    = 26.0f;  // 枠の端から回転つまみの中心までの距離(px)
+const float EDIT_KNOB_GRAB   = 11.0f;  // 回転つまみをつかめる半径(px)。見た目の丸より広くして狙いやすくする
+
+// 回転つまみの中心。角度は DrawRotaGraph と同じ「時計回りが正」で、0なら真上。
+inline void GetEditKnob(const EditBox& b, float angle, float& outKx, float& outKy) {
+    float cx = b.x + b.w * 0.5f, cy = b.y + b.h * 0.5f;
+    float r = (b.w > b.h ? b.w : b.h) * 0.5f + EDIT_KNOB_GAP;
+    outKx = cx + sinf(angle) * r;
+    outKy = cy - cosf(angle) * r;
+}
+
+// 拡縮つまみ（右下の角）の左上。大きさは GIM_HANDLE_SIZE（ギミックのつまみと同じ）。
+inline void GetEditCornerHandle(const EditBox& b, float& outHx, float& outHy) {
+    float half = GIM_HANDLE_SIZE * 0.5f;
+    outHx = b.x + b.w - half;
+    outHy = b.y + b.h - half;
+}
+
+// 角度を -π〜π へ畳む。回転つまみは「中心からマウスへの向き」を直接角度にするので、
+// 今の角度（何周ぶんも積もっていることがある）との差を最短で取るために使う。
+inline float WrapEditAngle(float a) {
+    return a - 2.0f * EDIT_KNOB_PI * floorf((a + EDIT_KNOB_PI) / (2.0f * EDIT_KNOB_PI));
+}
+
+// 15度の倍数の±5度以内なら、その倍数へ吸い付かせる。それ以外は自由角のまま。
+// 「ちょうど真横にしたい」「ちょうど真下にしたい」を、修飾キー無しで簡単にするためのもの。
+inline float SnapEditAngle(float a) {
+    const float step = EDIT_KNOB_PI / 12.0f;         // 15度
+    const float tol  = 5.0f * EDIT_KNOB_PI / 180.0f; // 5度
+    float nearest = roundf(a / step) * step;
+    return (fabsf(a - nearest) <= tol) ? nearest : a;
+}
+
 // 画面エフェクト系の編集ツール（T=色フィルタ / X=暗転 / C=明転 / Z=ズーム / F=早送り）の現在値。
 //
 // これらはWinMain内のローカル変数なので、そのままでは名前空間スコープの判定関数から読めない。
@@ -3615,6 +3667,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     bool lastF3 = false;
     bool isDragging = false, isScaling = false, isScalingHeight = false, isRotating = false;
     bool isInspScale = false, isInspAngle = false, isInspSpeed = false;
+    // 敵・プレイヤー・ギミックの「つまみ」をつかんでいる間のフラグ。
+    // つかんでいる間は、拡縮・回転ドラッグと同じく世界の更新を止める（CanUpdate が見る）。
+    bool isHandleScale = false, isHandleRotate = false;
+    float handleBaseScale = 1.0f; // 拡縮つまみをつかんだ瞬間の倍率
+    float handleGrabP = 1.0f;     // その瞬間にマウスが指していた「角の位置を倍率に直した値」（ずれを持ち越さないため）
+    // ダブルクリック判定用。直前にクリックした編集対象（種別と添字）と、その時刻(ms)。
+    int lastClickKind = -1, lastClickIdx = -1, lastClickMs = 0;
 
     // Feature 5: イベントアクション実行用の実行時ステート。ShowMessage / MoveCamera / ItemCollected条件で使用。
     bool isShowingMessage = false;
@@ -3653,6 +3712,286 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     EnemyType* targetEnemyType = nullptr;
     Gimmick* targetGimmick = nullptr;
     Enemy* targetEnemy = nullptr;
+
+    // ===== 編集操作の共通入口 =====
+    //
+    // 拡大・回転・反転・速度・一時停止・巻き戻し・リセットは、これまで
+    // 「右クリックメニュー」「INSPECTOR の値ドラッグ」「S/R＋ドラッグ」のそれぞれに
+    // ほぼ同じ処理が複製されていた（しかも微妙に違い、メニューは代表の1体にしか効かなかった）。
+    // つまみ・ホイール・ダブルクリックと入口をさらに増やす前に、効き方を1か所へ集める。
+    // 入口が増えても、禁止の判定・コスト・巻き戻し履歴の書き換えが必ず同じになる。
+
+    // 選択している物のうち先頭を「代表」として、INSPECTOR や各操作が読む target 系ポインタを組み直す。
+    // 範囲選択・Ctrl＋クリックの追加／解除のあとに呼ぶ。
+    auto SyncTargetsFromSelection = [&]() {
+        if (!selectedPlayers.empty()) {
+            selectedType = SELECT_PLAYER;
+            targetScale = &selectedPlayers[0]->scale;
+            targetAngle = &selectedPlayers[0]->angle;
+            targetSpeedScale = &selectedPlayers[0]->speedScale;
+            targetPaused = &selectedPlayers[0]->isPaused;
+            targetRewind = &selectedPlayers[0]->isRewinding;
+            targetDirection = &selectedPlayers[0]->direction;
+            targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+        } else if (!selectedEnemies.empty()) {
+            selectedType = SELECT_ENEMY;
+            targetScale = &selectedEnemies[0]->scale;
+            targetAngle = &selectedEnemies[0]->angle;
+            targetSpeedScale = &selectedEnemies[0]->speedScale;
+            targetPaused = &selectedEnemies[0]->isPaused;
+            targetRewind = &selectedEnemies[0]->isRewinding;
+            targetDirection = &selectedEnemies[0]->direction;
+            targetEnemyType = &selectedEnemies[0]->type;
+            targetGimmick = nullptr;
+            targetEnemy = selectedEnemies[0];
+        } else if (!selectedGimmicks.empty()) {
+            selectedType = SELECT_GIMMICK;
+            targetScale = &selectedGimmicks[0]->width; // ギミックの「大きさ」は横幅
+            targetAngle = &selectedGimmicks[0]->angle;
+            // 範囲選択経由だと従来は customTimer／向き無しになっていて、
+            // 直接クリックで選んだ場合とメニューの効き方が食い違っていた。直接選択と同じにそろえる。
+            targetSpeedScale = &selectedGimmicks[0]->speedScale;
+            targetPaused = &selectedGimmicks[0]->isPaused;
+            targetRewind = &selectedGimmicks[0]->isRewinding;
+            targetDirection = &selectedGimmicks[0]->direction;
+            targetEnemyType = nullptr;
+            targetGimmick = selectedGimmicks[0];
+            targetEnemy = nullptr;
+        } else {
+            selectedType = SELECT_NONE;
+            targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+            targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+            targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+        }
+    };
+
+    // 可変地面は、横幅を絵のタイル幅の整数倍に丸める（半端な幅だと絵が切れる）。
+    auto SnapGroundWidth = [&](Gimmick& g) {
+        if (g.type != GIMMICK_SCALABLE_GROUND) return;
+        int imgW, imgH;
+        GetGraphSize(jimenHandle, &imgW, &imgH);
+        float tileW = g.spriteHeight * ((float)imgW / imgH);
+        g.width = roundf(g.width / tileW) * tileW;
+        if (g.width < tileW) g.width = tileW;
+    };
+
+    // 選択中の全員へ「大きさの変化量」を足す。
+    //   ds … 敵・プレイヤーの倍率に足す量
+    //   dw … ギミックの横幅に足す量(px)
+    // 変形するとき、現在値だけでなく巻き戻し履歴の同じ軸も同じ量で書き換える
+    // （編集した形は巻き戻しても維持される、という方針。詳細は拡縮ドラッグ側の説明を参照）。
+    //   stepByTile … ホイール用。可変地面は横幅を「絵のタイル1枚ぶん」単位で増減する
+    //                （32pxずつだとタイル幅への丸めで元へ戻ってしまい、回しても大きくならない）
+    auto ApplyScaleDelta = [&](float ds, float dw, bool stepByTile = false) {
+        for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
+            e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
+            e->editDirtyMask |= EDIT_DIRTY_SCALE;
+            for (auto& h : e->history) { h.scale = e->scale; } // 編集後の大きさは巻き戻しても維持する
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
+            g->editDirtyMask |= EDIT_DIRTY_WIDTH;
+            float stepW = dw;
+            if (stepByTile && g->type == GIMMICK_SCALABLE_GROUND) {
+                int imgW, imgH;
+                GetGraphSize(jimenHandle, &imgW, &imgH);
+                float tileW = g->spriteHeight * ((float)imgW / imgH);
+                stepW = (dw / 32.0f) * tileW; // 32px＝1ノッチ。何ノッチ回ったかをタイル枚数へ換算する
+            }
+            g->width += stepW;
+            if (g->width < 10.0f) g->width = 10.0f;
+            SnapGroundWidth(*g);
+            g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
+        }
+    };
+
+    // 敵・プレイヤーの倍率を「この値」にする（拡縮つまみ用。ギミックは対象外）。
+    auto SetUniformScale = [&](float s) {
+        if (s < 0.1f) s = 0.1f;
+        for (auto* p : selectedPlayers) p->scale = s;
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
+            e->scale = s;
+            e->editDirtyMask |= EDIT_DIRTY_SCALE;
+            for (auto& h : e->history) { h.scale = e->scale; }
+        }
+    };
+
+    // 選択中の全員を da ラジアンだけ回す。
+    // angleをAIが自前の状態に使っている型は回さない（回すと壊れるため）。
+    auto ApplyAngleDelta = [&](float da) {
+        for (auto* p : selectedPlayers) { p->angle += da; }
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
+            e->angle += da;
+            e->editDirtyMask |= EDIT_DIRTY_ANGLE;
+            for (auto& h : e->history) { h.angle = e->angle; } // 傾けた姿勢は巻き戻しても維持する
+        }
+        for (auto* g : selectedGimmicks) {
+            if (GimmickAngleIsAiOwned(g->type)) continue;
+            if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
+            g->angle += da;
+            g->editDirtyMask |= EDIT_DIRTY_ANGLE;
+            for (auto& h : g->history) { h.angle = g->angle; }
+        }
+    };
+
+    // 一時停止／巻き戻しの切り替え。複数選択でも定額（対象数に関わらず一発分のコスト）。
+    // 禁止されている相手は飛ばす。成功したら true。
+    auto EditTogglePause = [&]() -> bool {
+        if (targetPaused == nullptr) return false;
+        if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        editCost -= currentEditCost.flatMenuToggle;
+        bool next = !(*targetPaused);
+        for (auto* p : selectedPlayers) p->isPaused = next;
+        for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = next; }
+        for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = next; }
+        return true;
+    };
+    auto EditToggleRewind = [&]() -> bool {
+        if (targetRewind == nullptr) return false;
+        if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        editCost -= currentEditCost.flatMenuToggle;
+        bool next = !(*targetRewind);
+        for (auto* p : selectedPlayers) p->isRewinding = next;
+        for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = next; }
+        for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = next; }
+        return true;
+    };
+
+    // 速度を delta だけ変える（下限0）。動かせる相手が1つも無ければ何もせず拒否音。
+    auto EditSpeedStep = [&](float delta) -> bool {
+        if (targetSpeedScale == nullptr) return false;
+        bool any = !selectedPlayers.empty();
+        for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
+        for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
+        if (!any || editCost < currentEditCost.flatSpeedChange) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        editCost -= currentEditCost.flatSpeedChange;
+        for (auto* p : selectedPlayers) { p->speedScale += delta; if (p->speedScale < 0.0f) p->speedScale = 0.0f; }
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
+            e->speedScale += delta; if (e->speedScale < 0.0f) e->speedScale = 0.0f;
+            e->editDirtyMask |= EDIT_DIRTY_SPEED;
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_SPEED)) continue;
+            g->speedScale += delta; if (g->speedScale < 0.0f) g->speedScale = 0.0f;
+            g->editDirtyMask |= EDIT_DIRTY_SPEED;
+        }
+        return true;
+    };
+
+    // 向きを反転する。以前は代表の1体しか反転しないのに、選択中の敵すべてへ「反転された」印だけを付けていた。
+    // 選択中の全員を反転し、印も実際に反転した相手にだけ付ける。
+    auto EditFlip = [&]() -> bool {
+        if (targetDirection == nullptr) return false;
+        bool any = !selectedPlayers.empty();
+        for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
+        for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
+        if (!any || editCost < currentEditCost.flatDirectionFlip) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        editCost -= currentEditCost.flatDirectionFlip;
+        for (auto* p : selectedPlayers) p->direction = (p->direction == 0 ? 1 : 0);
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_FLIP)) continue;
+            e->direction = (e->direction == 0 ? 1 : 0);
+            e->editDirtyMask |= EDIT_DIRTY_DIR;
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_FLIP)) continue;
+            g->direction = (g->direction == 0 ? 1 : 0);
+            g->editDirtyMask |= EDIT_DIRTY_DIR;
+        }
+        SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
+        return true;
+    };
+
+    // 配置時の値(editBase*)へ丸ごと戻す。
+    // 以前は幅120・角度1.57079といった決め打ちだったため、120px以外のギミック
+    // （gim_gate_doorは32x160、gim_edit_color_bridgeは224x24）がリセットのたびに別物のサイズへ化けていた。
+    // 併せてeditDirtyMaskも消す。これがサイズロック等「一度編集したらAIが値の所有権を手放す」系
+    // リアクションの解除手段になる。
+    auto EditResetAll = [&]() -> bool {
+        if (selectedType == SELECT_NONE) return false;
+        if (editCost < currentEditCost.flatResetAll) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        editCost -= currentEditCost.flatResetAll;
+        for (auto* p : selectedPlayers) {
+            p->scale = 1.0f; p->angle = 0.0f; p->speedScale = 1.0f; p->isPaused = false; p->isRewinding = false;
+        }
+        for (auto* e : selectedEnemies) {
+            e->scale = e->editBaseScale;
+            e->angle = e->editBaseAngle;
+            e->direction = e->editBaseDirection;
+            e->speedScale = 1.0f;
+            e->isPaused = false;
+            e->isRewinding = false;
+            e->editDirtyMask = EDIT_DIRTY_NONE;
+        }
+        for (auto* g : selectedGimmicks) {
+            SetGimmickWidth(*g, g->editBaseWidth);
+            SetGimmickHeight(*g, g->editBaseHeight);
+            g->angle = g->editBaseAngle;
+            g->speedScale = 1.0f;
+            g->direction = 0;
+            g->isPaused = false;
+            g->isRewinding = false;
+            g->editDirtyMask = EDIT_DIRTY_NONE;
+        }
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
+        return true;
+    };
+
+    // 選択がちょうど1つのときの、つまみの出し方を返す。つまみの描画と、つかむ判定の両方がこれを通る。
+    //   box … つまみを付ける枠（選択枠と同じ）  angle … 今の角度
+    //   canScale … 右下の拡縮つまみを出すか（敵・プレイヤーのみ。ギミックは辺のつまみが既にある）
+    //   canRotate … 回転つまみを出すか
+    // 複数選択のときは false を返す（つまみは出さない。ホイール・キー・メニューで操作する）。
+    auto GetSingleEditHandleInfo = [&](EditBox& box, float& angle, bool& canScale, bool& canRotate) -> bool {
+        canScale = false; canRotate = false;
+        if (selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size() != 1) return false;
+        if (!selectedPlayers.empty()) {
+            box = PlayerEditBox(*selectedPlayers[0]);
+            angle = selectedPlayers[0]->angle;
+            canScale = true; canRotate = true;
+            return true;
+        }
+        if (!selectedEnemies.empty()) {
+            Enemy* e = selectedEnemies[0];
+            if (!e->isActive) return false;
+            box = EnemyEditBox(*e);
+            angle = e->angle;
+            canScale = !IsEnemyEditLocked(*e, EDITOP_SCALE);
+            canRotate = !IsEnemyEditLocked(*e, EDITOP_ROTATE);
+            return true;
+        }
+        Gimmick* g = selectedGimmicks[0];
+        if (!g->isActive || g->isTimelineCut) return false;
+        box = GimmickEditBox(*g);
+        angle = g->angle;
+        canRotate = !GimmickAngleIsAiOwned(g->type) && !IsGimmickEditLocked(*g, EDITOP_ROTATE);
+        return true;
+    };
+
+    // ワールド座標の点にある編集対象を探す。優先順位は選択クリックと同じ（プレイヤー → 敵 → ギミック）。
+    // kind … 0=プレイヤー 1=敵 2=ギミック   idx … enemies / gimmicks の添字
+    // ダブルクリックの「同じ物を2回押したか」の判定に使う。生ポインタではなく添字で覚えるのは、
+    // gimmicks.push_back で配列が作り直されてもずれないようにするため。
+    auto FindEditObjectAt = [&](float wx, float wy, int& kind, int& idx) -> bool {
+        EditBox pb = PlayerEditBox(player);
+        if (wx >= pb.x && wx <= pb.x + pb.w && wy >= pb.y && wy <= pb.y + pb.h) { kind = 0; idx = 0; return true; }
+        for (int i = 0; i < (int)enemies.size(); i++) {
+            if (!enemies[i].isActive) continue;
+            EditBox b = EnemyEditBox(enemies[i]);
+            if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { kind = 1; idx = i; return true; }
+        }
+        for (int i = 0; i < (int)gimmicks.size(); i++) {
+            if (!gimmicks[i].isActive || gimmicks[i].isTimelineCut) continue;
+            EditBox b = GimmickEditBox(gimmicks[i]);
+            if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { kind = 2; idx = i; return true; }
+        }
+        return false;
+    };
 
     int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
     int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
@@ -4949,6 +5288,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool currentLeftClick = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
         static bool lastRightClick = false;
         bool currentRightClick = (GetMouseInput() & MOUSE_INPUT_RIGHT) != 0;
+        // このフレームのホイール回転量（上へ回すと正）。DxLibは前回の読み取りからの累積を返すので、
+        // 使う使わないに関わらず毎フレーム必ず読み捨てる（溜めておいて、あとでまとめて効くのを防ぐ）。
+        int wheelRot = GetMouseWheelRotVol();
+        bool editCtrlHeld = (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL));
 
         globalTimeScale = isFastForward ? 2.0f : 1.0f;
         float finalTimeScale = globalTimeScale;
@@ -5164,104 +5507,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         menu.isOpen = false;
                     }
                     else {
-                        // 巻き戻しの切り替え（Feature: 編集コストゲージ）
-                        if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetRewind = !(*targetRewind); }
-                            else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            menu.isOpen = false;
-                        }
-                        // 一時停止の切り替え（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 31 && my <= menu.y + 55) {
-                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetPaused = !(*targetPaused); }
-                            else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            menu.isOpen = false;
-                        }
-                        // 速度 +0.5（Feature: 編集コストゲージ）
-                        // Feature: 編集リアクション — ギミックにもspeedScaleを持たせたので、
-                        // 以前あった「ギミック選択時は何もしない」という除外は不要になった。
-                        else if (my >= menu.y + 56 && my <= menu.y + 80) {
-                            // この操作は代表の対象へのポインタ経由で効くので、禁止判定も代表側で行う
-                            bool spdLockedUp = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_SPEED))
-                                            || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_SPEED));
-                            if (targetSpeedScale != nullptr && !spdLockedUp) {
-                                if (editCost >= currentEditCost.flatSpeedChange) {
-                                    editCost -= currentEditCost.flatSpeedChange;
-                                    *targetSpeedScale += 0.5f;
-                                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) targetGimmick->editDirtyMask |= EDIT_DIRTY_SPEED;
-                                    for (auto* e : selectedEnemies) e->editDirtyMask |= EDIT_DIRTY_SPEED;
-                                }
-                                else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            }
-                            menu.isOpen = false;
-                        }
-                        // 速度 -0.5（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 81 && my <= menu.y + 105) {
-                            bool spdLockedDn = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_SPEED))
-                                            || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_SPEED));
-                            if (targetSpeedScale != nullptr && !spdLockedDn) {
-                                if (editCost >= currentEditCost.flatSpeedChange) {
-                                    editCost -= currentEditCost.flatSpeedChange;
-                                    *targetSpeedScale -= 0.5f;
-                                    if (*targetSpeedScale < 0) *targetSpeedScale = 0;
-                                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) targetGimmick->editDirtyMask |= EDIT_DIRTY_SPEED;
-                                    for (auto* e : selectedEnemies) e->editDirtyMask |= EDIT_DIRTY_SPEED;
-                                } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            }
-                            menu.isOpen = false;
-                        }
-                        // オブジェクトの向きを反転（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 106 && my <= menu.y + 130) {
-                            bool flipLocked = (targetEnemy != nullptr && IsEnemyEditLocked(*targetEnemy, EDITOP_FLIP))
-                                           || (targetGimmick != nullptr && IsGimmickEditLocked(*targetGimmick, EDITOP_FLIP));
-                            if (targetDirection != nullptr && !flipLocked) {
-                                if (editCost >= currentEditCost.flatDirectionFlip) {
-                                    editCost -= currentEditCost.flatDirectionFlip;
-                                    *targetDirection = (*targetDirection == 0 ? 1 : 0);
-                                    if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) targetGimmick->editDirtyMask |= EDIT_DIRTY_DIR;
-                                    for (auto* e : selectedEnemies) e->editDirtyMask |= EDIT_DIRTY_DIR;
-                                    SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
-                                }
-                                else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            }
-                            menu.isOpen = false;
-                        }
-                        // すべてリセット（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 131 && my <= menu.y + 155) {
-                            if (editCost >= currentEditCost.flatResetAll) {
-                                editCost -= currentEditCost.flatResetAll;
-                                // Feature: 編集リアクション — 配置時の値(editBase*)へ丸ごと戻す。
-                                // 以前は幅120・角度1.57079といった決め打ちだったため、
-                                // 120px以外のギミック（gim_gate_doorは32x160、gim_edit_color_bridgeは224x24）が
-                                // リセットのたびに別物のサイズへ化けていた。
-                                // 併せてeditDirtyMaskも消す。これがサイズロック等
-                                // 「一度編集したらAIが値の所有権を手放す」系リアクションの解除手段になる。
-                                if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
-                                    SetGimmickWidth(*targetGimmick, targetGimmick->editBaseWidth);
-                                    SetGimmickHeight(*targetGimmick, targetGimmick->editBaseHeight);
-                                    targetGimmick->angle = targetGimmick->editBaseAngle;
-                                    targetGimmick->speedScale = 1.0f;
-                                    targetGimmick->direction = 0;
-                                    targetGimmick->isPaused = false;
-                                    targetGimmick->isRewinding = false;
-                                    targetGimmick->editDirtyMask = EDIT_DIRTY_NONE;
-                                } else {
-                                    for (auto* e : selectedEnemies) {
-                                        e->scale = e->editBaseScale;
-                                        e->angle = e->editBaseAngle;
-                                        e->direction = e->editBaseDirection;
-                                        e->speedScale = 1.0f;
-                                        e->isPaused = false;
-                                        e->isRewinding = false;
-                                        e->editDirtyMask = EDIT_DIRTY_NONE;
-                                    }
-                                    if (selectedEnemies.empty()) {
-                                        *targetScale = 1.0f; *targetAngle = 0.0f; *targetSpeedScale = 1.0f; *targetPaused = false; *targetRewind = false;
-                                    }
-                                    SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
-                                }
-                            } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            menu.isOpen = false;
-                        }
+                        // 6項目の実体は WinMain 先頭近くの EditXxx（共通入口）。
+                        // 項目の領域に入ったら対応する操作を呼び、メニューを閉じる。
+                        if      (my >= menu.y + 5   && my <= menu.y + 30)  { EditToggleRewind(); menu.isOpen = false; }
+                        else if (my >= menu.y + 31  && my <= menu.y + 55)  { EditTogglePause();  menu.isOpen = false; }
+                        else if (my >= menu.y + 56  && my <= menu.y + 80)  { EditSpeedStep(+0.5f); menu.isOpen = false; }
+                        else if (my >= menu.y + 81  && my <= menu.y + 105) { EditSpeedStep(-0.5f); menu.isOpen = false; }
+                        else if (my >= menu.y + 106 && my <= menu.y + 130) { EditFlip();         menu.isOpen = false; }
+                        else if (my >= menu.y + 131 && my <= menu.y + 155) { EditResetAll();     menu.isOpen = false; }
                     }
                 } else { menu.isOpen = false; }
             }
@@ -5306,48 +5559,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                 }
 
-                // 単一ターゲット用の便利なポインタを最初に選択された要素にバインド
-                if (!selectedPlayers.empty()) {
-                    selectedType = SELECT_PLAYER;
-                    targetScale = &player.scale;
-                    targetAngle = &player.angle;
-                    targetSpeedScale = &player.speedScale;
-                    targetPaused = &player.isPaused;
-                    targetRewind = &player.isRewinding;
-                    targetDirection = &player.direction;
-                    targetEnemyType = nullptr;
-                    targetGimmick = nullptr;
-                    targetEnemy = nullptr;
-                }
-                else if (!selectedEnemies.empty()) {
-                    selectedType = SELECT_ENEMY;
-                    targetScale = &selectedEnemies[0]->scale;
-                    targetAngle = &selectedEnemies[0]->angle;
-                    targetSpeedScale = &selectedEnemies[0]->speedScale;
-                    targetPaused = &selectedEnemies[0]->isPaused;
-                    targetRewind = &selectedEnemies[0]->isRewinding;
-                    targetDirection = &selectedEnemies[0]->direction;
-                    targetEnemyType = &selectedEnemies[0]->type;
-                    targetGimmick = nullptr;
-                    targetEnemy = selectedEnemies[0];
-                }
-                else if (!selectedGimmicks.empty()) {
-                    selectedType = SELECT_GIMMICK;
-                    targetScale = &selectedGimmicks[0]->width;
-                    targetAngle = &selectedGimmicks[0]->angle;
-                    targetSpeedScale = &selectedGimmicks[0]->customTimer;
-                    targetPaused = &selectedGimmicks[0]->isPaused;
-                    targetRewind = &selectedGimmicks[0]->isRewinding;
-                    targetDirection = nullptr;
-                    targetEnemyType = nullptr;
-                    targetGimmick = selectedGimmicks[0];
-                    targetEnemy = nullptr;
-                }
-                else {
-                    selectedType = SELECT_NONE;
-                    targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
-                    targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
-                    targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+                // 単一ターゲット用の便利なポインタを、最初に選択された要素へ組み直す
+                SyncTargetsFromSelection();
+            }
+
+            // マウスホイールによる拡縮・回転。モニタの上で、1つ以上選択しているときだけ効く。
+            //   ホイール         … 敵・プレイヤーは倍率±0.1、ギミックは横幅±32px（可変地面はタイル1枚）
+            //   Ctrl＋ホイール   … 15度ずつ回す
+            // 回転に Shift ではなく Ctrl を使うのは、Shift がゲーム側のダッシュに使われていて、
+            // 編集中もプレイヤーが走り出してしまうため。
+            // 世界は止めない（つまみのドラッグと違い、1ノッチごとの瞬間的な操作なので）。
+            if (wheelRot != 0 && objectEditOpEnabled && !menu.isOpen && selectedType != SELECT_NONE
+                && mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT
+                && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate
+                && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting) {
+                if (editCtrlHeld) {
+                    ApplyAngleDelta((float)wheelRot * (EDIT_KNOB_PI / 12.0f));
+                    SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
+                } else {
+                    ApplyScaleDelta((float)wheelRot * 0.1f, (float)wheelRot * 32.0f, true);
+                    SoundManager::Get().PlaySe(gameConfig.editSe.scale);
                 }
             }
 
@@ -5425,23 +5656,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else if (my >= 100 && my <= 115 && targetAngle != nullptr) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
                     else if (my >= 120 && my <= 135 && targetSpeedScale != nullptr) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
                     else if (my >= 140 && my <= 155 && targetPaused != nullptr) {
-                        // Feature: 編集コストゲージ — 複数選択でも定額（対象数に関わらず一発分のコスト）
-                        if (editCost >= currentEditCost.flatMenuToggle) {
-                            editCost -= currentEditCost.flatMenuToggle;
-                            bool nextPaused = !(*targetPaused);
-                            for (auto* p : selectedPlayers) p->isPaused = nextPaused;
-                            for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = nextPaused; }
-                            for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = nextPaused; }
-                        } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                        EditTogglePause();  // 複数選択でも定額（対象数に関わらず一発分のコスト）。中身は共通入口
                     }
                     else if (my >= 160 && my <= 175 && targetRewind != nullptr) {
-                        if (editCost >= currentEditCost.flatMenuToggle) {
-                            editCost -= currentEditCost.flatMenuToggle;
-                            bool nextRewind = !(*targetRewind);
-                            for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
-                            for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = nextRewind; }
-                            for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = nextRewind; }
-                        } else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                        EditToggleRewind();
                     }
                     else if (my >= 180 && my <= 195 && targetEnemyType != nullptr) {
                         // 旧: %3 固定で最初の3種類しか巡回できなかった。ENEMY_TYPE_COUNTで全種別を巡回対象にする
@@ -5491,7 +5709,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 lastGKey = currentGKey;
 
                 // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
-                if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
+                if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
                     mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
                     
                     // 選択中のギミックの「つまみ」をつかんだかどうかを最初に見る。
@@ -5516,6 +5734,37 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
 
+                    // 敵・プレイヤー・ギミックの回転つまみ、敵・プレイヤーの拡縮つまみ（選択がちょうど1つのときだけ出ている）。
+                    // 辺のつまみと同じ理由で、移動や選択より先に判定する。
+                    if (!grabbedHandle) {
+                        EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                        if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                            if (hCanRotate) {
+                                float kx, ky;
+                                GetEditKnob(hb, hAng, kx, ky);
+                                float ddx = gx - kx, ddy = gy - ky;
+                                if (ddx * ddx + ddy * ddy <= EDIT_KNOB_GRAB * EDIT_KNOB_GRAB) {
+                                    isHandleRotate = true; lastMouseX = mx; lastMouseY = my;
+                                    grabbedHandle = true;
+                                }
+                            }
+                            if (!grabbedHandle && hCanScale && targetScale != nullptr) {
+                                float chx, chy;
+                                GetEditCornerHandle(hb, chx, chy);
+                                const float m = 3.0f; // 見た目より少し広くつかめるようにする
+                                if (gx >= chx - m && gx <= chx + GIM_HANDLE_SIZE + m && gy >= chy - m && gy <= chy + GIM_HANDLE_SIZE + m) {
+                                    isHandleScale = true; lastMouseX = mx; lastMouseY = my;
+                                    handleBaseScale = *targetScale;
+                                    // 「マウスが指している点」を「その点が角になる倍率」へ換算する。
+                                    // 枠は左上が固定で右下へ伸びるので、対角線への射影がそのまま倍率になる。
+                                    float uw = hb.w / handleBaseScale, uh = hb.h / handleBaseScale; // 倍率1のときの寸法
+                                    handleGrabP = ((gx - hb.x) * uw + (gy - hb.y) * uh) / (uw * uw + uh * uh);
+                                    grabbedHandle = true;
+                                }
+                            }
+                        }
+                    }
+
                     // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
                     // つまみをつかんでいた場合は、この先の破壊も選択も移動も行わない。
                     bool blockClicked = grabbedHandle;
@@ -5537,6 +5786,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // タイル定義エディタで「プレイヤーが壊せる」を立てたタイルだけが割れる。
                     if (!blockClicked) {
                         if (TryBreakTile((int)(gy / TILE_SIZE), (int)(gx / TILE_SIZE), BREAK_PLAYER, 0.0f)) {
+                            blockClicked = true;
+                        }
+                    }
+
+                    // Ctrl＋クリック：クリックした物を選択に加える／選択から外す。
+                    // 範囲選択でしか複数選択できなかったので、離れた物を数体だけ選ぶのが面倒だった。
+                    // 加えるだけで、移動やつまみの操作には進まない（blockClicked を立てて通常の選択を飛ばす）。
+                    // Shift ではなく Ctrl なのは、Shift がゲーム側のダッシュに使われているため。
+                    if (!blockClicked && editCtrlHeld) {
+                        int ck, ci;
+                        if (FindEditObjectAt(gx, gy, ck, ci)) {
+                            if (ck == 0) {
+                                auto it = std::find(selectedPlayers.begin(), selectedPlayers.end(), &player);
+                                if (it != selectedPlayers.end()) selectedPlayers.erase(it); else selectedPlayers.push_back(&player);
+                            } else if (ck == 1) {
+                                Enemy* ep = &enemies[ci];
+                                auto it = std::find(selectedEnemies.begin(), selectedEnemies.end(), ep);
+                                if (it != selectedEnemies.end()) selectedEnemies.erase(it); else selectedEnemies.push_back(ep);
+                            } else {
+                                Gimmick* gp = &gimmicks[ci];
+                                auto it = std::find(selectedGimmicks.begin(), selectedGimmicks.end(), gp);
+                                if (it != selectedGimmicks.end()) selectedGimmicks.erase(it); else selectedGimmicks.push_back(gp);
+                            }
+                            SyncTargetsFromSelection();
                             blockClicked = true;
                         }
                     }
@@ -5687,6 +5960,45 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                         }
                     }
+
+                    // ダブルクリックで向き反転。同じ物を0.3秒以内に2回押したら、選択中の物を反転する。
+                    // 反転は右クリックメニューの奥にしか無く、一番よく使う編集のわりに遠かった。
+                    // 1回目のクリックで始まるドラッグは移動量ゼロなので、位置には影響しない。
+                    if (!blockClicked) {
+                        int ck, ci;
+                        if (FindEditObjectAt(gx, gy, ck, ci)) {
+                            int nowMs = GetNowCount();
+                            if (ck == lastClickKind && ci == lastClickIdx && nowMs - lastClickMs <= 300) {
+                                EditFlip(); // コスト・禁止の判定は中で行う
+                                lastClickKind = -1;
+                                isDragging = false; // 2回目のクリックで始まったドラッグは取り消す
+                            } else {
+                                lastClickKind = ck; lastClickIdx = ci; lastClickMs = nowMs;
+                            }
+                        } else {
+                            lastClickKind = -1;
+                        }
+                    }
+                }
+
+                // つまみのドラッグ。つかんでいる間は世界が止まるので、狙いを付けてゆっくり合わせられる。
+                //   拡縮 … 右下の角が指に付いてくる。つかんだ瞬間のずれは持ち越す（急に大きさが跳ねない）
+                //   回転 … 中心から指への向きがそのまま角度になる。15度の倍数の近くでは吸い付く
+                if (isHandleScale || isHandleRotate) {
+                    EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                    if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                        if (isHandleScale && targetScale != nullptr && handleBaseScale > 0.0f) {
+                            float uw = hb.w / (*targetScale), uh = hb.h / (*targetScale);
+                            float p = ((gx - hb.x) * uw + (gy - hb.y) * uh) / (uw * uw + uh * uh);
+                            SetUniformScale(handleBaseScale + (p - handleGrabP));
+                        }
+                        if (isHandleRotate) {
+                            float cx = hb.x + hb.w * 0.5f, cy = hb.y + hb.h * 0.5f;
+                            float target = atan2f(gx - cx, -(gy - cy)); // 真上が0、時計回りが正
+                            float da = WrapEditAngle(SnapEditAngle(target) - hAng);
+                            ApplyAngleDelta(da);
+                        }
+                    }
                 }
 
                 // 選択されたすべてのオブジェクトに一斉に変形を適用
@@ -5727,29 +6039,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 敵・プレイヤーは縦のマウス移動で一様に拡大縮小（従来どおり）。
                     // ギミックの横幅だけは横のマウス移動で変える。
                     // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
+                    // 実際の変形は共通入口 ApplyScaleDelta（つまみ・ホイール・INSPECTOR と共用）。
                     float ds = (float)(lastMouseY - my) * 0.01f;
                     float dw = (float)(mx - lastMouseX) * 1.0f;
-                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
-                    for (auto* e : selectedEnemies) {
-                        if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
-                        e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
-                        e->editDirtyMask |= EDIT_DIRTY_SCALE;
-                        for (auto& h : e->history) { h.scale = e->scale; } // 編集後の大きさは巻き戻しても維持する
-                    }
-                    for (auto* g : selectedGimmicks) {
-                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
-                        g->editDirtyMask |= EDIT_DIRTY_WIDTH;
-                        g->width += dw;
-                        if (g->width < 10.0f) g->width = 10.0f;
-                        if (g->type == GIMMICK_SCALABLE_GROUND) {
-                            int imgW, imgH;
-                            GetGraphSize(jimenHandle, &imgW, &imgH);
-                            float tileW = g->spriteHeight * ((float)imgW / imgH);
-                            g->width = roundf(g->width / tileW) * tileW;
-                            if (g->width < tileW) g->width = tileW;
-                        }
-                        g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
-                    }
+                    ApplyScaleDelta(ds, dw);
                     lastMouseY = my;
                     lastMouseX = mx;
                 }
@@ -5785,57 +6078,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 if (isRotating && selectedType != SELECT_NONE) {
                     float da = (float)(mx - lastMouseX) * 0.02f;
-                    for (auto* p : selectedPlayers) { p->angle += da; }
-                    for (auto* e : selectedEnemies) {
-                        if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
-                        e->angle += da;
-                        e->editDirtyMask |= EDIT_DIRTY_ANGLE;
-                        for (auto& h : e->history) { h.angle = e->angle; } // 傾けた姿勢は巻き戻しても維持する
-                    }
-                    // angleをAIが自前の状態に使っている型は回転させない（回すと壊れるため）
-                    for (auto* g : selectedGimmicks) {
-                        if (GimmickAngleIsAiOwned(g->type)) continue;
-                        if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
-                        g->angle += da;
-                        g->editDirtyMask |= EDIT_DIRTY_ANGLE;
-                        for (auto& h : g->history) { h.angle = g->angle; }
-                    }
+                    ApplyAngleDelta(da); // 変形の実体は共通入口。AI所有の角度を持つ型などは中で除外される
                     lastMouseX = mx;
                 }
                 if (isInspScale && selectedType != SELECT_NONE) {
                     float ds = (float)(mx - lastMouseX) * 0.01f;
                     float dw = (float)(mx - lastMouseX) * 1.0f;
-                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
-                    for (auto* e : selectedEnemies) {
-                        if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
-                        e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
-                        e->editDirtyMask |= EDIT_DIRTY_SCALE;
-                        for (auto& h : e->history) { h.scale = e->scale; }
-                    }
-                    for (auto* g : selectedGimmicks) {
-                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
-                        SetGimmickWidth(*g, g->width + dw);
-                        g->editDirtyMask |= EDIT_DIRTY_WIDTH;
-                    }
+                    ApplyScaleDelta(ds, dw);
                     lastMouseX = mx;
                 }
                 if (isInspAngle && selectedType != SELECT_NONE) {
                     float da = (float)(mx - lastMouseX) * 0.02f;
-                    for (auto* p : selectedPlayers) { p->angle += da; }
-                    for (auto* e : selectedEnemies) {
-                        if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
-                        e->angle += da;
-                        e->editDirtyMask |= EDIT_DIRTY_ANGLE;
-                        for (auto& h : e->history) { h.angle = e->angle; }
-                    }
-                    // 回転ドラッグ(R+ドラッグ)と同じ理由でAI所有の型は除外する
-                    for (auto* g : selectedGimmicks) {
-                        if (GimmickAngleIsAiOwned(g->type)) continue;
-                        if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
-                        g->angle += da;
-                        g->editDirtyMask |= EDIT_DIRTY_ANGLE;
-                        for (auto& h : g->history) { h.angle = g->angle; }
-                    }
+                    ApplyAngleDelta(da);
                     lastMouseX = mx;
                 }
                 if (isInspSpeed && selectedType != SELECT_NONE) {
@@ -5860,10 +6114,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 従来、編集ツールは「拒否されたときだけ音が鳴り、成功したときは無音」という
                 // 一貫性の無い状態だった。掴んでいる間ずっと鳴らすとうるさいので、
                 // マウスを離して確定した瞬間に1回だけ鳴らす。
-                if (isScaling || isScalingHeight) SoundManager::Get().PlaySe(gameConfig.editSe.scale);
-                else if (isRotating)              SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
-                else if (isDragging)              SoundManager::Get().PlaySe(gameConfig.editSe.move);
-                isDragging = isScaling = isScalingHeight = isRotating = false;  
+                if (isScaling || isScalingHeight || isHandleScale) SoundManager::Get().PlaySe(gameConfig.editSe.scale);
+                else if (isRotating || isHandleRotate)             SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
+                else if (isDragging)                               SoundManager::Get().PlaySe(gameConfig.editSe.move);
+                isDragging = isScaling = isScalingHeight = isRotating = false;
+                isHandleScale = isHandleRotate = false;
                 isInspScale = isInspAngle = isInspSpeed = false;
             }
         }
@@ -5879,7 +6134,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // そもそもここへ来ないが、条件を曖昧にしておくと将来シーンを足したときに
             // 意図しない場所が止まる/動くという事故につながる。
             if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY
-                || isDragging || isScaling || isScalingHeight || isRotating || isShowingMessage) return false;
+                || isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isShowingMessage) return false;
             if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
             if (isStepFrame) return true;
             if (ignoresPause) return true;
@@ -10254,6 +10509,52 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // 敵・プレイヤー・ギミックのつまみ（選択がちょうど1つのときだけ）。
+        // 右下の四角が拡縮、枠から伸びた先の丸が回転。丸は対象の角度に合わせて枠のまわりを回る。
+        // 位置は GetEditKnob / GetEditCornerHandle が決めており、つかむ判定も同じ関数なので、
+        // 見えている場所とつかめる場所は一致する。
+        if (isEditMode) {
+            EditBox hb; float hAng; bool hCanScale, hCanRotate;
+            if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                int fill = GetColor(255, 235, 120), edge = GetColor(40, 36, 30);
+                int hs = (int)GIM_HANDLE_SIZE;
+                if (hCanScale) {
+                    float chx, chy;
+                    GetEditCornerHandle(hb, chx, chy);
+                    int x1 = (int)(chx - cameraX), y1 = (int)(chy - cameraY);
+                    DrawBox(x1, y1, x1 + hs, y1 + hs, fill, TRUE);
+                    DrawBox(x1, y1, x1 + hs, y1 + hs, edge, FALSE);
+                    // 左上⇔右下の斜めの両矢印（図形で描く。文字の矢印はフォント次第で豆腐になるため）
+                    DrawLine(x1 + 3, y1 + 3, x1 + hs - 3, y1 + hs - 3, edge);
+                    DrawLine(x1 + 3, y1 + 3, x1 + 3, y1 + 7, edge);
+                    DrawLine(x1 + 3, y1 + 3, x1 + 7, y1 + 3, edge);
+                    DrawLine(x1 + hs - 3, y1 + hs - 3, x1 + hs - 3, y1 + hs - 7, edge);
+                    DrawLine(x1 + hs - 3, y1 + hs - 3, x1 + hs - 7, y1 + hs - 3, edge);
+                }
+                if (hCanRotate) {
+                    float kx, ky;
+                    GetEditKnob(hb, hAng, kx, ky);
+                    float ccx = hb.x + hb.w * 0.5f, ccy = hb.y + hb.h * 0.5f;
+                    float rEdge = (hb.w > hb.h ? hb.w : hb.h) * 0.5f; // 枠の端までの距離
+                    // 枠の端からつまみまでを線でつなぐ（どの物のつまみかが分かる）
+                    DrawLine((int)(ccx + sinf(hAng) * rEdge - cameraX), (int)(ccy - cosf(hAng) * rEdge - cameraY),
+                             (int)(kx - cameraX), (int)(ky - cameraY), edge);
+                    DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS, fill, TRUE);
+                    DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS, edge, FALSE);
+                }
+                // つかんでいる間は今の値をその場に出す（どこまで回した・何倍にしたのかが分からないと止め所が無い）
+                if ((isHandleScale || isHandleRotate) && targetScale != nullptr) {
+                    char hbuf[32];
+                    if (isHandleScale) sprintf_s(hbuf, sizeof(hbuf), "x%.2f", *targetScale);
+                    else               sprintf_s(hbuf, sizeof(hbuf), "%.0f deg", WrapEditAngle(hAng) * 180.0f / EDIT_KNOB_PI);
+                    int tx = (int)(hb.x - cameraX);
+                    int ty = (int)(hb.y - cameraY) - 20;
+                    DrawBox(tx - 3, ty - 2, tx + 78, ty + 18, GetColor(30, 26, 24), TRUE);
+                    DrawString(tx, ty, hbuf, GetColor(255, 235, 120));
+                }
+            }
+        }
+
         // 弾の描画
         for (int i = 0; i < MAX_BULLETS; i++) {
             // 新アセット移行対応 — 以前は DrawGraph で原寸描画していたため、640x640の弾画像だと
@@ -10583,6 +10884,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, GetColor(0, 170, 225), TRUE);
                 DrawBox(60, 254, 226, 272, UiInkAccent(), FALSE);
                 DrawFormatString(66, 257, GetColor(255, 255, 255), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
+            }
+
+            // マウスでの編集操作の一覧。つまみ・ホイール・ダブルクリックは画面上に説明が出ないので、
+            // 知らないと辿り着けない。操作が使えない（オブジェクト編集が封印された）ステージでは灰色にする。
+            {
+                int gc = objectEditOpEnabled ? UiInk() : UiInkSub();
+                DrawString(24, 292, "マウス操作", UiInkSub());
+                DrawString(24, 314, "ホイール：拡大縮小", gc);
+                DrawString(24, 334, "Ctrl+ホイール：回転", gc);
+                DrawString(24, 354, "つまみ：引いて変形", gc);
+                DrawString(24, 374, "ダブルクリック：反転", gc);
+                DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
             }
 
             DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle); // 右パネル（インスペクター）
