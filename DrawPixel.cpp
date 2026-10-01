@@ -2396,6 +2396,35 @@ struct EditUndoEntry {
     float cost = 0.0f; // この操作で消費したコスト（取り消すと全額返す）
 };
 
+// ============================================================================
+// 右クリックの円形メニュー
+//
+// 6項目を、メニューを開いた位置（中心）のまわりに円形に並べる。項目は中心から見た「方向」で選ぶので、
+// 右ボタンを押したまま項目の方向へ動かして離すだけでも、離したあとに左クリックでも選べる。
+// 描画・判定・カーソル形状が同じ関数と定数を通るので、見えている位置と選べる位置は食い違わない。
+// ============================================================================
+const int   RADIAL_ITEM_W = 104, RADIAL_ITEM_H = 42; // 項目の大きさ(px)
+const float RADIAL_DEAD   = 24.0f;                    // 中心の不感帯の半径。この中では何も選ばない
+const float RADIAL_OUTER  = 170.0f;                   // これより外はメニューの外（クリックすると閉じる）
+const int   RADIAL_MARGIN_X = 150, RADIAL_MARGIN_Y = 125; // 画面の端からこれだけ内側へ寄せて開く（項目が見切れない）
+// 6項目の中心の、メニュー中心からのずれ。上から時計回り。
+const int   RADIAL_OFS[6][2] = { {0, -96}, {92, -48}, {92, 48}, {0, 96}, {-92, 48}, {-92, -48} };
+
+// 項目1つぶんの表示と、押せるかどうか
+struct RadialItem { std::string label, sub; bool enabled = true; int id = 0; };
+
+// 中心(cx,cy)から見て、マウス(mx,my)がどの項目の方向を向いているか。不感帯の中・外側は -1。
+inline int RadialSectorAt(int cx, int cy, int mx, int my, int count) {
+    float dx = (float)(mx - cx), dy = (float)(my - cy);
+    float d = sqrtf(dx * dx + dy * dy);
+    if (d < RADIAL_DEAD || d > RADIAL_OUTER) return -1;
+    if (count <= 1) return 0;
+    float ang = atan2f(dx, -dy);                 // 真上が0、時計回りが正
+    if (ang < 0.0f) ang += 2.0f * EDIT_KNOB_PI;
+    float step = 2.0f * EDIT_KNOB_PI / (float)count;
+    return (int)((ang + step * 0.5f) / step) % count; // 項目の中心の向きが区間の真ん中になるよう半区間ずらす
+}
+
 // 画面エフェクト系の編集ツール（T=色フィルタ / X=暗転 / C=明転 / Z=ズーム / F=早送り）の現在値。
 //
 // これらはWinMain内のローカル変数なので、そのままでは名前空間スコープの判定関数から読めない。
@@ -3738,7 +3767,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int areaSelectStartX = 0, areaSelectStartY = 0;
     int areaSelectEndX = 0, areaSelectEndY = 0;
     
-    ContextMenu menu = { false, 0, 0, 160, 160 }; // 6つのオプション用のコンテキストメニューサイズ (高さ 160)
+    // 右クリックの円形メニュー。x,y はメニューの中心。width/height は縦メニュー時代の名残で、今は使わない。
+    ContextMenu menu = { false, 0, 0, 0, 0 };
+    bool menuHoldActive = false; // 右ボタンを押しっぱなしでメニューを開いている最中か（離した位置で項目を決める）
     SetMouseDispFlag(TRUE);
 
     SelectedType selectedType = SELECT_NONE;
@@ -4181,6 +4212,95 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
         PushUndo(undoBefore, currentEditCost.flatResetAll, false);
         return true;
+    };
+
+    // ===== 右クリックの円形メニュー =====
+    //
+    // 縦に並んだ英語6項目（項目ごとのy座標を判定と描画に直書き）を、日本語・コスト表示つきの円形に作り替えた。
+    // 中心から「方向」で項目を選ぶので、右ボタンを押したまま動かして離すだけでも選べる。
+    // 項目の実行は共通入口（EditXxx）を呼ぶだけ。
+
+    // 円形メニューの項目数。タイムラインのカットを選んでいるときは「カット削除」だけの1項目。
+    auto RadialCount = [&]() -> int {
+        return (targetGimmick != nullptr && targetGimmick->isTimelineCut) ? 1 : 6;
+    };
+
+    // 今の選択から、円形メニューの項目（表示と、押せるかどうか）を組み立てる。
+    // 項目の順番は上から時計回り：巻き戻し／一時停止／加速／減速／反転／リセット。
+    auto BuildRadialItems = [&](std::vector<RadialItem>& out) {
+        out.clear();
+        char buf[48];
+        auto costStr = [&](float c) { sprintf_s(buf, sizeof(buf), "-%.0f", c); return std::string(buf); };
+        if (RadialCount() == 1) {
+            RadialItem it;
+            it.label = "カット削除"; it.sub = costStr(currentEditCost.flatMenuToggle);
+            it.enabled = (editCost >= currentEditCost.flatMenuToggle); it.id = 6;
+            out.push_back(it);
+            return;
+        }
+        RadialItem it;
+        it = RadialItem(); it.id = 0; it.label = "巻き戻し";
+        it.sub = std::string((targetRewind && *targetRewind) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
+        it.enabled = targetRewind != nullptr && editCost >= currentEditCost.flatMenuToggle;
+        out.push_back(it);
+        it = RadialItem(); it.id = 1; it.label = "一時停止";
+        it.sub = std::string((targetPaused && *targetPaused) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
+        it.enabled = targetPaused != nullptr && editCost >= currentEditCost.flatMenuToggle;
+        out.push_back(it);
+        it = RadialItem(); it.id = 2; it.label = "加速";
+        it.sub = "+0.5 " + costStr(currentEditCost.flatSpeedChange);
+        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
+        out.push_back(it);
+        it = RadialItem(); it.id = 3; it.label = "減速";
+        it.sub = "-0.5 " + costStr(currentEditCost.flatSpeedChange);
+        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
+        out.push_back(it);
+        it = RadialItem(); it.id = 4; it.label = "反転";
+        it.sub = costStr(currentEditCost.flatDirectionFlip);
+        it.enabled = targetDirection != nullptr && editCost >= currentEditCost.flatDirectionFlip;
+        out.push_back(it);
+        it = RadialItem(); it.id = 5; it.label = "リセット";
+        it.sub = costStr(currentEditCost.flatResetAll);
+        it.enabled = editCost >= currentEditCost.flatResetAll;
+        out.push_back(it);
+    };
+
+    // 項目 id を実行する（コスト・禁止の判定は、共通入口の中で行う）
+    auto RunRadialItem = [&](int id) {
+        switch (id) {
+        case 0: EditToggleRewind(); break;
+        case 1: EditTogglePause();  break;
+        case 2: EditSpeedStep(+0.5f); break;
+        case 3: EditSpeedStep(-0.5f); break;
+        case 4: EditFlip();         break;
+        case 5: EditResetAll();     break;
+        case 6: {
+            // タイムラインカットの削除。巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
+            if (targetGimmick != nullptr && targetGimmick->isTimelineCut && editCost >= currentEditCost.flatMenuToggle) {
+                editCost -= currentEditCost.flatMenuToggle;
+                for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
+                    if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
+                }
+                ClearEditUndo(); // 添字がずれるので、取り消しの記録は使えなくなる
+                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                selectedType = SELECT_NONE;
+                targetGimmick = nullptr;
+                SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+            } else {
+                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+            }
+            break;
+        }
+        }
+    };
+
+    // 円形メニューの idx 番目（中心から見た方向）を実行する。押せない項目は拒否音だけ鳴らす。
+    auto RunRadialIndex = [&](int idx) {
+        std::vector<RadialItem> items;
+        BuildRadialItems(items);
+        if (idx < 0 || idx >= (int)items.size()) return;
+        if (!items[idx].enabled) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return; }
+        RunRadialItem(items[idx].id);
     };
 
     // 選択がちょうど1つのときの、つまみの出し方を返す。つまみの描画と、つかむ判定の両方がこれを通る。
@@ -5599,9 +5719,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 入口はORで通し、実際の操作ごとに objectEditOpEnabled / cutOpEnabled を個別に見る。
         if (isEditMode && (objectEditOpEnabled || cutOpEnabled)) {
             // コンテキストメニューの有効化
-            if (currentRightClick && !lastRightClick) { 
+            // このフレームだけの印：左クリックがメニューの項目を押した場合、同じクリックを背後の選択・ドラッグへ回さない
+            bool menuClickConsumed = false;
+            if (currentRightClick && !lastRightClick) {
+                // すでに選んでいる物（Ctrl+クリックで選んだ複数のうちの1つなど）を右クリックしたときは、選択を変えない。
+                // 選び直してしまうと、複数選択がその1つに縮んで、まとめて編集できなくなる。
+                bool rightOnSelected = false;
+                {
+                    int rk, ri;
+                    if (selectedType != SELECT_NONE && FindEditObjectAt(gx, gy, rk, ri)) {
+                        if (rk == 0) rightOnSelected = !selectedPlayers.empty();
+                        else if (rk == 1) rightOnSelected = std::find(selectedEnemies.begin(), selectedEnemies.end(), &enemies[ri]) != selectedEnemies.end();
+                        else rightOnSelected = std::find(selectedGimmicks.begin(), selectedGimmicks.end(), &gimmicks[ri]) != selectedGimmicks.end();
+                    }
+                }
                 // コンテキストメニューの当たり判定・選択のトリガー
-                if (gx >= player.x && gx <= player.x + player.width * player.scale &&
+                if (rightOnSelected) {
+                    // 選択はそのまま
+                }
+                else if (gx >= player.x && gx <= player.x + player.width * player.scale &&
                     gy >= player.y && gy <= player.y + player.height * player.scale) {
                     selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                     selectedPlayers.push_back(&player);
@@ -5717,49 +5853,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 } else {
                     // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTAL専用の「Delete Cut」メニューは
                     // 廃止し、他のギミックと同じ標準コンテキストメニュー（巻き戻し/一時停止トグル等）を使う
-                    menu.height = 160;
                     menu.isOpen = true;
-                    menu.x = mx;
-                    menu.y = my;
+                    menu.x = max(RADIAL_MARGIN_X, min(WINDOW_WIDTH - RADIAL_MARGIN_X, mx));
+                    menu.y = max(RADIAL_MARGIN_Y, min(WINDOW_HEIGHT - RADIAL_MARGIN_Y, my));
+                    // 押しっぱなしのまま項目の方向へ動かして離す使い方に備える。
+                    // ただし画面の端で中心を内側へ寄せたとき（押した位置≠メニューの中心）は使わない。
+                    // 押した場所がすでに中心から離れているので、押して離しただけで項目が実行されてしまう。
+                    // その場合は、離したあとに項目を左クリックして選ぶ。
+                    menuHoldActive = (menu.x == mx && menu.y == my);
                 }
             }
 
-            // コンテキストメニューのアクショントリガー
+            // 右ボタンを押したまま項目の方向へ動かして離すと、その項目が実行される。
+            // 中心の不感帯の中で離したときは何もせず、メニューは開いたまま残す（離してから左クリックで選ぶ従来の使い方）。
+            if (!currentRightClick && lastRightClick && menu.isOpen && menuHoldActive) {
+                int idx = RadialSectorAt(menu.x, menu.y, mx, my, RadialCount());
+                if (idx >= 0 && selectedType != SELECT_NONE) {
+                    RunRadialIndex(idx);
+                    menu.isOpen = false;
+                }
+            }
+            if (!currentRightClick) menuHoldActive = false;
+
+            // 円形メニューの項目を左クリックで選ぶ。
+            //   ・項目の方向をクリック        … その項目を実行して閉じる
+            //   ・中心の不感帯をクリック      … 何もせず閉じる（キャンセル）
+            //   ・メニューの外側をクリック    … 閉じるだけ。同じクリックで通常の選択も行われる（従来どおり）
+            // 項目を押したクリックは、背後の選択・ドラッグへ回さない（以前は項目を押した直後に
+            // 同じクリックで範囲選択が始まり、選択が消えていた）。
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
-                if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
-                    // Feature: カット機能の復活 — タイムラインカットを選択している場合は専用メニュー（Delete Cutのみ）。
-                    // カットに対しては巻き戻し/一時停止/速度といった通常項目が全て無意味で、
-                    // かつ target 系ポインタがnullptrなので、通常メニューの処理へ流してはいけない（nullptr参照でクラッシュする）。
-                    if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
-                        if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            if (editCost >= currentEditCost.flatMenuToggle) {
-                                editCost -= currentEditCost.flatMenuToggle;
-                                // 巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
-                                for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
-                                    if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
-                                }
-                                ClearEditUndo(); // 添字がずれるので、取り消しの記録は使えなくなる
-                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
-                                selectedType = SELECT_NONE;
-                                targetGimmick = nullptr;
-                                SoundManager::Get().PlaySe(gameConfig.editSe.reset);
-                            } else {
-                                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
-                            }
-                        }
-                        menu.isOpen = false;
-                    }
-                    else {
-                        // 6項目の実体は WinMain 先頭近くの EditXxx（共通入口）。
-                        // 項目の領域に入ったら対応する操作を呼び、メニューを閉じる。
-                        if      (my >= menu.y + 5   && my <= menu.y + 30)  { EditToggleRewind(); menu.isOpen = false; }
-                        else if (my >= menu.y + 31  && my <= menu.y + 55)  { EditTogglePause();  menu.isOpen = false; }
-                        else if (my >= menu.y + 56  && my <= menu.y + 80)  { EditSpeedStep(+0.5f); menu.isOpen = false; }
-                        else if (my >= menu.y + 81  && my <= menu.y + 105) { EditSpeedStep(-0.5f); menu.isOpen = false; }
-                        else if (my >= menu.y + 106 && my <= menu.y + 130) { EditFlip();         menu.isOpen = false; }
-                        else if (my >= menu.y + 131 && my <= menu.y + 155) { EditResetAll();     menu.isOpen = false; }
-                    }
-                } else { menu.isOpen = false; }
+                float ddx = (float)(mx - menu.x), ddy = (float)(my - menu.y);
+                if (selectedType != SELECT_NONE && sqrtf(ddx * ddx + ddy * ddy) <= RADIAL_OUTER) {
+                    int idx = RadialSectorAt(menu.x, menu.y, mx, my, RadialCount());
+                    if (idx >= 0) RunRadialIndex(idx);
+                    menu.isOpen = false;
+                    menuClickConsumed = true;
+                } else {
+                    menu.isOpen = false;
+                }
             }
 
             // エディタの範囲選択ドラッグ終了
@@ -5854,7 +5985,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // エディタUI / ドラッグ操作
-            if (currentLeftClick && !menu.isOpen) {
+            if (currentLeftClick && !menu.isOpen && !menuClickConsumed) {
                 // 一時停止ボタンのチェック
                 if (!lastLeftClick && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
                     if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
@@ -11407,31 +11538,35 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                            20, isPaused ? uiPlayHandle : uiPauseHandle);
             }
 
-            // コンテキストメニューポップアップの描画
+            // 右クリックの円形メニュー。中心から見て、マウスが向いている項目を強調する。
             if (menu.isOpen) {
-                // UI素材化 — ポップアップメニューも UIウィンドウ.png の枠で描く
-                DrawUiWindow(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, uiWindowHandle);
-
-                // Feature: カット機能の復活 — カット選択中は「Delete Cut」だけを出す専用メニュー
-                if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
-                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", UiInkWarn()); // 目立つ赤で表示
-                    DrawString(menu.x + 10, menu.y + 40, "(timeline cut)", UiInkSub());
+                std::vector<RadialItem> ritems;
+                BuildRadialItems(ritems);
+                int hover = RadialSectorAt(menu.x, menu.y, mx, my, (int)ritems.size());
+                int accent = UiInkAccent();
+                // 中心の目印と不感帯。マウスが向いている項目へは線を引いて、どれが選ばれるかを見せる。
+                if (hover >= 0) {
+                    DrawLine(menu.x, menu.y, menu.x + RADIAL_OFS[hover][0], menu.y + RADIAL_OFS[hover][1], accent);
                 }
-                else {
-                    char rewindStr[32];
-                    sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
-                    char pausedStr[32];
-                    sprintf_s(pausedStr, sizeof(pausedStr), "Pause: %s", (targetPaused && *targetPaused) ? "ON" : "OFF");
-
-                    DrawString(menu.x + 10, menu.y + 10, rewindStr, UiInk());
-                    DrawString(menu.x + 10, menu.y + 35, pausedStr, UiInk());
-
-                    // Feature: 編集リアクション — ギミックにも速度と向き反転を実装したので、
-                    // 全ての選択対象で6つの操作が等しく使える
-                    DrawString(menu.x + 10, menu.y + 60, "Speed +0.5", targetSpeedScale ? UiInk() : UiInkSub());
-                    DrawString(menu.x + 10, menu.y + 85, "Speed -0.5", targetSpeedScale ? UiInk() : UiInkSub());
-                    DrawString(menu.x + 10, menu.y + 110, "Flip Object", targetDirection ? UiInk() : UiInkSub());
-                    DrawString(menu.x + 10, menu.y + 135, "Reset All", UiInk());
+                DrawCircle(menu.x, menu.y, (int)RADIAL_DEAD, accent, FALSE);
+                DrawCircle(menu.x, menu.y, 4, accent, TRUE);
+                for (int i = 0; i < (int)ritems.size(); i++) {
+                    const RadialItem& it = ritems[i];
+                    int x1 = menu.x + RADIAL_OFS[i][0] - RADIAL_ITEM_W / 2;
+                    int y1 = menu.y + RADIAL_OFS[i][1] - RADIAL_ITEM_H / 2;
+                    bool isHover = (i == hover);
+                    // 押せない項目は暗くして、文字も灰色にする（コスト不足・この対象では使えない）
+                    if (!it.enabled)  SetDrawBright(150, 148, 145);
+                    else if (isHover) SetDrawBright(255, 255, 255);
+                    else              SetDrawBright(214, 209, 202);
+                    DrawUiWindow(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, uiWindowHandle);
+                    SetDrawBright(255, 255, 255);
+                    int labelColor = !it.enabled ? UiInkSub() : (it.id == 6 ? UiInkWarn() : (isHover ? accent : UiInk()));
+                    int lw = GetDrawStringWidth(it.label.c_str(), (int)it.label.size());
+                    int sw = GetDrawStringWidth(it.sub.c_str(), (int)it.sub.size());
+                    DrawString(x1 + (RADIAL_ITEM_W - lw) / 2, y1 + 4, it.label.c_str(), labelColor);
+                    DrawString(x1 + (RADIAL_ITEM_W - sw) / 2, y1 + 22, it.sub.c_str(), it.enabled ? UiInkSub() : UiInkSub());
+                    if (isHover && it.enabled) DrawBox(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, accent, FALSE);
                 }
             }
 
@@ -11776,9 +11911,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         pointing = true;
                     }
                     // 2) 開いているコンテキストメニューの上
-                    else if (menu.isOpen &&
-                             cmx >= menu.x && cmx <= menu.x + menu.width &&
-                             cmy >= menu.y && cmy <= menu.y + menu.height) {
+                    else if (menu.isOpen && RadialSectorAt(menu.x, menu.y, cmx, cmy, RadialCount()) >= 0) {
                         pointing = true;
                     }
                     // 3) インスペクタの操作行。
