@@ -6838,11 +6838,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (imgW > 0 && imgH > 0) {
                     float parallaxCamX = cameraX * bl.scrollRate;
                     float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
-                    float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
                     float drawY = -parallaxCamY + bl.offsetY;
-                    DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
                     if (bl.loop) {
-                        DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
+                        // 繰り返す背景：画像1枚ぶんの幅で割った余りだけ動かし、画面の幅を覆い尽くすまで横へ並べる。
+                        //
+                        // 以前は「2枚だけ」並べていたので、画像が画面より狭いと右側に隙間ができ、
+                        // offsetX をプラスにすると左側に隙間ができた（先頭が画面の内側から始まるため）。
+                        float x = -fmodf(parallaxCamX, (float)imgW) + bl.offsetX;
+                        while (x > 0.0f) x -= (float)imgW; // 左端に隙間が出ない位置まで戻す
+                        for (; x < (float)SCREEN_WIDTH; x += (float)imgW) {
+                            DrawGraph((int)x, (int)drawY, bl.handle, TRUE);
+                        }
+                    } else {
+                        // 繰り返さない背景：1枚だけを、スクロールに合わせて動かす（端まで行ったら画面の外へ出ていく）。
+                        // 以前はループしない設定でも余りで巻き戻していたため、1枚の背景が途中で唐突に先頭へ飛んでいた。
+                        DrawGraph((int)(-parallaxCamX + bl.offsetX), (int)drawY, bl.handle, TRUE);
                     }
                 }
             }
