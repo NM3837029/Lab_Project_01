@@ -123,9 +123,13 @@ public static class ScriptPreviewEvaluator
             case "PartIndex": return partIndex;
             // 親/自分/プレイヤー座標はプレビュー単体では意味を持たないため0として扱う
             case "ParentX": case "ParentY": case "SelfX": case "SelfY":
-            case "PlayerX": case "PlayerY": case "DistanceToPlayer": case "DirectionToPlayer":
+            case "PlayerX": case "PlayerY": case "DistanceToPlayer":
             case "GetVar":
                 return 0f;
+            // プレイヤーの方向・本体が狙う向きは、プレビューには相手がいないので、左右へゆっくり振って見せる。
+            // 以前は常に0（真横）で固定だったため、黒目や砲身が「どう動く型なのか」がプレビューでは分からなかった。
+            case "DirectionToPlayer": case "ParentAim":
+                return 0.9f * MathF.Sin(time * 0.02f);
             // 編集・画面エフェクト系はプレビューには「まだ何も編集されていない状態」しかないので、
             // 差分を表すものは0、倍率を表すものは1（＝等倍）を返す。
             // ここに書かなくても default で0になるが、倍率まで0になると

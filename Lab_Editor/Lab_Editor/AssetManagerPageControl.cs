@@ -400,6 +400,9 @@ public class AssetManagerPageControl : UserControl
         var btnAddEnemy = new Button { Text = "＋ 敵追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         // 押すと敵グリッドへ既定値(GetDefaultEnemyRow)の新規行を1行追加する
         btnAddEnemy.Click += (s, e) => AddRow(dgvEnemies, GetDefaultEnemyRow());
+        // 複数のパーツで動く敵を「型」から1体まとめて作るボタン。タイプ・HP・大きさ・パーツ・スクリプトが入った状態で追加される。
+        var btnNewEnemyFromTemplate = new Button { Text = "✨ 敵をテンプレートから作る", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 244, 214) };
+        btnNewEnemyFromTemplate.Click += (s, e) => BtnNewEnemyFromTemplate_Click();
         var btnAddGimmick = new Button { Text = "＋ ギミック追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnAddGimmick.Click += (s, e) => AddRow(dgvGimmicks, GetDefaultGimmickRow());
         var btnAddItem = new Button { Text = "＋ アイテム追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
@@ -419,7 +422,7 @@ public class AssetManagerPageControl : UserControl
         // type_enumを選べるようにするためのボタン
         var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
-        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnTypeCardPicker });
+        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnTypeCardPicker });
 
         pnlBottom.Controls.Add(flowBottomLeft);
         pnlBottom.Controls.Add(flowBottomRight);
@@ -1057,6 +1060,51 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // 機能: 複数パーツからなる複合オブジェクト (Composite Multi-Part Objects, 通称 Parts-M7)
     // 敵/ギミック/アイテムいずれのタブでも、タイプ(type_enum)に関係なく使える
     // （パーツは親のタイプとは独立して機能するため、挙動スクリプトのようなタイプ制限は設けない）
+    // 「✨ 敵をテンプレートから作る」。複数のパーツで動く敵の「型」（多節体・砲身・目・舌・翼・尻尾・はさみ…）を選び、
+    // 画像と数値を決めると、その型が勧める設定（タイプ・HP・大きさ・体節の間隔など）と、パーツ・スクリプト一式の入った
+    // 新しい敵が1体、敵の一覧に追加される。追加したあとも、通常の敵と同じように、各項目・パーツを自由に直せる。
+    //
+    // 以前は、複数パーツの敵を作るには「敵を追加 → タイプを選ぶ → パーツ編集でパーツを1つずつ作り、スクリプトも自分で組む」
+    // しかなく、既存の敵（いもむし・砲台・ベロなど）の動きを別の絵で使い回すには、JSONを開いて式を写すしかなかった。
+    private void BtnNewEnemyFromTemplate_Click()
+    {
+        using var dlg = new PartTemplatePickerForm(projectRoot, "", 32f, 32f, 0, createEnemyMode: true);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK || dlg.SelectedTemplate == null || dlg.Suggestion == null) return;
+        CreateEnemyFromTemplate(dlg.SelectedTemplate, dlg.Suggestion, dlg.ResultParts, dlg.BodySpritePath);
+    }
+
+    // 型の結果から、敵の行を1つ作って一覧へ加える（ダイアログを使わずに呼べるよう、処理を分けてある）。
+    // 戻り値は追加した行。
+    private DataGridViewRow CreateEnemyFromTemplate(PartTemplate tpl, EnemySuggestion sg, List<PartDef> parts, string bodySprite)
+    {
+        AddRow(dgvEnemies, GetDefaultEnemyRow());
+        var row = dgvEnemies.Rows[dgvEnemies.Rows.Count - 1];
+        // 「どのタイプにも合う」型(TypeEnum=-1)は、既定のタイプのまま。ユーザーがあとで選ぶ。
+        if (sg.TypeEnum >= 0)
+        {
+            var t = EnemyTypes.FirstOrDefault(x => x.type == sg.TypeEnum);
+            if (t.desc != null) row.Cells["type_enum"].Value = t.desc;
+        }
+        row.Cells["name"].Value = string.IsNullOrEmpty(sg.BaseName) ? "新敵" : sg.BaseName + "（" + tpl.Name.Split(' ').Last() + "）";
+        row.Cells["hp"].Value = sg.Hp;
+        row.Cells["width"].Value = sg.Width;
+        row.Cells["height"].Value = sg.Height;
+        // 当たり判定は、本体の大きさと同じにしておく（パーツの位置は、この判定の左上を原点に決めているため）
+        row.Cells["hitboxOffsetX"].Value = 0;
+        row.Cells["hitboxOffsetY"].Value = 0;
+        row.Cells["hitboxWidth"].Value = sg.Width;
+        row.Cells["hitboxHeight"].Value = sg.Height;
+        row.Cells["scale"].Value = 1f;
+        row.Cells["sprite"].Value = bodySprite;
+        var def = GetOrCreateEnemyParams(row);
+        def.parts = parts.Select(p => p).ToList();
+        def.bodyIgnoresTilt = sg.BodyIgnoresTilt;
+        def.segmentGap = sg.SegmentGap;
+        def.consumePartOnAttack = sg.ConsumePartOnAttack;
+        if (sg.EnemyScript != null) def.script = (Newtonsoft.Json.Linq.JArray)sg.EnemyScript.DeepClone();
+        return row;
+    }
+
     private void BtnPartsEditor_Click()
     {
         var kind = GetActiveKind();
