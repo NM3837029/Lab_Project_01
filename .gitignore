@@ -46,3 +46,7 @@ Lab_Editor/**/obj/
 # ---- 作業用 ----
 /scratch/
 /recovered.txt
+
+# patch コマンドが残す退避ファイル（検証用にパッチを当てると毎回できる）
+*.orig
+*.rej
