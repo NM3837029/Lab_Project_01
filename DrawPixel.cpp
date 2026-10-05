@@ -2425,6 +2425,23 @@ inline int RadialSectorAt(int cx, int cy, int mx, int my, int count) {
     return (int)((ang + step * 0.5f) / step) % count; // 項目の中心の向きが区間の真ん中になるよう半区間ずらす
 }
 
+// 大きさを変えたとき、地形（地面・壁・足場）に食い込まないよう止める対象の型か。
+// 範囲を示すだけの型（明暗・色調・ズーム・スロー・時間のゾーン）は、壁や床と重なっているのが普通なので対象外。
+// カットは座標を持たない。
+inline bool GimmickRespectsTerrain(GimmickType t) {
+    switch (t) {
+    case GIMMICK_CUT_PORTAL:
+    case GIMMICK_TIME_FIELD:
+    case GIMMICK_BRIGHTNESS_ZONE:
+    case GIMMICK_COLOR_ZONE:
+    case GIMMICK_ZOOM_LENS:
+    case GIMMICK_SLOWMO_FIELD:
+        return false;
+    default:
+        return true;
+    }
+}
+
 // 画面エフェクト系の編集ツール（T=色フィルタ / X=暗転 / C=明転 / Z=ズーム / F=早送り）の現在値。
 //
 // これらはWinMain内のローカル変数なので、そのままでは名前空間スコープの判定関数から読めない。
@@ -3783,6 +3800,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Gimmick* targetGimmick = nullptr;
     Enemy* targetEnemy = nullptr;
 
+    // 今プレイしているステージの添字。大きさ変更の地形判定（SolidOverlapArea）が読むので、共通入口より前に置く。
+    int currentStageIdx = 0;
+
     // ===== 編集操作の共通入口 =====
     //
     // 拡大・回転・反転・速度・一時停止・巻き戻し・リセットは、これまで
@@ -3912,8 +3932,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (size_t i = 0; i < v.size() && i < fl.size(); i++) {
             const EditSnap& sn = v[i]; unsigned f = fl[i];
             if (sn.kind == 0) {
+                // 倍率を戻すときも、足元（下端の中心）を保つ。位置が一緒に戻るなら、そのあと位置で上書きされる。
+                if (f & EF_SCALE) {
+                    float w0 = (float)player.width * player.scale, h0 = (float)player.height * player.scale;
+                    player.scale = sn.scale;
+                    float dx = (w0 - (float)player.width * player.scale) * 0.5f, dy = h0 - (float)player.height * player.scale;
+                    player.x += dx; player.y += dy;
+                    for (auto& h : player.history) { h.x += dx; h.y += dy; }
+                }
                 if (f & EF_POS)    { player.x = sn.x; player.y = sn.y; player.vx = 0.0f; player.vy = 0.0f; }
-                if (f & EF_SCALE)  player.scale = sn.scale;
                 if (f & EF_ANGLE)  player.angle = sn.angle;
                 if (f & EF_SPEED)  player.speedScale = sn.speedScale;
                 if (f & EF_DIR)    player.direction = sn.direction;
@@ -3921,12 +3948,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (f & EF_REWIND) player.isRewinding = sn.rewinding;
             } else if (sn.kind == 1 && sn.index >= 0 && sn.index < (int)enemies.size()) {
                 Enemy& e = enemies[sn.index];
+                if (f & EF_SCALE) {
+                    float w0 = (float)e.hitboxWidth * e.scale, h0 = (float)e.hitboxHeight * e.scale;
+                    e.scale = sn.scale;
+                    float dx = (w0 - (float)e.hitboxWidth * e.scale) * 0.5f, dy = h0 - (float)e.hitboxHeight * e.scale;
+                    e.x += dx; e.y += dy;
+                    for (auto& h : e.history) { h.x += dx; h.y += dy; h.scale = e.scale; }
+                }
                 if (f & EF_POS) {
                     float dx = sn.x - e.x, dy = sn.y - e.y;
                     e.x = sn.x; e.y = sn.y; e.vx = 0.0f; e.vy = 0.0f;
                     for (auto& h : e.history) { h.x += dx; h.y += dy; }
                 }
-                if (f & EF_SCALE)  { e.scale = sn.scale; for (auto& h : e.history) h.scale = e.scale; }
                 if (f & EF_ANGLE)  { e.angle = sn.angle; for (auto& h : e.history) h.angle = e.angle; }
                 if (f & EF_SPEED)  e.speedScale = sn.speedScale;
                 if (f & EF_DIR)    e.direction = sn.direction;
@@ -4021,6 +4054,134 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return true;
     };
 
+    // ===== 大きさを変えたときに地面・壁へめり込まないようにする仕組み =====
+    //
+    // 拡大・縮小は、これまで「左上を固定して右と下へ伸びる」だった。そのため
+    //   ・地面に立っている敵を拡大すると、足が床の中へ沈む
+    //   ・壁ぎわの箱を横へ広げると、壁の中へ入る
+    // が起きていた。しかもタイル・ギミックとの衝突判定は「動いた量」を基準にした許容値で押し戻す作りなので、
+    // 一度深く食い込むと、あとから押し出されずに埋まったままになる（動かなくなる）。
+    //
+    // 直し方は2つ。
+    //   1) 敵・プレイヤーは「足元（下端の中心）」を固定して、上と左右へ伸び縮みさせる（床へ沈まない）
+    //   2) 拡大しようとした先が、地形・実体化した足場に新しく食い込むなら、食い込まない最大の大きさで止める
+    // 縮小は常に通す。すでに埋まっている物（配置ミス等）は、これ以上は埋めないだけで、操作は止めない。
+
+    // 長方形(x,y,w,h)が、地形（衝突するタイル・実体化した足場系ギミック）と重なっている面積。
+    // self … 判定から除く自分自身（ギミックの大きさを変えるとき、自分の箱と重なって見えないように）
+    auto SolidOverlapArea = [&](float x, float y, float w, float h, const Gimmick* self) -> float {
+        if (w <= 0.0f || h <= 0.0f) return 0.0f;
+        float area = 0.0f;
+        if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size()) {
+            const auto& mp = stages[currentStageIdx].map;
+            int mapH = (int)mp.size();
+            if (mapH > 0) {
+                int mapW = (int)mp[0].size();
+                int tx0 = (int)floorf(x / (float)TILE_SIZE), tx1 = (int)floorf((x + w) / (float)TILE_SIZE);
+                int ty0 = (int)floorf(y / (float)TILE_SIZE), ty1 = (int)floorf((y + h) / (float)TILE_SIZE);
+                for (int ty = ty0; ty <= ty1; ty++) {
+                    if (ty < 0 || ty >= mapH) continue;
+                    for (int tx = tx0; tx <= tx1; tx++) {
+                        if (tx < 0 || tx >= mapW) continue;
+                        int tid = mp[ty][tx];
+                        if (tid < 0 || tid >= (int)tileDefs.size() || !tileDefs[tid].isCollidable) continue;
+                        float ox = fminf(x + w, (float)((tx + 1) * TILE_SIZE)) - fmaxf(x, (float)(tx * TILE_SIZE));
+                        float oy = fminf(y + h, (float)((ty + 1) * TILE_SIZE)) - fmaxf(y, (float)(ty * TILE_SIZE));
+                        if (ox > 0.0f && oy > 0.0f) area += ox * oy;
+                    }
+                }
+            }
+        }
+        for (const auto& gm : gimmicks) {
+            if (&gm == self || !gm.isActive || gm.isTimelineCut) continue;
+            // 衝突判定（CheckGimmickCollisionX/Y）が「壁・床」として扱っている型だけを地形とみなす
+            bool solid = gm.type == GIMMICK_SCALABLE_BOX || gm.type == GIMMICK_SCALABLE_GROUND || gm.type == GIMMICK_PUSHABLE_ROCK
+                      || gm.type == GIMMICK_FASTFORWARD_GATE || gm.type == GIMMICK_BREAKABLE_BLOCK
+                      || (gm.type == GIMMICK_GATE_DOOR && !GimmickIsTipped(gm));
+            if (!solid) continue;
+            float gbx, gby, gbw, gbh;
+            GetGimmickCollisionBox(gm, gbx, gby, gbw, gbh);
+            float ox = fminf(x + w, gbx + gbw) - fmaxf(x, gbx);
+            float oy = fminf(y + h, gby + gbh) - fmaxf(y, gby);
+            if (ox > 0.0f && oy > 0.0f) area += ox * oy;
+        }
+        return area;
+    };
+    const float TERRAIN_FIT_EPS = 0.5f; // 浮動小数の誤差で「接しているだけ」を食い込みと誤判定しないための許容面積(px^2)
+
+    // 足元の中心を固定したまま、倍率を oldScale から wantScale へ変えたときの左上と、実際に通る倍率を返す。
+    // 拡大で新しく地形へ食い込むなら、食い込まない最大の倍率まで二分探索で戻す。
+    //   baseW/baseH … 倍率1のときの当たり判定の寸法
+    auto FitAnchoredScale = [&](float x, float y, float baseW, float baseH, float oldScale, float wantScale,
+                                float& outX, float& outY) -> float {
+        float cx = x + baseW * oldScale * 0.5f;   // 足元の中心X（伸び縮みしても動かない）
+        float bottom = y + baseH * oldScale;      // 足元のY（同上）
+        auto place = [&](float s, float& px, float& py) { px = cx - baseW * s * 0.5f; py = bottom - baseH * s; };
+        float px, py;
+        place(wantScale, px, py);
+        if (wantScale > oldScale) {
+            float cur = SolidOverlapArea(x, y, baseW * oldScale, baseH * oldScale, nullptr);
+            if (SolidOverlapArea(px, py, baseW * wantScale, baseH * wantScale, nullptr) > cur + TERRAIN_FIT_EPS) {
+                float lo = oldScale, hi = wantScale;
+                for (int i = 0; i < 12; i++) {
+                    float mid = (lo + hi) * 0.5f, mx, my;
+                    place(mid, mx, my);
+                    if (SolidOverlapArea(mx, my, baseW * mid, baseH * mid, nullptr) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+                }
+                wantScale = lo;
+                place(wantScale, px, py);
+            }
+        }
+        outX = px; outY = py;
+        return wantScale;
+    };
+
+    // 敵・プレイヤーの倍率を want にする（足元固定・地形で止まる）。巻き戻し履歴も同じだけずらす。
+    // 履歴の位置は「その時点の左上」なので、今回ずれた量(dx,dy)を全部に足せば、どの時点でも足元が保たれる。
+    auto RescaleEnemy = [&](Enemy& e, float want) {
+        float ox, oy;
+        float got = FitAnchoredScale(e.x, e.y, (float)e.hitboxWidth, (float)e.hitboxHeight, e.scale, want, ox, oy);
+        float dx = ox - e.x, dy = oy - e.y;
+        e.x = ox; e.y = oy; e.scale = got;
+        for (auto& h : e.history) { h.x += dx; h.y += dy; h.scale = got; } // 編集後の大きさは巻き戻しても維持する
+        e.editDirtyMask |= EDIT_DIRTY_SCALE;
+    };
+    auto RescalePlayer = [&](Player& p, float want) {
+        float ox, oy;
+        float got = FitAnchoredScale(p.x, p.y, (float)p.width, (float)p.height, p.scale, want, ox, oy);
+        float dx = ox - p.x, dy = oy - p.y;
+        p.x = ox; p.y = oy; p.scale = got;
+        for (auto& h : p.history) { h.x += dx; h.y += dy; }
+    };
+
+    // ギミックの横幅を wantW にしたい。左端を固定して右へ伸びるので、地形に新しく食い込むなら食い込まない最大の幅で止める。
+    // 地形との関係を持たない型（範囲系・カット）は対象外。
+    auto FitGimmickWidth = [&](const Gimmick& g, float wantW) -> float {
+        if (wantW <= g.spriteWidth || !GimmickRespectsTerrain(g.type)) return wantW;
+        float cur = SolidOverlapArea(g.x, g.y, g.spriteWidth, g.spriteHeight, &g);
+        if (SolidOverlapArea(g.x, g.y, wantW, g.spriteHeight, &g) <= cur + TERRAIN_FIT_EPS) return wantW;
+        float lo = g.spriteWidth, hi = wantW;
+        for (int i = 0; i < 12; i++) {
+            float mid = (lo + hi) * 0.5f;
+            if (SolidOverlapArea(g.x, g.y, mid, g.spriteHeight, &g) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+        }
+        return lo;
+    };
+    // ギミックの高さ。下端を固定して上へ伸びる（天井に当たったら止まる）。
+    auto FitGimmickHeight = [&](const Gimmick& g, float wantH) -> float {
+        if (wantH <= g.spriteHeight || !GimmickRespectsTerrain(g.type)) return wantH;
+        float bottom = g.y + g.spriteHeight;
+        auto area = [&](float h) { return SolidOverlapArea(g.x, bottom - h, g.spriteWidth, h, &g); };
+        float cur = area(g.spriteHeight);
+        if (area(wantH) <= cur + TERRAIN_FIT_EPS) return wantH;
+        float lo = g.spriteHeight, hi = wantH;
+        for (int i = 0; i < 12; i++) {
+            float mid = (lo + hi) * 0.5f;
+            if (area(mid) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+        }
+        return lo;
+    };
+
     // 可変地面は、横幅を絵のタイル幅の整数倍に丸める（半端な幅だと絵が切れる）。
     auto SnapGroundWidth = [&](Gimmick& g) {
         if (g.type != GIMMICK_SCALABLE_GROUND) return;
@@ -4039,39 +4200,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     //   stepByTile … ホイール用。可変地面は横幅を「絵のタイル1枚ぶん」単位で増減する
     //                （32pxずつだとタイル幅への丸めで元へ戻ってしまい、回しても大きくならない）
     auto ApplyScaleDelta = [&](float ds, float dw, bool stepByTile = false) {
-        for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
+        // 敵・プレイヤーは足元を固定して伸び縮みし、拡大で地形に食い込むなら手前で止まる
+        for (auto* p : selectedPlayers) RescalePlayer(*p, fmaxf(p->scale + ds, 0.1f));
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
-            e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f;
-            e->editDirtyMask |= EDIT_DIRTY_SCALE;
-            for (auto& h : e->history) { h.scale = e->scale; } // 編集後の大きさは巻き戻しても維持する
+            RescaleEnemy(*e, fmaxf(e->scale + ds, 0.1f));
         }
         for (auto* g : selectedGimmicks) {
             if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
             g->editDirtyMask |= EDIT_DIRTY_WIDTH;
             float stepW = dw;
-            if (stepByTile && g->type == GIMMICK_SCALABLE_GROUND) {
+            float tileW = 0.0f;
+            if (g->type == GIMMICK_SCALABLE_GROUND) {
                 int imgW, imgH;
                 GetGraphSize(jimenHandle, &imgW, &imgH);
-                float tileW = g->spriteHeight * ((float)imgW / imgH);
-                stepW = (dw / 32.0f) * tileW; // 32px＝1ノッチ。何ノッチ回ったかをタイル枚数へ換算する
+                tileW = g->spriteHeight * ((float)imgW / imgH);
+                if (stepByTile) stepW = (dw / 32.0f) * tileW; // 32px＝1ノッチ。何ノッチ回ったかをタイル枚数へ換算する
             }
-            g->width += stepW;
-            if (g->width < 10.0f) g->width = 10.0f;
+            float oldW = g->spriteWidth;
+            float want = g->width + stepW;
+            if (want < 10.0f) want = 10.0f;
+            g->width = want;
             SnapGroundWidth(*g);
+            float snapped = g->width;
+            // 壁・足場に新しく食い込むなら、食い込まない幅で止める（可変地面はタイル枚数に切り下げる）
+            float got = FitGimmickWidth(*g, snapped);
+            if (got < snapped && tileW > 0.0f) {
+                got = floorf(got / tileW) * tileW;
+                if (got < oldW) got = oldW;
+            }
+            g->width = got;
             g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
         }
     };
 
-    // 敵・プレイヤーの倍率を「この値」にする（拡縮つまみ用。ギミックは対象外）。
+    // 敵・プレイヤーの倍率を「この値」にする（拡縮つまみ用。ギミックは対象外）。足元固定・地形で止まる。
     auto SetUniformScale = [&](float s) {
         if (s < 0.1f) s = 0.1f;
-        for (auto* p : selectedPlayers) p->scale = s;
+        for (auto* p : selectedPlayers) RescalePlayer(*p, s);
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
-            e->scale = s;
-            e->editDirtyMask |= EDIT_DIRTY_SCALE;
-            for (auto& h : e->history) { h.scale = e->scale; }
+            RescaleEnemy(*e, s);
         }
     };
 
@@ -4356,8 +4525,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
     int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
-
-    int currentStageIdx = 0;
 
     GameScene currentScene = PLAY;
     // 前フレームのシーン。「PLAY からクリアへ移った瞬間」を検出してセーブするために持つ。
@@ -6157,10 +6324,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (gx >= chx - m && gx <= chx + GIM_HANDLE_SIZE + m && gy >= chy - m && gy <= chy + GIM_HANDLE_SIZE + m) {
                                     isHandleScale = true; lastMouseX = mx; lastMouseY = my;
                                     handleBaseScale = *targetScale;
-                                    // 「マウスが指している点」を「その点が角になる倍率」へ換算する。
-                                    // 枠は左上が固定で右下へ伸びるので、対角線への射影がそのまま倍率になる。
-                                    float uw = hb.w / handleBaseScale, uh = hb.h / handleBaseScale; // 倍率1のときの寸法
-                                    handleGrabP = ((gx - hb.x) * uw + (gy - hb.y) * uh) / (uw * uw + uh * uh);
+                                    // 「マウスが指している点」を「その点が右下の角になる倍率」へ換算する。
+                                    // 足元の中心(枠の中心X・下端)が固定で、左右へ同じだけ広がるので、
+                                    // 中心から横へ離れた距離の2倍が、そのまま枠の幅（＝倍率）になる。
+                                    // 縦は下端が動かない（上へ伸びる）ので、マウスの高さは使わない。
+                                    float uw = hb.w / handleBaseScale; // 倍率1のときの幅
+                                    handleGrabP = 2.0f * (gx - (hb.x + hb.w * 0.5f)) / uw;
                                     grabbedHandle = true;
                                 }
                             }
@@ -6402,8 +6571,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     EditBox hb; float hAng; bool hCanScale, hCanRotate;
                     if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
                         if (isHandleScale && targetScale != nullptr && handleBaseScale > 0.0f) {
-                            float uw = hb.w / (*targetScale), uh = hb.h / (*targetScale);
-                            float p = ((gx - hb.x) * uw + (gy - hb.y) * uh) / (uw * uw + uh * uh);
+                            float uw = hb.w / (*targetScale);
+                            float p = 2.0f * (gx - (hb.x + hb.w * 0.5f)) / uw;
                             SetUniformScale(handleBaseScale + (p - handleGrabP));
                         }
                         if (isHandleRotate) {
@@ -6473,8 +6642,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // editBaseY も同じだけ動かすのは、動く足場のように毎フレーム
                         // editBaseY から位置を組み直す型でも下端を保つため。
                         float beforeH = g->spriteHeight;
-                        g->spriteHeight += dh;
-                        if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f;
+                        float wantH = g->spriteHeight + dh;
+                        if (wantH < 10.0f) wantH = 10.0f;
+                        // 上へ伸ばした先が天井・足場に新しく食い込むなら、手前で止める
+                        g->spriteHeight = FitGimmickHeight(*g, wantH);
                         float grownH = g->spriteHeight - beforeH;
                         g->y -= grownH;
                         g->editBaseY -= grownH;
