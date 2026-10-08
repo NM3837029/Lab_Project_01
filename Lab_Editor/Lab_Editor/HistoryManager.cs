@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace Lab_Editor;
@@ -62,6 +62,16 @@ public class HistoryManager<T>
             history.RemoveAt(0);
             currentIndex--;
         }
+    }
+
+    // 現在位置の状態を、新しい状態で上書きする関数（新しい履歴は積まない）。
+    // 数値を矢印で連続して変える、文字を打つ、といった「同じ項目への一連の変更」を1手にまとめたいときに使う。
+    // 1文字・1目盛りごとに履歴が1件ずつ積まれると、10回元に戻してもほとんど動かない、という状態になるため。
+    // 何も記録されていない場合や、nullを渡された場合は何もしない。
+    public void ReplaceCurrent(T? state)
+    {
+        if (state == null || currentIndex < 0) return;
+        history[currentIndex] = JsonConvert.SerializeObject(state);
     }
 
     // ひとつ前の状態に戻す（元に戻す＝Undo）関数。

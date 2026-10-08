@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -68,7 +68,7 @@ public class BackgroundSettingsForm : Form
     private void InitializeComponent()
     {
         Text            = "背景レイヤー設定";
-        Size            = new Size(860, 500);
+        Size            = new Size(1060, 540);
         Font            = UiTheme.Base;
         StartPosition   = FormStartPosition.CenterParent;
         // ウィンドウのリサイズ挙動や外観をアプリ共通のテーマに合わせる（UiTheme側で定義）
@@ -165,6 +165,24 @@ public class BackgroundSettingsForm : Form
             DefaultCellStyle = { BackColor = Color.WhiteSmoke }
         });
 
+        // color 列（画像を使わず単色で塗るときの色。"#RRGGBB" と直接入力するか、右の🎨ボタンから選ぶ）。
+        //
+        // 【不具合の修正】コードの側（AddRow・保存・プレビュー・🎨ボタンの処理）は colColor / colBtnColor を
+        // 参照していたのに、この2つの列を作る処理が抜けていた。そのため背景設定を開いて
+        // レイヤーを表示する（AddRow が row.Cells["colColor"] を引く）たびに
+        // 「colColor という名前の列が見つかりません」で例外になり、画面がまともに動かなかった。
+        _grid.Columns.Add(new DataGridViewTextBoxColumn
+        {
+            Name = "colColor", HeaderText = "color", Width = 82,
+        });
+
+        // ボタン列：🎨（クリックした行の color を色選択ダイアログで決める）
+        _grid.Columns.Add(new DataGridViewButtonColumn
+        {
+            Name = "colBtnColor", HeaderText = "", Width = 38,
+            Text = "🎨", UseColumnTextForButtonValue = true
+        });
+
         // scrollRate 列（カメラ移動量に対するこのレイヤーのスクロール速度の比率。
         // 1.0で前景と同じ速度、0に近いほど遠景のようにゆっくり動く）
         _grid.Columns.Add(new DataGridViewTextBoxColumn
@@ -209,6 +227,11 @@ public class BackgroundSettingsForm : Form
 
         // 各列のボタンクリック・行選択変更・不正な値入力（DataError）に対するイベントハンドラを登録する
         _grid.CellContentClick     += Grid_CellContentClick;
+        // color 列の値が変わるたびに、セルの背景へその色を出す（#RRGGBB の文字だけでは色が分からない）
+        _grid.CellValueChanged     += (_, e) =>
+        {
+            if (e.RowIndex >= 0 && _grid.Columns[e.ColumnIndex].Name == "colColor") RefreshColorSwatch(_grid.Rows[e.RowIndex]);
+        };
         _grid.SelectionChanged     += Grid_SelectionChanged;
         // 型に合わない値が入力された場合でも例外で落ちないよう、エラーを握りつぶす（e.Cancel=true）
         _grid.DataError            += (_, e) => e.Cancel = true;
@@ -218,8 +241,17 @@ public class BackgroundSettingsForm : Form
         var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 44 };
 
         _btnAdd    = MakeButton("＋背景追加",       12,  6, 110);
-        _btnSave   = MakeButton("💾 保存して閉じる", 530, 6, 160);
-        _btnCancel = MakeButton("キャンセル",        700, 6, 100);
+        _btnSave   = MakeButton("💾 保存して閉じる", 740, 6, 160);
+        _btnCancel = MakeButton("キャンセル",        910, 6, 100);
+        // ウィンドウを広げ縮めしても、保存・キャンセルが右端に付いてくるようにする。
+        // Anchor（右固定）にしないのは、ボタンを置いた時点では下部パネルの幅がまだ確定しておらず、
+        // 右端からの距離が負の値で記録されて、パネルが広がった瞬間に画面の外へ飛んでしまうため。
+        // 幅が決まったあと（Resize）に、毎回右端から数えて置き直す。
+        pnlBottom.Resize += (_, _) =>
+        {
+            _btnCancel.Left = pnlBottom.ClientSize.Width - _btnCancel.Width - 16;
+            _btnSave.Left   = _btnCancel.Left - _btnSave.Width - 10;
+        };
 
         // 保存ボタンは「主要な操作」として緑系の強調スタイルを、
         // キャンセルボタンは「副次的な操作」としてフラットのみのスタイルを適用する
@@ -259,13 +291,44 @@ public class BackgroundSettingsForm : Form
         int idx = _grid.Rows.Add();
         var row  = _grid.Rows[idx];
 
-        // layerがnullの場合は各プロパティのデフォルト値（?? の右側）を使う
-        row.Cells["colOrder"].Value      = layer?.drawOrder  ?? 0;
-        row.Cells["colSprite"].Value     = layer?.sprite     ?? "";
-        row.Cells["colScrollRate"].Value = layer?.scrollRate ?? 0.5f;
-        row.Cells["colLoop"].Value       = layer?.loop       ?? false;
-        row.Cells["colOffsetX"].Value    = layer?.offsetX    ?? 0f;
-        row.Cells["colOffsetY"].Value    = layer?.offsetY    ?? 0f;
+        // layerがnullの場合は、BackgroundLayer の既定値（ゲームが JSON から読むときの既定値と同じ）を使う。
+        // 以前は scrollRate=0.5・loop=false と、モデルの既定(0.3・true)と食い違っていて、
+        // 追加しただけの行がゲーム側の既定とは別物になっていた。
+        layer ??= new BackgroundLayer();
+        row.Cells["colOrder"].Value      = layer.drawOrder;
+        row.Cells["colSprite"].Value     = layer.sprite;
+        row.Cells["colColor"].Value      = layer.color;
+        row.Cells["colScrollRate"].Value = layer.scrollRate;
+        row.Cells["colLoop"].Value       = layer.loop;
+        row.Cells["colOffsetX"].Value    = layer.offsetX;
+        row.Cells["colOffsetY"].Value    = layer.offsetY;
+        RefreshColorSwatch(row);
+    }
+
+    // color 列のセルの背景を、その行の色にする（読めない・空のときは通常の色へ戻す）。
+    // 文字は背景の明るさに応じて白か黒にして、どんな色でも読めるようにする。
+    private static void RefreshColorSwatch(DataGridViewRow row)
+    {
+        var cell = row.Cells["colColor"];
+        string hex = cell.Value?.ToString() ?? "";
+        if (hex.Length == 7 && hex[0] == '#')
+        {
+            try
+            {
+                var c = ColorTranslator.FromHtml(hex);
+                cell.Style.BackColor = c;
+                cell.Style.SelectionBackColor = c;
+                bool dark = (c.R * 299 + c.G * 587 + c.B * 114) / 1000 < 140;
+                cell.Style.ForeColor = dark ? Color.White : Color.Black;
+                cell.Style.SelectionForeColor = cell.Style.ForeColor;
+                return;
+            }
+            catch { /* 読めない値は下で通常の色へ戻す */ }
+        }
+        cell.Style.BackColor = Color.Empty;
+        cell.Style.SelectionBackColor = Color.Empty;
+        cell.Style.ForeColor = Color.Empty;
+        cell.Style.SelectionForeColor = Color.Empty;
     }
 
     // 「＋背景追加」ボタン用のショートカット。引数なしでAddRowを呼び、空の新規行を1つ追加する。
@@ -283,6 +346,24 @@ public class BackgroundSettingsForm : Form
         {
             // 画像ファイル選択ダイアログを開き、選ばれた画像をこの行に設定する
             SelectImageFile(e.RowIndex);
+        }
+        else if (colName == "colBtnColor")
+        {
+            // 単色背景の色を選ぶ。#RRGGBB の文字列としてセルへ入れる
+            // （タイル定義エディタの色選択と同じ扱い方に揃えてある）。
+            using var dlg = new ColorDialog { FullOpen = true };
+            string cur = _grid.Rows[e.RowIndex].Cells["colColor"].Value?.ToString() ?? "";
+            if (cur.Length == 7 && cur[0] == '#')
+            {
+                try { dlg.Color = ColorTranslator.FromHtml(cur); } catch { /* 読めない値は既定色のまま */ }
+            }
+            if (dlg.ShowDialog() == DialogResult.OK)
+            {
+                _grid.Rows[e.RowIndex].Cells["colColor"].Value =
+                    $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+                RefreshColorSwatch(_grid.Rows[e.RowIndex]);
+                _parallaxPreview.Invalidate();
+            }
         }
         else if (colName == "colBtnDel")
         {
@@ -399,7 +480,20 @@ public class BackgroundSettingsForm : Form
 
         foreach (var row in rows)
         {
-            // 画像パスが未設定の行は描画対象から除外する
+            // 単色指定があれば、まずその色でプレビュー全面を塗る（ゲーム側と同じく色が下地になる）。
+            string colorHex = row.Cells["colColor"].Value?.ToString() ?? "";
+            if (colorHex.Length == 7 && colorHex[0] == '#')
+            {
+                try
+                {
+                    using var fill = new SolidBrush(ColorTranslator.FromHtml(colorHex));
+                    g.FillRectangle(fill, 0, 0, _parallaxPreview.Width, _parallaxPreview.Height);
+                }
+                catch { /* 色として読めない文字列は無視する */ }
+            }
+
+            // 画像パスが未設定の行は、ここから先（画像の描画）は行わない。
+            // 単色だけのレイヤーはこのパスを通る。
             string sprite = row.Cells["colSprite"].Value?.ToString() ?? "";
             if (string.IsNullOrEmpty(sprite)) continue;
             // キャッシュ経由で画像を取得。読み込みに失敗している場合(null)もスキップする
@@ -418,25 +512,29 @@ public class BackgroundSettingsForm : Form
 
             // 0.3f はプレビュー画面内で動きが分かりやすくなるよう調整した表示用の速度係数（実機の速度そのものではない）
             // シミュレーション上のカメラ位置(_simCameraX)にscrollRateを掛けて「このレイヤーがどれだけ動くか」を求め、
-            // offsetXを加算した上で表示スケール・速度係数を掛けて実際の描画上の移動量(scrollPx)に変換する
-            float scrollPx = (_simCameraX * scrollRate + offsetX) * scale * 0.3f;
-            // 描画開始位置。drawW（1枚分の幅）で割った余りを使うことで、
-            // ループ描画時に画像がタイル状に無限スクロールしているように見せる
-            int baseX = -(int)(scrollPx % drawW);
-            // 余りが正の値になった場合、画像の先頭がパネル内部から始まってしまい
-            // 左端に隙間ができるため、1枚分左にずらして隙間が出ないようにする
-            if (baseX > 0) baseX -= drawW;
+            // 表示スケール・速度係数を掛けて実際の描画上の移動量(scrollPx)に変換する。
+            //
+            // 【不具合の修正】offsetX は「初期表示位置のずらし量」なので、ゲームでは描画位置へそのまま足している
+            // （プラスなら右へずれる）。以前のプレビューは offsetX をスクロール量へ足していたため、
+            // ずれる向きがゲームと逆で、プレビューで合わせた位置が実機ではずれていた。
+            float scrollPx = (_simCameraX * scrollRate) * scale * 0.3f;
+            int offX = (int)(offsetX * scale);
 
             if (loop)
             {
-                // loop=trueの場合は、パネル幅を覆い尽くすまで画像を横に並べて繰り返し描画する
+                // loop=trueの場合は、drawW（1枚分の幅）で割った余りでタイル状に無限スクロールさせ、
+                // パネル幅を覆い尽くすまで画像を横に並べて繰り返し描画する
+                int baseX = -(int)(scrollPx % drawW) + offX;
+                // 画像の先頭がパネルの内側から始まると左端に隙間ができるので、隙間が出ないところまで左へ戻す
+                while (baseX > 0) baseX -= drawW;
                 for (int x = baseX; x < _parallaxPreview.Width; x += drawW)
                     g.DrawImage(img, x, (int)(offsetY * scale), drawW, drawH);
             }
             else
             {
-                // loop=falseの場合は繰り返さず、計算済みの位置に1枚だけ描画する
-                g.DrawImage(img, baseX, (int)(offsetY * scale), drawW, drawH);
+                // loop=falseの場合は繰り返さず、1枚だけをスクロールに合わせて動かす（端まで行ったら画面の外へ出ていく）。
+                // ゲームも同じ動きにそろえてある。
+                g.DrawImage(img, -(int)scrollPx + offX, (int)(offsetY * scale), drawW, drawH);
             }
         }
     }
@@ -490,6 +588,7 @@ public class BackgroundSettingsForm : Form
             {
                 drawOrder  = TryInt("colOrder"),
                 sprite     = row.Cells["colSprite"].Value?.ToString()       ?? "",
+                color      = row.Cells["colColor"].Value?.ToString()        ?? "",
                 scrollRate = TryFloat("colScrollRate", 0.5f),
                 loop       = row.Cells["colLoop"].Value is bool b && b,
                 offsetX    = TryFloat("colOffsetX"),

@@ -1,4 +1,4 @@
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // UI改善（構造改修フェーズ5b）— 中身はAssetManagerPageControlに抽出済み。
 // このクラスは既存の呼び出し元（Form1.cs等）が引き続き `new AssetManagerForm(...).ShowDialog()`
@@ -38,10 +38,11 @@ public class AssetManagerForm : Form
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.HitboxOffsetX, form.HitboxOffsetY, form.HitboxWidth, form.HitboxHeight);
         };
         // 表示サイズ(スケール)の編集要求 → SizeEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
-        page.SizeEditRequested += (fullPath, curScale, onSaved) =>
+        page.SizeEditRequested += (fullPath, curScale, lw, lh, hw, hh, hasScale, onSaved) =>
         {
-            using var form = new SizeEditorForm(fullPath, curScale);
-            if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultScale);
+            using var form = new SizeEditorForm(fullPath, curScale, lw, lh, hw, hh, hasScale);
+            if (form.ShowDialog(this) == DialogResult.OK)
+                onSaved(form.ResultScale, form.ResultHitboxWidth, form.ResultHitboxHeight);
         };
         // 挙動スクリプトの編集要求 → BehaviorScriptEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
         page.BehaviorScriptEditRequested += (label, initialScript, onSaved) =>
@@ -50,9 +51,9 @@ public class AssetManagerForm : Form
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultScript);
         };
         // パーツ構成の編集要求 → PartsEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
-        page.PartsEditRequested += (label, initialParts, baseSpritePath, onSaved) =>
+        page.PartsEditRequested += (label, initialParts, baseSpritePath, baseLogicalW, baseLogicalH, onSaved) =>
         {
-            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath);
+            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultParts);
         };
         // コモンイベントの編集要求 → CommonEventEditorFormをモーダル表示し、OKなら結果をコールバックで返す。

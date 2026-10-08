@@ -50,7 +50,7 @@ public partial class Form1 : Form
         projectRoot = AppPaths.ProjectRoot;
         assetsPath = Path.Combine(projectRoot, "assets");
         stagesPath = Path.Combine(assetsPath, "stages");
-        exePath = Path.Combine(projectRoot, "x64", "Debug", "Lab_Project_01.exe");
+        exePath = ResolveGameExe(projectRoot);
         // Feature 4: テストプレイ専用の一時JSONファイルのパスをあらかじめ決めておく。
         testPlayJsonPath = Path.Combine(stagesPath, "_test_play.json");
         // Designerで定義されたUIコントロール一式を生成・配置する（Form1.Designer.cs の処理を呼び出す）。
@@ -206,6 +206,7 @@ public partial class Form1 : Form
             numEditFlatDirectionFlip.Value = (decimal)Math.Clamp(currentStage.EditCost.flatDirectionFlip, 0, 999);
             numEditFlatResetAll.Value = (decimal)Math.Clamp(currentStage.EditCost.flatResetAll, 0, 999);
             numEditFlatCutCreate.Value = (decimal)Math.Clamp(currentStage.EditCost.flatCutCreate, 0, 999);
+            numEditCutPerTile.Value = (decimal)Math.Clamp(currentStage.EditCost.cutCostPerTile, 0, 999);
 
             // マップサイズ（幅・高さ）の数値を反映する。
             numMapW.Value = currentStage.MapW;
@@ -792,6 +793,7 @@ public partial class Form1 : Form
         currentStage.EditCost.flatDirectionFlip = (float)numEditFlatDirectionFlip.Value;
         currentStage.EditCost.flatResetAll = (float)numEditFlatResetAll.Value;
         currentStage.EditCost.flatCutCreate = (float)numEditFlatCutCreate.Value;
+        currentStage.EditCost.cutCostPerTile = (float)numEditCutPerTile.Value;
 
         // ここまでの内容をすべてJSONファイルとして書き出す。
         currentStage.SaveToFile(Path.Combine(stagesPath, currentStageFile));
@@ -872,6 +874,24 @@ public partial class Form1 : Form
     // 「▶プレイ」ボタン（ツールバー・メニュー共通）が押されたときの処理。現在のステージでゲームを起動する。
     private void btnPlay_Click(object? sender, EventArgs e) => LaunchGame();
 
+    // 起動するゲーム本体(exe)を決める。
+    //
+    // 従来は x64\Debug\ 決め打ちだった。配布用に Release をビルドしても
+    // エディタからは Debug しか起動できず、「直したはずの挙動が確認できない」ことになる。
+    // 両方あるときは「後からビルドされた方」を選ぶ。配布ビルド直後は Release、
+    // 普段の開発中は Debug が自然に選ばれる。
+    // どちらも無ければ Debug のパスを返し、既存の「見つかりません」メッセージに任せる。
+    private static string ResolveGameExe(string root)
+    {
+        string dbg = Path.Combine(root, "x64", "Debug", "Lab_Project_01.exe");
+        string rel = Path.Combine(root, "x64", "Release", "Lab_Project_01.exe");
+        bool hasDbg = File.Exists(dbg), hasRel = File.Exists(rel);
+        if (hasDbg && hasRel)
+            return File.GetLastWriteTime(rel) > File.GetLastWriteTime(dbg) ? rel : dbg;
+        if (hasRel) return rel;
+        return dbg;
+    }
+
     // 現在編集中のステージを保存してから、そのステージファイルでゲームを起動する。
     private void LaunchGame()
     {
@@ -890,6 +910,41 @@ public partial class Form1 : Form
         // ゲーム本体をプロジェクトルートを作業ディレクトリとして起動し、ステージファイル名をコマンドライン引数として渡す。
         try { Process.Start(new ProcessStartInfo { FileName = exePath, WorkingDirectory = projectRoot, Arguments = stageFileName }); }
         catch (Exception ex) { MessageBox.Show($"起動失敗:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    // タイトル画面から起動する（ステージ名を引数に渡さない）。
+    //
+    // ゲーム側は「引数が付いているか」で Lab_Editor からのテストプレイかどうかを判断し、
+    // 引数付きならタイトルを飛ばして直接そのステージへ行く。
+    // つまりこの入口が無いと、エディタからタイトル画面とステージセレクトを
+    // 一度も確認できないことになる。
+    private void btnPlayFromTitle_Click(object? sender, EventArgs e)
+    {
+        if (!File.Exists(exePath))
+        { MessageBox.Show($"ゲーム実行ファイルが見つかりません:\n{exePath}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+        try { Process.Start(new ProcessStartInfo { FileName = exePath, WorkingDirectory = projectRoot }); }
+        catch (Exception ex) { MessageBox.Show($"起動失敗:\n{ex.Message}", "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    // 「ファイル」→「配布用パッケージを作る」。遊ぶ人に渡すzipを作る画面を開く。
+    //
+    // 開く前に編集中のステージを保存しておく。
+    // 配布物には assets\stages\ の中身がそのまま入るので、保存していない編集は
+    // 黙って配布物から漏れる。あとから「直したはずなのに直っていない」と気付くより、
+    // ここで確実に書き出しておくほうがよい。
+    private void btnDeployPackage_Click(object? sender, EventArgs e)
+    {
+        if (currentStage != null && !string.IsNullOrEmpty(currentStageFile)) SaveCurrentStage();
+        using var form = new DeployForm(projectRoot);
+        form.ShowDialog(this);
+    }
+
+    // ゲーム全体の設定（タイトル画面・ステージ一覧・テーマ色など）を編集する画面を開く。
+    private void btnGameConfig_Click(object? sender, EventArgs e)
+    {
+        var cfg = GameConfig.Load(assetsPath);
+        using var form = new GameConfigForm(projectRoot, assetsPath, stagesPath, assets, cfg);
+        form.ShowDialog(this);
     }
 
     // Feature 4: ここからプレイ。
@@ -940,10 +995,13 @@ public partial class Form1 : Form
         // 現在ステージが開かれていればそのファイル名とBGM設定を渡し、画面側でステージへのBGM割り当ても行えるようにする。
         string? stageName = currentStage != null && !string.IsNullOrEmpty(currentStageFile) ? currentStageFile : null;
         string stageBgmId = currentStage?.BgmId ?? "";
+        // プレイヤー操作音・編集ツール音・UI音は game_config.json 側の設定なので、こちらも渡す
+        var gameCfg = GameConfig.Load(assetsPath);
         var form = new SoundAssignmentForm(assets.Enemies, assets.Gimmicks, assets.Items,
-            assets.Se, assets.UiSe, assets.Bgm, stageName, stageBgmId);
+            assets.Se, assets.UiSe, assets.Bgm, stageName, stageBgmId, gameCfg);
         if (form.ShowDialog() == DialogResult.OK)
         {
+            form.ResultGameConfig.Save(assetsPath);
             // 敵・ギミック・アイテムそれぞれに割り当てられたサウンドIDの変更をアセット定義に反映して保存する。
             assets.Enemies = form.ResultEnemies;
             assets.Gimmicks = form.ResultGimmicks;
@@ -1031,12 +1089,12 @@ public partial class Form1 : Form
         }
 
         // 「サイズ編集」への遷移要求を処理するローカル関数。考え方はHandleHitboxRequestと同じ。
-        void HandleSizeRequest(string fullPath, float curScale, Action<float> onSaved)
+        void HandleSizeRequest(string fullPath, float curScale, int lw, int lh, int hw, int hh, bool hasScale, Action<float, int, int> onSaved)
         {
-            var page = new SizeEditorPageControl(fullPath, curScale);
-            page.Saved += (s, ev) => { onSaved(page.ResultScale); shell.GoBack(); };
+            var page = new SizeEditorPageControl(fullPath, curScale, lw, lh, hw, hh, hasScale);
+            page.Saved += (s, ev) => { onSaved(page.ResultScale, page.ResultHitboxWidth, page.ResultHitboxHeight); shell.GoBack(); };
             page.Cancelled += (s, ev) => shell.GoBack();
-            shell.NavigateTo(page, "サイズ編集", page.PrimaryActionButton, page.SecondaryActionButton);
+            shell.NavigateTo(page, "大きさの設定", page.PrimaryActionButton, page.SecondaryActionButton);
         }
 
         // 「挙動スクリプト編集」への遷移要求を処理するローカル関数。考え方は上と同じ。
@@ -1049,9 +1107,9 @@ public partial class Form1 : Form
         }
 
         // 「パーツ編集」への遷移要求を処理するローカル関数。
-        void HandlePartsEditRequest(string label, List<PartDef> initialParts, string baseSpritePath, Action<List<PartDef>> onSaved)
+        void HandlePartsEditRequest(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, Action<List<PartDef>> onSaved)
         {
-            var page = new PartsEditorPageControl(label, initialParts, projectRoot, baseSpritePath);
+            var page = new PartsEditorPageControl(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
             page.Saved += (s, parts) => { onSaved(parts); shell.GoBack(); };
             page.Cancelled += (s, ev) => shell.GoBack();
             // パーツ編集の中からさらに当たり判定/挙動スクリプトを開く場合も、同じシェル内でページ遷移する
@@ -1096,7 +1154,9 @@ public partial class Form1 : Form
     // タイル（地形パーツ）の定義を編集する専用画面を開く。保存されたらアセットとパレット・キャンバス表示を更新する。
     private void btnTileEditor_Click(object? sender, EventArgs e)
     {
-        var form = new TileEditorForm(assetsPath, assets.Tiles);
+        // アセット定義も渡す。タイル定義エディタから「壊せるブロック（ギミック）」の
+        // 破壊条件へ辿り着けるようにするため（ユーザーはまずタイルとして探しに来るため）。
+        var form = new TileEditorForm(assetsPath, assets.Tiles, assets);
         if (form.ShowDialog() == DialogResult.OK)
         { assets = AssetDefinitions.LoadFromFolder(assetsPath); RefreshPalette(); if (currentStage != null) { mapCanvas.Assets = assets; mapCanvas.RefreshTileColors(); } }
     }
@@ -1131,7 +1191,14 @@ public partial class Form1 : Form
     // 見つかれば緑色で「検出済み」、見つからなければ赤色で警告を表示し、プレイ関連の操作が失敗する原因を事前に伝える。
     private void UpdateStatus()
     {
-        if (File.Exists(exePath)) { lblStatus.Text = "✅ ゲームエンジン検出済み"; lblStatus.ForeColor = Color.Green; }
+        if (File.Exists(exePath))
+        {
+            // Debug と Release のどちらを起動するかは自動で選ばれるので、
+            // どちらが選ばれたのかを見せておかないと「なぜかRelease版が起動する」という混乱を生む。
+            string kind = exePath.Contains(@"\Release\") ? "Release" : "Debug";
+            lblStatus.Text = $"✅ ゲームエンジン検出済み ({kind} / {File.GetLastWriteTime(exePath):MM-dd HH:mm})";
+            lblStatus.ForeColor = Color.Green;
+        }
         else { lblStatus.Text = "⚠ ゲームのビルドが見つかりません"; lblStatus.ForeColor = Color.Red; }
     }
 }

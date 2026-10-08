@@ -1,0 +1,263 @@
+{
+  "version": 1,
+  "window_title": "Lab Project 01 - 編集して進む2Dアクション",
+  "title_enabled": true,
+  "theme": {
+    "ink": [
+      32,
+      34,
+      40
+    ],
+    "ink_sub": [
+      112,
+      116,
+      126
+    ],
+    "ink_accent": [
+      20,
+      84,
+      132
+    ],
+    "backdrop": [
+      246,
+      240,
+      228
+    ]
+  },
+  "title_screen": {
+    "background_image": "img/薄橙色の背景.png",
+    "bgm_id": "bgm_editing_09",
+    "elements": [
+      {
+        "key": "logo",
+        "type": "image",
+        "visible": false,
+        "text": "",
+        "image": "",
+        "x": 320.0,
+        "y": 110.0,
+        "w": 360.0,
+        "h": 120.0,
+        "font_size": 20,
+        "align": "center",
+        "color_role": "ink",
+        "edge": true,
+        "item_h": 46.0,
+        "gap": 12.0
+      },
+      {
+        "key": "title",
+        "type": "text",
+        "visible": true,
+        "text": "Editron",
+        "image": "",
+        "x": 320.0,
+        "y": 96.0,
+        "w": 0.0,
+        "h": 0.0,
+        "font_size": 52,
+        "align": "center",
+        "color_role": "accent",
+        "edge": true,
+        "item_h": 46.0,
+        "gap": 12.0
+      },
+      {
+        "key": "subtitle",
+        "type": "text",
+        "visible": true,
+        "text": "2Dアクションゲームのためのゲームエンジン",
+        "image": "",
+        "x": 320.0,
+        "y": 162.0,
+        "w": 0.0,
+        "h": 0.0,
+        "font_size": 20,
+        "align": "center",
+        "color_role": "ink",
+        "edge": true,
+        "item_h": 46.0,
+        "gap": 12.0
+      },
+      {
+        "key": "menu",
+        "type": "menu",
+        "visible": true,
+        "text": "",
+        "image": "",
+        "x": 320.0,
+        "y": 240.0,
+        "w": 260.0,
+        "h": 0.0,
+        "font_size": 22,
+        "align": "center",
+        "color_role": "ink",
+        "edge": true,
+        "item_h": 46.0,
+        "gap": 12.0
+      }
+    ],
+    "menu_items": [
+      {
+        "label": "はじめる",
+        "action": "stage_select"
+      },
+      {
+        "label": "つづきから",
+        "action": "continue"
+      },
+      {
+        "label": "おわる",
+        "action": "quit"
+      }
+    ]
+  },
+  "stage_select": {
+    "background_image": "img/薄橙色の背景.png",
+    "bgm_id": "",
+    "heading": "ステージせんたく",
+    "heading_x": 320.0,
+    "heading_y": 34.0,
+    "heading_font_size": 30,
+    "grid": {
+      "x": 41.0,
+      "y": 92.0,
+      "cols": 4,
+      "cell_w": 132.0,
+      "cell_h": 100.0,
+      "gap_x": 10.0,
+      "gap_y": 12.0
+    },
+    "back_label": "もどる",
+    "locked_label": "？ ？ ？"
+  },
+  "stages": [
+    {
+      "file": "tutorial_1_kihon.json",
+      "name": "そうさのきほん",
+      "thumbnail": "img/thumb_tutorial1.png",
+      "order": 0,
+      "unlock": "always",
+      "require": [],
+      "item_total": 9
+    },
+    {
+      "file": "tutorial_2_hensyu.json",
+      "name": "へんしゅうのきほん",
+      "thumbnail": "img/thumb_tutorial2.png",
+      "order": 1,
+      "unlock": "always",
+      "require": [],
+      "item_total": 8
+    },
+    {
+      "file": "stage1_hajimari.json",
+      "name": "はじまりの草原",
+      "thumbnail": "img/thumb_hajimari.png",
+      "order": 2,
+      "unlock": "always",
+      "require": [],
+      "item_total": 15
+    },
+    {
+      "file": "stage2_hensyu.json",
+      "name": "編集のとびら",
+      "thumbnail": "img/thumb_hensyu.png",
+      "order": 3,
+      "unlock": "always",
+      "require": [],
+      "item_total": 17
+    },
+    {
+      "file": "stage4_tate_tower.json",
+      "name": "たての塔",
+      "thumbnail": "img/thumb_tower.png",
+      "order": 4,
+      "unlock": "always",
+      "require": [],
+      "item_total": 15
+    },
+    {
+      "file": "stage_iro.json",
+      "name": "いろの回廊",
+      "thumbnail": "img/thumb_iro.png",
+      "order": 5,
+      "unlock": "always",
+      "require": [],
+      "item_total": 13
+    },
+    {
+      "file": "hills.json",
+      "name": "かたむく丘",
+      "thumbnail": "img/thumb_hills.png",
+      "order": 6,
+      "unlock": "always",
+      "require": [],
+      "item_total": 17
+    },
+    {
+      "file": "horinuki.json",
+      "name": "ほりぬきの坑道",
+      "thumbnail": "img/thumb_horinuki.png",
+      "order": 7,
+      "unlock": "always",
+      "require": [],
+      "item_total": 18
+    },
+    {
+      "file": "tatekou.json",
+      "name": "わきあがる縦坑",
+      "thumbnail": "img/thumb_tatekou.png",
+      "order": 8,
+      "unlock": "always",
+      "require": [],
+      "item_total": 24
+    },
+    {
+      "file": "haguruma.json",
+      "name": "はぐるまの回廊",
+      "thumbnail": "img/thumb_haguruma.png",
+      "order": 9,
+      "unlock": "always",
+      "require": [],
+      "item_total": 16
+    }
+  ],
+  "result": {
+    "next_label": "つぎのステージへ",
+    "retry_label": "もういちど",
+    "select_label": "ステージ選択へ",
+    "victory_text": "クリア！",
+    "gameover_text": "ゲームオーバー"
+  },
+  "player_se": {
+    "jump": "se_jump",
+    "land": "",
+    "dash": "",
+    "shoot": "se_shoot",
+    "damage": "se_hit",
+    "death": ""
+  },
+  "edit_se": {
+    "rewind": "ui_rewind",
+    "scale": "ui_edit_apply",
+    "rotate": "ui_edit_apply",
+    "move": "ui_edit_apply",
+    "flip": "ui_edit_apply",
+    "reset": "ui_cancel",
+    "step": "ui_cursor",
+    "pause": "ui_pause",
+    "fast_forward": "ui_fastforward",
+    "color_filter": "ui_color_cycle",
+    "cut": "ui_fastforward",
+    "denied": "ui_denied",
+    "cost_empty": "ui_denied"
+  },
+  "meta_se": {
+    "cursor": "ui_cursor",
+    "decide": "ui_decide",
+    "cancel": "ui_cancel",
+    "clear": "",
+    "gameover": ""
+  }
+}

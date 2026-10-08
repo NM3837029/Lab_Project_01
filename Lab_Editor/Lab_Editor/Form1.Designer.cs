@@ -48,7 +48,7 @@ partial class Form1
     // 編集ツール許可設定・編集コスト経済設定
     private System.Windows.Forms.CheckBox chkEditRewind = null!, chkEditPause = null!, chkEditFastForward = null!, chkEditScreenFx = null!, chkEditObjectEdit = null!, chkEditCut = null!;  // 各編集ツール（巻き戻し/一時停止/早送り/画面エフェクト/個別オブジェクト編集）をゲーム中に使用可能にするかの許可チェックボックス群
     private System.Windows.Forms.NumericUpDown numEditMaxCost = null!, numEditRegen = null!, numEditDrainRewind = null!, numEditDrainPause = null!, numEditDrainFF = null!, numEditDrainScreenFx = null!;  // 編集コストゲージの最大値・自然回復量・各ツール使用時の消費量（秒あたり）
-    private System.Windows.Forms.NumericUpDown numEditFlatColorCycle = null!, numEditFlatMenuToggle = null!, numEditFlatSpeedChange = null!, numEditFlatDirectionFlip = null!, numEditFlatResetAll = null!, numEditFlatCutCreate = null!;  // 単発アクション（色フィルタ切替・メニュートグル等）ごとの固定消費コスト
+    private System.Windows.Forms.NumericUpDown numEditFlatColorCycle = null!, numEditFlatMenuToggle = null!, numEditFlatSpeedChange = null!, numEditFlatDirectionFlip = null!, numEditFlatResetAll = null!, numEditFlatCutCreate = null!, numEditCutPerTile = null!;  // 単発アクション（色フィルタ切替・メニュートグル等）ごとの固定消費コスト
     private System.Windows.Forms.Button btnResize = null!;  // マップサイズ変更を確定するボタン
 
     // ツールバー用ボタン等
@@ -96,11 +96,20 @@ partial class Form1
 
         // ===== メニューバー =====
         menuStrip1 = new System.Windows.Forms.MenuStrip();
-        // 「ファイル」メニュー：保存・終了
+        // 「ファイル」メニュー：保存・配布・終了
         var menuFile = new System.Windows.Forms.ToolStripMenuItem("ファイル(&F)");
         var miSave = new System.Windows.Forms.ToolStripMenuItem("保存(&S)", null, btnSave_Click) { ShortcutKeys = System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.S };
+        // 配布（デプロイ）の入口。
+        // 仕組み自体は前から toolsuild_dist.ps1 にあったが、リポジトリ直下の
+        // build_dist.bat をダブルクリックする方法しか無く、エディタからは辿り着けなかった。
+        var miDeploy = new System.Windows.Forms.ToolStripMenuItem("📦 配布用パッケージを作る(&D)...", null, btnDeployPackage_Click);
         var miExit = new System.Windows.Forms.ToolStripMenuItem("終了(&X)", null, (_,_) => this.Close());
-        menuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miSave, miExit });
+        menuFile.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            miSave,
+            new System.Windows.Forms.ToolStripSeparator(),
+            miDeploy,
+            new System.Windows.Forms.ToolStripSeparator(),
+            miExit });
 
         // 「編集」メニュー：元に戻す・やり直し
         var menuEdit = new System.Windows.Forms.ToolStripMenuItem("編集(&E)");
@@ -123,7 +132,17 @@ partial class Form1
         // 「プレイ」メニュー：テストプレイ開始（F5ショートカット付き）
         var menuPlay = new System.Windows.Forms.ToolStripMenuItem("プレイ(&P)");
         var miPlay = new System.Windows.Forms.ToolStripMenuItem("テストプレイ", null, btnPlay_Click) { ShortcutKeys = System.Windows.Forms.Keys.F5 };
-        menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay });
+        // タイトル画面から起動する入口。引数を渡さないとゲーム側がタイトルを出す仕組みなので、
+        // これが無いとタイトル/ステージセレクトをエディタから確認できない。
+        var miPlayTitle = new System.Windows.Forms.ToolStripMenuItem("タイトル画面から起動", null, btnPlayFromTitle_Click) { ShortcutKeys = System.Windows.Forms.Keys.Shift | System.Windows.Forms.Keys.F5 };
+        menuPlay.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miPlay, miPlayTitle });
+
+        // 「ゲーム設定」メニュー：タイトル画面の内容・レイアウトとステージ一覧を編集する。
+        // タイトルやステージ一覧は「アセット」とは概念が違うので、アセット管理の下ではなく
+        // 独立したトップレベルメニューにしてある（見つけやすさのため）。
+        var menuGame = new System.Windows.Forms.ToolStripMenuItem("ゲーム設定(&G)");
+        var miGameConfig = new System.Windows.Forms.ToolStripMenuItem("タイトル画面・ステージ一覧", null, btnGameConfig_Click);
+        menuGame.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miGameConfig });
 
         // Feature: UI改善（提案書 MW-2）— 詰まったときに参照できる使い方ガイドをメニューから開けるようにする
         var menuHelp = new System.Windows.Forms.ToolStripMenuItem("ヘルプ(&H)");
@@ -131,7 +150,7 @@ partial class Form1
         menuHelp.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] { miHelp });
 
         // 組み立てた各メニューをメニューバーへ登録する。
-        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuPlay, menuHelp });
+        menuStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { menuFile, menuEdit, menuData, menuGame, menuPlay, menuHelp });
 
         // ===== ツールバー =====
         toolStrip1 = new System.Windows.Forms.ToolStrip();
@@ -306,6 +325,12 @@ partial class Form1
         numEditFlatCutCreate = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 760), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 20 };
         numEditFlatCutCreate.ValueChanged += PlayerSetting_Changed;
 
+        // カットで飛ばした区間の長さに応じた上乗せぶん（1タイルあたり）。
+        // 総コストは「カット作成」＋こちら×タイル数になる。
+        var lblEcCutPerTile = new System.Windows.Forms.Label { Text = "カット/1タイル:", Location = new System.Drawing.Point(5, 786), Size = new System.Drawing.Size(115, 18) };
+        numEditCutPerTile = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 784), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.1m, Maximum = 999, Value = 1.2m };
+        numEditCutPerTile.ValueChanged += PlayerSetting_Changed;
+
         // マップ設定タブへ、上記で組み立てた全コントロールをまとめて登録する。
         tabMapProps.Controls.AddRange(new System.Windows.Forms.Control[] {
             lblSize, lblW, numMapW, lblH, numMapH, btnResize,
@@ -320,7 +345,8 @@ partial class Form1
             lblEcFlatColorCycle, numEditFlatColorCycle, lblEcFlatMenuToggle, numEditFlatMenuToggle,
             lblEcFlatSpeedChange, numEditFlatSpeedChange, lblEcFlatDirectionFlip, numEditFlatDirectionFlip,
             lblEcFlatResetAll, numEditFlatResetAll,
-            lblEcFlatCutCreate, numEditFlatCutCreate
+            lblEcFlatCutCreate, numEditFlatCutCreate,
+            lblEcCutPerTile, numEditCutPerTile
         });
 
         tabLeft.Controls.Add(tabStages);

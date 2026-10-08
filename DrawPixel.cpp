@@ -1,5 +1,6 @@
 ﻿#include "DxLib.h"
 #include <vector>
+#include <algorithm> // 背景レイヤーを drawOrder 順へ並べ替えるための std::sort
 #include <stdio.h>
 #include <fstream>
 #include <string>
@@ -7,6 +8,8 @@
 #include <cstdlib>
 #include "json.hpp"
 #include "Logger.h"
+#include "GamePaths.h"
+#include "GameConfig.h"
 #include <exception>
 
 #include "imgui.h"
@@ -90,6 +93,22 @@ struct PartInstance {
     int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
     ScriptState scriptState;   // OnSpawn用
     ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+
+    // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
+    // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
+    // 導出値であって真の値ではない。真の値はこの localX/localY のほう。
+    // ワールド座標を積み上げていく方式にすると回転の反復合成で誤差が溜まり、
+    // 編集を元に戻してもパーツが元の位置へ帰ってこなくなるため、ローカルを正とする。
+    float localX = 0.0f, localY = 0.0f;
+    // 直前に ApplyPartsParentPose が書き込んだワールド座標。
+    // 「スクリプトがワールド座標を直接書いたかどうか」をこれとの一致で判定する。
+    // 一致していれば誰も触っていないので localX/localY をそのまま信用でき、
+    // 親の姿勢が変わったフレームでもパーツは正しく追従する。
+    float appliedX = 0.0f, appliedY = 0.0f;
+    // このフレームの親の姿勢（描画と当たり判定が同じ値を見るようここへ写す）。
+    float parentScaleX = 1.0f, parentScaleY = 1.0f; // 親の横・縦倍率
+    float parentTilt    = 0.0f;                      // 親の配置時からの傾き（描画角度に加算する）
+    float parentUniform = 1.0f;                      // パーツ自身の表示倍率・判定サイズに掛ける一様倍率
 };
 
 // 敵1種類分の「定義データ」。enemies.jsonから読み込まれる、いわば敵の設計図。
@@ -164,6 +183,18 @@ struct EnemyDef {
     //   無いとエディタで保存した瞬間にこのキーが黙って消えてしまう。
     bool ignorePause = false;
 
+    // 「本体の絵は回転させない」型かどうか。
+    //
+    // 砲台のように本体が台座で、回る部分がパーツ（砲身）として分かれている敵は、
+    // プレイヤーの回転を本体の絵にまで掛けると台座ごと傾いてしまう。
+    // 回るべきはパーツだけなので、この型では本体を配置時の姿勢のまま描く。
+    // パーツ側は parentTilt を読んで従来どおり回るので、砲身の動きは変わらない。
+    //
+    // 既定は false。ドッスン（本体＋黒目）のように「全体が回るのが正しい」型は
+    // これまでと完全に同じ見た目になる。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    bool bodyIgnoresTilt = false;
+
     // ==== 敵の行動改良（新ロスター向けに追加したパラメータ） ====
     // いずれも -1 / false のままなら従来の挙動と完全に同じになるようにしてあるので、
     // このキーを書いていない既存の enemies.json は無変更で動く。
@@ -172,6 +203,11 @@ struct EnemyDef {
     bool radialFire = false;            // SPREAD_SHOOTER: trueなら正面ファンではなく360度全方位へ均等に撃つ
     float spreadRotationStep = -1.0f;   // SPREAD_SHOOTER: 1斉射ごとに発射角度をずらす量(ラジアン)。渦巻き弾幕を作る
     float verticalTrackSpeed = -1.0f;   // FLOATER: 浮遊の中心高度をプレイヤーのYへ寄せる速さ(px/フレーム)。0なら従来どおり高さ固定
+
+    // ---- BOUNCING_WORM（跳ね回る節足敵）----
+    float bounceSpeed = -1.0f;          // 頭が直進する速さ(px/フレーム)。重力を受けないので常にこの速さで飛ぶ
+    float bounceRandomness = -1.0f;     // 跳ね返るたびに反射角へ足す乱れの最大値(度)。0なら物理どおりの正反射
+    float segmentGap = -1.0f;           // 胴体の節と節の間隔(px)。頭の軌跡をこの距離ごとに辿って並ぶ
     float riseSpeed = -1.0f;            // FALLER: クールダウン後に元の高さへ戻る速さ(px/フレーム)。0以下なら従来どおり瞬間復帰
     // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
     // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
@@ -179,8 +215,30 @@ struct EnemyDef {
     // 既定はfalseなので、パーツを持つ既存の敵（砲台・ドッスン等）の挙動は一切変わらない。
     bool consumePartOnAttack = false;
 
+    // ==== このアセットに対して禁止する編集操作 ====
+    //
+    // 「この敵だけは拡大させたくない」「この足場は動かされたら困る」といった
+    // 場ごとの縛りを、C++を書き換えずにアセット側で設定できるようにするためのフラグ。
+    // 既定は全て false（＝何でも編集できる）なので、既存アセットの挙動は変わらない。
+    //
+    // ステージ単位の EditToolFlags（そのステージで使えるツール）とは別の軸で、
+    // こちらは「このオブジェクトに対して」の可否を決める。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
+    bool noScale = false;   // 拡大縮小を禁止
+    bool noRotate = false;  // 回転を禁止
+    bool noMove = false;    // 移動を禁止
+    bool noFlip = false;    // 向き反転を禁止
+    bool noPause = false;   // 個別の一時停止を禁止
+    bool noRewind = false;  // 個別の巻き戻しを禁止
+    bool noSpeed = false;   // 速度変更を禁止
+
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==ENEMY_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
+
+    // Feature: 編集リアクションのJSON宣言 — 「編集されたらどうなるか」をJSONだけで組むためのブロック。
+    // scriptと同じく入れ子JSONを丸ごと保持するので、キーの追加はこことLab_EditorのC#モデルの2箇所で済む。
+    // 空なら何も起きず、従来どおりの挙動になる（既存の全アセットは空のまま）。
+    json editReactions = json::object();
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
@@ -220,6 +278,37 @@ struct GimmickDef {
     float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
     float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
 
+    // ==== 壊せるブロックの破壊条件（BREAKABLE_BLOCK）====
+    //
+    // 「誰が壊せるか」は長らくブロックを壊す側6箇所へ直に書かれており、条件もバラバラだった
+    // （体当たり系は拡大時のみ、ドッスンは縮小時以外、弾はプレイヤーのものだけ、など）。
+    // そのせいで「ドッスンでしか壊せないブロック」のような場を作ることができなかった。
+    // 壊せる条件をブロック側のデータにすることで、Lab_Editorから場ごとに設計できるようにする。
+    //
+    // このギミックに対して禁止する編集操作（詳細は EnemyDef の同名フィールドのコメント参照）
+    bool noScale = false;
+    bool noRotate = false;
+    bool noMove = false;
+    bool noFlip = false;
+    bool noPause = false;
+    bool noRewind = false;
+    bool noSpeed = false;
+
+    // ON/OFFは素直に bool で持つ（EnemyDef::ignorePause と同じ）。
+    // 他の数値パラメータが使っている -1.0f の「未指定」番兵はここでは使わない。
+    // 既定値をこの初期化子に書いておけば、キーを持たない既存アセットは自動的に
+    // 「今までどおり誰でも壊せる汎用ブロック」として読み込まれるため。
+    // Lab_Editor 側のパラメータ欄も、bool のプロパティだけをチェックボックスとして描く。
+    bool breakBySlam = true;    // ドッスンの落下衝撃で壊れるか
+    bool breakByRam = true;     // 突進・歩行・巡回の体当たりで壊れるか
+    bool breakByBullet = true;  // 弾で壊れるか
+    bool breakByPlayer = true;  // プレイヤーの直接操作（クリック）で壊れるか
+    bool breakByTip = true;     // 45度以上傾けられると自重で崩れるか
+    // 壊すのに必要な相手の大きさ（倍率）。0なら大きさを問わない。
+    // 敵の衝撃（スラム・体当たり）にだけ掛かり、プレイヤーの操作と自重崩壊には掛からない
+    // （どちらも「相手の大きさ」という概念が無いため）。
+    float breakMinScale = 0.0f;
+
     // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
     // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、
     // 状態がひと目で分かる必要があるギミック向け。空文字なら従来どおり sprite 1枚で描画する。
@@ -229,6 +318,9 @@ struct GimmickDef {
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type_enum==GIMMICK_CUSTOM_SCRIPTの時に使うJSON ASTブロック配列
     json script = json::array();
+
+    // Feature: 編集リアクションのJSON宣言（詳細はEnemyDefの同名フィールドのコメント参照）
+    json editReactions = json::object();
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
@@ -241,12 +333,22 @@ std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義�
 struct PlacedEnemy {
     int def_idx;  // enemyDefs配列内でのインデックス（この敵がどの種類の敵かを指す）
     float x, y;   // ステージ内でのスポーン座標（ワールド座標）
+    // 配置ごとの大きさ（1.0 = アセットの標準サイズ）と角度（ラジアン）。
+    // ゲーム内のImGuiエディタはこれらを編集しないが、保持しないと
+    // Lab_Editor で付けた値が「ここから一度保存した瞬間に消える」ことになる。
+    float scale = 1.0f;
+    float angle = 0.0f;
 };
 // ステージ上に実際に配置された「ギミック1個分」の情報。
 struct PlacedGimmick {
     int def_idx;  // gimmickDefs配列内でのインデックス
     float x, y;   // ステージ内でのスポーン座標
     std::string stringParam = ""; // ポータルの遷移先など
+    // 配置ごとの大きさと角度。PlacedEnemy と同じ理由で保持する。
+    // ギミックは横幅と縦幅を別々に持つ（ゲーム内の編集ツールがそうなっているため）。
+    float scale = 1.0f;
+    float scaleY = 1.0f;
+    float angle = 0.0f;
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
@@ -267,6 +369,17 @@ struct ItemDef {
     int hitboxWidth = 32;            // 当たり判定矩形の幅
     int hitboxHeight = 32;           // 当たり判定矩形の高さ
     std::string seCollect = "";      // 取得時に鳴らす効果音ファイル名
+
+    // このアセットに対して禁止する編集操作（詳細は EnemyDef の同名フィールドのコメント参照）。
+    // アイテムは現状ゲーム内編集ツールで選択できないが、
+    // 敵・ギミックと設定の形を揃えておくため同じフラグを持たせてある。
+    bool noScale = false;
+    bool noRotate = false;
+    bool noMove = false;
+    bool noFlip = false;
+    bool noPause = false;
+    bool noRewind = false;
+    bool noSpeed = false;
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
@@ -340,6 +453,10 @@ std::vector<ItemDef> itemDefs; // 読み込み済みのアイテム定義（item
 struct PlacedItem {
     int def_idx;  // itemDefs配列内でのインデックス（このアイテムがどの種類かを指す）
     float x, y;   // ステージ内でのスポーン座標
+    // 配置ごとの大きさと角度。PlacedEnemy と同じ理由で保持する
+    // （ここで持たないと、Lab_Editor で付けた値がこの画面からの保存で消える）。
+    float scale = 1.0f;
+    float angle = 0.0f;
 };
 std::vector<PlacedItem> editorPlacedItems; // 現在編集中/プレイ中のステージに配置されているアイテムの一覧
 
@@ -401,6 +518,16 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.dashSpeedMult, 0.5f);   // 飛びかかりの水平速度係数
             fill(def.dashDuration, 120.0f);  // 空中に居られる上限フレーム（着地を取り逃した時の保険）
             fill(def.cooldownTime, 45.0f);   // 着地後の硬直＝反撃の窓
+            break;
+        case 22: // BOUNCING_WORM（跳ね回る節足敵）
+            // 速さはプレイヤーの歩行(4px/f)より少し遅い程度。これより速いと、
+            // 重力を受けず直進してくる相手なので反応して避けるのが現実的でなくなる。
+            fill(def.bounceSpeed, 3.0f);
+            // 反射角の乱れ。正反射のままだと軌道が読み切れて簡単な障害物になり、
+            // 大きすぎると壁に沿って滑るような不自然な跳ね方になるので、その中間に置く。
+            fill(def.bounceRandomness, 25.0f);
+            // 節の間隔。頭の当たり判定(32px)より少し詰めて、繋がって見えるようにする。
+            fill(def.segmentGap, 22.0f);
             break;
         default: break;
     }
@@ -543,13 +670,26 @@ void LoadAssetDefinitions() {
                     def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
                     // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
                     def.ignorePause = e.value("ignorePause", false);
+                    // 本体の絵を回転させない型か（砲台の台座など。既定false＝従来どおり全体が回る）
+                    def.bodyIgnoresTilt = e.value("bodyIgnoresTilt", false);
                     // 敵の行動改良で追加したパラメータ。未指定なら false / -1 のままにしておき、
                     // ApplyEnemyDefaultParams() が「従来の挙動と完全に同じ」値を後から補完する。
                     def.radialFire = e.value("radialFire", false);
                     def.spreadRotationStep = e.value("spreadRotationStep", -1.0f);
                     def.verticalTrackSpeed = e.value("verticalTrackSpeed", -1.0f);
+                    def.bounceSpeed = e.value("bounceSpeed", -1.0f);
+                    def.bounceRandomness = e.value("bounceRandomness", -1.0f);
+                    def.segmentGap = e.value("segmentGap", -1.0f);
                     def.riseSpeed = e.value("riseSpeed", -1.0f);
                     def.consumePartOnAttack = e.value("consumePartOnAttack", false);
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = e.value("noScale",  false);
+                    def.noRotate = e.value("noRotate", false);
+                    def.noMove   = e.value("noMove",   false);
+                    def.noFlip   = e.value("noFlip",   false);
+                    def.noPause  = e.value("noPause",  false);
+                    def.noRewind = e.value("noRewind", false);
+                    def.noSpeed  = e.value("noSpeed",  false);
                     def.sizeAmplitude = e.value("sizeAmplitude", -1.0f);
                     def.sizeFrequency = e.value("sizeFrequency", -1.0f);
                     def.minScale = e.value("minScale", -1.0f);
@@ -568,6 +708,8 @@ void LoadAssetDefinitions() {
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     // カスタムスクリプト（ブロックのJSON配列）が指定されていれば読み込む
                     if (e.contains("script") && e["script"].is_array()) def.script = e["script"];
+                    // Feature: 編集リアクションのJSON宣言
+                    if (e.contains("edit_reactions") && e["edit_reactions"].is_object()) def.editReactions = e["edit_reactions"];
                     // 未設定(-1.0f)のパラメータをtype_enumごとの従来既定値で補完する
                     ApplyEnemyDefaultParams(def);
                     // 複数パーツで構成される敵の場合、"parts"配列を読み込む
@@ -596,6 +738,14 @@ void LoadAssetDefinitions() {
                     def.sprite_path = i.value("sprite", "");
                     def.grant_ability = i.value("grant_ability", "");
                     def.seCollect = i.value("seCollect", "");
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = i.value("noScale",  false);
+                    def.noRotate = i.value("noRotate", false);
+                    def.noMove   = i.value("noMove",   false);
+                    def.noFlip   = i.value("noFlip",   false);
+                    def.noPause  = i.value("noPause",  false);
+                    def.noRewind = i.value("noRewind", false);
+                    def.noSpeed  = i.value("noSpeed",  false);
                     def.hitboxOffsetX = i.value("hitboxOffsetX", 0);
                     def.hitboxOffsetY = i.value("hitboxOffsetY", 0);
                     def.hitboxWidth = i.value("hitboxWidth", 32);
@@ -662,6 +812,21 @@ void LoadAssetDefinitions() {
                     def.tintB = g.value("tintB", -1.0f);
                     def.zoomLevel = g.value("zoomLevel", -1.0f);
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    // 壊せるブロックの破壊条件（詳細は GimmickDef の同名フィールドのコメント参照）
+                    def.breakBySlam = g.value("breakBySlam", true);
+                    // このアセットで禁止する編集操作（未指定なら全て許可）
+                    def.noScale  = g.value("noScale",  false);
+                    def.noRotate = g.value("noRotate", false);
+                    def.noMove   = g.value("noMove",   false);
+                    def.noFlip   = g.value("noFlip",   false);
+                    def.noPause  = g.value("noPause",  false);
+                    def.noRewind = g.value("noRewind", false);
+                    def.noSpeed  = g.value("noSpeed",  false);
+                    def.breakByRam = g.value("breakByRam", true);
+                    def.breakByBullet = g.value("breakByBullet", true);
+                    def.breakByPlayer = g.value("breakByPlayer", true);
+                    def.breakByTip = g.value("breakByTip", true);
+                    def.breakMinScale = g.value("breakMinScale", 0.0f);
                     // 新ギミックロスター対応 — 作動中に差し替える画像。
                     // 起動時に一度だけ読み込んでハンドルを持っておく（毎フレームのLoadGraphは重いため）。
                     def.spriteAlt_path = g.value("spriteAlt", "");
@@ -673,6 +838,8 @@ void LoadAssetDefinitions() {
                     }
                     // Feature: Puzzle-like Behavior Scripting (M2)
                     if (g.contains("script") && g["script"].is_array()) def.script = g["script"];
+                    // Feature: 編集リアクションのJSON宣言
+                    if (g.contains("edit_reactions") && g["edit_reactions"].is_object()) def.editReactions = g["edit_reactions"];
                     ApplyGimmickDefaultParams(def);
                     ParsePartDefsFromJson(g, def.parts);
                     gimmickDefs.push_back(def);
@@ -712,6 +879,12 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         // オフセットを親座標に加算して、パーツのワールド座標を確定させる
         inst.x = baseX + pd.offsetX;
         inst.y = baseY + pd.offsetY;
+        // 複合オブジェクトのパーツ追従 — 定義上のオフセットがそのまま初期ローカル位置になる。
+        // 親が未編集のあいだ、この値から組み直したワールド座標は上の2行と完全に一致する。
+        inst.localX = pd.offsetX;
+        inst.localY = pd.offsetY;
+        inst.appliedX = inst.x;
+        inst.appliedY = inst.y;
         inst.handle = pd.graphHandle;
         inst.scale = pd.scale;
         inst.hp = pd.hp;
@@ -753,6 +926,146 @@ static float ComputeFitScale(int graphHandle, float logicalW, float logicalH) {
     return (sx < sy) ? sx : sy;
 }
 
+// ===================================================================================
+// 複合オブジェクトのパーツ追従 — 親の姿勢とその適用
+// ===================================================================================
+
+// パーツが親から継承する倍率の上下限。
+//
+// ファイアバー/振り子/回転する棘の輪は当たり判定が 8x8 しかないのに、
+// スケール編集は「マウスの移動量をそのまま width に足す」方式なので、
+// 100px ドラッグしただけで倍率が 13 倍を超える。そのまま腕に掛けると
+// 長さ1700px級のハザードが画面を覆い尽くしてしまう。
+// 描画と当たり判定の両方で必ずこのクランプ済みの値を使うこと
+// （片方だけ掛けると「見えていないのに当たる」最悪のズレになる）。
+static const float PART_RATIO_MIN = 0.25f;
+static const float PART_RATIO_MAX = 4.0f;
+static float ClampPartRatio(float v) {
+    if (!(v > 0.0f)) return 1.0f; // 0・負・NaN は「編集されていない」とみなす
+    if (v < PART_RATIO_MIN) return PART_RATIO_MIN;
+    if (v > PART_RATIO_MAX) return PART_RATIO_MAX;
+    return v;
+}
+
+// 親(敵/ギミック/アイテム)1体ぶんの「このフレームの姿勢」。
+// 各記号の意味は BehaviorScript.h の PartLocalToWorld のコメントを参照。
+struct ParentPose {
+    float px = 0.0f, py = 0.0f; // P: 親のアンカー座標
+    float qx = 0.0f, qy = 0.0f; // Q: 親アンカー→配置時の親中心
+    float sx = 1.0f, sy = 1.0f; // s: 配置時に対する倍率（クランプ済み）
+    float tilt = 0.0f;          // θ: 配置時からの傾き
+    float uniform = 1.0f;       // u: パーツに掛ける一様倍率（クランプ済み）
+};
+
+// 親のアンカー座標・現在の描画サイズ・編集差分から ParentPose を組み立てる。
+//
+// ピボット Q は「現在の半サイズ ÷ 現在の倍率」で逆算する。配置時のサイズを直接持たないのは、
+// ENEMY_SHRINKER の復活補正（基準側にも縮小率が掛かる）や ENEMY_SIZE_SHIFTER の
+// 毎フレームの scale 書き換えといった特殊ケースがあり、
+// 「配置時はこうだったはず」と決め打ちするとピボットが実際の描画中心とズレて、
+// パーツだけが本体から浮いてしまうため。逆算なら P + Q*sx が常に描画中心に一致する。
+//
+// DrawRotaGraph は縦横別倍率を取れないので、パーツ自身の表示倍率は sx と sy の平均にする。
+inline ParentPose MakeParentPose(float px, float py, float curW, float curH,
+                                 float scaleRatio, float heightRatio, float tilt) {
+    ParentPose pose;
+    pose.px = px; pose.py = py;
+    pose.sx = ClampPartRatio(scaleRatio);
+    pose.sy = ClampPartRatio(heightRatio);
+    pose.qx = (curW * 0.5f) / pose.sx;
+    pose.qy = (curH * 0.5f) / pose.sy;
+    pose.tilt = tilt;
+    pose.uniform = ClampPartRatio((pose.sx + pose.sy) * 0.5f);
+    return pose;
+}
+
+// パーツ自身の半サイズ(h)。親の倍率は含めない（含めると変換の中で二重に掛かる）。
+inline void GetPartHalfSize(const PartInstance& p, float& hx, float& hy) {
+    hx = (p.width  * p.scale) * 0.5f;
+    hy = (p.height * p.scale) * 0.5f;
+}
+
+// パーツの当たり判定矩形を求める唯一の入口。
+//
+// 以前はこの式が6箇所へコピーされており、1箇所でも直し忘れると
+// 「見えているのに当たらない」「見えていないのに当たる」という追跡の難しいバグになる。
+// hitboxOffset にも倍率を掛けるのが正しい（従来は生ピクセルのままだったが、
+// 現存する52パーツの hitboxOffset は全て(0,0)なので、この修正に回帰は無い）。
+inline void GetPartHitRect(const PartInstance& p, float& outX, float& outY, float& outW, float& outH) {
+    float m = p.scale * p.parentUniform;
+    outX = p.x + (float)p.hitboxOffsetX * m;
+    outY = p.y + (float)p.hitboxOffsetY * m;
+    outW = (float)p.hitboxWidth  * m;
+    outH = (float)p.hitboxHeight * m;
+}
+
+// パーツのスクリプトを実行した「直後」に呼ぶ。
+//
+// SetLocalOffset / SetLocalOffsetPolar はローカルオフセット自体を書き換えるので、ここでは何もしない。
+// 一方 SetPosition / OffsetPosition のようにワールド座標を直接書くopが使われた場合は、
+// ローカルが実際の位置と食い違ったままになるため、ワールドから逆変換して取り直す。
+//
+// 「前回 Apply が書いた座標と一致するか」で判定しているのがポイント。
+// 現在の姿勢で組み直した座標と比べる実装にすると、親の姿勢が変わったフレームに
+// 「スクリプトが動かした」と誤判定してローカルを取り直してしまい、
+// スクリプトを持たないパーツが永久に親へ追従できなくなる。
+void CapturePartsLocal(std::vector<PartInstance>& parts, const ParentPose& pose) {
+    for (auto& part : parts) {
+        if (part.x == part.appliedX && part.y == part.appliedY) continue; // 誰も触っていない
+        float hx, hy; GetPartHalfSize(part, hx, hy);
+        // SetLocalOffset系ならローカルも同時に更新済みなので、現在のローカルで説明がつく。
+        // その場合は逆変換を通さない（往復の丸め誤差を乗せないため）。
+        float wx = 0.0f, wy = 0.0f;
+        PartLocalToWorld(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                         pose.tilt, pose.uniform, hx, hy, part.localX, part.localY, wx, wy);
+        if (fabsf(part.x - wx) > 0.001f || fabsf(part.y - wy) > 0.001f) {
+            PartWorldToLocal(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                             pose.tilt, pose.uniform, hx, hy, part.x, part.y,
+                             part.localX, part.localY);
+        }
+        part.appliedX = part.x;
+        part.appliedY = part.y;
+    }
+}
+
+// ローカルオフセットと親の姿勢から、パーツのワールド座標を組み直す。
+//
+// 「毎フレーム必ず通る場所」に置くこと。編集ツールでドラッグしている最中は CanUpdate が
+// false を返して全オブジェクトのスクリプトが1ティックも回らないため、
+// スクリプト任せにするとまさにプレイヤーが拡大・回転している最中だけパーツが固まる。
+// ここを通していれば、移動ドラッグ中・一時停止中・巻き戻し中でもパーツは本体に張り付く。
+//
+// ⚠ 必ず CapturePartsLocal より「後」に呼ぶこと。逆順にすると、スクリプトが動かない
+// フレームで「親に張り付いた位置」をローカルとして取り直してしまい、編集差分が毎フレーム
+// 累積して発散する。
+void ApplyPartsParentPose(std::vector<PartInstance>& parts, const ParentPose& pose) {
+    for (auto& part : parts) {
+        float hx, hy; GetPartHalfSize(part, hx, hy);
+        PartLocalToWorld(pose.px, pose.py, pose.qx, pose.qy, pose.sx, pose.sy,
+                         pose.tilt, pose.uniform, hx, hy, part.localX, part.localY,
+                         part.x, part.y);
+        part.appliedX = part.x;
+        part.appliedY = part.y;
+        part.parentScaleX = pose.sx;
+        part.parentScaleY = pose.sy;
+        part.parentTilt = pose.tilt;
+        part.parentUniform = pose.uniform;
+    }
+}
+
+// ScriptActor へ親の姿勢を流し込む。SetLocalOffset系がローカル→ワールドの合成に使う。
+// 敵・ギミック・アイテムの3つのパーツループが同じ内容を書くため、ここへ集約する。
+void FillScriptPartTransform(ScriptActor& actor, PartInstance& part, const ParentPose& pose) {
+    float hx, hy; GetPartHalfSize(part, hx, hy);
+    actor.parentPivotX = pose.qx; actor.parentPivotY = pose.qy;
+    actor.parentScaleX = pose.sx; actor.parentScaleY = pose.sy;
+    actor.parentTilt = pose.tilt;
+    actor.parentUniform = pose.uniform;
+    actor.selfHalfX = hx; actor.selfHalfY = hy;
+    actor.partLocalX = &part.localX;
+    actor.partLocalY = &part.localY;
+}
+
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
@@ -763,12 +1076,17 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // wantBehindParent==falseの呼び出し時はzOrder>=0（親より手前）のパーツだけを描画する
         if ((part.zOrder < 0) != wantBehindParent) continue;
         if (part.handle < 0) continue; // 画像が読み込まれていないパーツは描画しない
-        // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める
-        int pcx = (int)(part.x + (part.width * part.scale) / 2.0f - cameraX);
-        int pcy = (int)(part.y + (part.height * part.scale) / 2.0f - cameraY);
+        // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める。
+        // 複合オブジェクトのパーツ追従 — 親を拡大したぶん(parentUniform)はパーツのサイズにも効くので、
+        // 中心を出すときの半サイズにも同じ倍率を掛ける。掛け忘れると絵の位置が半サイズぶんずれる。
+        float pm = part.scale * part.parentUniform;
+        int pcx = (int)(part.x + (part.width * pm) / 2.0f - cameraX);
+        int pcy = (int)(part.y + (part.height * pm) / 2.0f - cameraY);
         // 新アセット移行対応 — パーツ画像(640x640)をパーツ定義の width/height へ収める倍率を掛ける
         float partFit = ComputeFitScale(part.handle, (float)part.width, (float)part.height);
-        DrawRotaGraph(pcx, pcy, partFit * part.scale, part.angle, part.handle, TRUE);
+        // 親の傾きはパーツ自身の角度に加算する。剛体として親と一緒に回るのが既定の挙動で、
+        // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
+        DrawRotaGraph(pcx, pcy, partFit * pm, part.angle + part.parentTilt, part.handle, TRUE);
     }
 }
 
@@ -789,13 +1107,22 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
 // 描画モードの色深度に依存するため、DxLib_Init より前の静的初期化時に
 // 呼ばれる形にしたくないから。
 
-inline int UiInk() { return GetColor(32, 34, 40); }        // 主要テキスト（ほぼ黒）
-inline int UiInkSub() { return GetColor(112, 116, 126); }  // 補助テキスト・無効表示
-inline int UiInkAccent() { return GetColor(20, 84, 132); } // 強調（ウィンドウ枠の青と同系色）
-inline int UiInkWarn() { return GetColor(196, 52, 52); }   // 警告・削除など危険寄りの操作
-inline int UiInkOk() { return GetColor(28, 122, 68); }     // 正常・有効を示す緑
+// ゲーム画面のウィンドウの見た目の設定（assets/game_config.json の ui_style / theme）。
+// WinMain が設定を読んだ直後にここへ写す。既定値は従来の見た目と同じなので、
+// 設定が無くても何も変わらない。Lab_Editor の「ゲーム設定」→「UIデザイン」から変えられる。
+GameCfg::UiStyle g_uiStyle;
 
-// --- 9スライス描画のパラメータ ---
+inline int UiColorOf(const GameCfg::Color& c) { return GetColor(c.r, c.g, c.b); }
+inline int UiInk() { return UiColorOf(g_uiStyle.ink); }               // 主要テキスト（既定はほぼ黒）
+inline int UiInkSub() { return UiColorOf(g_uiStyle.inkSub); }         // 補助テキスト・無効表示
+inline int UiInkAccent() { return UiColorOf(g_uiStyle.inkAccent); }   // 強調（ウィンドウ枠の青と同系色）
+inline int UiInkWarn() { return UiColorOf(g_uiStyle.inkWarn); }       // 警告・削除など危険寄りの操作
+inline int UiInkOk() { return UiColorOf(g_uiStyle.inkOk); }           // 正常・有効を示す緑
+inline int UiGaugeFill() { return UiColorOf(g_uiStyle.gaugeFill); }   // 編集コストゲージの中身
+inline int UiGaugeLow() { return UiColorOf(g_uiStyle.gaugeLow); }     // 残りわずかのときの点滅色（明）
+inline int UiGaugeBack() { return UiColorOf(g_uiStyle.gaugeBack); }   // ゲージの器（暗い溝）
+
+// --- 9スライス描画 ---
 // 9スライスとは、1枚の枠絵を「四隅・上下左右の辺・中央」の9領域に切り分け、
 //   ・四隅は引き伸ばさない
 //   ・上下の辺は横方向だけ、左右の辺は縦方向だけ引き伸ばす
@@ -803,52 +1130,104 @@ inline int UiInkOk() { return GetColor(28, 122, 68); }     // 正常・有効を
 // という描き方のこと。こうするとどんな大きさのウィンドウを作っても
 // 角の丸みや枠線の太さが潰れず、1枚の素材を全UIで使い回せる。
 //
-// UIウィンドウ.png は 640x640 で、周囲におよそ 17〜26px の透明な余白がある。
-// その余白まで含めて描くと小さいウィンドウが内側に痩せて見えるので、
-// 全周 16px を切り落とした内側だけを素材として扱う。
-const int UI_WIN_SRC_PAD = 16;                              // 素材から切り落とす透明余白(px)
-const int UI_WIN_SRC_SPAN = 640 - UI_WIN_SRC_PAD * 2;       // 実際に使う素材の一辺(px)
-const int UI_WIN_SRC_SLICE = 60;                            // 素材側で「枠」として扱う縁の太さ(px)
-const int UI_WIN_DEST_SLICE = 14;                           // 画面上での枠の太さ(px)
+// 切り方（素材から切り落とす余白・枠の太さ・画面上での枠の太さ）は、以前は定数だったが、
+// 素材を差し替えられるよう g_uiStyle の値（src_pad / src_slice / dest_slice）にした。
+// 既定値は従来の 16 / 60 / 14 で、640x640 の UIウィンドウ.png ならこれまでと完全に同じ結果になる。
+
+// 設定で指定された素材のハンドルを返す（初回だけ読み込み、以後は使い回す）。読めなければ -1。
+std::map<std::string, int> g_uiImageCache;
+int UiLoadImage(const std::string& path) {
+    if (path.empty()) return -1;
+    auto it = g_uiImageCache.find(path);
+    if (it != g_uiImageCache.end()) return it->second;
+    int h = LoadGraph(path.c_str());
+    if (h < 0) Logger::Error("DrawPixel", "UiLoadImage", "Failed to load ui frame image", path);
+    g_uiImageCache[path] = h;
+    return h;
+}
 
 // UIウィンドウを9スライスで描く。
-// handleが未読み込み(-1)の場合は、素材が無くてもUIが消えないよう単色の枠でフォールバックする。
-void DrawUiWindow(int x1, int y1, int x2, int y2, int handle) {
+//   handle … 既定の素材（img/UIウィンドウ.png）のハンドル。設定が既定の素材のままなら、これを使う
+//   kind   … 枠の種類（GameCfg::UiKind）。種類ごとの色合わせ・不透明度・素材の上書きを反映する。-1なら全体設定のみ
+// 素材が無い（未読み込み）場合は、UIが消えないよう単色の枠でフォールバックする。
+void DrawUiWindow(int x1, int y1, int x2, int y2, int handle, int kind = -1) {
     int w = x2 - x1;
     int h = y2 - y1;
     if (w <= 0 || h <= 0) return;
-    if (handle < 0) {
-        DrawBox(x1, y1, x2, y2, GetColor(252, 246, 236), TRUE);
-        DrawBox(x1, y1, x2, y2, GetColor(20, 84, 132), FALSE);
-        return;
+    const GameCfg::UiWindowStyle* ws = (kind >= 0 && kind < GameCfg::UIK_COUNT) ? &g_uiStyle.win[kind] : nullptr;
+
+    // 使う素材を決める。種類ごとの指定 → 全体の指定 の順。既定の素材のままなら呼び出し側のハンドルを使う
+    // （同じ絵を二重に読み込まないため）。
+    const std::string& path = (ws && !ws->image.empty()) ? ws->image : g_uiStyle.frameImage;
+    int img = (path == "img/UIウィンドウ.png") ? handle : UiLoadImage(path);
+
+    // 色合わせと不透明度。呼び出し側がすでに SetDrawBright / ブレンドを指定していること（ホバーで暗くする等）が
+    // あるので、置き換えずに掛け合わせ、描き終えたら元へ戻す。
+    int br = 255, bg = 255, bb = 255, bm = DX_BLENDMODE_NOBLEND, bp = 0;
+    GetDrawBright(&br, &bg, &bb);
+    GetDrawBlendMode(&bm, &bp);
+    bool restore = false;
+    if (ws) {
+        if (ws->tint.r != 255 || ws->tint.g != 255 || ws->tint.b != 255) {
+            SetDrawBright(br * ws->tint.r / 255, bg * ws->tint.g / 255, bb * ws->tint.b / 255);
+            restore = true;
+        }
+        if (ws->opacity < 100) {
+            int base = (bm == DX_BLENDMODE_ALPHA) ? bp : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, base * ws->opacity / 100);
+            restore = true;
+        }
     }
-    // 枠の太さは基本 UI_WIN_DEST_SLICE。ただしウィンドウ自体が小さいときに
-    // 左右（上下）の枠がぶつかって潰れないよう、短辺の1/3を上限にする。
-    int ds = UI_WIN_DEST_SLICE;
-    int limit = (w < h ? w : h) / 3;
-    if (ds > limit) ds = limit;
-    if (ds < 2) ds = 2;
 
-    const int ss = UI_WIN_SRC_SLICE;
-    const int sm = UI_WIN_SRC_SPAN - ss * 2; // 素材の中央部分の一辺
-    const int sx0 = UI_WIN_SRC_PAD, sx1 = sx0 + ss, sx2 = sx1 + sm;
-    const int sy0 = UI_WIN_SRC_PAD, sy1 = sy0 + ss, sy2 = sy1 + sm;
-    const int dx1 = x1 + ds, dx2 = x2 - ds;
-    const int dy1 = y1 + ds, dy2 = y2 - ds;
+    if (img < 0) {
+        DrawBox(x1, y1, x2, y2, UiColorOf(g_uiStyle.fallbackFill), TRUE);
+        DrawBox(x1, y1, x2, y2, UiColorOf(g_uiStyle.fallbackEdge), FALSE);
+    } else {
+        int iw = 0, ih = 0;
+        GetGraphSize(img, &iw, &ih);
+        // 枠の太さは基本 dest_slice。ただしウィンドウ自体が小さいときに
+        // 左右（上下）の枠がぶつかって潰れないよう、短辺の1/3を上限にする。
+        int ds = (ws && ws->destSlice >= 0) ? ws->destSlice : g_uiStyle.destSlice;
+        int limit = (w < h ? w : h) / 3;
+        if (ds > limit) ds = limit;
+        if (ds < 2) ds = 2;
 
-    // 四隅（引き伸ばさず、枠の太さぶんに縮めて描く）
-    DrawRectExtendGraph(x1,  y1,  dx1, dy1, sx0, sy0, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(dx2, y1,  x2,  dy1, sx2, sy0, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(x1,  dy2, dx1, y2,  sx0, sy2, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(dx2, dy2, x2,  y2,  sx2, sy2, ss, ss, handle, TRUE);
-    // 上下の辺（横方向だけ引き伸ばす）
-    DrawRectExtendGraph(dx1, y1,  dx2, dy1, sx1, sy0, sm, ss, handle, TRUE);
-    DrawRectExtendGraph(dx1, dy2, dx2, y2,  sx1, sy2, sm, ss, handle, TRUE);
-    // 左右の辺（縦方向だけ引き伸ばす）
-    DrawRectExtendGraph(x1,  dy1, dx1, dy2, sx0, sy1, ss, sm, handle, TRUE);
-    DrawRectExtendGraph(dx2, dy1, x2,  dy2, sx2, sy1, ss, sm, handle, TRUE);
-    // 中央（縦横とも引き伸ばす）
-    DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sm, sm, handle, TRUE);
+        // 素材側の切り方。素材の大きさが想定と違っても破綻しないよう、余白と縁の太さを素材の大きさで頭打ちにする
+        int pad = g_uiStyle.srcPad;
+        if (pad * 2 >= iw - 2) pad = (iw - 2) / 2;
+        if (pad * 2 >= ih - 2) pad = (ih - 2) / 2;
+        if (pad < 0) pad = 0;
+        const int spanW = iw - pad * 2, spanH = ih - pad * 2;
+        int ss = g_uiStyle.srcSlice;
+        if (ss > spanW / 2 - 1) ss = spanW / 2 - 1;
+        if (ss > spanH / 2 - 1) ss = spanH / 2 - 1;
+        if (ss < 1) ss = 1;
+        const int smW = spanW - ss * 2; // 素材の中央部分の幅
+        const int smH = spanH - ss * 2; // 素材の中央部分の高さ
+        const int sx0 = pad, sx1 = sx0 + ss, sx2 = sx1 + smW;
+        const int sy0 = pad, sy1 = sy0 + ss, sy2 = sy1 + smH;
+        const int dx1 = x1 + ds, dx2 = x2 - ds;
+        const int dy1 = y1 + ds, dy2 = y2 - ds;
+
+        // 四隅（引き伸ばさず、枠の太さぶんに縮めて描く）
+        DrawRectExtendGraph(x1,  y1,  dx1, dy1, sx0, sy0, ss, ss, img, TRUE);
+        DrawRectExtendGraph(dx2, y1,  x2,  dy1, sx2, sy0, ss, ss, img, TRUE);
+        DrawRectExtendGraph(x1,  dy2, dx1, y2,  sx0, sy2, ss, ss, img, TRUE);
+        DrawRectExtendGraph(dx2, dy2, x2,  y2,  sx2, sy2, ss, ss, img, TRUE);
+        // 上下の辺（横方向だけ引き伸ばす）
+        DrawRectExtendGraph(dx1, y1,  dx2, dy1, sx1, sy0, smW, ss, img, TRUE);
+        DrawRectExtendGraph(dx1, dy2, dx2, y2,  sx1, sy2, smW, ss, img, TRUE);
+        // 左右の辺（縦方向だけ引き伸ばす）
+        DrawRectExtendGraph(x1,  dy1, dx1, dy2, sx0, sy1, ss, smH, img, TRUE);
+        DrawRectExtendGraph(dx2, dy1, x2,  dy2, sx2, sy1, ss, smH, img, TRUE);
+        // 中央（縦横とも引き伸ばす）
+        DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, smW, smH, img, TRUE);
+    }
+
+    if (restore) {
+        SetDrawBright(br, bg, bb);
+        SetDrawBlendMode(bm, bp);
+    }
 }
 
 // UIアイコンを (cx, cy) を中心に boxSize x boxSize の正方形へ収めて描く。
@@ -875,6 +1254,10 @@ const int PAUSE_BUTTON_X2 = WINDOW_WIDTH / 2 + 24;
 const int PAUSE_BUTTON_Y1 = WINDOW_HEIGHT - 94;
 const int PAUSE_BUTTON_Y2 = WINDOW_HEIGHT - 66;
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
+// ドッスン(FALLER)が落下フェーズに留まれる最大フレーム数。
+// 落下中は重力を切って軸方向へ加速させるため、着地判定を1回でも取り逃すと
+// そのまま永久に飛び続けてしまう。必ずクールダウンへ抜けられるようにする安全網。
+const float FALLER_MAX_AIRTIME = 240.0f;
 const int MAX_BULLETS = 40;      // 同時に存在できる弾の最大数
 const float BULLET_SPEED = 20.0f;// 弾の基本速度
 // 弾の描画サイズ(px)。当たり判定側が全ての判定箇所で 16x16 決め打ちになっているため、
@@ -916,10 +1299,17 @@ enum TileType {
 };
 
 // 現在のゲーム全体の進行状態（シーン）。
+//
+// TITLE と STAGE_SELECT は「ゲームプレイのループに乗らない画面」で、
+// メインループの先頭で早期continueして専用の描画へ分岐する。
+// そのため CanUpdate やリザルト描画といったゲームプレイ側の処理には一切到達しない。
+// 値を足すときは必ず末尾へ。既存の値の並びを崩さないこと。
 enum GameScene {
     PLAY,             // 通常プレイ中
     RESULT_GAMEOVER,  // ゲームオーバー結果画面
-    RESULT_VICTORY    // クリア（勝利）結果画面
+    RESULT_VICTORY,   // クリア（勝利）結果画面
+    TITLE,            // タイトル画面
+    STAGE_SELECT      // ステージセレクト画面
 };
 
 // 1種類のタイルの見た目・当たり判定情報をまとめた定義データ。
@@ -928,7 +1318,27 @@ struct TileDefinition {
     int handle;            // 描画に使う画像ハンドル
     bool isCollidable;     // trueなら地形として衝突判定の対象になる（プレイヤー・敵が乗れる/ぶつかる）
     bool deadly = false;   // 返った場合ただちゲームオーバー
-    const char* name;      // デバッグ表示・エディタ表示用の名前
+    std::string name;      // デバッグ表示・エディタ表示用の名前。
+                           // 以前は const char* で "Custom" 固定になっており、
+                           // タイル定義エディタで付けた名前がゲーム側へ一切届いていなかった。
+    std::string color;     // タイル定義エディタで指定される色（"#RRGGBB"）。
+                           // 画像が無いタイルを塗り分けるために使う。
+    int colorRGB = 0;      // color を GetColor で解決した値。hasColor が false のときは無意味。
+    bool hasColor = false; // color が指定されていたか。
+                           // GetColor は32bitカラーだと負値を返すので「>=0なら有効」では判定できない。
+
+    // Feature: タイル破壊 — このタイルを「どの壊し方で」壊せるか。
+    // ギミックの壊せるブロック（GimmickDef の breakByXxx）と同じ考え方を、
+    // 地形タイルそのものへ広げたもの。既定は全て false なので、
+    // 設定しない限り従来どおりタイルは絶対に壊れない。
+    bool breakBySlam = false;   // ドッスンの落下叩きつけ
+    bool breakByRam = false;    // 敵の体当たり・突進
+    bool breakByBullet = false; // 弾
+    bool breakByPlayer = false; // プレイヤーの操作（編集ツールでの破壊）
+    std::string breakSe; // 壊れたときに鳴らす効果音ID（se.json / ui_se.json のid）。空なら無音。
+    // 壊すのに必要な相手の大きさ（scale）。0以下なら大きさを問わない。
+    // 「拡大した敵の突進でなければ壊せない壁」をJSONだけで作れるようにするための条件。
+    float breakMinScale = 0.0f;
     // Feature: タイル表示範囲調整機能 — spriteが複数タイルをまとめたタイルセット画像の場合に、
     // そのうちどの矩形部分を表示に使うかを指定する。srcW/srcHが0のままなら画像全体を使う
     // （tileDefs構築直後の解決ループで画像サイズへ解決される。従来互換）。
@@ -974,11 +1384,30 @@ enum EnemyType {
     ENEMY_ZOOM_DISRUPTOR,     // ズーム撹乱敵：射程内で画面ズームを揺さぶる（新画面エフェクト連携）
     ENEMY_CUSTOM_SCRIPT,      // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで挙動を自作する
     ENEMY_POUNCER,            // 飛びかかり：普段は高速で地上を追い、射程に入ると溜めてから放物線ジャンプで飛びかかる
+    ENEMY_BOUNCING_WORM,      // 跳ね回る節足敵：重力を受けず直進し、壁・床に当たるとランダムな角度で跳ね返る。胴体のパーツが頭の軌跡を辿って連なる
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
 
 // 巻き戻し機能のために毎フレーム記録する、敵1体・1フレーム分のスナップショット。
+// 「プレイヤーが編集ツールでこの軸を触ったか」を覚えておくためのビットフラグ。
+//
+// 編集リアクションの判定は基本的に「配置時の値(editBase*)と現在値の差」を毎フレーム見るだけで済み、
+// その方が巻き戻しと自然に噛み合う（値そのものが履歴に入っているため）。
+// ただし ENEMY_SIZE_SHIFTER のように「AIが毎フレーム自分でscaleを上書きする」型では
+// 差分がAI由来なのか編集由来なのか区別できないので、そういう型のためだけに
+// 「触られた事実」を明示的に立てておく。
+enum EditDirtyBits : unsigned int {
+    EDIT_DIRTY_NONE   = 0u,
+    EDIT_DIRTY_SCALE  = 1u << 0, // 拡大・縮小された
+    EDIT_DIRTY_ANGLE  = 1u << 1, // 回転された
+    EDIT_DIRTY_DIR    = 1u << 2, // 向きを反転された
+    EDIT_DIRTY_SPEED  = 1u << 3, // 速度を変えられた
+    EDIT_DIRTY_POS    = 1u << 4, // 移動された
+    EDIT_DIRTY_WIDTH  = 1u << 5, // 横幅を変えられた（ギミックのみ）
+    EDIT_DIRTY_HEIGHT = 1u << 6, // 縦幅を変えられた（ギミックのみ）
+};
+
 struct EnemyState {
     float x, y, vx, vy;      // 座標と速度
     int direction;            // 向いている方向
@@ -1079,6 +1508,9 @@ struct Item {
 
     std::string assetId = ""; // ItemDef.id への参照（SE検索用）
     int handle = -1;          // ItemDef.graphHandle（カスタムスプライト）。-1ならcoinHandleを使う
+    // 配置ごとの回転角（ラジアン）。ステージJSONの "angle" から入る。
+    // 敵やギミックと違い、アイテムはAIで角度を変えないので表示専用。
+    float angle = 0.0f;
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartInstance> parts; // このアイテムを構成する追加パーツ（無ければ空のまま）
@@ -1167,6 +1599,45 @@ struct Enemy {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartInstance> parts;
+
+    // Feature: 編集リアクション — ステージ配置時（ResetStage）の値をここに焼いておき、
+    // 「現在値とどれだけズレているか」でプレイヤーが何を編集したかを毎フレーム導出する。
+    // ResetStage以外では書き換わらないので巻き戻し履歴(EnemyState)には入れない。
+    // 既存の集成初期化（ステージ読み込み・ハードコードステージ等）を壊さないよう、
+    // 必ず既定値つきで構造体の末尾に置くこと。
+    float        editBaseScale = 1.0f;  // 配置時のscale
+    float        editBaseAngle = 0.0f;  // 配置時のangle
+    float        editBaseX = 0.0f;      // 配置時のX（移動されたかの判定と、ホーム追従に使う）
+    float        editBaseY = 0.0f;      // 配置時のY
+    int          editBaseDirection = 0; // 配置時の向き
+    unsigned int editDirtyMask = 0u;    // EditDirtyBitsの論理和
+
+    // Feature: 配置ごとの初期姿勢 — ステージJSONの scale / angle は
+    // 「最初からその編集がかけられている」という意味で扱う。
+    //
+    // そのためには編集リアクションの基準(editBase*)を**アセット既定の姿勢のまま**に
+    // 据え置く必要がある。基準まで配置後の値にしてしまうと差が0になり、
+    // 「拡大して置いた敵が重くならない」「傾けて置いたドッスンが傾いた方向へ落ちない」という
+    // 見た目だけの変更になってしまう（実際それが最初の実装の不具合だった）。
+    // 砲台系がこのフレームに狙っている向き（ワールド角・ラジアン）。
+    //
+    // 狙いの決め方は本体の1箇所だけに置き、砲身パーツは ParentAim でこの値を読む。
+    // パーツ側が DirectionToPlayer から狙いを組み直していたころは、
+    // 本体が追尾をやめる条件（反転など）を足すたびに「砲身は自分を向いているのに
+    // 弾は別の方向へ飛ぶ」という食い違いが生まれていた。
+    float aimAngle = 0.0f;
+
+    // 本体の絵を傾けない型（砲台の台座など）が使う「置かれたときの姿勢」。
+    //
+    // editBaseAngle を使えないのは、AIMED_SHOOTER が手動照準を一発で消費するときに
+    // editBaseAngle へ現在の角度を焼き直すため。一度撃つと基準が傾いた角度に変わり、
+    // 以後は台座まで傾いて描かれてしまう（＝直したはずの不具合が撃った瞬間に再発する）。
+    // こちらは ResetStage で一度だけ焼き、以後どのAIも触らない。
+    float        bodyRestAngle = 0.0f;
+    bool         hasSpawnEdit = false;  // 配置ごとの scale / angle 指定があったか
+    float        spawnBaseScale = 1.0f; // アセット既定の scale（リアクションの基準）
+    float        spawnBaseAngle = 0.0f; // アセット既定の angle
+    unsigned int spawnDirtyMask = 0u;   // 配置時点で立てておくダーティビット
 };
 
 // ギミック1個分の実行時状態。GimmickDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・状態を持つ。
@@ -1215,6 +1686,28 @@ struct Gimmick {
 
     // 動くギミックに乗っているプレイヤー/敵を追従させるための、直近フレームの移動量
     float lastDeltaX = 0.0f, lastDeltaY = 0.0f;
+
+    // Feature: 編集リアクション — ギミックにも「速度」と「向き反転」を持たせる。
+    // 従来はこの2つのフィールドが無かったため、インスペクタとコンテキストメニューが
+    // ギミック選択時だけ "Speed: N/A" / "Flip: N/A" になり、
+    // 6つある編集操作のうち2つがギミックに対して完全に死んでいた。
+    float speedScale = 1.0f; // このギミック個体の時間倍率（0で停止、2で倍速）
+    int   direction  = 0;    // 0=正方向 / 1=逆方向。往復や回転の向きを反転させるのに使う
+
+    // Feature: 編集リアクション — 配置時の値（詳細はEnemy側の同名フィールドのコメント参照）。
+    // width/heightはGimmickStateに入っておらず巻き戻し対象外なので、
+    // 「編集は巻き戻らない」という全体方針とも一致する。
+    float        editBaseX = 0.0f, editBaseY = 0.0f;
+    float        editBaseWidth = 0.0f, editBaseHeight = 0.0f;
+    float        editBaseAngle = 0.0f;
+    unsigned int editDirtyMask = 0u;
+
+    // Feature: 配置ごとの初期姿勢（考え方は Enemy の同名フィールドのコメント参照）。
+    // ギミックは scale を持たず横幅・縦幅を別々に編集するため、基準も幅・高さで持つ。
+    bool         hasSpawnEdit = false;
+    float        spawnBaseWidth = 0.0f, spawnBaseHeight = 0.0f;
+    float        spawnBaseAngle = 0.0f;
+    unsigned int spawnDirtyMask = 0u;
 };
 
 // 弾1発分の実行時状態。
@@ -1226,6 +1719,11 @@ struct Bullet {
     bool isActive = false; // 発射中/存在しているか
     int handle = 0;         // 描画に使う画像ハンドル
     bool isPlayerOwned = true; // 弾丸の所有者の追跡用
+
+    // Feature: 編集リアクション — 撃った側のscaleを引き継ぐ弾の大きさ。
+    // 砲台を拡大すると大きく遅い弾に、縮小すると小さく速い弾になる、という反応を成立させる。
+    // 描画倍率と当たり判定の両方に掛かる。1.0なら従来と完全に同じ。
+    float scale = 1.0f;
 
     // 巻き戻しトラック
     bool isRewinding = false;          // 現在巻き戻し再生中かどうか
@@ -1248,6 +1746,15 @@ struct ContextMenu {
 struct BackgroundLayer {
     std::string sprite;      // 背景画像のパス
     int handle = -1;         // spriteをLoadGraphした結果のハンドル
+    // 画像を使わず単色で塗りたいときの色（"#RRGGBB"）。空なら単色塗りはしない。
+    // 画像が無いレイヤーは従来ただの何も描かない層になっていて、空だと
+    // ClearDrawScreen の黒がそのまま見えていた。空を塗るだけの背景を作れるようにする。
+    std::string color;
+    int colorRGB = 0;        // colorをGetColorへ通した結果
+    // 色が指定されているかはこのフラグで判断する。
+    // GetColor は32bitカラーだと上位ビットが立って負の値を返すため、
+    // 「colorRGB >= 0 なら指定あり」といった値での判定はできない。
+    bool hasColor = false;
     int drawOrder = 0;       // 描画順（値が小さいほど奥に描画）
     float scrollRate = 0.3f; // カメラ移動に対するスクロール速度の割合（視差効果。1.0でカメラと同速）
     bool loop = true;        // 画像端に達したときに繰り返し表示するか
@@ -1262,6 +1769,11 @@ struct StageData {
     char name[64] = "";      // ステージ名（表示用）
     std::string sourceFile = ""; // assets/stages/ 配下のファイル名（GoToStageでの再読み込み判定に使用）
     std::vector<std::vector<int>> map; // 地形タイルマップ（[行][列]にTileTypeの数値が入る2次元配列）
+    // Feature: タイル破壊 — 壊される前の地形。
+    // map は実行時に書き換わるようになったので、リトライやステージ再入場で元へ戻すには
+    // 「一度も壊れていないマップ」を別に持っておく必要がある。
+    // ステージ読み込み直後に map の複製を入れ、ResetStage でここから戻す。
+    std::vector<std::vector<int>> pristineMap;
 
     std::vector<std::vector<int>> decoMapBack;  // プレイヤーより奥に描画される装飾タイルマップ
     std::vector<std::vector<int>> decoMapFront; // プレイヤーより手前に描画される装飾タイルマップ
@@ -1285,6 +1797,17 @@ struct StageData {
     // Feature: 編集コストゲージ（ステージ単位設定）
     EditToolFlags editToolFlags;         // このステージで許可する編集ツールの設定
     EditCostSettings editCostSettings;   // このステージでの編集コストゲージの数値設定
+
+    // このステージでのプレイヤーの基本性能（歩く速さ・ジャンプ力・使える行動）。
+    //
+    // 【重要】ステージごとに持つこと。
+    // 以前はステージJSONの player_capabilities を読み込み時にグローバルの editorPlayerCaps へ
+    // 直接書いていたため、一度読み込んだステージへ戻っても能力が読み直されず、
+    // 「直前に遊んだステージの速さとジャンプ力のまま別のステージが始まる」状態になっていた
+    // （＝プレイヤーの性能が勝手に変わる）。
+    // 編集ツールの許可(editToolFlags)や編集コスト(editCostSettings)と同じく、
+    // ステージ側が持ち、ResetStage で現在のステージのものを反映する。
+    PlayerCapabilities playerCaps;
 };
 
 // エディタ上で現在何が選択されているかを表す種別。
@@ -1294,6 +1817,994 @@ enum SelectedType {
     SELECT_ENEMY,   // 敵を選択中
     SELECT_GIMMICK  // ギミックを選択中
 };
+
+// このギミックの angle を「AI側が毎フレーム書き換えている」かどうかを返す。
+//
+// 一部のギミックは angle を自前の状態に使っており、プレイヤーが編集ツールで回すと壊れる：
+//   ・GIMMICK_ROTATING_BRIDGE … 毎フレーム rotationSpeed を加算し続ける（＝編集しても即座に上書きされる）
+//   ・GIMMICK_CHIKUWA_BLOCK   … angle を「落下中フラグ」(0.0/1.0)として流用している。
+//                                少しでも回すと落下中と誤判定され、さらに実体化条件からも外れて
+//                                「その場で落ち続ける上に足場でもない」壊れた状態になる。
+//   ・GIMMICK_CUSTOM_SCRIPT   … ScriptActor.angle 経由でスクリプトが自由に書き換える
+// これらは回転編集の対象から外し、幅や速度など別の軸で編集させる。
+// ===================================================================================
+// アセットごとの編集禁止
+// ===================================================================================
+//
+// 「この敵だけは拡大させたくない」「この足場は動かされたら困る」といった縛りを、
+// アセット定義のフラグで表せるようにする。
+//
+// ステージ単位の EditToolFlags は「そのステージでどのツールを使えるか」を決めるのに対し、
+// こちらは「このオブジェクトに対して何をしてよいか」を決める別の軸。
+//
+// 形は GimmickAngleIsAiOwned（回転できない型の判定）を一般化したもので、
+// 使い方も同じく「編集ループの中で continue する」。選択は複数同時にできるので、
+// 選択時点ではなくループの中で1体ずつ判定しないと、禁止していない相手まで巻き添えになる。
+enum EditOp {
+    EDITOP_SCALE,  // 拡大縮小（横幅・縦幅を含む）
+    EDITOP_ROTATE, // 回転
+    EDITOP_MOVE,   // 移動
+    EDITOP_FLIP,   // 向き反転
+    EDITOP_PAUSE,  // 個別の一時停止
+    EDITOP_REWIND, // 個別の巻き戻し
+    EDITOP_SPEED,  // 速度変更
+};
+
+// フラグの並びはどのDefでも同じなので、読み出しだけをテンプレートで共有する。
+template <class DefT>
+bool IsDefEditLocked(const DefT* def, EditOp op) {
+    if (def == nullptr) return false; // 定義が引けないものは従来どおり何でも編集できる
+    switch (op) {
+        case EDITOP_SCALE:  return def->noScale;
+        case EDITOP_ROTATE: return def->noRotate;
+        case EDITOP_MOVE:   return def->noMove;
+        case EDITOP_FLIP:   return def->noFlip;
+        case EDITOP_PAUSE:  return def->noPause;
+        case EDITOP_REWIND: return def->noRewind;
+        default:            return def->noSpeed; // EDITOP_SPEED
+    }
+}
+bool IsEnemyEditLocked(const Enemy& e, EditOp op) { return IsDefEditLocked(FindEnemyDef(e.assetId), op); }
+bool IsGimmickEditLocked(const Gimmick& g, EditOp op) { return IsDefEditLocked(FindGimmickDef(g.assetId), op); }
+
+bool GimmickAngleIsAiOwned(GimmickType type) {
+    return type == GIMMICK_ROTATING_BRIDGE
+        || type == GIMMICK_CHIKUWA_BLOCK
+        || type == GIMMICK_CUSTOM_SCRIPT;
+}
+
+// ============================================================================
+// Feature: 編集リアクション（Edit Reaction）
+//
+// このゲームの編集ツール（拡大・回転・速度・向き反転・一時停止・巻き戻し）は、
+// 従来「当たり判定のサイズが変わる」「見た目が回る」程度の汎用的な効果しか持たず、
+// 相手が誰であっても同じことしか起きなかった。とくに angle は完全に描画専用で、
+// ゲームプレイ上の意味がゼロだった。
+//
+// ここから下のヘルパは「プレイヤーが配置時の状態からどれだけ手を加えたか」を
+// 正規化した差分(EditReaction)として取り出し、敵AIやギミックが読めるようにする。
+// これにより「拡大すると重くなる」「傾けると照準が固定される」といった
+// 相手ごとに異なる反応を、共通の物差しの上で書けるようになる。
+//
+// 判定は原則ステートレス（配置時の値との比較）にしてある。scale/angle/direction は
+// 巻き戻し履歴に含まれているので、余計な状態を足さなくても巻き戻しと自然に整合する。
+// ============================================================================
+namespace {
+    // しきい値。「プレイヤーがマウスをどれだけ動かしたら反応するか」であって
+    // 相手ごとに変える性質のものではないため、ここに一元化して定数で持つ。
+    // ドラッグ感度もそれぞれ固定値（scale 0.01/px、angle 0.02rad/px、speed 0.05/px）なので、
+    // 下の値はおおよそ「15px / 10px / 5px 動かしたら反応する」に相当する。
+    constexpr float EDIT_SCALE_EPS = 0.15f;      // 拡大・縮小とみなす倍率のズレ
+    constexpr float EDIT_TILT_EPS  = 0.20f;      // 傾けたとみなす角度のズレ（約11.5度）
+    constexpr float EDIT_SPEED_EPS = 0.25f;      // 速度を変えたとみなすズレ
+    constexpr float EDIT_FROZEN_SPEED = 0.05f;   // これ未満の速度倍率は「停止」扱い
+    constexpr float EDIT_TILT_TIPPED  = 0.7854f; // 45度。これ以上倒れたら姿勢が変わったとみなす
+    constexpr float EDIT_TILT_STEP    = 1.0472f; // 60度。傾きを離散段数に落とすときの1段ぶん
+    constexpr float EDIT_PI = 3.14159265f;
+}
+
+// 角度差を (-PI, PI] へ畳む。
+// 回転ドラッグは angle に加算し続けるだけなので、5回転させれば差は31.4radにもなる。
+// そのまま「45度以上か」を判定すると常に真になってしまうため、必ずここを通してから使う。
+// 跳ね返りの角度を散らすための疑似乱数。戻り値は -1.0〜1.0。
+//
+// rand() を使ってはいけない。このゲームは巻き戻しが中核の機能で、
+// 巻き戻して同じ場面をもう一度再生したときに軌道が変わってしまうと、
+// 「巻き戻して跳ね返り先を見てから動く」という遊び方そのものが成立しなくなる。
+// 「何回目の跳ね返りか」と「どこで跳ね返ったか」だけから決まる値にしておけば、
+// 何度再生しても必ず同じ角度になる。
+float BounceJitterUnit(int bounceIndex, float seedX, float seedY) {
+    unsigned int h = (unsigned int)(bounceIndex + 1) * 2654435761u;
+    h ^= (unsigned int)(int)(seedX * 16.0f) * 40503u;
+    h ^= (unsigned int)(int)(seedY * 16.0f) * 2246822519u;
+    h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+    return ((float)(h & 0xFFFFu) / 32767.5f) - 1.0f;
+}
+
+float NormalizeAngle(float a) {
+    while (a >   EDIT_PI) a -= 2.0f * EDIT_PI;
+    while (a <= -EDIT_PI) a += 2.0f * EDIT_PI;
+    return a;
+}
+
+// 傾きから離散段数を作る補助。色ロック足場の「要求色を1つ進める」のように、
+// 連続値ではなく段階が欲しい場面で使う。
+int EditTiltSteps(float tilt) {
+    return (int)((tilt >= 0.0f) ? (tilt / EDIT_TILT_STEP + 0.5f) : (tilt / EDIT_TILT_STEP - 0.5f));
+}
+
+// EnemyTypeの表示名。インスペクタのType行と、敵タイプ巡回編集の結果確認に使う。
+// enumに新しい型を足したらここにも1行足すこと（未対応の値はUNKNOWNになる）。
+const char* EnemyTypeName(EnemyType t) {
+    switch (t) {
+        case ENEMY_PATROL:             return "PATROL";
+        case ENEMY_JUMPER:             return "JUMPER";
+        case ENEMY_STATIONARY:         return "STATIONARY";
+        case ENEMY_PATROL_SHOOTER:     return "PATROL_SHOOTER";
+        case ENEMY_WALKER:             return "WALKER";
+        case ENEMY_CHASER:             return "CHASER";
+        case ENEMY_DASH_CHARGER:       return "DASH_CHARGER";
+        case ENEMY_FALLER:             return "FALLER";
+        case ENEMY_SPREAD_SHOOTER:     return "SPREAD_SHOOTER";
+        case ENEMY_AIMED_SHOOTER:      return "AIMED_SHOOTER";
+        case ENEMY_FLOATER:            return "FLOATER";
+        case ENEMY_TELEPORTER:         return "TELEPORTER";
+        case ENEMY_SHRINKER:           return "SHRINKER";
+        case ENEMY_SHIELD:             return "SHIELD";
+        case ENEMY_MIMIC_GHOST:        return "MIMIC_GHOST";
+        case ENEMY_SIZE_SHIFTER:       return "SIZE_SHIFTER";
+        case ENEMY_TEMPO_WARPER:       return "TEMPO_WARPER";
+        case ENEMY_BRIGHTNESS_PHANTOM: return "BRIGHTNESS_PHANTOM";
+        case ENEMY_COLOR_SHIFTER:      return "COLOR_SHIFTER";
+        case ENEMY_ZOOM_DISRUPTOR:     return "ZOOM_DISRUPTOR";
+        case ENEMY_CUSTOM_SCRIPT:      return "CUSTOM_SCRIPT";
+        case ENEMY_POUNCER:            return "POUNCER";
+        case ENEMY_BOUNCING_WORM:      return "BOUNCING_WORM";
+        default:                       return "UNKNOWN";
+    }
+}
+
+// プレイヤーが加えた編集を、AI側が読みやすい形へ正規化したもの。
+struct EditReaction {
+    float scaleRatio  = 1.0f; // 配置時に対する現在の倍率（敵はscale、ギミックはwidth）
+    float heightRatio = 1.0f; // 同上（ギミックの縦幅。敵はscaleと同じ値が入る）
+    bool  enlarged = false;   // 拡大された
+    bool  shrunk   = false;   // 縮小された
+    float tilt      = 0.0f;   // 配置時からの傾き（正規化済みラジアン）
+    int   tiltSteps = 0;      // 傾きを60度刻みの段数にしたもの（色送りなど離散的な用途向け）
+    bool  tilted    = false;  // 傾けられた
+    bool  tipped    = false;  // 45度以上倒された（姿勢が変わったとみなせる）
+    float speedRatio = 1.0f;  // 速度倍率そのもの
+    bool  hastened = false;   // 速くされた
+    bool  slowed   = false;   // 遅くされた
+    bool  frozen   = false;   // 速度0にされた
+    bool  flipped  = false;   // 向きを反転された
+    bool  selfPaused    = false; // 個別に一時停止されている
+    bool  selfRewinding = false; // 個別に巻き戻し中
+    bool  moved    = false;   // 配置位置から動かされた
+    float movedX   = 0.0f;    // 配置位置からのXズレ
+    float movedY   = 0.0f;    // 配置位置からのYズレ
+    bool  angleIsAiOwned = false; // この型のangleはAIが握っており傾け編集を解釈しない
+
+    // 「拡大されたら鈍く、縮小されたら軽快に」という全型共通の重さの倍率。
+    float MassMul() const { return (scaleRatio > 0.01f) ? (1.0f / scaleRatio) : 1.0f; }
+};
+
+// 敵1体ぶんの編集差分を求める。edefはHP等の定義（NULL可）。
+EditReaction GetEnemyEditReaction(const Enemy& e, const EnemyDef* edef) {
+    EditReaction r;
+
+    // ENEMY_SHRINKERは「致死ダメージを受けると自分から縮んで復活する」ため、
+    // 素の比較では復活した個体が全て「プレイヤーに縮小された」と誤判定されてしまう。
+    // 復活済み(auxFlag)なら基準側にも同じ縮小率を掛けて打ち消す。
+    // auxFlagはEnemyStateに入っており巻き戻しでも正しく復元されるので、この補正もステートレスに成立する。
+    float effBase = e.editBaseScale;
+    if (e.type == ENEMY_SHRINKER && e.auxFlag) {
+        effBase *= (edef && edef->shrinkFactor > 0.0f) ? edef->shrinkFactor : 0.6f;
+    }
+    if (effBase > 0.01f) r.scaleRatio = e.scale / effBase;
+    r.heightRatio = r.scaleRatio; // 敵はscaleが1つしかないので縦横で分けられない
+    r.enlarged = (r.scaleRatio > 1.0f + EDIT_SCALE_EPS);
+    r.shrunk   = (r.scaleRatio < 1.0f - EDIT_SCALE_EPS);
+
+    r.tilt      = NormalizeAngle(e.angle - e.editBaseAngle);
+    r.tilted    = (r.tilt > EDIT_TILT_EPS || r.tilt < -EDIT_TILT_EPS);
+    r.tiltSteps = EditTiltSteps(r.tilt);
+    {
+        float t = (r.tilt < 0.0f) ? -r.tilt : r.tilt;
+        if (t > EDIT_PI * 0.5f) t = EDIT_PI - t; // 180度回しただけなら姿勢は元と同じ
+        r.tipped = (t >= EDIT_TILT_TIPPED);
+    }
+
+    r.speedRatio = e.speedScale;
+    r.hastened = (r.speedRatio > 1.0f + EDIT_SPEED_EPS);
+    r.slowed   = (r.speedRatio < 1.0f - EDIT_SPEED_EPS);
+    r.frozen   = (r.speedRatio < EDIT_FROZEN_SPEED);
+
+    r.flipped = (e.direction != e.editBaseDirection);
+    r.selfPaused    = e.isPaused;
+    r.selfRewinding = e.isRewinding;
+
+    r.movedX = e.x - e.editBaseX;
+    r.movedY = e.y - e.editBaseY;
+    r.moved  = ((e.editDirtyMask & EDIT_DIRTY_POS) != 0u);
+    return r;
+}
+
+// ===================================================================================
+// 敵の「向き」— 編集で変えられた姿勢を、移動・射出の方向へ合成する
+// ===================================================================================
+//
+// プレイヤーが編集ツールで敵を傾けたり反転させたりしたとき、
+// 落ちる方向・突進する向き・飛びかかる角度・弾を撃つ方向がその姿勢どおりになるようにする。
+//
+// これを1箇所にまとめる理由は、以前は同じ三角関数が敵タイプごとにコピーされており、
+// 「基準にしている軸」と「回転の符号」が型ごとにバラバラだったため。
+// たとえばドッスン（静止時は真下を向く）が真上を基準にした式を使っていたせいで、
+// 90度倒しても真横へ落ちず、しかも横へずれる向きが見た目の回転と逆になっていた。
+// 突進は静止時に水平を向くのに真上を基準にしていたため、ほんの少し傾けただけで
+// 突然ほぼ真上へ飛び出すという不連続が起きていた。
+//
+// DxLib の DrawRotaGraph は正の角度で時計回りに描く。画面座標（X右・Y下）での時計回りは
+//     R(θ)·(x, y) = (x·cosθ − y·sinθ, x·sinθ + y·cosθ)
+// なので、この行列で基準ベクトルを回せば、得られる向きは必ずスプライトの見た目と一致する。
+
+// 敵が「編集されていないときにどちらを向いているか」。傾けはこの軸を回す形で解釈する。
+enum EnemyRestAxis {
+    REST_DOWN,    // 落下・スラム系。未編集では真下へ向かう（ドッスン）
+    REST_UP,      // ジャンプ・射撃系。未編集では真上（砲口の向き・跳躍方向）
+    REST_FORWARD, // 歩行・突進系。未編集では enemy.direction の指す左右
+};
+
+// 向き反転で縦向きの基準軸を左右へ振る量（ラジアン、約30度）。
+//
+// 真上・真下のベクトルは左右反転しても値が変わらないため、そのままでは
+// 縦向きの敵に対して反転ツールが何の意味も持たなくなってしまう。
+// そこで反転を「基準の向きを向いている側へ傾ける」と解釈する。
+// これはドッスンが元々持っていた「反転させると斜めに落ちる」という挙動を、
+// px単位の横押しではなく角度として一般化したもの。
+const float EDIT_FLIP_BIAS = 0.5235988f; // 30度
+
+// 編集ぶんを合成した、長さ1の向きベクトルを返す。
+//
+// 未編集（傾き0・反転なし）のときは基準軸そのものを返すので、
+// REST_UP なら (0,-1)、REST_DOWN なら (0,1)、REST_FORWARD なら (±1,0) になる。
+// つまり編集していない限り、どの敵も今までと1ミリも変わらない動きをする。
+//
+// 先に「基準軸をどれだけ回すか」だけを求める。
+// 渦の位相のように向きベクトルではなく角度そのものが欲しい型（SPREAD_SHOOTER）が
+// 同じ解釈を共有できるよう、角度の計算だけを切り出してある。
+float GetEnemyEditAngle(const Enemy& e, const EditReaction& r, EnemyRestAxis axis) {
+    float facing = (e.direction == 0) ? 1.0f : -1.0f; // 0=右向き / それ以外=左向き
+    float theta = r.tilt;
+    //
+    // 反転バイアスの判定に EditReaction::flipped を使ってはいけない。
+    // flipped は「現在の向き != 配置時の向き」でしかなく、プレイヤーを追って自分から
+    // 向きを変えただけの敵でも真になってしまう（歩行敵はほぼ毎秒trueになる）。
+    // 「プレイヤーが反転ツールを使ったかどうか」はダーティビットでしか判別できない。
+    if (axis != REST_FORWARD && (e.editDirtyMask & EDIT_DIRTY_DIR) != 0u) {
+        // 縦向きの型だけ、反転を角度のバイアスとして足し、向いている側へ基準軸を振る。
+        // 符号が上下で逆なのは、真上と真下が正反対のベクトルだから
+        // （同じ向きへ回すには逆方向へ回す必要がある）。
+        // REST_FORWARD の型は enemy.direction 自体が既に反転していて基準ベクトルに反映済みなので、
+        // ここで足すと二重適用になり、反転するたび30度ずつずれていってしまう。
+        theta += (axis == REST_DOWN) ? (-EDIT_FLIP_BIAS * facing) : (EDIT_FLIP_BIAS * facing);
+    }
+    return theta;
+}
+
+void GetEnemyHeading(const Enemy& e, const EditReaction& r, EnemyRestAxis axis,
+                     float& outX, float& outY) {
+    // 1) 基準ベクトルを決める
+    float bx = 0.0f, by = 0.0f;
+    float facing = (e.direction == 0) ? 1.0f : -1.0f;
+    switch (axis) {
+        case REST_DOWN:    bx = 0.0f;    by =  1.0f; break;
+        case REST_UP:      bx = 0.0f;    by = -1.0f; break;
+        default:           bx = facing;  by =  0.0f; break; // REST_FORWARD
+    }
+    // 2) 編集ぶんの回転角を求め、3) 時計回りに回す（DrawRotaGraph と同じ向き）
+    float theta = GetEnemyEditAngle(e, r, axis);
+    float c = cosf(theta), s = sinf(theta);
+    outX = bx * c - by * s;
+    outY = bx * s + by * c;
+}
+
+// 傾けたぶんだけを回した向きを返す。反転のバイアスは乗せない。
+//
+// GetEnemyHeading は「反転ツールを使ったら基準軸も向いている側へ振る」ために
+// 30度のバイアス(EDIT_FLIP_BIAS)を足す。跳ぶ・落ちる型ではそれが正しいが、
+// 砲台系（STATIONARY / AIMED_SHOOTER）の反転は「弾の所属が味方側になる」という
+// まったく別の意味しか持たない。
+// それらでバイアスまで乗ってしまうと、砲身の絵は傾けた向き（＝ParentTiltそのもの）を
+// 指しているのに、弾だけ30度ずれた方向へ飛ぶ。
+// 実測でも、反転させて70度傾けた砲台の弾は水平から10度「下」へ飛んでいて、
+// 狙ったはずの壊せるタイルの下にある地面へ当たっていた
+// （＝「反転させた砲台で撃っても壊せるブロックが壊れない」の原因）。
+// 砲身と弾を必ず一致させるため、この2型ではこちらを使う。
+void GetEnemyTiltOnlyHeading(const Enemy& e, const EditReaction& r, EnemyRestAxis axis,
+                             float& outX, float& outY) {
+    float bx = 0.0f, by = 0.0f;
+    float facing = (e.direction == 0) ? 1.0f : -1.0f;
+    switch (axis) {
+        case REST_DOWN:    bx = 0.0f;    by =  1.0f; break;
+        case REST_UP:      bx = 0.0f;    by = -1.0f; break;
+        default:           bx = facing;  by =  0.0f; break; // REST_FORWARD
+    }
+    float c = cosf(r.tilt), s = sinf(r.tilt); // 時計回り（DrawRotaGraph と同じ向き）
+    outX = bx * c - by * s;
+    outY = bx * s + by * c;
+}
+
+// ギミック1個ぶんの編集差分を求める。
+// 敵と違いギミックは横幅と縦幅を独立に編集できるので、scaleRatio/heightRatioが別々の値になる。
+EditReaction GetGimmickEditReaction(const Gimmick& g) {
+    EditReaction r;
+    if (g.editBaseWidth  > 0.01f) r.scaleRatio  = g.width  / g.editBaseWidth;
+    if (g.editBaseHeight > 0.01f) r.heightRatio = g.height / g.editBaseHeight;
+    r.enlarged = (r.scaleRatio > 1.0f + EDIT_SCALE_EPS) || (r.heightRatio > 1.0f + EDIT_SCALE_EPS);
+    r.shrunk   = (r.scaleRatio < 1.0f - EDIT_SCALE_EPS) || (r.heightRatio < 1.0f - EDIT_SCALE_EPS);
+
+    // 自動回転する橋やちくわブロックのようにangleをAI側が握っている型では、
+    // 現在角と配置角の差は「プレイヤーの編集」ではないので傾きとして解釈してはいけない。
+    r.angleIsAiOwned = GimmickAngleIsAiOwned(g.type);
+    if (!r.angleIsAiOwned) {
+        r.tilt      = NormalizeAngle(g.angle - g.editBaseAngle);
+        r.tilted    = (r.tilt > EDIT_TILT_EPS || r.tilt < -EDIT_TILT_EPS);
+        r.tiltSteps = EditTiltSteps(r.tilt);
+        float t = (r.tilt < 0.0f) ? -r.tilt : r.tilt;
+        if (t > EDIT_PI * 0.5f) t = EDIT_PI - t;
+        r.tipped = (t >= EDIT_TILT_TIPPED);
+    }
+
+    r.speedRatio = g.speedScale;
+    r.hastened = (r.speedRatio > 1.0f + EDIT_SPEED_EPS);
+    r.slowed   = (r.speedRatio < 1.0f - EDIT_SPEED_EPS);
+    r.frozen   = (r.speedRatio < EDIT_FROZEN_SPEED);
+
+    r.flipped = (g.direction != 0);
+    r.selfPaused    = g.isPaused;
+    r.selfRewinding = g.isRewinding;
+
+    r.movedX = g.x - g.editBaseX;
+    r.movedY = g.y - g.editBaseY;
+    r.moved  = ((g.editDirtyMask & EDIT_DIRTY_POS) != 0u);
+    return r;
+}
+
+// ---- 複合オブジェクトのパーツ追従 — 親ごとの ParentPose の作り方 ----
+// 編集差分(EditReaction)は純関数なので、パーツを更新したい場所でいつでも作り直せる。
+
+// 敵の姿勢。敵は倍率を scale 1つでしか持たないので横縦とも同じ値になる。
+// 描画側(DrawPixel.cpp の敵本体描画)が hitboxWidth * scale を中心計算に使っているので、
+// ピボットの逆算にも同じ値を渡してズレないようにする。
+ParentPose MakeEnemyPose(const Enemy& e, const EnemyDef* edef) {
+    EditReaction r = GetEnemyEditReaction(e, edef);
+    return MakeParentPose(e.x, e.y,
+                          (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale,
+                          r.scaleRatio, r.heightRatio, r.tilt);
+}
+
+// ギミックの姿勢。横幅と縦幅を独立に編集できるので sx != sy になりうる。
+// 描画は spriteWidth/spriteHeight を見る（SetGimmickWidth が width と同期させている）ので、
+// ピボットの逆算にもそちらを渡す。
+// 回転橋やちくわブロックのように angle をAIが握る型では GetGimmickEditReaction が
+// tilt を0のままにするため、自動回転が傾け編集と誤解されてパーツごと回る事故は起きない。
+ParentPose MakeGimmickPose(const Gimmick& g) {
+    EditReaction r = GetGimmickEditReaction(g);
+    return MakeParentPose(g.x, g.y, g.spriteWidth, g.spriteHeight,
+                          r.scaleRatio, r.heightRatio, r.tilt);
+}
+
+// アイテムの姿勢。アイテムは編集ツールで選択できない（SelectedTypeにSELECT_ITEMが無い）ため、
+// 編集差分は常に無く、変換は恒等になる。それでも同じ経路を通しておくことで、
+// 「スクリプトが動かないフレームでもパーツが親に張り付く」という利点だけは共有できる。
+ParentPose MakeItemPose(const Item& it) {
+    return MakeParentPose(it.x, it.y, it.width, it.height, 1.0f, 1.0f, 0.0f);
+}
+
+// ===================================================================================
+// 壊せるブロックの破壊 — 「誰が・どの大きさなら壊せるか」の判定をここ1箇所に集める
+// ===================================================================================
+//
+// 壊す側は、エディタのクリック／巡回敵の体当たり／歩行敵の体当たり／突進／
+// ドッスンの着地衝撃／45度傾けた自重崩壊／弾 と7箇所に散らばっていて、
+// それぞれが「拡大されているか」「縮小されていないか」といった条件を独自に書いていた。
+// 同じ判定が散らばっていると、設定を1つ足すたびにどこかが更新漏れになる
+// （パーツの当たり判定を GetPartHitRect へ集約したのと同じ理由）。
+//
+// 破壊の可否はブロック側のデータ(GimmickDef)が決め、壊す側は「どの壊し方で」
+// 「どのくらいの大きさの相手が」ぶつかったかだけを伝える。
+
+// 壊し方の種類。ブロック側の breakBy* と1対1で対応する。
+enum BreakCause {
+    BREAK_SLAM,   // ドッスンの落下衝撃
+    BREAK_RAM,    // 突進・歩行・巡回の体当たり
+    BREAK_BULLET, // 弾
+    BREAK_PLAYER, // プレイヤーの直接操作（クリック）
+    BREAK_TIP,    // 45度以上傾けられた自重崩壊
+};
+
+// このギミックを、その壊し方・その相手の大きさで壊せるなら壊す。壊したら true を返す。
+//
+// attackerScale には敵の scale を渡す。相手の大きさという概念が無い壊し方
+// （プレイヤーの操作・自重崩壊）では 0 以下を渡せば大きさ判定は行われない。
+// 「大きさが足りなくて壊せなかった」ことを、その場に出すための記録。
+//
+// 破壊の条件を満たさないとき、これまで画面には何も出なかった。
+// とくに breakMinScale（拡大しないと壊せない）は満たしていないことに気付く
+// 手がかりが一切無く、プレイヤーからは「壊れないブロック」にしか見えない。
+// 条件そのものを緩めるのではなく、条件が見えるようにするための仕組み。
+//
+// 直近の1件だけ覚えておけば足りる。同時に何か所も弾かれる場面は無く、
+// 何件も並べるとかえって画面が読めなくなるため。
+struct BreakSizeHint {
+    float x = 0.0f, y = 0.0f;    // 表示するワールド座標（対象の左上）
+    float timer = 0.0f;          // 残り表示フレーム
+    float need = 0.0f;           // 必要だった大きさ（倍率）
+    bool  justTriggered = false; // このフレームに新しく立ったか（音を1回だけ鳴らすため）
+};
+BreakSizeHint g_breakSizeHint;
+
+// 大きさ不足で弾かれたことを記録する。呼ぶのは TryBreakGimmick / TryBreakTile の2か所。
+void NoteBreakTooSmall(float x, float y, float need) {
+    // 敵が壁へ押し付けられていると毎フレーム弾かれる。
+    // そのたびに鳴らすと音が途切れず鳴り続けるので、
+    // 表示が終わりかけてから改めて鳴らし直す（＝1秒に1回程度に間引く）。
+    if (g_breakSizeHint.timer <= 30.0f) g_breakSizeHint.justTriggered = true;
+    g_breakSizeHint.x = x;
+    g_breakSizeHint.y = y;
+    g_breakSizeHint.need = need;
+    g_breakSizeHint.timer = 90.0f;
+}
+
+bool TryBreakGimmick(Gimmick& gim, BreakCause cause, float attackerScale) {
+    if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) return false;
+    // 定義が引けないブロックは「どの壊し方でも壊せる」従来どおりの挙動へ落とす。
+    //
+    // 以前はここで false を返して絶対に壊れないようにしていたが、
+    // FindGimmickDef は assetId の完全一致でしか引かないため、
+    // assetId を持たないブロック（C++直書きステージに置かれたもの等）が
+    // 破壊条件を導入した時点から一切壊せなくなっていた。
+    // 条件が読めないときは「制限なし」と解釈するほうが、
+    // 壊せるはずのブロックが無言で壊れないより壊れ方として健全。
+    const GimmickDef* gdef = FindGimmickDef(gim.assetId);
+
+    // 1) この壊し方が許可されているか
+    bool allowed = true;
+    if (gdef != nullptr) {
+        switch (cause) {
+            case BREAK_SLAM:   allowed = gdef->breakBySlam;   break;
+            case BREAK_RAM:    allowed = gdef->breakByRam;    break;
+            case BREAK_BULLET: allowed = gdef->breakByBullet; break;
+            case BREAK_PLAYER: allowed = gdef->breakByPlayer; break;
+            default:           allowed = gdef->breakByTip;    break; // BREAK_TIP
+        }
+    }
+    if (!allowed) return false;
+
+    // 2) 相手の大きさが足りているか。
+    // 「拡大した敵の体当たりでなければ壊せない壁」のような場を、
+    // C++を書き換えずにブロック側の設定だけで作れるようにするための条件。
+    float needScale = (gdef != nullptr) ? gdef->breakMinScale : 0.0f;
+    if (attackerScale > 0.0f && needScale > 0.0f && attackerScale < needScale) {
+        NoteBreakTooSmall(gim.x, gim.y, needScale); // 「あと少し大きくすれば壊せる」ことを画面へ出す
+        return false;
+    }
+
+    gim.isActive = false;
+    if (gdef != nullptr) SoundManager::Get().PlaySe(gdef->seActivate);
+    return true;
+}
+
+// このギミックが45度以上倒されているかどうか。
+//
+// トゲなら刺が横を向いて無害化、扉なら壁ではなく床になる、というように
+// 「倒したかどうか」で振る舞いが切り替わる型がいくつもあるため、判定をここに集約する。
+bool GimmickIsTipped(const Gimmick& gim) {
+    if (GimmickAngleIsAiOwned(gim.type)) return false;
+    float t = NormalizeAngle(gim.angle - gim.editBaseAngle);
+    if (t < 0.0f) t = -t;
+    if (t > EDIT_PI * 0.5f) t = EDIT_PI - t; // 180度回しただけなら姿勢は元と同じ
+    return (t >= EDIT_TILT_TIPPED);
+}
+
+// ギミックの「実効的な当たり判定ボックス」を返す。
+//
+// 傾けたギミックの判定を呼び出し側それぞれで書くと、見た目は倒れているのに判定は縦のまま、
+// といったズレが必ず生まれる。倒れ判定はここ1箇所に集約し、
+// 足場判定・横方向判定・トゲの即死判定などが全て同じ答えを見るようにする。
+void GetGimmickCollisionBox(const Gimmick& gim, float& outX, float& outY, float& outW, float& outH) {
+    outX = gim.x; outY = gim.y; outW = gim.width; outH = gim.height;
+    if (GimmickAngleIsAiOwned(gim.type)) return;
+
+    float t = NormalizeAngle(gim.angle - gim.editBaseAngle);
+    if (t < 0.0f) t = -t;
+    if (t > EDIT_PI * 0.5f) t = EDIT_PI - t; // 180度回しただけなら姿勢は元と同じ
+    if (t < EDIT_TILT_TIPPED) return;        // 45度未満は倒れていないものとして扱う
+
+    // 45度以上倒れている＝縦横が入れ替わった姿勢。中心を動かさずにw/hを入れ替える。
+    // （外接矩形にすると45度付近で判定が膨らみ、見た目より広く当たって理不尽になる）
+    float cx = gim.x + gim.width * 0.5f;
+    float cy = gim.y + gim.height * 0.5f;
+    outW = gim.height; outH = gim.width;
+    outX = cx - outW * 0.5f;
+    outY = cy - outH * 0.5f;
+}
+
+// 選択中のギミックに出す「つまみ」の大きさ(px)と位置。
+//
+// 大きさを変える操作は、もともと「Sキーを押しながら、まだ選んでいない相手をクリックして、
+// そのまま縦にドラッグ」でしか動かなかった。横幅なのに縦へ引く、しかも一度選んだあとは
+// Sを押しても移動になる、という状態で、知らなければまず辿り着けない操作だった。
+// つまみを出して直接引っぱれるようにする。
+//
+// 描画と当たり判定の両方がこの関数を通るので、見えている場所とつかめる場所が食い違わない。
+const float GIM_HANDLE_SIZE = 14.0f;
+
+// outWx/outWy … 横幅のつまみ（右辺の中央）の左上
+// outHx/outHy … 縦幅のつまみ（上辺の中央）の左上
+void GetGimmickResizeHandles(const Gimmick& g, float& outWx, float& outWy, float& outHx, float& outHy) {
+    float half = GIM_HANDLE_SIZE * 0.5f;
+    outWx = g.x + g.spriteWidth - half;
+    outWy = g.y + g.spriteHeight * 0.5f - half;
+    outHx = g.x + g.spriteWidth * 0.5f - half;
+    outHy = g.y - half;
+}
+
+// ギミックの横幅・縦幅を変える唯一の入口。
+// 判定側はwidth/heightを、描画側はspriteWidth/spriteHeightを見るという二重管理になっているため、
+// どちらか片方だけ書き換えると「見た目と判定がズレる」不具合になる。必ずここを通す。
+void SetGimmickWidth(Gimmick& g, float w) {
+    if (w < 10.0f) w = 10.0f;
+    g.width = w;
+    g.spriteWidth = w;
+}
+void SetGimmickHeight(Gimmick& g, float h) {
+    if (h < 10.0f) h = 10.0f;
+    g.height = h;
+    g.spriteHeight = h;
+}
+
+// ============================================================================
+// 編集つまみ（敵・プレイヤーの拡縮／回転、ギミックの回転）
+//
+// ギミックの横幅・縦幅にだけあったつまみを、敵とプレイヤーにも広げる。
+// 変形がキー操作（S／R を押しながらドラッグ）でしか出来なかったため、
+// 「どうやって大きくするのか」が画面から読み取れなかった。
+//
+// 選択枠（敵は当たり判定の矩形、ギミックは絵の矩形）に対して
+//   ・拡縮つまみ … 右下の角。外へ引くと大きくなる（敵・プレイヤーのみ。ギミックは既存の辺のつまみ）
+//   ・回転つまみ … 枠の中心から「今の角度の真上」へ伸ばした先の丸。つまみごと対象の回転に合わせて回る
+// を出す。描画と当たり判定が同じ関数を通るので、見えている場所とつかめる場所は食い違わない。
+// ============================================================================
+struct EditBox { float x, y, w, h; };
+inline EditBox EnemyEditBox(const Enemy& e)     { return { e.x, e.y, (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale }; }
+inline EditBox PlayerEditBox(const Player& p)   { return { p.x, p.y, (float)p.width * p.scale, (float)p.height * p.scale }; }
+inline EditBox GimmickEditBox(const Gimmick& g) { return { g.x, g.y, g.spriteWidth, g.spriteHeight }; }
+
+const float EDIT_KNOB_PI          = 3.14159265f;
+const float EDIT_KNOB_RADIUS = 7.0f;   // 回転つまみ（丸）の半径(px)。つかめる範囲はこれより少し広く取る
+const float EDIT_KNOB_GAP    = 26.0f;  // 枠の端から回転つまみの中心までの距離(px)
+const float EDIT_KNOB_GRAB   = 11.0f;  // 回転つまみをつかめる半径(px)。見た目の丸より広くして狙いやすくする
+
+// 回転つまみの中心。角度は DrawRotaGraph と同じ「時計回りが正」で、0なら真上。
+inline void GetEditKnob(const EditBox& b, float angle, float& outKx, float& outKy) {
+    float cx = b.x + b.w * 0.5f, cy = b.y + b.h * 0.5f;
+    float r = (b.w > b.h ? b.w : b.h) * 0.5f + EDIT_KNOB_GAP;
+    outKx = cx + sinf(angle) * r;
+    outKy = cy - cosf(angle) * r;
+}
+
+// 拡縮つまみ（右下の角）の左上。大きさは GIM_HANDLE_SIZE（ギミックのつまみと同じ）。
+inline void GetEditCornerHandle(const EditBox& b, float& outHx, float& outHy) {
+    float half = GIM_HANDLE_SIZE * 0.5f;
+    outHx = b.x + b.w - half;
+    outHy = b.y + b.h - half;
+}
+
+// 角度を -π〜π へ畳む。回転つまみは「中心からマウスへの向き」を直接角度にするので、
+// 今の角度（何周ぶんも積もっていることがある）との差を最短で取るために使う。
+inline float WrapEditAngle(float a) {
+    return a - 2.0f * EDIT_KNOB_PI * floorf((a + EDIT_KNOB_PI) / (2.0f * EDIT_KNOB_PI));
+}
+
+// 15度の倍数の±5度以内なら、その倍数へ吸い付かせる。それ以外は自由角のまま。
+// 「ちょうど真横にしたい」「ちょうど真下にしたい」を、修飾キー無しで簡単にするためのもの。
+inline float SnapEditAngle(float a) {
+    const float step = EDIT_KNOB_PI / 12.0f;         // 15度
+    const float tol  = 5.0f * EDIT_KNOB_PI / 180.0f; // 5度
+    float nearest = roundf(a / step) * step;
+    return (fabsf(a - nearest) <= tol) ? nearest : a;
+}
+
+// ============================================================================
+// 取り消し（Ctrl+Z）用のデータ。使い方と考え方は WinMain 内の「取り消し／やり直し」の説明を参照。
+// ============================================================================
+// 編集で変わりうる値を1個体ぶん写し取ったもの。kind は 0=プレイヤー 1=敵 2=ギミック、
+// index は enemies / gimmicks の添字（プレイヤーは0）。
+struct EditSnap {
+    int kind = 0, index = 0;
+    float x = 0.0f, y = 0.0f, scale = 1.0f, angle = 0.0f, speedScale = 1.0f;
+    float width = 0.0f, height = 0.0f, spriteWidth = 0.0f, spriteHeight = 0.0f, editBaseY = 0.0f; // ギミックのみ
+    int direction = 0;
+    bool paused = false, rewinding = false;
+    unsigned int mask = 0u; // editDirtyMask
+};
+// どの項目が変わったか（取り消し時に、変わった項目だけを戻すためのビット）
+enum EditField : unsigned int {
+    EF_POS = 1u << 0, EF_SCALE = 1u << 1, EF_ANGLE = 1u << 2, EF_SPEED = 1u << 3, EF_DIR = 1u << 4,
+    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8
+};
+inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
+    unsigned int f = 0;
+    if (a.x != b.x || a.y != b.y) f |= EF_POS;
+    if (a.scale != b.scale) f |= EF_SCALE;
+    if (a.angle != b.angle) f |= EF_ANGLE;
+    if (a.speedScale != b.speedScale) f |= EF_SPEED;
+    if (a.direction != b.direction) f |= EF_DIR;
+    if (a.paused != b.paused) f |= EF_PAUSE;
+    if (a.rewinding != b.rewinding) f |= EF_REWIND;
+    if (a.mask != b.mask) f |= EF_MASK;
+    if (a.width != b.width || a.height != b.height || a.spriteWidth != b.spriteWidth
+        || a.spriteHeight != b.spriteHeight || a.editBaseY != b.editBaseY) f |= EF_SIZE;
+    return f;
+}
+// 1回の編集操作の記録。before/after は同じ個体を同じ順に並べたもの。fields は個体ごとの「変わった項目」。
+struct EditUndoEntry {
+    std::vector<EditSnap> before, after;
+    std::vector<unsigned int> fields;
+    float cost = 0.0f; // この操作で消費したコスト（取り消すと全額返す）
+};
+
+// ============================================================================
+// 右クリックの円形メニュー
+//
+// 6項目を、メニューを開いた位置（中心）のまわりに円形に並べる。項目は中心から見た「方向」で選ぶので、
+// 右ボタンを押したまま項目の方向へ動かして離すだけでも、離したあとに左クリックでも選べる。
+// 描画・判定・カーソル形状が同じ関数と定数を通るので、見えている位置と選べる位置は食い違わない。
+// ============================================================================
+const int   RADIAL_ITEM_W = 104, RADIAL_ITEM_H = 42; // 項目の大きさ(px)
+const float RADIAL_DEAD   = 24.0f;                    // 中心の不感帯の半径。この中では何も選ばない
+const float RADIAL_OUTER  = 170.0f;                   // これより外はメニューの外（クリックすると閉じる）
+const int   RADIAL_MARGIN_X = 150, RADIAL_MARGIN_Y = 125; // 画面の端からこれだけ内側へ寄せて開く（項目が見切れない）
+// 6項目の中心の、メニュー中心からのずれ。上から時計回り。
+const int   RADIAL_OFS[6][2] = { {0, -96}, {92, -48}, {92, 48}, {0, 96}, {-92, 48}, {-92, -48} };
+
+// 項目1つぶんの表示と、押せるかどうか
+struct RadialItem { std::string label, sub; bool enabled = true; int id = 0; };
+
+// 中心(cx,cy)から見て、マウス(mx,my)がどの項目の方向を向いているか。不感帯の中・外側は -1。
+inline int RadialSectorAt(int cx, int cy, int mx, int my, int count) {
+    float dx = (float)(mx - cx), dy = (float)(my - cy);
+    float d = sqrtf(dx * dx + dy * dy);
+    if (d < RADIAL_DEAD || d > RADIAL_OUTER) return -1;
+    if (count <= 1) return 0;
+    float ang = atan2f(dx, -dy);                 // 真上が0、時計回りが正
+    if (ang < 0.0f) ang += 2.0f * EDIT_KNOB_PI;
+    float step = 2.0f * EDIT_KNOB_PI / (float)count;
+    return (int)((ang + step * 0.5f) / step) % count; // 項目の中心の向きが区間の真ん中になるよう半区間ずらす
+}
+
+// 大きさを変えたとき、地形（地面・壁・足場）に食い込まないよう止める対象の型か。
+// 範囲を示すだけの型（明暗・色調・ズーム・スロー・時間のゾーン）は、壁や床と重なっているのが普通なので対象外。
+// カットは座標を持たない。
+inline bool GimmickRespectsTerrain(GimmickType t) {
+    switch (t) {
+    case GIMMICK_CUT_PORTAL:
+    case GIMMICK_TIME_FIELD:
+    case GIMMICK_BRIGHTNESS_ZONE:
+    case GIMMICK_COLOR_ZONE:
+    case GIMMICK_ZOOM_LENS:
+    case GIMMICK_SLOWMO_FIELD:
+        return false;
+    default:
+        return true;
+    }
+}
+
+// 画面エフェクト系の編集ツール（T=色フィルタ / X=暗転 / C=明転 / Z=ズーム / F=早送り）の現在値。
+//
+// これらはWinMain内のローカル変数なので、そのままでは名前空間スコープの判定関数から読めない。
+// 「明るくすると幽霊が消える」「色を合わせている間だけ実体化する」といった反応は
+// 当たり判定側でも参照する必要があるため、毎フレームここへ写して共有する。
+struct ScreenFxSnapshot {
+    float brightness = 1.0f;  // 1.0が通常。0.6未満で暗い、1.3超で明るいとみなす
+    float zoom       = 1.0f;
+    int   colorFilter = 0;    // 0=なし, 1=赤, 2=緑, 3=青
+    bool  fastForward = false;
+};
+ScreenFxSnapshot g_screenFx;
+
+// この敵の「弱点色」。色フィルタがこれと一致している間、実体化したり弱ったりする。
+// type_enumから機械的に決めているので、今後追加される敵タイプにも自動で割り当たる。
+int EnemyWeakColor(EnemyType t) { return ((int)t % 3) + 1; }
+
+// ============================================================================
+// Feature: 編集リアクションのJSON宣言（edit_reactions）
+//
+// ここまでの実装は「型ごとにC++で書いた固有リアクション」と
+// 「全オブジェクトへ無条件で効く共通層」の2階建てになっている。
+// この宣言層はその間に入る3枚目で、C++を一切書き換えずに
+// JSON（enemies.json / gimmicks.json）だけで反応を組めるようにするためのもの。
+//
+// 今後追加する新しい敵やギミックは、まず共通層の反応が自動で付き、
+// 足りなければこの宣言層で味付けし、それでも足りないときだけC++を書く、という順序で作れる。
+//
+// 書式：
+//   "edit_reactions": {
+//     "enlarge":     [ { "effect": "MulParam", "param": "moveSpeed", "by": "invScaleRatio" } ],
+//     "shrink":      [ { "effect": "Harmless" }, { "effect": "BecomePlatform" } ],
+//     "tilt":        [ { "effect": "AimLock" } ],
+//     "flip":        [ { "effect": "FriendlyFire" } ],
+//     "pause":       [ { "effect": "BecomePlatform" } ],
+//     "rewind":      [ { "effect": "Phase" } ],
+//     "fastForward": [ { "effect": "MulParam", "param": "attackRate", "by": 2.0 } ],
+//     "dark":        [ { "effect": "MulParam", "param": "sightRange", "by": 0.6 } ],
+//     "bright":      [ { "effect": "Harmless" } ],
+//     "color":       { "2": [ { "effect": "Vulnerable" } ] }
+//   }
+//
+// "by" には数値のほか "scaleRatio" / "invScaleRatio" / "speedRatio" / "invSpeedRatio" /
+// "tilt" という変数名も書ける（そのフレームの編集差分がそのまま入る）。
+//
+// JSONキーを1つ増やすと通常はC++側・既定値補完・Lab_EditorのC#モデル・エディタUIの
+// 4箇所を揃える必要があるが、edit_reactionsは入れ子JSONを丸ごと保持する1キーなので、
+// 既存の script と同じくC++とC#モデルの2箇所だけで済む。
+// ============================================================================
+
+// JSON宣言を1フレーム分解釈した結果。
+struct DeclaredEffects {
+    // 状態を切り替える効果
+    bool harmless       = false; // 触れてもダメージを与えない
+    bool becomePlatform = false; // 乗れる足場になる
+    bool phase          = false; // すり抜けられる（弾も当たらない）
+    bool invulnerable   = false; // 弾を受け付けない
+    bool vulnerable     = false; // 無敵状態を強制的に解除する
+    bool destroy        = false; // 消滅する
+    bool noGravity      = false; // 重力を受けない
+    bool ignoreBounds   = false; // 巡回範囲や崖の判定を無視する
+    bool aimLock        = false; // 追尾をやめて固定方向を狙う
+    bool friendlyFire   = false; // 撃つ弾がプレイヤー側の所属になる
+    bool reverseCycle   = false; // 周期・回転・往復の向きが逆になる
+    bool lockValue      = false; // AIによる値の自動上書きを止める
+
+    // 数値の倍率。対象は内部フィールド名ではなく「何が変わるか」で名付けてある。
+    float mulMoveSpeed  = 1.0f; // 移動の速さ
+    float mulSightRange = 1.0f; // 索敵・効果範囲の広さ
+    float mulAttackRate = 1.0f; // 攻撃の頻度（大きいほど手数が増える）
+
+    bool any = false; // 1つでも効果が入ったか（何も宣言が無い場合の早期終了用）
+};
+
+// "by" に書かれた値を、このフレームの編集差分から実数へ解決する。
+// 数値リテラルならそのまま、変数名なら対応する差分の値を返す。
+float ResolveReactionAmount(const json& node, const EditReaction& r, float fallback) {
+    if (node.is_number()) return node.get<float>();
+    if (node.is_string()) {
+        const std::string s = node.get<std::string>();
+        if (s == "scaleRatio")    return r.scaleRatio;
+        if (s == "invScaleRatio") return (r.scaleRatio > 0.01f) ? (1.0f / r.scaleRatio) : 1.0f;
+        if (s == "speedRatio")    return r.speedRatio;
+        if (s == "invSpeedRatio") return (r.speedRatio > 0.01f) ? (1.0f / r.speedRatio) : 1.0f;
+        if (s == "tilt")          return r.tilt;
+        if (s == "heightRatio")   return r.heightRatio;
+    }
+    return fallback;
+}
+
+// 効果リスト（1つのトリガーにぶら下がる配列）を解釈して out へ積む。
+void ApplyReactionEffectList(const json& list, const EditReaction& r, DeclaredEffects& out) {
+    if (!list.is_array()) return;
+    for (const auto& item : list) {
+        if (!item.is_object()) continue;
+        const std::string fx = item.value("effect", "");
+        if (fx.empty()) continue;
+        out.any = true;
+
+        if      (fx == "Harmless")       out.harmless = true;
+        else if (fx == "Deadly")         out.harmless = false;
+        else if (fx == "BecomePlatform") out.becomePlatform = true;
+        else if (fx == "Phase")          out.phase = true;
+        else if (fx == "Invulnerable")   out.invulnerable = true;
+        else if (fx == "Vulnerable")     out.vulnerable = true;
+        else if (fx == "Destroy")        out.destroy = true;
+        else if (fx == "NoGravity")      out.noGravity = true;
+        else if (fx == "IgnoreBounds")   out.ignoreBounds = true;
+        else if (fx == "AimLock")        out.aimLock = true;
+        else if (fx == "FriendlyFire")   out.friendlyFire = true;
+        else if (fx == "ReverseCycle")   out.reverseCycle = true;
+        else if (fx == "LockValue")      out.lockValue = true;
+        else if (fx == "MulParam" || fx == "AddParam") {
+            const std::string param = item.value("param", "");
+            float amount = ResolveReactionAmount(item.contains("by") ? item["by"] : json(1.0f), r, 1.0f);
+            // AddParamは「倍率へ加算する」意味に統一する（1.0を基準とした相対量として扱う）
+            if (fx == "AddParam") amount = 1.0f + amount;
+            if      (param == "moveSpeed")  out.mulMoveSpeed  *= amount;
+            else if (param == "sightRange") out.mulSightRange *= amount;
+            else if (param == "attackRate") out.mulAttackRate *= amount;
+        }
+    }
+}
+
+// edit_reactions の宣言全体を、このフレームの編集差分に照らして解釈する。
+// 宣言が無ければ何もせず既定値を返すので、既存のアセット定義の挙動は一切変わらない。
+DeclaredEffects EvalDeclaredReactions(const json& decl, const EditReaction& r) {
+    DeclaredEffects out;
+    if (!decl.is_object() || decl.empty()) return out;
+
+    auto fire = [&](const char* key) {
+        auto it = decl.find(key);
+        if (it != decl.end()) ApplyReactionEffectList(*it, r, out);
+    };
+
+    if (r.enlarged)       fire("enlarge");
+    if (r.shrunk)         fire("shrink");
+    if (r.tilted)         fire("tilt");
+    if (r.tipped)         fire("tipped");
+    if (r.hastened)       fire("speedUp");
+    if (r.slowed)         fire("slow");
+    if (r.frozen)         fire("stop");
+    if (r.flipped)        fire("flip");
+    if (r.selfPaused)     fire("pause");
+    if (r.selfRewinding)  fire("rewind");
+    if (r.moved)          fire("move");
+    if (g_screenFx.fastForward)        fire("fastForward");
+    if (g_screenFx.brightness < 0.6f)  fire("dark");
+    if (g_screenFx.brightness > 1.3f)  fire("bright");
+
+    // 色フィルタは「どの色か」で分岐できるよう、色番号をキーにした入れ子オブジェクトで書く
+    if (g_screenFx.colorFilter != 0) {
+        auto itColor = decl.find("color");
+        if (itColor != decl.end() && itColor->is_object()) {
+            auto itNum = itColor->find(std::to_string(g_screenFx.colorFilter));
+            if (itNum != itColor->end()) ApplyReactionEffectList(*itNum, r, out);
+        }
+    }
+    return out;
+}
+
+// 敵アセットの宣言を解釈する薄いラッパ（定義が無い個体でも安全に呼べるようにする）。
+DeclaredEffects GetEnemyDeclaredEffects(const Enemy& e, const EnemyDef* edef, const EditReaction& r) {
+    if (edef == nullptr) return DeclaredEffects();
+    (void)e;
+    return EvalDeclaredReactions(edef->editReactions, r);
+}
+
+// この敵が今「乗れる足場」として振る舞うかどうか。
+//
+// 共通層のルールとして、個別に一時停止された敵は誰であっても踏み台になる。
+// これに加えて、型ごとに「編集された結果おとなしくなった状態」も足場に含める。
+bool EnemyIsStandable(const Enemy& e) {
+    if (!e.isActive) return false;
+    if (e.isPaused) return true; // 共通層：止めた敵は踏み台になる
+
+    // アセット側のJSON宣言（edit_reactions）で BecomePlatform が指定されていればそれに従う
+    {
+        const EnemyDef* d = FindEnemyDef(e.assetId);
+        if (d != nullptr && !d->editReactions.empty()) {
+            DeclaredEffects fx = EvalDeclaredReactions(d->editReactions, GetEnemyEditReaction(e, d));
+            if (fx.becomePlatform) return true;
+        }
+    }
+
+    if (e.type == ENEMY_FALLER) {
+        // ドッスンは小さくすると着地の衝撃波を起こせなくなり、
+        // ただ落ちてくるだけの安全な台になる（乗って運んでもらう使い道が生まれる）。
+        EditReaction r = GetEnemyEditReaction(e, FindEnemyDef(e.assetId));
+        if (r.shrunk) return true;
+    }
+    return false;
+}
+
+// この敵が今「触れてもダメージを与えない」状態かどうか。
+// 足場になる相手に乗った瞬間に被弾しては成立しないので、EnemyIsStandableと足並みを揃える。
+bool EnemyIsHarmless(const Enemy& e) {
+    if (e.isRewinding) return true; // 巻き戻し中は過去の残像なのですり抜けられる
+
+    // アセット側のJSON宣言（edit_reactions）で Harmless / Phase が指定されていればそれに従う
+    {
+        const EnemyDef* d = FindEnemyDef(e.assetId);
+        if (d != nullptr && !d->editReactions.empty()) {
+            DeclaredEffects fx = EvalDeclaredReactions(d->editReactions, GetEnemyEditReaction(e, d));
+            if (fx.harmless || fx.phase) return true;
+        }
+    }
+
+    // まぼろしは光に弱い。画面を明るくしている間は掻き消えて何もできなくなる
+    // （時間を止めても効かない相手に対する、画面エフェクト側からの解答）。
+    if (e.type == ENEMY_MIMIC_GHOST && g_screenFx.brightness > 1.3f) return true;
+
+    return EnemyIsStandable(e);
+}
+
+// この敵が今「弾を受け付けない」状態かどうか。
+//
+// まぼろしは普段は実体を持たず弾が素通りする。色フィルタ(Tキー)を弱点色に合わせている間だけ
+// 実体化して撃てるようになる、という「画面エフェクトで見えないものを掴む」関係にしてある。
+bool EnemyIsBulletProof(const Enemy& e) {
+    if (e.type == ENEMY_MIMIC_GHOST) {
+        return g_screenFx.colorFilter != EnemyWeakColor(e.type);
+    }
+
+    // アセット側のJSON宣言（edit_reactions）による無敵／無敵解除
+    const EnemyDef* d = FindEnemyDef(e.assetId);
+    if (d != nullptr && !d->editReactions.empty()) {
+        DeclaredEffects fx = EvalDeclaredReactions(d->editReactions, GetEnemyEditReaction(e, d));
+        if (fx.vulnerable) return false;      // Vulnerableは他の無敵指定より優先する
+        if (fx.invulnerable || fx.phase) return true;
+    }
+    return false;
+}
+
+// 軸そろえで描いていたギミックを、編集で傾けられた角度どおりに回転描画する。
+//
+// トゲや扉のように「倒すと役割が変わる」型は、見た目が回らないと
+// 何が起きたのかプレイヤーに全く伝わらない。DrawExtendGraphの代わりにこれを使う。
+// x/y/w/h はワールド座標のまま渡す（カメラ補正はこの中で行う）。
+void DrawGimmickRotated(const Gimmick& gim, int handle, float camX, float camY,
+                        float x, float y, float w, float h) {
+    if (handle < 0) return;
+    int imgW = 1, imgH = 1;
+    GetGraphSize(handle, &imgW, &imgH);
+    if (imgW <= 0) imgW = 1;
+    if (imgH <= 0) imgH = 1;
+    float cx = x + w * 0.5f - camX;
+    float cy = y + h * 0.5f - camY;
+    double rateX = (double)w / imgW;
+    double rateY = (double)h / imgH;
+    // 描画に使う角度は「配置時からの差」ではなく現在の角度そのもの。
+    // 配置時から傾けて置かれているギミック（縦向きの手動橋など）も正しい姿勢で描くため。
+    DrawRotaGraph3((int)cx, (int)cy, imgW / 2, imgH / 2, rateX, rateY, gim.angle, handle, TRUE, FALSE);
+}
+
+// ScriptActorへ「編集で何をされたか」と画面エフェクトの現在値を詰める。
+//
+// 敵本体・敵のパーツ・ギミック本体・ギミックのパーツの4箇所から呼ばれる。
+// 同じ内容を4回書くとどこかが更新漏れになるので、必ずこの1関数を通す。
+// （アイテムのパーツからは呼ばない。アイテムは編集ツールで選択できず、編集差分が常に空のため）
+// パーツには親の編集内容をそのまま渡す（親を拡大したら舌も伸びる、という直感に合わせる）。
+void FillScriptEditContext(ScriptActor& actor, const EditReaction& r) {
+    actor.editScaleRatio = r.scaleRatio;
+    actor.editTilt       = r.tilt;
+    actor.editSpeedRatio = r.speedRatio;
+    actor.editFlipped    = r.flipped;
+    actor.editPaused     = r.selfPaused;
+    actor.editRewinding  = r.selfRewinding;
+    actor.screenColorFilter = g_screenFx.colorFilter;
+    actor.screenBrightness  = g_screenFx.brightness;
+    actor.screenZoom        = g_screenFx.zoom;
+    actor.isFastForwardNow  = g_screenFx.fastForward;
+}
+
+// Feature: 編集リアクション（全オブジェクト共通層）—
+// 「個別に一時停止された敵」を足場として扱うための着地判定。
+//
+// どんな敵が相手でも必ず通用する手札として、止めた敵の上に乗れるようにする。
+// 時間を止めた相手を踏み台にして高所へ届く、という解法がどのステージでも成立する。
+// 既存のCheckPlatformCollisionは呼び出し箇所が多くシグネチャを変えたくないので、別関数として足す。
+// selfには「今判定している本人」を渡す（敵が自分自身の上に乗らないようにするため。プレイヤーならnullptr）。
+bool CheckFrozenEnemyPlatform(float& x, float& y, float& vy, int width, int height, float scale,
+                              const std::vector<Enemy>& enemies, const Enemy* self = nullptr) {
+    float objW = (float)width * scale;
+    float objH = (float)height * scale;
+    float footY = y + objH;
+
+    for (const auto& e : enemies) {
+        if (&e == self) continue;
+        if (!EnemyIsStandable(e)) continue;
+        float ew = (float)e.hitboxWidth * e.scale;
+        if (vy >= 0.0f && x <= e.x + ew && x + objW >= e.x) {
+            float threshold = vy + 8.0f; // 高速落下時のすり抜け防止で速度ぶんの余裕を持たせる
+            if (footY >= e.y && footY <= e.y + threshold) {
+                y = e.y - objH;
+                vy = 0.0f;
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 // プラットフォームおよびアクティブな衝突ギミックへの着地衝突判定
 // 着地した場合はtrueを返し、オブジェクトのY座標をプラットフォーム上に着坐するように更新します
@@ -1369,8 +2880,17 @@ bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height
         else if (gim.type == GIMMICK_BREAKABLE_BLOCK || gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_GATE_DOOR
                  || gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT || gim.type == GIMMICK_PUSHABLE_ROCK
                  || gim.type == GIMMICK_COLOR_LOCK_PLATFORM || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM
+                 || gim.type == GIMMICK_SPIKES  // Feature: 編集リアクション — 45度以上倒したトゲは無害な足場になる
                  || (gim.type == GIMMICK_CHIKUWA_BLOCK && gim.angle == 0.0f)) {
-            if (CheckLanded(gim.x, gim.y, gim.x + gim.width)) {
+            // 倒したトゲは「刺さらない床」としてだけ足場になる。立っているトゲは触れれば即死のままなので
+            // ここでは足場にしない（乗れてしまうと即死判定と矛盾する）。
+            if (gim.type == GIMMICK_SPIKES && !GimmickIsTipped(gim)) continue;
+
+            // Feature: 編集リアクション — 傾けて倒したギミックは縦横が入れ替わった姿勢になる。
+            // 見た目と判定がズレないよう、実効ボックスの算出は必ずこのヘルパに通す。
+            float gbx, gby, gbw, gbh;
+            GetGimmickCollisionBox(gim, gbx, gby, gbw, gbh);
+            if (CheckLanded(gbx, gby, gbx + gbw)) {
                 if (outGimmickIndex) *outGimmickIndex = (int)gi;
                 return true;
             }
@@ -1500,17 +3020,23 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
         // isActive==true（施錠中/閉状態）の間だけこのループに乗り、通行を塞げるようにする
         // （元々ここに無かったため、閉じているはずのドアを素通りできてしまっていた）。
         if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_GATE_DOOR) {
+            // Feature: 編集リアクション — 倒した扉は「壁」ではなく「床」になるので、
+            // 横方向の実体判定からは外れる。実効ボックスで縦横の入れ替えも反映する。
+            if (gim.type == GIMMICK_GATE_DOOR && GimmickIsTipped(gim)) continue;
+            float gbx, gby, gbw, gbh;
+            GetGimmickCollisionBox(gim, gbx, gby, gbw, gbh);
+
             // Y軸の重なり判定（少しの遊びを持たせる）
-            if (y + objH > gim.y + 4.0f && y < gim.y + gim.height - 4.0f) {
+            if (y + objH > gby + 4.0f && y < gby + gbh - 4.0f) {
                 float toleranceGX = std::abs(vx) + 12.0f; // 高速移動時のすり抜け防止のため速度依存にする
                 if (vx > 0.0f) { // 右方向へ移動中
-                    if (x < gim.x && x + objW > gim.x && x + objW <= gim.x + toleranceGX) {
-                        x = gim.x - objW;
+                    if (x < gbx && x + objW > gbx && x + objW <= gbx + toleranceGX) {
+                        x = gbx - objW;
                     }
                 }
                 else if (vx < 0.0f) { // 左方向へ移動中
-                    if (x > gim.x + gim.width - toleranceGX && x < gim.x + gim.width) {
-                        x = gim.x + gim.width;
+                    if (x > gbx + gbw - toleranceGX && x < gbx + gbw) {
+                        x = gbx + gbw;
                     }
                 }
             }
@@ -1526,22 +3052,27 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE) {
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE
+            || (gim.type == GIMMICK_GATE_DOOR && GimmickIsTipped(gim))) {
+            // Feature: 編集リアクション — 倒した扉はここで床として拾う（横の壁判定からは外れている）。
+            float gbx, gby, gbw, gbh;
+            GetGimmickCollisionBox(gim, gbx, gby, gbw, gbh);
+
             // X軸の重なり判定
-            if (x + objW > gim.x + 2.0f && x < gim.x + gim.width - 2.0f) {
+            if (x + objW > gbx + 2.0f && x < gbx + gbw - 2.0f) {
                 if (vy >= 0.0f) { // 下方向へ移動中（着地）
                     float footY = y + objH;
                     float threshold = vy + 12.0f;
-                    if (footY >= gim.y && footY <= gim.y + threshold) {
-                        y = gim.y - objH;
+                    if (footY >= gby && footY <= gby + threshold) {
+                        y = gby - objH;
                         vy = 0.0f;
                         isGrounded = true;
                     }
                 }
                 else if (vy < 0.0f) { // 上方向へ移動中（頭ぶつけ）
                     float threshold = -vy + 12.0f;
-                    if (y <= gim.y + gim.height && y >= gim.y + gim.height - threshold) {
-                        y = gim.y + gim.height;
+                    if (y <= gby + gbh && y >= gby + gbh - threshold) {
+                        y = gby + gbh;
                         vy = 0.0f;
                     }
                 }
@@ -1576,6 +3107,19 @@ bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, 
 // このファイルで最も大きな関数。
 int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ int n)
 {
+    // ★最初にやること: カレントディレクトリをゲームデータ(assets/ img/ sound/ se/)の
+    // 置き場所へ移す。
+    //
+    // このゲームはアセットを全てCWDからの相対パスで参照している（約67箇所）。
+    // exeの出力先は x64\Debug\ でアセットはリポジトリのルート直下という別階層なので、
+    // これを行わないと exe をダブルクリックしても何も読み込めない。
+    // これまで動いていたのは Lab_Editor が WorkingDirectory を指定して
+    // 起動していたからにすぎず、ゲーム単体では配布できない状態だった。
+    //
+    // ログ出力(Logger)より前に呼ぶ。そうしないと set_terminate ハンドラ内のログが
+    // 移動前の場所へ書かれてしまう。
+    bool gameRootFound = GamePaths::ResolveAndSetGameRoot();
+
     // 未処理の例外でstd::terminateが呼ばれた場合のハンドラを登録しておく。
     // 何も対処しないとプログラムが無言で落ちてしまい原因調査が困難なため、
     // 例外の内容（何のエラーだったか）を可能な限りログファイルに書き残してからabortする。
@@ -1595,6 +3139,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     Logger::Info("System", "WinMain", "[Init] WinMain Begin");
 
+    // ゲームデータが見つからなかった場合は、ここで理由を伝えて終了する。
+    // 黙って真っ白な画面が出て終わるのが配布版で最も困る失敗の仕方なので、
+    // 「何が足りないのか」と「どうすれば直るのか」をその場で見せる。
+    if (!gameRootFound) {
+        Logger::Error("System", "WinMain", "Game data (assets folder) not found near the executable");
+        MessageBoxW(NULL,
+            L"ゲームデータ(assetsフォルダ)が見つかりませんでした。\n\n"
+            L"zipを展開したフォルダの中身を移動していないか確認してください。\n"
+            L"実行ファイルと同じ場所に assets / img / sound / se フォルダが必要です。",
+            L"Lab Project 01", MB_OK | MB_ICONERROR);
+        return -1;
+    }
+
+    // DxLibが自動生成する Log.txt を作らない（DxLib_Initより前でのみ有効）。
+    // カレントディレクトリ直下に毎回書き出されるため、追跡していると差分が出続けるうえ、
+    // 配布版ではインストール先へ書き込むことになる。DxLib自体の診断が要る場面は稀。
+    SetOutApplicationLogValidFlag(FALSE);
+
     // DxLibへ渡す文字列の扱いをUTF-8にする（DxLib_Initより前に呼ぶ必要がある）。
     // 既定はShift-JIS解釈のため、assets/*.json（UTF-8）由来の日本語をDrawStringへ渡すと
     // 文字化けしていた（ShowMessageのヒント等）。ソースもUTF-8なので全体をUTF-8で統一する。
@@ -1607,7 +3169,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
     // コマンドライン引数でステージファイル名が渡されていれば、起動時に読み込むステージを上書きする
     // （Lab_Editorから「このステージでテストプレイ」を実行したときに使われる仕組み）
+    // 引数が付いているかどうかが、そのまま「Lab_Editorからテストプレイで起動されたか」の
+    // 判定になる。エディタから来た場合はタイトル画面を挟まず、指定されたステージへ直行する
+    // （毎回タイトルを経由させられてはテストプレイにならない）。
+    bool bootDirectToStage = false;
     if (l != nullptr && strlen(l) > 0) {
+        bootDirectToStage = true;
         currentStageFileName = l;
         // コマンドライン引数の前後に空白/引用符が付くケースへの防御（呼び出し元により混入することがある）
         while (!currentStageFileName.empty() && (currentStageFileName.front() == ' ' || currentStageFileName.front() == '"')) currentStageFileName.erase(0, 1);
@@ -1627,8 +3194,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // ウィンドウ同士をドッキング（連結）できるようにする
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // マルチビューポートを有効化（UIを独立したOSウィンドウにできる）
-    // 日本語（メイリオ）フォントを読み込み、日本語グリフ範囲を指定してUI上で日本語表示できるようにする
-    io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese());
+    // imgui.ini を書き出さない。カレントディレクトリ直下に毎回生成されるため、
+    // 追跡していると差分が出続けるうえ、配布版ではインストール先へ書き込むことになる。
+    // ImGuiのUIは現状ほぼ使われていないので、ウィンドウ配置を保存する価値もない。
+    io.IniFilename = nullptr;
+    // 日本語（メイリオ）フォントを読み込み、日本語グリフ範囲を指定してUI上で日本語表示できるようにする。
+    // メイリオが無い環境（システムドライブがC:でない等）でも落ちないよう戻り値を確認する。
+    // 読めなかった場合はImGuiの既定フォント（英数のみ）になるだけで、ゲーム本体には影響しない。
+    if (io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\meiryo.ttc", 18.0f, NULL, io.Fonts->GetGlyphRangesJapanese()) == nullptr) {
+        Logger::Info("System", "WinMain", "[Init] meiryo.ttc not available; ImGui falls back to the default font");
+    }
 
     ImGui::StyleColorsDark(); // UIの配色をダークテーマにする
 
@@ -1640,6 +3215,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 実際のウィンドウサイズ(WINDOW_WIDTH x WINDOW_HEIGHT)へは、この仮想スクリーンを拡大して転送する。
     int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
     LoadAssetDefinitions(); // 敵/アイテム/ギミックの定義データ(enemies.json等)を読み込む
+
+    // ゲーム全体の設定（タイトル画面の内容・ステージ一覧・テーマ色など）を読み込む。
+    // ファイルが無い/壊れている場合は titleEnabled=false になるだけで、
+    // 従来どおり起動即プレイになる（設定が壊れても遊べなくならない）。
+    GameCfg::GameConfig gameConfig;
+    GameCfg::LoadGameConfig("assets/game_config.json", gameConfig);
+    g_uiStyle = gameConfig.ui; // ゲーム画面のウィンドウの見た目（枠・色）を描画側へ渡す
+    if (!gameConfig.windowTitle.empty()) {
+        SetMainWindowText(gameConfig.windowTitle.c_str());
+    }
+
+    // 進行状況（どのステージをクリアしたか・最高取得数）。
+    // 置き場所は %LOCALAPPDATA%\LabProject01\save.json。
+    // 初回起動ではファイルが無いので false が返るが、それは正常な状態。
+    GameCfg::SaveData saveData;
+    GameCfg::LoadSaveData(saveData);
     {
         // Feature 5: コモンイベント定義の読み込み。CallCommonEventアクションから参照される。
         std::ifstream cef("assets/common_events.json");
@@ -1679,6 +3270,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int uiPauseHandle = LoadGraph("img/UI一時停止中.png");        // 一時停止中(||)アイコン
     int energyHandle = LoadGraph("img/エネルギー.png");           // 編集コストゲージのアイコン
     int cursorHandle = LoadGraph("img/マウスホイール.png");       // ゲーム内マウスカーソル（実物は矢印の絵）
+    // 押せるものの上に来たときの指差しカーソル。実物のマウスカーソルと同じ振る舞いにするための素材。
+    int cursorPointHandle = LoadGraph("img/マウスカーソル指差し.png");
     int goalHandle = LoadGraph("img/ゴール.png");                 // ゴール地点
     int checkpointHandle = LoadGraph("img/チェックポイント.png"); // チェックポイントの旗
     int switchOnHandle = LoadGraph("img/スイッチオン.png");       // 押し込まれた状態のスイッチ
@@ -1709,6 +3302,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "img/UI一時停止中.png",      uiPauseHandle },
             { "img/エネルギー.png",        energyHandle },
             { "img/マウスホイール.png",    cursorHandle },
+            { "img/マウスカーソル指差し.png", cursorPointHandle },
             { "img/ゴール.png",            goalHandle },
             { "img/チェックポイント.png",  checkpointHandle },
             { "img/スイッチオン.png",      switchOnHandle },
@@ -1753,6 +3347,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int srcY = t.value("srcY", 0);
                     int srcW = t.value("srcW", 0);
                     int srcH = t.value("srcH", 0);
+                    // Feature: タイル破壊 — 壊し方ごとの可否と、壊すのに要る相手の大きさ
+                    bool bSlam = t.value("breakBySlam", false);
+                    bool bRam = t.value("breakByRam", false);
+                    bool bBullet = t.value("breakByBullet", false);
+                    bool bPlayer = t.value("breakByPlayer", false);
+                    float bMinScale = t.value("breakMinScale", 0.0f);
+                    std::string bSe = t.value("breakSe", "");
+                    // name / color はエディタが以前から書き出していたのに、ゲーム側が読んでいなかった。
+                    std::string tname = t.value("name", "");
+                    std::string tcolor = t.value("color", "");
 
                     int handle = -1;
                     if (!spritePath.empty()) {
@@ -1774,19 +3378,54 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (handle != -1) tileDefs[tid].handle = handle;
                         tileDefs[tid].srcX = srcX; tileDefs[tid].srcY = srcY;
                         tileDefs[tid].srcW = srcW; tileDefs[tid].srcH = srcH;
+                        if (!tname.empty()) tileDefs[tid].name = tname;
+                        tileDefs[tid].color = tcolor;
+                        tileDefs[tid].breakBySlam = bSlam;
+                        tileDefs[tid].breakByRam = bRam;
+                        tileDefs[tid].breakByBullet = bBullet;
+                        tileDefs[tid].breakByPlayer = bPlayer;
+                        tileDefs[tid].breakMinScale = bMinScale;
+                        tileDefs[tid].breakSe = bSe;
                     } else if (tid >= (int)tileDefs.size()) {
                         // 新規タイルを追加
                         TileDefinition newTile;
                         newTile.type = (TileType)tid;
-                        newTile.handle = (handle != -1) ? handle : jimenHandle; // デフォルト画像
+                        // 画像を指定していないタイルは handle を -1 のままにして、色で塗らせる。
+                        // 以前はここで無条件に地面緑へフォールバックしていたため、
+                        // 「画像なし・色だけ」で作った新しいタイルが必ず地面緑の見た目になり、
+                        // 既存の地形と見分けがつかなくなっていた（色指定が効くのは既定の11種だけだった）。
+                        // パスが書かれているのに読めなかった場合だけ、従来どおり地面緑で代用する。
+                        newTile.handle = (handle != -1) ? handle
+                                       : (spritePath.empty() ? -1 : jimenHandle);
                         newTile.isCollidable = collidable;
                         newTile.deadly = deadly;
-                        newTile.name = "Custom";
+                        // 以前は "Custom" 固定で、エディタで付けた名前が無視されていた
+                        newTile.name = tname.empty() ? std::string("Custom") : tname;
+                        newTile.color = tcolor;
                         newTile.srcX = srcX; newTile.srcY = srcY;
                         newTile.srcW = srcW; newTile.srcH = srcH;
+                        newTile.breakBySlam = bSlam;
+                        newTile.breakByRam = bRam;
+                        newTile.breakByBullet = bBullet;
+                        newTile.breakByPlayer = bPlayer;
+                        newTile.breakMinScale = bMinScale;
+                        newTile.breakSe = bSe;
                         tileDefs.push_back(newTile);
                     }
                 }
+            }
+        }
+
+        // Feature: タイル定義の色 — "#RRGGBB" を実際の描画色へ解決しておく。
+        // GetColor は32bitカラーモードでは負の値を返すため、
+        // 「解決できたか」は値の符号ではなく hasColor で持つ（>=0 判定では絶対に通らない）。
+        for (auto& td : tileDefs) {
+            if (td.color.size() == 7 && td.color[0] == '#') {
+                int rr = (int)strtol(td.color.substr(1, 2).c_str(), nullptr, 16);
+                int gg = (int)strtol(td.color.substr(3, 2).c_str(), nullptr, 16);
+                int bb = (int)strtol(td.color.substr(5, 2).c_str(), nullptr, 16);
+                td.colorRGB = GetColor(rr, gg, bb);
+                td.hasColor = true;
             }
         }
 
@@ -2167,10 +3806,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     float groundY = 400.0f;
     bool isPaused = false, isEditMode = true, isFastForward = false, isStepFrame = false, isDebugDrawMode = false;
+    // コマ送りをどちら向きに送ったか。→なら+1、←なら-1。
+    // 世界の進み方そのものは前向きの1フレームで変わらない（巻き戻しとは別物）。
+    // この符号を読むのはコマ送りリフトだけで、送る向きで上がるか下がるかが決まる。
+    float stepFrameDir = 1.0f;
     float editCost = 100.0f; // 編集コストゲージ現在値（ResetStageで currentEditCost.maxCost に上書きされる）
     bool lastF3 = false;
     bool isDragging = false, isScaling = false, isScalingHeight = false, isRotating = false;
     bool isInspScale = false, isInspAngle = false, isInspSpeed = false;
+    // 敵・プレイヤー・ギミックの「つまみ」をつかんでいる間のフラグ。
+    // つかんでいる間は、拡縮・回転ドラッグと同じく世界の更新を止める（CanUpdate が見る）。
+    bool isHandleScale = false, isHandleRotate = false;
+    float handleBaseScale = 1.0f; // 拡縮つまみをつかんだ瞬間の倍率
+    float handleGrabP = 1.0f;     // その瞬間にマウスが指していた「角の位置を倍率に直した値」（ずれを持ち越さないため）
+    // ダブルクリック判定用。直前にクリックした編集対象（種別と添字）と、その時刻(ms)。
+    int lastClickKind = -1, lastClickIdx = -1, lastClickMs = 0;
+
+    // ===== 編集操作のフィードバック表示 =====
+    // 「やったのに何が起きたか分からない」「できなかったのに理由が分からない」をなくすための表示用の状態。
+    //   ・トースト … 取り消し／やり直し／拒否の結果を、ゲーム画面の下寄りに短く出す
+    //   ・コスト増減 … 編集コストが一気に動いたとき（操作の消費・取り消しの返却・アイテム回復）に、
+    //                  ゲージの横へ「-8」「+8」を浮かべる
+    // どちらも見た目だけで、ゲームの進行には一切関わらない（ResetStage でも消さなくてよい）。
+    std::string editToastText;        // 表示中の文言（空なら何も出さない）
+    int   editToastKind = 0;          // 0=情報（白）／1=成功（緑）／2=拒否（赤）
+    float editToastTimer = 0.0f;      // 残りフレーム数。0になったら消える
+    float editCostSeen = -1.0f;       // 前フレームの editCost。負なら「基準を取り直す」（ステージ開始直後など）
+    float costFloatValue = 0.0f;      // 浮かべる増減量（負=消費、正=回復）
+    float costFloatTimer = 0.0f;      // 残りフレーム数
 
     // Feature 5: イベントアクション実行用の実行時ステート。ShowMessage / MoveCamera / ItemCollected条件で使用。
     bool isShowingMessage = false;
@@ -2196,7 +3859,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     int areaSelectStartX = 0, areaSelectStartY = 0;
     int areaSelectEndX = 0, areaSelectEndY = 0;
     
-    ContextMenu menu = { false, 0, 0, 160, 160 }; // 6つのオプション用のコンテキストメニューサイズ (高さ 160)
+    // 右クリックの円形メニュー。x,y はメニューの中心。width/height は縦メニュー時代の名残で、今は使わない。
+    ContextMenu menu = { false, 0, 0, 0, 0 };
+    bool menuHoldActive = false; // 右ボタンを押しっぱなしでメニューを開いている最中か（離した位置で項目を決める）
     SetMouseDispFlag(TRUE);
 
     SelectedType selectedType = SELECT_NONE;
@@ -2210,12 +3875,802 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     Gimmick* targetGimmick = nullptr;
     Enemy* targetEnemy = nullptr;
 
+    // 今プレイしているステージの添字。大きさ変更の地形判定（SolidOverlapArea）が読むので、共通入口より前に置く。
+    int currentStageIdx = 0;
+
+    // ===== 編集操作の共通入口 =====
+    //
+    // 拡大・回転・反転・速度・一時停止・巻き戻し・リセットは、これまで
+    // 「右クリックメニュー」「INSPECTOR の値ドラッグ」「S/R＋ドラッグ」のそれぞれに
+    // ほぼ同じ処理が複製されていた（しかも微妙に違い、メニューは代表の1体にしか効かなかった）。
+    // つまみ・ホイール・ダブルクリックと入口をさらに増やす前に、効き方を1か所へ集める。
+    // 入口が増えても、禁止の判定・コスト・巻き戻し履歴の書き換えが必ず同じになる。
+
+    // 選択している物のうち先頭を「代表」として、INSPECTOR や各操作が読む target 系ポインタを組み直す。
+    // 範囲選択・Ctrl＋クリックの追加／解除のあとに呼ぶ。
+    auto SyncTargetsFromSelection = [&]() {
+        if (!selectedPlayers.empty()) {
+            selectedType = SELECT_PLAYER;
+            targetScale = &selectedPlayers[0]->scale;
+            targetAngle = &selectedPlayers[0]->angle;
+            targetSpeedScale = &selectedPlayers[0]->speedScale;
+            targetPaused = &selectedPlayers[0]->isPaused;
+            targetRewind = &selectedPlayers[0]->isRewinding;
+            targetDirection = &selectedPlayers[0]->direction;
+            targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+        } else if (!selectedEnemies.empty()) {
+            selectedType = SELECT_ENEMY;
+            targetScale = &selectedEnemies[0]->scale;
+            targetAngle = &selectedEnemies[0]->angle;
+            targetSpeedScale = &selectedEnemies[0]->speedScale;
+            targetPaused = &selectedEnemies[0]->isPaused;
+            targetRewind = &selectedEnemies[0]->isRewinding;
+            targetDirection = &selectedEnemies[0]->direction;
+            targetEnemyType = &selectedEnemies[0]->type;
+            targetGimmick = nullptr;
+            targetEnemy = selectedEnemies[0];
+        } else if (!selectedGimmicks.empty()) {
+            selectedType = SELECT_GIMMICK;
+            targetScale = &selectedGimmicks[0]->width; // ギミックの「大きさ」は横幅
+            targetAngle = &selectedGimmicks[0]->angle;
+            // 範囲選択経由だと従来は customTimer／向き無しになっていて、
+            // 直接クリックで選んだ場合とメニューの効き方が食い違っていた。直接選択と同じにそろえる。
+            targetSpeedScale = &selectedGimmicks[0]->speedScale;
+            targetPaused = &selectedGimmicks[0]->isPaused;
+            targetRewind = &selectedGimmicks[0]->isRewinding;
+            targetDirection = &selectedGimmicks[0]->direction;
+            targetEnemyType = nullptr;
+            targetGimmick = selectedGimmicks[0];
+            targetEnemy = nullptr;
+        } else {
+            selectedType = SELECT_NONE;
+            targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+            targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+            targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+        }
+    };
+
+    // ===== 取り消し（Ctrl+Z）／やり直し（Ctrl+Y） =====
+    //
+    // 「すべてリセット」（コスト10）が唯一の戻し方だったため、試しに触ってみるのが怖かった。
+    // 1手ずつ戻せるようにする。
+    //
+    // 記録の単位は「1回の編集操作」：
+    //   ・マウスを押してから離すまでの1ジェスチャ（移動・拡縮・回転・つまみ・INSPECTORのドラッグ）
+    //   ・メニュー／ダブルクリックの1操作（反転・速度・一時停止・巻き戻し・リセット）
+    //   ・0.4秒以内に続いたホイール操作（まとめて1手）
+    // 各操作の前後で、選択している物の「編集で変わりうる値」を写し取っておき、
+    // 差があった項目だけを戻す／やり直す。
+    //
+    // 【なぜ差があった項目だけか】世界が動いている間に拡縮した敵は、取り消すころには別の場所へ歩いている。
+    // 位置まで一式を戻すと、大きさを戻しただけのつもりが敵が元の場所へ瞬間移動してしまう。
+    //
+    // 【なぜ添字で覚えるか】生ポインタだと、gimmicks.push_back（Gキー・カット作成）で配列が作り直された
+    // 瞬間にすべて無効になる。種別と添字なら、末尾への追加ではずれない。
+    // 配列の途中を消す操作（カットの削除）をしたときは、記録ごと捨てる。
+    std::vector<EditUndoEntry> undoStack, redoStack;
+    const size_t EDIT_UNDO_MAX = 50;
+    bool gestureActive = false;                 // ジェスチャの記録中か
+    std::vector<EditSnap> gestureBefore;        // ジェスチャを始める前の状態
+    bool wheelUndoOpen = false;                 // ホイール操作の記録中か（0.4秒以内の続きはまとめる）
+    std::vector<EditSnap> wheelUndoBefore;
+    int wheelUndoLastMs = 0;
+
+    // 1個体ぶんの現在値を写し取る
+    auto CaptureSnap = [&](int kind, int index) -> EditSnap {
+        EditSnap sn; sn.kind = kind; sn.index = index;
+        if (kind == 0) {
+            sn.x = player.x; sn.y = player.y; sn.scale = player.scale; sn.angle = player.angle;
+            sn.speedScale = player.speedScale; sn.direction = player.direction;
+            sn.paused = player.isPaused; sn.rewinding = player.isRewinding;
+        } else if (kind == 1 && index >= 0 && index < (int)enemies.size()) {
+            const Enemy& e = enemies[index];
+            sn.x = e.x; sn.y = e.y; sn.scale = e.scale; sn.angle = e.angle;
+            sn.speedScale = e.speedScale; sn.direction = e.direction;
+            sn.paused = e.isPaused; sn.rewinding = e.isRewinding; sn.mask = e.editDirtyMask;
+        } else if (kind == 2 && index >= 0 && index < (int)gimmicks.size()) {
+            const Gimmick& g = gimmicks[index];
+            sn.x = g.x; sn.y = g.y; sn.angle = g.angle;
+            sn.speedScale = g.speedScale; sn.direction = g.direction;
+            sn.paused = g.isPaused; sn.rewinding = g.isRewinding; sn.mask = g.editDirtyMask;
+            sn.width = g.width; sn.height = g.height; sn.spriteWidth = g.spriteWidth; sn.spriteHeight = g.spriteHeight;
+            sn.editBaseY = g.editBaseY;
+        }
+        return sn;
+    };
+    // 今の選択すべてを写し取る
+    auto CaptureSelection = [&](std::vector<EditSnap>& out) {
+        out.clear();
+        for (auto* p : selectedPlayers) { (void)p; out.push_back(CaptureSnap(0, 0)); }
+        for (auto* e : selectedEnemies) {
+            int i = (int)(e - enemies.data());
+            if (i >= 0 && i < (int)enemies.size()) out.push_back(CaptureSnap(1, i));
+        }
+        for (auto* g : selectedGimmicks) {
+            int i = (int)(g - gimmicks.data());
+            if (i >= 0 && i < (int)gimmicks.size()) out.push_back(CaptureSnap(2, i));
+        }
+    };
+    // 「like」と同じ個体を、今の値で写し取る（選択が変わっていても、同じ物の前後を比べられる）
+    auto CaptureLike = [&](const std::vector<EditSnap>& like, std::vector<EditSnap>& out) {
+        out.clear();
+        for (const auto& sn : like) out.push_back(CaptureSnap(sn.kind, sn.index));
+    };
+    auto SameTargets = [&](const std::vector<EditSnap>& a, const std::vector<EditSnap>& b) -> bool {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); i++) if (a[i].kind != b[i].kind || a[i].index != b[i].index) return false;
+        return true;
+    };
+
+    // 差のあった項目だけを書き戻す。履歴の書き換え方は、各編集操作（ドラッグ・拡縮・回転）と同じ。
+    auto ApplySnaps = [&](const std::vector<EditSnap>& v, const std::vector<unsigned>& fl) {
+        for (size_t i = 0; i < v.size() && i < fl.size(); i++) {
+            const EditSnap& sn = v[i]; unsigned f = fl[i];
+            if (sn.kind == 0) {
+                // 倍率を戻すときも、足元（下端の中心）を保つ。位置が一緒に戻るなら、そのあと位置で上書きされる。
+                if (f & EF_SCALE) {
+                    float w0 = (float)player.width * player.scale, h0 = (float)player.height * player.scale;
+                    player.scale = sn.scale;
+                    float dx = (w0 - (float)player.width * player.scale) * 0.5f, dy = h0 - (float)player.height * player.scale;
+                    player.x += dx; player.y += dy;
+                    for (auto& h : player.history) { h.x += dx; h.y += dy; }
+                }
+                if (f & EF_POS)    { player.x = sn.x; player.y = sn.y; player.vx = 0.0f; player.vy = 0.0f; }
+                if (f & EF_ANGLE)  player.angle = sn.angle;
+                if (f & EF_SPEED)  player.speedScale = sn.speedScale;
+                if (f & EF_DIR)    player.direction = sn.direction;
+                if (f & EF_PAUSE)  player.isPaused = sn.paused;
+                if (f & EF_REWIND) player.isRewinding = sn.rewinding;
+            } else if (sn.kind == 1 && sn.index >= 0 && sn.index < (int)enemies.size()) {
+                Enemy& e = enemies[sn.index];
+                if (f & EF_SCALE) {
+                    float w0 = (float)e.hitboxWidth * e.scale, h0 = (float)e.hitboxHeight * e.scale;
+                    e.scale = sn.scale;
+                    float dx = (w0 - (float)e.hitboxWidth * e.scale) * 0.5f, dy = h0 - (float)e.hitboxHeight * e.scale;
+                    e.x += dx; e.y += dy;
+                    for (auto& h : e.history) { h.x += dx; h.y += dy; h.scale = e.scale; }
+                }
+                if (f & EF_POS) {
+                    float dx = sn.x - e.x, dy = sn.y - e.y;
+                    e.x = sn.x; e.y = sn.y; e.vx = 0.0f; e.vy = 0.0f;
+                    for (auto& h : e.history) { h.x += dx; h.y += dy; }
+                }
+                if (f & EF_ANGLE)  { e.angle = sn.angle; for (auto& h : e.history) h.angle = e.angle; }
+                if (f & EF_SPEED)  e.speedScale = sn.speedScale;
+                if (f & EF_DIR)    e.direction = sn.direction;
+                if (f & EF_PAUSE)  e.isPaused = sn.paused;
+                if (f & EF_REWIND) e.isRewinding = sn.rewinding;
+                if (f & EF_MASK)   e.editDirtyMask = sn.mask;
+            } else if (sn.kind == 2 && sn.index >= 0 && sn.index < (int)gimmicks.size()) {
+                Gimmick& g = gimmicks[sn.index];
+                if (f & EF_POS) {
+                    float dx = sn.x - g.x, dy = sn.y - g.y;
+                    g.x = sn.x; g.y = sn.y;
+                    for (auto& h : g.history) { h.x += dx; h.y += dy; }
+                }
+                if (f & EF_SIZE) {
+                    g.width = sn.width; g.height = sn.height;
+                    g.spriteWidth = sn.spriteWidth; g.spriteHeight = sn.spriteHeight;
+                    g.editBaseY = sn.editBaseY;
+                }
+                if (f & EF_ANGLE)  { g.angle = sn.angle; for (auto& h : g.history) h.angle = g.angle; }
+                if (f & EF_SPEED)  g.speedScale = sn.speedScale;
+                if (f & EF_DIR)    g.direction = sn.direction;
+                if (f & EF_PAUSE)  g.isPaused = sn.paused;
+                if (f & EF_REWIND) g.isRewinding = sn.rewinding;
+                if (f & EF_MASK)   g.editDirtyMask = sn.mask;
+            }
+        }
+    };
+
+    // 記録を全部捨てる（ステージの作り直し・配列の途中を消す操作のとき）
+    auto ClearEditUndo = [&]() {
+        undoStack.clear(); redoStack.clear();
+        gestureActive = false; gestureBefore.clear();
+        wheelUndoOpen = false; wheelUndoBefore.clear();
+    };
+
+    // 1回の編集操作を記録する。before は操作の直前の状態、cost はその操作が消費したコスト。
+    //   ignorePos … 位置の差は記録しない（世界が動いている間に続いたホイール操作用。
+    //               敵が勝手に歩いた分まで「編集」として戻してしまうのを避ける）
+    auto PushUndo = [&](const std::vector<EditSnap>& before, float cost, bool ignorePos) {
+        if (before.empty()) return;
+        EditUndoEntry en;
+        en.before = before;
+        CaptureLike(before, en.after);
+        bool anyReal = false;
+        for (size_t i = 0; i < en.before.size(); i++) {
+            unsigned f = EditSnapDiff(en.before[i], en.after[i]);
+            if (ignorePos) f &= ~(unsigned)EF_POS;
+            en.fields.push_back(f);
+            // 「編集した印(editDirtyMask)」だけが変わった操作は記録しない。
+            // 何も動かさずに物をクリックしただけでも印は付くため、残すと取り消しの履歴が空打ちで埋まる。
+            if (f & ~(unsigned)EF_MASK) anyReal = true;
+        }
+        if (!anyReal && cost <= 0.0f) return;
+        en.cost = cost;
+        undoStack.push_back(en);
+        if (undoStack.size() > EDIT_UNDO_MAX) undoStack.erase(undoStack.begin());
+        redoStack.clear(); // 新しい編集をしたら、やり直しの先は無くなる
+    };
+
+    // ホイール操作の記録を確定する。他の編集操作の前（順番が入れ替わらないように）と、0.4秒経ったときに呼ぶ。
+    auto FlushWheelUndo = [&]() {
+        if (!wheelUndoOpen) return;
+        PushUndo(wheelUndoBefore, 0.0f, true);
+        wheelUndoOpen = false;
+        wheelUndoBefore.clear();
+    };
+
+    // 画面に出すトースト（短いメッセージ）を設定する。kind … 0=情報／1=成功／2=拒否
+    auto ShowEditToast = [&](const std::string& text, int kind) {
+        editToastText = text;
+        editToastKind = kind;
+        editToastTimer = 100.0f;
+    };
+    // コストが足りなくて操作できなかったとき。拒否音と、必要量・残量をまとめて出す。
+    // 以前は拒否音だけで、「なぜ通らないのか」が分からなかった。
+    auto EditDeniedCost = [&](float need) {
+        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        char b[96];
+        sprintf_s(b, sizeof(b), "コストが足りません（必要 %.0f／残り %.0f）", need, editCost);
+        ShowEditToast(b, 2);
+    };
+    // コスト以外の理由で操作できなかったとき（対象がロックされている、取り消す物が無い、など）
+    auto EditDeniedWhy = [&](const std::string& why) {
+        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        ShowEditToast(why, 2);
+    };
+    // 継続系の操作（時間停止・早送り・画面エフェクト）が使えなかったとき。
+    // 「このステージで封印されている」のか「コストが尽きた」のかを言い分ける（対処が全く違うため）。
+    auto EditDeniedToggle = [&](bool opEnabled, const char* what) {
+        if (!opEnabled) EditDeniedWhy(std::string("このステージでは") + what + "は使えません");
+        else            EditDeniedWhy("編集コストが残っていません");
+    };
+    // 取り消し／やり直しした項目の名前を並べる（「移動・大きさ」のように）
+    auto DescribeEditFields = [&](const EditUndoEntry& en) -> std::string {
+        unsigned all = 0;
+        for (unsigned f : en.fields) all |= f;
+        std::string s;
+        auto add = [&](unsigned bit, const char* name) {
+            if (all & bit) { if (!s.empty()) s += "・"; s += name; }
+        };
+        add(EF_POS, "移動");
+        add(EF_SCALE | EF_SIZE, "大きさ");
+        add(EF_ANGLE, "回転");
+        add(EF_SPEED, "速度");
+        add(EF_DIR, "反転");
+        add(EF_PAUSE, "一時停止");
+        add(EF_REWIND, "巻き戻し");
+        if (s.empty()) s = "編集";
+        return s;
+    };
+
+    auto EditUndo = [&]() -> bool {
+        FlushWheelUndo();
+        if (undoStack.empty()) { EditDeniedWhy("取り消せる操作がありません"); return false; }
+        EditUndoEntry en = undoStack.back();
+        undoStack.pop_back();
+        ApplySnaps(en.before, en.fields);
+        // 消費したコストは全額返す（試行錯誤を罰しない）
+        editCost += en.cost;
+        if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
+        redoStack.push_back(en);
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        {
+            char b[96];
+            if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "取り消しました：%s（コスト +%.0f）", DescribeEditFields(en).c_str(), en.cost);
+            else                sprintf_s(b, sizeof(b), "取り消しました：%s", DescribeEditFields(en).c_str());
+            ShowEditToast(b, 1);
+        }
+        return true;
+    };
+    auto EditRedo = [&]() -> bool {
+        if (redoStack.empty()) { EditDeniedWhy("やり直せる操作がありません"); return false; }
+        const EditUndoEntry& top = redoStack.back();
+        // やり直しはもう一度その操作をするのと同じなので、コストが足りなければできない
+        if (editCost < top.cost) { EditDeniedCost(top.cost); return false; }
+        EditUndoEntry en = top;
+        redoStack.pop_back();
+        editCost -= en.cost;
+        ApplySnaps(en.after, en.fields);
+        undoStack.push_back(en);
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        {
+            char b[96];
+            if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "やり直しました：%s（コスト -%.0f）", DescribeEditFields(en).c_str(), en.cost);
+            else                sprintf_s(b, sizeof(b), "やり直しました：%s", DescribeEditFields(en).c_str());
+            ShowEditToast(b, 1);
+        }
+        return true;
+    };
+
+    // ===== 大きさを変えたときに地面・壁へめり込まないようにする仕組み =====
+    //
+    // 拡大・縮小は、これまで「左上を固定して右と下へ伸びる」だった。そのため
+    //   ・地面に立っている敵を拡大すると、足が床の中へ沈む
+    //   ・壁ぎわの箱を横へ広げると、壁の中へ入る
+    // が起きていた。しかもタイル・ギミックとの衝突判定は「動いた量」を基準にした許容値で押し戻す作りなので、
+    // 一度深く食い込むと、あとから押し出されずに埋まったままになる（動かなくなる）。
+    //
+    // 直し方は2つ。
+    //   1) 敵・プレイヤーは「足元（下端の中心）」を固定して、上と左右へ伸び縮みさせる（床へ沈まない）
+    //   2) 拡大しようとした先が、地形・実体化した足場に新しく食い込むなら、食い込まない最大の大きさで止める
+    // 縮小は常に通す。すでに埋まっている物（配置ミス等）は、これ以上は埋めないだけで、操作は止めない。
+
+    // 長方形(x,y,w,h)が、地形（衝突するタイル・実体化した足場系ギミック）と重なっている面積。
+    // self … 判定から除く自分自身（ギミックの大きさを変えるとき、自分の箱と重なって見えないように）
+    auto SolidOverlapArea = [&](float x, float y, float w, float h, const Gimmick* self) -> float {
+        if (w <= 0.0f || h <= 0.0f) return 0.0f;
+        float area = 0.0f;
+        if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size()) {
+            const auto& mp = stages[currentStageIdx].map;
+            int mapH = (int)mp.size();
+            if (mapH > 0) {
+                int mapW = (int)mp[0].size();
+                int tx0 = (int)floorf(x / (float)TILE_SIZE), tx1 = (int)floorf((x + w) / (float)TILE_SIZE);
+                int ty0 = (int)floorf(y / (float)TILE_SIZE), ty1 = (int)floorf((y + h) / (float)TILE_SIZE);
+                for (int ty = ty0; ty <= ty1; ty++) {
+                    if (ty < 0 || ty >= mapH) continue;
+                    for (int tx = tx0; tx <= tx1; tx++) {
+                        if (tx < 0 || tx >= mapW) continue;
+                        int tid = mp[ty][tx];
+                        if (tid < 0 || tid >= (int)tileDefs.size() || !tileDefs[tid].isCollidable) continue;
+                        float ox = fminf(x + w, (float)((tx + 1) * TILE_SIZE)) - fmaxf(x, (float)(tx * TILE_SIZE));
+                        float oy = fminf(y + h, (float)((ty + 1) * TILE_SIZE)) - fmaxf(y, (float)(ty * TILE_SIZE));
+                        if (ox > 0.0f && oy > 0.0f) area += ox * oy;
+                    }
+                }
+            }
+        }
+        for (const auto& gm : gimmicks) {
+            if (&gm == self || !gm.isActive || gm.isTimelineCut) continue;
+            // 衝突判定（CheckGimmickCollisionX/Y）が「壁・床」として扱っている型だけを地形とみなす
+            bool solid = gm.type == GIMMICK_SCALABLE_BOX || gm.type == GIMMICK_SCALABLE_GROUND || gm.type == GIMMICK_PUSHABLE_ROCK
+                      || gm.type == GIMMICK_FASTFORWARD_GATE || gm.type == GIMMICK_BREAKABLE_BLOCK
+                      || (gm.type == GIMMICK_GATE_DOOR && !GimmickIsTipped(gm));
+            if (!solid) continue;
+            float gbx, gby, gbw, gbh;
+            GetGimmickCollisionBox(gm, gbx, gby, gbw, gbh);
+            float ox = fminf(x + w, gbx + gbw) - fmaxf(x, gbx);
+            float oy = fminf(y + h, gby + gbh) - fmaxf(y, gby);
+            if (ox > 0.0f && oy > 0.0f) area += ox * oy;
+        }
+        return area;
+    };
+    const float TERRAIN_FIT_EPS = 0.5f; // 浮動小数の誤差で「接しているだけ」を食い込みと誤判定しないための許容面積(px^2)
+
+    // 足元の中心を固定したまま、倍率を oldScale から wantScale へ変えたときの左上と、実際に通る倍率を返す。
+    // 拡大で新しく地形へ食い込むなら、食い込まない最大の倍率まで二分探索で戻す。
+    //   baseW/baseH … 倍率1のときの当たり判定の寸法
+    auto FitAnchoredScale = [&](float x, float y, float baseW, float baseH, float oldScale, float wantScale,
+                                float& outX, float& outY) -> float {
+        float cx = x + baseW * oldScale * 0.5f;   // 足元の中心X（伸び縮みしても動かない）
+        float bottom = y + baseH * oldScale;      // 足元のY（同上）
+        auto place = [&](float s, float& px, float& py) { px = cx - baseW * s * 0.5f; py = bottom - baseH * s; };
+        float px, py;
+        place(wantScale, px, py);
+        if (wantScale > oldScale) {
+            float cur = SolidOverlapArea(x, y, baseW * oldScale, baseH * oldScale, nullptr);
+            if (SolidOverlapArea(px, py, baseW * wantScale, baseH * wantScale, nullptr) > cur + TERRAIN_FIT_EPS) {
+                float lo = oldScale, hi = wantScale;
+                for (int i = 0; i < 12; i++) {
+                    float mid = (lo + hi) * 0.5f, mx, my;
+                    place(mid, mx, my);
+                    if (SolidOverlapArea(mx, my, baseW * mid, baseH * mid, nullptr) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+                }
+                wantScale = lo;
+                place(wantScale, px, py);
+            }
+        }
+        outX = px; outY = py;
+        return wantScale;
+    };
+
+    // 敵・プレイヤーの倍率を want にする（足元固定・地形で止まる）。巻き戻し履歴も同じだけずらす。
+    // 履歴の位置は「その時点の左上」なので、今回ずれた量(dx,dy)を全部に足せば、どの時点でも足元が保たれる。
+    auto RescaleEnemy = [&](Enemy& e, float want) {
+        float ox, oy;
+        float got = FitAnchoredScale(e.x, e.y, (float)e.hitboxWidth, (float)e.hitboxHeight, e.scale, want, ox, oy);
+        float dx = ox - e.x, dy = oy - e.y;
+        e.x = ox; e.y = oy; e.scale = got;
+        for (auto& h : e.history) { h.x += dx; h.y += dy; h.scale = got; } // 編集後の大きさは巻き戻しても維持する
+        e.editDirtyMask |= EDIT_DIRTY_SCALE;
+    };
+    auto RescalePlayer = [&](Player& p, float want) {
+        float ox, oy;
+        float got = FitAnchoredScale(p.x, p.y, (float)p.width, (float)p.height, p.scale, want, ox, oy);
+        float dx = ox - p.x, dy = oy - p.y;
+        p.x = ox; p.y = oy; p.scale = got;
+        for (auto& h : p.history) { h.x += dx; h.y += dy; }
+    };
+
+    // ギミックの横幅を wantW にしたい。左端を固定して右へ伸びるので、地形に新しく食い込むなら食い込まない最大の幅で止める。
+    // 地形との関係を持たない型（範囲系・カット）は対象外。
+    auto FitGimmickWidth = [&](const Gimmick& g, float wantW) -> float {
+        if (wantW <= g.spriteWidth || !GimmickRespectsTerrain(g.type)) return wantW;
+        float cur = SolidOverlapArea(g.x, g.y, g.spriteWidth, g.spriteHeight, &g);
+        if (SolidOverlapArea(g.x, g.y, wantW, g.spriteHeight, &g) <= cur + TERRAIN_FIT_EPS) return wantW;
+        float lo = g.spriteWidth, hi = wantW;
+        for (int i = 0; i < 12; i++) {
+            float mid = (lo + hi) * 0.5f;
+            if (SolidOverlapArea(g.x, g.y, mid, g.spriteHeight, &g) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+        }
+        return lo;
+    };
+    // ギミックの高さ。下端を固定して上へ伸びる（天井に当たったら止まる）。
+    auto FitGimmickHeight = [&](const Gimmick& g, float wantH) -> float {
+        if (wantH <= g.spriteHeight || !GimmickRespectsTerrain(g.type)) return wantH;
+        float bottom = g.y + g.spriteHeight;
+        auto area = [&](float h) { return SolidOverlapArea(g.x, bottom - h, g.spriteWidth, h, &g); };
+        float cur = area(g.spriteHeight);
+        if (area(wantH) <= cur + TERRAIN_FIT_EPS) return wantH;
+        float lo = g.spriteHeight, hi = wantH;
+        for (int i = 0; i < 12; i++) {
+            float mid = (lo + hi) * 0.5f;
+            if (area(mid) > cur + TERRAIN_FIT_EPS) hi = mid; else lo = mid;
+        }
+        return lo;
+    };
+
+    // 可変地面は、横幅を絵のタイル幅の整数倍に丸める（半端な幅だと絵が切れる）。
+    auto SnapGroundWidth = [&](Gimmick& g) {
+        if (g.type != GIMMICK_SCALABLE_GROUND) return;
+        int imgW, imgH;
+        GetGraphSize(jimenHandle, &imgW, &imgH);
+        float tileW = g.spriteHeight * ((float)imgW / imgH);
+        g.width = roundf(g.width / tileW) * tileW;
+        if (g.width < tileW) g.width = tileW;
+    };
+
+    // 選択中の全員へ「大きさの変化量」を足す。
+    //   ds … 敵・プレイヤーの倍率に足す量
+    //   dw … ギミックの横幅に足す量(px)
+    // 変形するとき、現在値だけでなく巻き戻し履歴の同じ軸も同じ量で書き換える
+    // （編集した形は巻き戻しても維持される、という方針。詳細は拡縮ドラッグ側の説明を参照）。
+    //   stepByTile … ホイール用。可変地面は横幅を「絵のタイル1枚ぶん」単位で増減する
+    //                （32pxずつだとタイル幅への丸めで元へ戻ってしまい、回しても大きくならない）
+    auto ApplyScaleDelta = [&](float ds, float dw, bool stepByTile = false) {
+        // 敵・プレイヤーは足元を固定して伸び縮みし、拡大で地形に食い込むなら手前で止まる
+        for (auto* p : selectedPlayers) RescalePlayer(*p, fmaxf(p->scale + ds, 0.1f));
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
+            RescaleEnemy(*e, fmaxf(e->scale + ds, 0.1f));
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
+            g->editDirtyMask |= EDIT_DIRTY_WIDTH;
+            float stepW = dw;
+            float tileW = 0.0f;
+            if (g->type == GIMMICK_SCALABLE_GROUND) {
+                int imgW, imgH;
+                GetGraphSize(jimenHandle, &imgW, &imgH);
+                tileW = g->spriteHeight * ((float)imgW / imgH);
+                if (stepByTile) stepW = (dw / 32.0f) * tileW; // 32px＝1ノッチ。何ノッチ回ったかをタイル枚数へ換算する
+            }
+            float oldW = g->spriteWidth;
+            float want = g->width + stepW;
+            if (want < 10.0f) want = 10.0f;
+            g->width = want;
+            SnapGroundWidth(*g);
+            float snapped = g->width;
+            // 壁・足場に新しく食い込むなら、食い込まない幅で止める（可変地面はタイル枚数に切り下げる）
+            float got = FitGimmickWidth(*g, snapped);
+            if (got < snapped && tileW > 0.0f) {
+                got = floorf(got / tileW) * tileW;
+                if (got < oldW) got = oldW;
+            }
+            g->width = got;
+            g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
+        }
+    };
+
+    // 敵・プレイヤーの倍率を「この値」にする（拡縮つまみ用。ギミックは対象外）。足元固定・地形で止まる。
+    auto SetUniformScale = [&](float s) {
+        if (s < 0.1f) s = 0.1f;
+        for (auto* p : selectedPlayers) RescalePlayer(*p, s);
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SCALE)) continue;
+            RescaleEnemy(*e, s);
+        }
+    };
+
+    // 選択中の全員を da ラジアンだけ回す。
+    // angleをAIが自前の状態に使っている型は回さない（回すと壊れるため）。
+    auto ApplyAngleDelta = [&](float da) {
+        for (auto* p : selectedPlayers) { p->angle += da; }
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
+            e->angle += da;
+            e->editDirtyMask |= EDIT_DIRTY_ANGLE;
+            for (auto& h : e->history) { h.angle = e->angle; } // 傾けた姿勢は巻き戻しても維持する
+        }
+        for (auto* g : selectedGimmicks) {
+            if (GimmickAngleIsAiOwned(g->type)) continue;
+            if (IsGimmickEditLocked(*g, EDITOP_ROTATE)) continue;
+            g->angle += da;
+            g->editDirtyMask |= EDIT_DIRTY_ANGLE;
+            for (auto& h : g->history) { h.angle = g->angle; }
+        }
+    };
+
+    // 一時停止／巻き戻しの切り替え。複数選択でも定額（対象数に関わらず一発分のコスト）。
+    // 禁止されている相手は飛ばす。成功したら true。
+    // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
+    auto EditTogglePause = [&]() -> bool {
+        if (targetPaused == nullptr) return false;
+        if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= currentEditCost.flatMenuToggle;
+        bool next = !(*targetPaused);
+        for (auto* p : selectedPlayers) p->isPaused = next;
+        for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = next; }
+        for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = next; }
+        PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
+        return true;
+    };
+    auto EditToggleRewind = [&]() -> bool {
+        if (targetRewind == nullptr) return false;
+        if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= currentEditCost.flatMenuToggle;
+        bool next = !(*targetRewind);
+        for (auto* p : selectedPlayers) p->isRewinding = next;
+        for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = next; }
+        for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = next; }
+        PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
+        return true;
+    };
+
+    // 速度を delta だけ変える（下限0）。動かせる相手が1つも無ければ何もせず拒否音。
+    auto EditSpeedStep = [&](float delta) -> bool {
+        if (targetSpeedScale == nullptr) return false;
+        bool any = !selectedPlayers.empty();
+        for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
+        for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
+        if (!any) { EditDeniedWhy("この相手の速度は変えられません"); return false; }
+        if (editCost < currentEditCost.flatSpeedChange) { EditDeniedCost(currentEditCost.flatSpeedChange); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= currentEditCost.flatSpeedChange;
+        for (auto* p : selectedPlayers) { p->speedScale += delta; if (p->speedScale < 0.0f) p->speedScale = 0.0f; }
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
+            e->speedScale += delta; if (e->speedScale < 0.0f) e->speedScale = 0.0f;
+            e->editDirtyMask |= EDIT_DIRTY_SPEED;
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_SPEED)) continue;
+            g->speedScale += delta; if (g->speedScale < 0.0f) g->speedScale = 0.0f;
+            g->editDirtyMask |= EDIT_DIRTY_SPEED;
+        }
+        PushUndo(undoBefore, currentEditCost.flatSpeedChange, false);
+        return true;
+    };
+
+    // 向きを反転する。以前は代表の1体しか反転しないのに、選択中の敵すべてへ「反転された」印だけを付けていた。
+    // 選択中の全員を反転し、印も実際に反転した相手にだけ付ける。
+    auto EditFlip = [&]() -> bool {
+        if (targetDirection == nullptr) return false;
+        bool any = !selectedPlayers.empty();
+        for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
+        for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
+        if (!any) { EditDeniedWhy("この相手は反転できません"); return false; }
+        if (editCost < currentEditCost.flatDirectionFlip) { EditDeniedCost(currentEditCost.flatDirectionFlip); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= currentEditCost.flatDirectionFlip;
+        for (auto* p : selectedPlayers) p->direction = (p->direction == 0 ? 1 : 0);
+        for (auto* e : selectedEnemies) {
+            if (IsEnemyEditLocked(*e, EDITOP_FLIP)) continue;
+            e->direction = (e->direction == 0 ? 1 : 0);
+            e->editDirtyMask |= EDIT_DIRTY_DIR;
+        }
+        for (auto* g : selectedGimmicks) {
+            if (IsGimmickEditLocked(*g, EDITOP_FLIP)) continue;
+            g->direction = (g->direction == 0 ? 1 : 0);
+            g->editDirtyMask |= EDIT_DIRTY_DIR;
+        }
+        SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
+        PushUndo(undoBefore, currentEditCost.flatDirectionFlip, false);
+        return true;
+    };
+
+    // 配置時の値(editBase*)へ丸ごと戻す。
+    // 以前は幅120・角度1.57079といった決め打ちだったため、120px以外のギミック
+    // （gim_gate_doorは32x160、gim_edit_color_bridgeは224x24）がリセットのたびに別物のサイズへ化けていた。
+    // 併せてeditDirtyMaskも消す。これがサイズロック等「一度編集したらAIが値の所有権を手放す」系
+    // リアクションの解除手段になる。
+    auto EditResetAll = [&]() -> bool {
+        if (selectedType == SELECT_NONE) return false;
+        if (editCost < currentEditCost.flatResetAll) { EditDeniedCost(currentEditCost.flatResetAll); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= currentEditCost.flatResetAll;
+        for (auto* p : selectedPlayers) {
+            p->scale = 1.0f; p->angle = 0.0f; p->speedScale = 1.0f; p->isPaused = false; p->isRewinding = false;
+        }
+        for (auto* e : selectedEnemies) {
+            e->scale = e->editBaseScale;
+            e->angle = e->editBaseAngle;
+            e->direction = e->editBaseDirection;
+            e->speedScale = 1.0f;
+            e->isPaused = false;
+            e->isRewinding = false;
+            e->editDirtyMask = EDIT_DIRTY_NONE;
+        }
+        for (auto* g : selectedGimmicks) {
+            SetGimmickWidth(*g, g->editBaseWidth);
+            SetGimmickHeight(*g, g->editBaseHeight);
+            g->angle = g->editBaseAngle;
+            g->speedScale = 1.0f;
+            g->direction = 0;
+            g->isPaused = false;
+            g->isRewinding = false;
+            g->editDirtyMask = EDIT_DIRTY_NONE;
+        }
+        SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
+        PushUndo(undoBefore, currentEditCost.flatResetAll, false);
+        return true;
+    };
+
+    // ===== 右クリックの円形メニュー =====
+    //
+    // 縦に並んだ英語6項目（項目ごとのy座標を判定と描画に直書き）を、日本語・コスト表示つきの円形に作り替えた。
+    // 中心から「方向」で項目を選ぶので、右ボタンを押したまま動かして離すだけでも選べる。
+    // 項目の実行は共通入口（EditXxx）を呼ぶだけ。
+
+    // 円形メニューの項目数。タイムラインのカットを選んでいるときは「カット削除」だけの1項目。
+    auto RadialCount = [&]() -> int {
+        return (targetGimmick != nullptr && targetGimmick->isTimelineCut) ? 1 : 6;
+    };
+
+    // 今の選択から、円形メニューの項目（表示と、押せるかどうか）を組み立てる。
+    // 項目の順番は上から時計回り：巻き戻し／一時停止／加速／減速／反転／リセット。
+    auto BuildRadialItems = [&](std::vector<RadialItem>& out) {
+        out.clear();
+        char buf[48];
+        auto costStr = [&](float c) { sprintf_s(buf, sizeof(buf), "-%.0f", c); return std::string(buf); };
+        if (RadialCount() == 1) {
+            RadialItem it;
+            it.label = "カット削除"; it.sub = costStr(currentEditCost.flatMenuToggle);
+            it.enabled = (editCost >= currentEditCost.flatMenuToggle); it.id = 6;
+            out.push_back(it);
+            return;
+        }
+        RadialItem it;
+        it = RadialItem(); it.id = 0; it.label = "巻き戻し";
+        it.sub = std::string((targetRewind && *targetRewind) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
+        it.enabled = targetRewind != nullptr && editCost >= currentEditCost.flatMenuToggle;
+        out.push_back(it);
+        it = RadialItem(); it.id = 1; it.label = "一時停止";
+        it.sub = std::string((targetPaused && *targetPaused) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
+        it.enabled = targetPaused != nullptr && editCost >= currentEditCost.flatMenuToggle;
+        out.push_back(it);
+        it = RadialItem(); it.id = 2; it.label = "加速";
+        it.sub = "+0.5 " + costStr(currentEditCost.flatSpeedChange);
+        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
+        out.push_back(it);
+        it = RadialItem(); it.id = 3; it.label = "減速";
+        it.sub = "-0.5 " + costStr(currentEditCost.flatSpeedChange);
+        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
+        out.push_back(it);
+        it = RadialItem(); it.id = 4; it.label = "反転";
+        it.sub = costStr(currentEditCost.flatDirectionFlip);
+        it.enabled = targetDirection != nullptr && editCost >= currentEditCost.flatDirectionFlip;
+        out.push_back(it);
+        it = RadialItem(); it.id = 5; it.label = "リセット";
+        it.sub = costStr(currentEditCost.flatResetAll);
+        it.enabled = editCost >= currentEditCost.flatResetAll;
+        out.push_back(it);
+    };
+
+    // 項目 id を実行する（コスト・禁止の判定は、共通入口の中で行う）
+    auto RunRadialItem = [&](int id) {
+        switch (id) {
+        case 0: EditToggleRewind(); break;
+        case 1: EditTogglePause();  break;
+        case 2: EditSpeedStep(+0.5f); break;
+        case 3: EditSpeedStep(-0.5f); break;
+        case 4: EditFlip();         break;
+        case 5: EditResetAll();     break;
+        case 6: {
+            // タイムラインカットの削除。巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
+            if (targetGimmick != nullptr && targetGimmick->isTimelineCut && editCost >= currentEditCost.flatMenuToggle) {
+                editCost -= currentEditCost.flatMenuToggle;
+                for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
+                    if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
+                }
+                ClearEditUndo(); // 添字がずれるので、取り消しの記録は使えなくなる
+                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                selectedType = SELECT_NONE;
+                targetGimmick = nullptr;
+                SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+            } else {
+                EditDeniedCost(currentEditCost.flatMenuToggle);
+            }
+            break;
+        }
+        }
+    };
+
+    // 円形メニューの idx 番目（中心から見た方向）を実行する。押せない項目は拒否音だけ鳴らす。
+    auto RunRadialIndex = [&](int idx) {
+        std::vector<RadialItem> items;
+        BuildRadialItems(items);
+        if (idx < 0 || idx >= (int)items.size()) return;
+        if (!items[idx].enabled) {
+            // 灰色の項目を選んだとき。コスト不足か、対象がロックされているかで言い分けたいが、
+            // 項目側は有効/無効しか持たないので、コストが足りているかだけ見て理由を分ける。
+            if (editCost < currentEditCost.flatMenuToggle) EditDeniedCost(currentEditCost.flatMenuToggle);
+            else EditDeniedWhy("この操作は今の対象には使えません");
+            return;
+        }
+        RunRadialItem(items[idx].id);
+    };
+
+    // 選択がちょうど1つのときの、つまみの出し方を返す。つまみの描画と、つかむ判定の両方がこれを通る。
+    //   box … つまみを付ける枠（選択枠と同じ）  angle … 今の角度
+    //   canScale … 右下の拡縮つまみを出すか（敵・プレイヤーのみ。ギミックは辺のつまみが既にある）
+    //   canRotate … 回転つまみを出すか
+    // 複数選択のときは false を返す（つまみは出さない。ホイール・キー・メニューで操作する）。
+    auto GetSingleEditHandleInfo = [&](EditBox& box, float& angle, bool& canScale, bool& canRotate) -> bool {
+        canScale = false; canRotate = false;
+        if (selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size() != 1) return false;
+        if (!selectedPlayers.empty()) {
+            box = PlayerEditBox(*selectedPlayers[0]);
+            angle = selectedPlayers[0]->angle;
+            canScale = true; canRotate = true;
+            return true;
+        }
+        if (!selectedEnemies.empty()) {
+            Enemy* e = selectedEnemies[0];
+            if (!e->isActive) return false;
+            box = EnemyEditBox(*e);
+            angle = e->angle;
+            canScale = !IsEnemyEditLocked(*e, EDITOP_SCALE);
+            canRotate = !IsEnemyEditLocked(*e, EDITOP_ROTATE);
+            return true;
+        }
+        Gimmick* g = selectedGimmicks[0];
+        if (!g->isActive || g->isTimelineCut) return false;
+        box = GimmickEditBox(*g);
+        angle = g->angle;
+        canRotate = !GimmickAngleIsAiOwned(g->type) && !IsGimmickEditLocked(*g, EDITOP_ROTATE);
+        return true;
+    };
+
+    // ワールド座標の点にある編集対象を探す。優先順位は選択クリックと同じ（プレイヤー → 敵 → ギミック）。
+    // kind … 0=プレイヤー 1=敵 2=ギミック   idx … enemies / gimmicks の添字
+    // ダブルクリックの「同じ物を2回押したか」の判定に使う。生ポインタではなく添字で覚えるのは、
+    // gimmicks.push_back で配列が作り直されてもずれないようにするため。
+    auto FindEditObjectAt = [&](float wx, float wy, int& kind, int& idx) -> bool {
+        EditBox pb = PlayerEditBox(player);
+        if (wx >= pb.x && wx <= pb.x + pb.w && wy >= pb.y && wy <= pb.y + pb.h) { kind = 0; idx = 0; return true; }
+        for (int i = 0; i < (int)enemies.size(); i++) {
+            if (!enemies[i].isActive) continue;
+            EditBox b = EnemyEditBox(enemies[i]);
+            if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { kind = 1; idx = i; return true; }
+        }
+        for (int i = 0; i < (int)gimmicks.size(); i++) {
+            if (!gimmicks[i].isActive || gimmicks[i].isTimelineCut) continue;
+            EditBox b = GimmickEditBox(gimmicks[i]);
+            if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { kind = 2; idx = i; return true; }
+        }
+        return false;
+    };
+
     int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
     int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
 
-    int currentStageIdx = 0;
-
     GameScene currentScene = PLAY;
+    // 前フレームのシーン。「PLAY からクリアへ移った瞬間」を検出してセーブするために持つ。
+    // currentScene = RESULT_VICTORY の代入元は6箇所以上に散っているので、
+    // 個々の代入元へセーブ処理を書き足すのではなく、遷移そのものを1箇所で拾う。
+    // こうしておけば、後からクリア判定を増やしても自動的にセーブされる。
+    GameScene prevSceneForSave = PLAY;
 
     // ===== JSON ステージ読み込み =====
     // assets/stages/<ファイル名> を読み込みStageDataを構築するラムダ。
@@ -2249,15 +4704,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         jsonStage.goalY = sj["goal"].value("y", -1.0f);
                     }
 
-                    // プレイヤー能力
+                    // プレイヤー能力。
+                    // 読み込んだステージ自身に持たせ、実際に使う値(editorPlayerCaps)へは
+                    // ResetStage が「今から始めるステージのもの」を反映する。
+                    // ここで直接グローバルを書くと、読み込んだ順番で性能が決まってしまう。
                     if (sj.contains("player_capabilities")) {
                         auto caps = sj["player_capabilities"];
-                        editorPlayerCaps.canDoubleJump = caps.value("canDoubleJump", false);
-                        editorPlayerCaps.canDash = caps.value("canDash", false);
-                        editorPlayerCaps.canShootFireball = caps.value("canShootFireball", false);
-                        editorPlayerCaps.canFly = caps.value("canFly", false);
-                        editorPlayerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
-                        editorPlayerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
+                        jsonStage.playerCaps.canDoubleJump = caps.value("canDoubleJump", false);
+                        jsonStage.playerCaps.canDash = caps.value("canDash", false);
+                        jsonStage.playerCaps.canShootFireball = caps.value("canShootFireball", false);
+                        jsonStage.playerCaps.canFly = caps.value("canFly", false);
+                        jsonStage.playerCaps.baseJumpPower = caps.value("baseJumpPower", -12);
+                        jsonStage.playerCaps.baseSpeed = caps.value("baseSpeed", 4.0f);
                     }
 
                     // 編集ツール許可設定（ステージ単位、キー未指定時はデフォルト全部true）
@@ -2365,6 +4823,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             bl.loop = bj.value("loop", true);
                             bl.offsetX = bj.value("offsetX", 0.0f);
                             bl.offsetY = bj.value("offsetY", 0.0f);
+                            // 単色背景。画像が無くても色だけで塗れるようにする。
+                            // "#RRGGBB" 形式だけを受け付け、それ以外は未指定扱い（-1）にする。
+                            bl.color = bj.value("color", "");
+                            if (bl.color.size() == 7 && bl.color[0] == '#') {
+                                try {
+                                    int rv = std::stoi(bl.color.substr(1, 2), nullptr, 16);
+                                    int gv = std::stoi(bl.color.substr(3, 2), nullptr, 16);
+                                    int bv = std::stoi(bl.color.substr(5, 2), nullptr, 16);
+                                    bl.colorRGB = GetColor(rv, gv, bv);
+                                    bl.hasColor = true;
+                                } catch (...) {
+                                    bl.hasColor = false; // 16進として読めない文字が混ざっていた
+                                }
+                            }
                             if (!bl.sprite.empty()) {
                                 std::string path = "assets/" + bl.sprite; // C++側からのパス
                                 bl.handle = LoadGraph(path.c_str());
@@ -2405,10 +4877,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
+                            // 配置ごとの大きさ・角度。アセット定義の値を「その種類の標準」として、
+                            // 配置単位で上書きできるようにする（同じ敵を大小並べる、最初から傾けて置く、など）。
+                            // キーが無ければ 1.0 / 0 なので、既存ステージの見え方は一切変わらない。
+                            float placedScale = defScale * ej.value("scale", 1.0f);
+                            float placedAngle = ej.value("angle", 0.0f);
                             // hitboxOffsetX/Y は元画像のピクセル座標系で指定されるため、hitboxWidth/Height と同様に
-                            // defScaleを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
+                            // スケールを掛けてからワールド座標へ焼き込む（以前はスケールせず加算しており、
                             // scale!=1.0のアセット（例: dossun, 太陽）で当たり判定がスプライトから大きくズレていた）
-                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * defScale, y + hy * defScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, defScale, 0.0f, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            jsonStage.enemies.push_back({ (EnemyType)t_enum, x + hx * placedScale, y + hy * placedScale, 0.0f, 0.0f, handle, 1, pw, ph, sw, sh, hx, hy, pw, ph, placedScale, placedAngle, 1.0f, true, false, defHp, 0.0f, 0, patrolLeft, patrolRight, false, {}, id, AnimationController() });
+                            // 配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
+                            // 基準はアセット既定（倍率は defScale、角度は0）なので、
+                            // ゲーム内の編集ツールで同じ倍率・角度にしたときと同じ反応になる。
+                            {
+                                Enemy& placedEnemy = jsonStage.enemies.back();
+                                float scaleMul = ej.value("scale", 1.0f);
+                                if (scaleMul != 1.0f || placedAngle != 0.0f) {
+                                    placedEnemy.hasSpawnEdit = true;
+                                    placedEnemy.spawnBaseScale = defScale;
+                                    placedEnemy.spawnBaseAngle = 0.0f;
+                                    if (scaleMul != 1.0f)    placedEnemy.spawnDirtyMask |= EDIT_DIRTY_SCALE;
+                                    if (placedAngle != 0.0f) placedEnemy.spawnDirtyMask |= EDIT_DIRTY_ANGLE;
+                                }
+                            }
                         }
                     }
 
@@ -2436,10 +4927,38 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 初期角度。手動橋(GIMMICK_MANUAL_BRIDGE=2)は「プレイヤーがR+ドラッグで倒して渡る」ギミックなので、
                             // 指定が無ければ縦向き(=渡れない状態)で始める。従来は常に0(水平)で置かれ、最初から渡れてしまっていた。
                             float initAngle = gj.value("angle", (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f);
-                            Gimmick newGim{ (GimmickType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
+                            // 配置ごとの大きさ。ギミックは scale を持たず、ゲーム内の編集ツールでも
+                            // 横幅(Sドラッグ)と縦幅(Wドラッグ)を別々に変えるので、こちらも別々に受ける。
+                            // scaleY を省略した場合は scale と同じ値＝等方拡大になる。
+                            float gimScale = gj.value("scale", 1.0f);
+                            if (gimScale <= 0.0f) gimScale = 1.0f;
+                            float gimScaleY = gj.value("scaleY", gimScale);
+                            if (gimScaleY <= 0.0f) gimScaleY = gimScale;
+                            float gw = pw * gimScale, gh = ph * gimScaleY;
+                            float gsw = sw * gimScale, gsh = sh * gimScaleY;
+                            Gimmick newGim{ (GimmickType)t_enum, x + hx * gimScale, y + hy * gimScaleY, gw, gh, gsw, gsh, (float)hx, (float)hy, gw, gh, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
                             newGim.assetId = id;
                             newGim.param = param;
                             newGim.handle = gHandle;
+                            // 敵と同じく、配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
+                            // 角度の基準は「そのタイプの既定の姿勢」。手動橋は縦向き(1.5708)が既定なので、
+                            // そこを0にしてしまうと置いただけで「倒された」と誤解されてしまう。
+                            // angle をAIが自前の状態に使う型（自動回転橋・ちくわブロック等）は、
+                            // 角度を編集として解釈しない（GetGimmickEditReaction 側でも弾いている）。
+                            {
+                                float defaultAngle = (t_enum == GIMMICK_MANUAL_BRIDGE) ? 1.5708f : 0.0f;
+                                bool sizeEdited = (gimScale != 1.0f || gimScaleY != 1.0f);
+                                bool angleEdited = (initAngle != defaultAngle) && !GimmickAngleIsAiOwned((GimmickType)t_enum);
+                                if (sizeEdited || angleEdited) {
+                                    newGim.hasSpawnEdit = true;
+                                    newGim.spawnBaseWidth = (float)pw;
+                                    newGim.spawnBaseHeight = (float)ph;
+                                    newGim.spawnBaseAngle = defaultAngle;
+                                    if (gimScale != 1.0f)  newGim.spawnDirtyMask |= EDIT_DIRTY_WIDTH;
+                                    if (gimScaleY != 1.0f) newGim.spawnDirtyMask |= EDIT_DIRTY_HEIGHT;
+                                    if (angleEdited)       newGim.spawnDirtyMask |= EDIT_DIRTY_ANGLE;
+                                }
+                            }
                             jsonStage.gimmicks.push_back(newGim);
                         }
                     }
@@ -2463,9 +4982,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     break;
                                 }
                             }
-                            Item newItem{ (ItemType)t_enum, x + hx, y + hy, (float)pw, (float)ph, (float)sw, (float)sh, (float)hx, (float)hy, (float)pw, (float)ph, true, false, false, {} };
+                            // 配置ごとの大きさ。アイテムはランタイムに scale を持たないので、
+                            // 読み込み時に表示サイズと当たり判定へ直接掛けてしまう。
+                            float itemScale = ij.value("scale", 1.0f);
+                            if (itemScale <= 0.0f) itemScale = 1.0f;
+                            float isw = sw * itemScale, ish = sh * itemScale;
+                            float ipw = pw * itemScale, iph = ph * itemScale;
+                            Item newItem{ (ItemType)t_enum, x + hx * itemScale, y + hy * itemScale, ipw, iph, isw, ish, (float)hx, (float)hy, ipw, iph, true, false, false, {} };
                             newItem.assetId = id;
                             newItem.handle = iHandle;
+                            newItem.angle = ij.value("angle", 0.0f);
                             jsonStage.items.push_back(newItem);
                         }
                     }
@@ -2504,15 +5030,91 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         Logger::Info("System", "WinMain", "No stages loaded, creating default stage");
     }
 
+    // Feature: タイル破壊 — 壊したマスの記録。
+    //
+    // 壊せるブロック（ギミック）は isActive を false にするだけで済むが、
+    // 地形タイルは「衝突判定・描画・敵の足場プローブ」が全て同じ map を読む共有データなので、
+    // 壊したあと元へ戻すには、どのマスに何が入っていたかを別に覚えておく必要がある。
+    //
+    // framesSinceBroken は「壊れてから経った時間」。通常フレームで増え、巻き戻し中は減る。
+    // 0まで戻れば復活＝巻き戻しで壊れたブロックが元に戻る、という振る舞いになる
+    // （ギミックの壊せるブロックと揃えた）。
+    // MAX_HISTORY_FRAMES を超えたものは巻き戻しても届かないので、記録から外して確定させる。
+    struct BrokenTile {
+        int row, col;            // 壊れたマス
+        int originalId;          // 壊れる前に入っていたタイルID
+        float framesSinceBroken; // 壊れてから経過したフレーム数（巻き戻し中は減る）
+    };
+    std::vector<BrokenTile> brokenTiles;
+
+    // 指定マスのタイルを、その壊し方・その相手の大きさで壊せるなら壊す。壊したら true。
+    //
+    // TryBreakGimmick と同じ形にしてあるので、壊す側は「どのマスを」「どう壊したか」
+    // 「相手はどのくらいの大きさか」だけを渡せばよい。
+    // attackerScale には敵の scale を渡す。大きさという概念が無い壊し方では 0 以下を渡す。
+    auto TryBreakTile = [&](int row, int col, BreakCause cause, float attackerScale) -> bool {
+        if (currentStageIdx < 0 || currentStageIdx >= (int)stages.size()) return false;
+        auto& mp = stages[currentStageIdx].map;
+        if (row < 0 || row >= (int)mp.size()) return false;
+        if (col < 0 || col >= (int)mp[row].size()) return false;
+        int tid = mp[row][col];
+        // 空マス(0)と、tiles.json に定義の無いIDは対象外。
+        // 定義が引けないタイルを壊さないのは、破壊条件が読めない以上
+        // 「壊してよいかどうか」を判断できないため（TryBreakGimmick と同じ方針）。
+        if (tid <= 0 || tid >= (int)tileDefs.size()) return false;
+        const TileDefinition& td = tileDefs[tid];
+
+        // 1) この壊し方が許可されているか
+        bool allowed = false;
+        switch (cause) {
+            case BREAK_SLAM:   allowed = td.breakBySlam;   break;
+            case BREAK_RAM:    allowed = td.breakByRam;    break;
+            case BREAK_BULLET: allowed = td.breakByBullet; break;
+            case BREAK_PLAYER: allowed = td.breakByPlayer; break;
+            default:           allowed = false;            break; // タイルは傾かないので BREAK_TIP は無い
+        }
+        if (!allowed) return false;
+
+        // 2) 相手の大きさが足りているか（「拡大した敵の突進でなければ壊せない壁」を作れる条件）
+        if (attackerScale > 0.0f && td.breakMinScale > 0.0f && attackerScale < td.breakMinScale) {
+            NoteBreakTooSmall((float)(col * TILE_SIZE), (float)(row * TILE_SIZE), td.breakMinScale);
+            return false;
+        }
+
+        mp[row][col] = 0;
+        brokenTiles.push_back({ row, col, tid, 0.0f });
+        if (!td.breakSe.empty()) SoundManager::Get().PlaySe(td.breakSe);
+        return true;
+    };
+
     // 死亡時にステージ全体を初期化し、ゲームの整合性を保証するラムダヘルパー
     auto ResetStage = [&]() {
         Logger::Info("System", "ResetStage", "Begin ResetStage");
+
+        // Feature: タイル破壊 — 壊れた地形を元へ戻す。
+        // 初回は今の地形が「無傷の状態」なのでそれを控え、2回目以降はそこから丸ごと戻す。
+        // ここに置けば、JSONステージ／C++直書きステージ／別ステージへの切り替えの
+        // どの経路から来ても必ず無傷の地形で始まる。
+        {
+            auto& mutableStage = stages[currentStageIdx];
+            if (mutableStage.pristineMap.empty()) mutableStage.pristineMap = mutableStage.map;
+            else                                  mutableStage.map = mutableStage.pristineMap;
+            brokenTiles.clear();
+        }
+
         const auto& stage = stages[currentStageIdx];
+
+        // このステージのプレイヤー性能を反映する。
+        // アイテムで解放した行動（ダッシュ等）もここで一度ステージ側の設定へ戻る。
+        // 解放アイテムはステージ内に置かれていてリセットで復活するので、状態は食い違わない。
+        editorPlayerCaps = stage.playerCaps;
 
         // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
         currentEditTools = stage.editToolFlags;
         currentEditCost = stage.editCostSettings;
         editCost = currentEditCost.maxCost;
+        // ゲージを満タンに戻すのは「操作」ではないので、増減の浮き表示に拾わせない（基準を取り直させる）
+        editCostSeen = -1.0f; costFloatTimer = 0.0f; editToastTimer = 0.0f;
         // ステージ切替でその場アクティブだった操作が、新ステージで禁止されている場合は強制解除する
         if (!currentEditTools.pauseEnabled && !unlockedEditTools.pauseEnabled) isPaused = false;
         if (!currentEditTools.fastForwardEnabled && !unlockedEditTools.fastForwardEnabled) isFastForward = false;
@@ -2567,6 +5169,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             enemy.anim.LoadForAsset(enemy.assetId, "assets");
             enemy.history.clear();
+
+            // Feature: 編集リアクション — 「プレイヤーが何を編集したか」は配置時の値との差で判定する。
+            // ResetStageは起動時・ステージ切替・死亡・リトライの全経路が必ず通る唯一の合流点なので、
+            // ここで焼いておけば基準値が未設定のまま動き出す個体は存在しない。
+            // 配置ごとの大きさ・角度が指定されている個体は、その指定を
+            // 「最初からプレイヤーが編集した状態」として扱う。基準はアセット既定の姿勢に据え置く
+            // （ここを現在値にしてしまうと差が0になり、見た目だけ変わって挙動が素のままになる）。
+            if (enemy.hasSpawnEdit) {
+                enemy.editBaseScale = enemy.spawnBaseScale;
+                enemy.editBaseAngle = enemy.spawnBaseAngle;
+                enemy.editDirtyMask = enemy.spawnDirtyMask;
+            } else {
+                enemy.editBaseScale = enemy.scale;
+                enemy.editBaseAngle = enemy.angle;
+                enemy.editDirtyMask = EDIT_DIRTY_NONE;
+            }
+            // 本体の絵を傾けない型が使う「置かれたときの姿勢」。
+            // 編集の基準(editBase*)とは別物なので、配置ごとの角度指定があっても現在値で焼く
+            // （傾けて置いた砲台の台座は、その傾きのまま立っているのが正しい）。
+            enemy.bodyRestAngle     = enemy.angle;
+            enemy.editBaseX         = enemy.x;
+            enemy.editBaseY         = enemy.y;
+            enemy.editBaseDirection = enemy.direction;
         }
 
         items = stage.items;
@@ -2593,6 +5218,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (gim.type == GIMMICK_CHECKPOINT && checkpointX >= 0.0f && gim.x == checkpointX && gim.y == checkpointY) {
                 gim.val1 = 1.0f;
             }
+
+            // Feature: 編集リアクション — 敵側と同じく配置時の値を基準として焼く。
+            // 縦幅の基準は height を正とする（Wドラッグは spriteHeight を先に動かして height へ同期し、
+            // Sドラッグは width を先に動かして spriteWidth へ同期する、という非対称があるため）。
+            gim.speedScale     = 1.0f;
+            gim.direction      = 0;
+            gim.editBaseX      = gim.x;
+            gim.editBaseY      = gim.y;
+            // 敵と同じく、配置ごとの指定がある個体は基準をアセット既定の大きさ・角度に据え置く
+            if (gim.hasSpawnEdit) {
+                gim.editBaseWidth  = gim.spawnBaseWidth;
+                gim.editBaseHeight = gim.spawnBaseHeight;
+                gim.editBaseAngle  = gim.spawnBaseAngle;
+                gim.editDirtyMask  = gim.spawnDirtyMask;
+            } else {
+                gim.editBaseWidth  = gim.width;
+                gim.editBaseHeight = gim.height;
+                gim.editBaseAngle  = gim.angle;
+                gim.editDirtyMask  = EDIT_DIRTY_NONE;
+            }
         }
 
         platforms = stage.platforms;
@@ -2601,6 +5246,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         selectedEnemies.clear();
         selectedGimmicks.clear();
         isAreaSelecting = false;
+        ClearEditUndo(); // 敵・ギミックの配列が作り直されるので、添字で覚えた記録は使えない
 
         selectedType = SELECT_NONE;
         targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
@@ -2666,6 +5312,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // 音声マネージャー初期化
     SoundManager::Get().LoadFromJson("assets");
+
+    // 効果音idの突き合わせ（起動時に一度だけ）。
+    //
+    // SoundManager::PlaySe は未知のidを完全に黙殺する（ログすら出さない）ので、
+    // アセットJSONのidを1文字打ち間違えても「なぜか鳴らない」としか分からなかった。
+    // 起動時にまとめて照合し、登録されていないidを指している設定をログへ出す。
+    // 毎フレームの再生側で警告するとログが溢れるため、ここで一度だけ行う。
+    {
+        auto checkSe = [](const char* where, const std::string& who, const std::string& id) {
+            if (id.empty()) return; // 空文字は「鳴らさない」の意味なので正常
+            if (!SoundManager::Get().HasSe(id)) {
+                Logger::Error("SoundCheck", where, "未登録の効果音idが指定されています: " + who + " -> " + id);
+            }
+        };
+        for (const auto& d : enemyDefs) {
+            checkSe("enemies", d.id, d.seSpawn);  checkSe("enemies", d.id, d.seAttack);
+            checkSe("enemies", d.id, d.seDamage); checkSe("enemies", d.id, d.seDeath);
+        }
+        for (const auto& d : gimmickDefs) checkSe("gimmicks", d.id, d.seActivate);
+        for (const auto& d : itemDefs)    checkSe("items",    d.id, d.seCollect);
+        checkSe("player_se", "jump",   gameConfig.playerSe.jump);
+        checkSe("player_se", "land",   gameConfig.playerSe.land);
+        checkSe("player_se", "dash",   gameConfig.playerSe.dash);
+        checkSe("player_se", "shoot",  gameConfig.playerSe.shoot);
+        checkSe("player_se", "damage", gameConfig.playerSe.damage);
+        checkSe("player_se", "death",  gameConfig.playerSe.death);
+        checkSe("edit_se", "rewind", gameConfig.editSe.rewind); checkSe("edit_se", "scale", gameConfig.editSe.scale);
+        checkSe("edit_se", "rotate", gameConfig.editSe.rotate); checkSe("edit_se", "move",  gameConfig.editSe.move);
+        checkSe("edit_se", "flip",   gameConfig.editSe.flip);   checkSe("edit_se", "reset", gameConfig.editSe.reset);
+        checkSe("edit_se", "step",   gameConfig.editSe.step);   checkSe("edit_se", "pause", gameConfig.editSe.pause);
+        checkSe("edit_se", "fast_forward", gameConfig.editSe.fastForward);
+        checkSe("edit_se", "color_filter", gameConfig.editSe.colorFilter);
+        checkSe("edit_se", "cut", gameConfig.editSe.cut);
+        checkSe("edit_se", "denied", gameConfig.editSe.denied);
+        checkSe("edit_se", "cost_empty", gameConfig.editSe.costEmpty);
+        checkSe("meta_se", "cursor",   gameConfig.metaSe.cursor);
+        checkSe("meta_se", "decide",   gameConfig.metaSe.decide);
+        checkSe("meta_se", "cancel",   gameConfig.metaSe.cancel);
+        checkSe("meta_se", "clear",    gameConfig.metaSe.clear);
+        checkSe("meta_se", "gameover", gameConfig.metaSe.gameover);
+    }
 
     // イベントマネージャーのアクションコールバック登録
     // 注: StageClear / GoToStage / SetSwitch / CallCommonEvent は EventManager 内部で直接処理されるため、ここには来ない
@@ -2756,11 +5443,631 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
     });
 
+
+    // ================================================================
+    // Feature: タイトル画面・ステージセレクト画面
+    //
+    // これらは gameScreen(640x480の仮想スクリーン)を経由せず、
+    // 実ウィンドウ(1280x720)へ直接描く。理由は2つ。
+    //   ・640x480に描いてから拡大すると、大きなタイトル文字がボケる
+    //   ・編集UI（左パネル・インスペクタ・タイムライン）と重ねる必要が無い
+    // 座標は game_config.json 側が640x480で持ち、等方1.5倍＋左右160pxの余白で配置する
+    // （背景画像は全面に敷くので余白は見えない）。
+    // ================================================================
+
+    // フォントハンドルのキャッシュ（デザイン上のサイズ → ハンドル）。
+    // SetFontSize は呼ぶたびに既定フォントを作り直す重い処理なので、
+    // 複数サイズを使うタイトル画面では必ずハンドルを作ってキャッシュする。
+    // 失敗値(-1)もキャッシュして、毎フレーム作り直しに行かないようにする。
+    std::map<int, int> metaFontCache;
+    auto MetaFont = [&](int designSize) -> int {
+        auto it = metaFontCache.find(designSize);
+        if (it != metaFontCache.end()) return it->second;
+        int px = (int)(designSize * GameCfg::DESIGN_SCALE);
+        // EDGE付きにするのは、背景画像の上に文字を置いても読めるようにするため。
+        // 縁取りは CreateFontToHandle の FontType でしか指定できず、SetFontSize では作れない。
+        int fh = CreateFontToHandle("メイリオ", px, 4, DX_FONTTYPE_ANTIALIASING_EDGE_4X4, -1, 2);
+        metaFontCache[designSize] = fh;
+        return fh;
+    };
+
+    // 画像のキャッシュ（パス → ハンドル）。毎フレーム LoadGraph するのは重い
+    std::map<std::string, int> metaImageCache;
+    auto MetaImage = [&](const std::string& path) -> int {
+        if (path.empty()) return -1;
+        auto it = metaImageCache.find(path);
+        if (it != metaImageCache.end()) return it->second;
+        int h = LoadGraph(path.c_str());
+        metaImageCache[path] = h;
+        return h;
+    };
+
+    auto MetaColor = [&](const GameCfg::Color& c) { return GetColor(c.r, c.g, c.b); };
+    auto MetaRoleColor = [&](const std::string& role) -> unsigned int {
+        if (role == "sub")    return MetaColor(gameConfig.inkSub);
+        if (role == "accent") return MetaColor(gameConfig.inkAccent);
+        return MetaColor(gameConfig.ink);
+    };
+
+    // デザイン座標(640x480)へ文字を描く。align=="center" のとき dx は中心座標。
+    auto MetaDrawText = [&](const std::string& s, float dx, float dy, int fontSize,
+                            const std::string& align, unsigned int color, bool edge) {
+        if (s.empty()) return;
+        int x = GameCfg::ToScreenX(dx);
+        int y = GameCfg::ToScreenY(dy);
+        int fh = MetaFont(fontSize);
+        if (fh < 0) {
+            // メイリオが使えない環境向けのフォールバック。
+            // 見栄えは落ちるが、真っ白な画面になるよりはるかにまし。
+            SetFontSize((int)(fontSize * GameCfg::DESIGN_SCALE));
+            if (align == "center") x -= GetDrawStringWidth(s.c_str(), (int)s.size()) / 2;
+            DrawString(x, y, s.c_str(), color);
+            SetFontSize(16);
+            return;
+        }
+        // GetDrawStringWidthToHandle の第2引数(StrLen)は、SetUseCharCodeFormat(UTF8) の状態では
+        // 「文字数」ではなく「バイト数」を渡すのが正しい。
+        // 実測: フォント30pxで "ラボ"(2文字/6バイト) を計測したところ、
+        //   バイト数(6)を渡すと 68px（全角2文字ぶん＋縁取り。期待どおり）
+        //   文字数(2)を渡すと 34px（1文字ぶんしか数えていない）
+        // std::string::size() はバイト数なのでそのまま渡してよい。
+        if (align == "center") x -= GetDrawStringWidthToHandle(s.c_str(), (int)s.size(), fh) / 2;
+        DrawStringToHandle(x, y, s.c_str(), color, fh, edge ? GetColor(255, 255, 255) : 0);
+    };
+
+    // 指定した幅(デザイン座標)に収まるよう、文字サイズを段階的に落としてから描く。
+    //
+    // ステージ名やメニュー文言はエディタで自由に書き換えられるので、
+    // 固定サイズにするといずれ必ずセルからはみ出す。
+    // 「はみ出したら小さくする」を仕組みとして持たせておけば、
+    // 長い名前を付けても崩れない。
+    auto MetaDrawTextFit = [&](const std::string& str, float dx, float dy, int fontSize,
+                               float maxWidthDesign, const std::string& align,
+                               unsigned int color, bool edge) {
+        if (str.empty()) return;
+        int size = fontSize;
+        const int minSize = 9; // これ以下は読めないので下限を設ける
+        while (size > minSize) {
+            int fh = MetaFont(size);
+            if (fh < 0) break; // フォントが作れない環境ではフォールバックに任せる
+            int wpx = GetDrawStringWidthToHandle(str.c_str(), (int)str.size(), fh);
+            if (wpx <= GameCfg::ToScreenLen(maxWidthDesign)) break;
+            size -= 1;
+        }
+        MetaDrawText(str, dx, dy, size, align, color, edge);
+    };
+    // デザイン座標の矩形をウィンドウ座標へ変換してボタンとして描く。
+    // 見た目は既存UIと揃えて UIウィンドウ.png の9スライスを使う。
+    auto MetaDrawButton = [&](float dl, float dt, float dw, float dh,
+                              const std::string& label, int fontSize, bool hot, bool enabled) {
+        int x1 = GameCfg::ToScreenX(dl);
+        int y1 = GameCfg::ToScreenY(dt);
+        int x2 = x1 + GameCfg::ToScreenLen(dw);
+        int y2 = y1 + GameCfg::ToScreenLen(dh);
+        if (!enabled)   SetDrawBright(150, 148, 145);
+        else if (hot)   SetDrawBright(255, 255, 255);
+        else            SetDrawBright(214, 209, 202);
+        DrawUiWindow(x1, y1, x2, y2, uiWindowHandle, GameCfg::UIK_BUTTON);
+        SetDrawBright(255, 255, 255);
+        unsigned int col = !enabled ? MetaColor(gameConfig.inkSub)
+                         : (hot ? MetaColor(gameConfig.inkAccent) : MetaColor(gameConfig.ink));
+        // ラベルはボタンの中央へ置く（縦方向はフォントの高さぶんだけ上げる）
+        // ラベルはボタンの中央へ。幅からはみ出す場合は自動で小さくなる
+        MetaDrawTextFit(label, dl + dw * 0.5f, dt + dh * 0.5f - fontSize * 0.6f,
+                        fontSize, dw - 16.0f, "center", col, false);
+    };
+
+    // メニュー項目 i 番目の矩形をデザイン座標で求める。
+    //
+    // 【重要】このレイアウト式は Lab_Editor 側の配置キャンバスにも同じものがある。
+    // 片方だけ変えると「エディタで見た位置」と「実際に出る位置」がズレるので、
+    // 変更するときは必ず両方を直すこと。変数を4つ(x,y,w,item_h,gap)に絞ってあるのは
+    // そのため。
+    //   align=="center" のとき:
+    //     left = x - w/2,  top = y + i*(item_h + gap),  width = w,  height = item_h
+    auto MetaMenuItemRect = [&](const GameCfg::Element& m, int i,
+                                float& l, float& t, float& w, float& h) {
+        w = m.w; h = m.itemH;
+        l = (m.align == "center") ? (m.x - m.w * 0.5f) : m.x;
+        t = m.y + i * (m.itemH + m.gap);
+    };
+
+    // 画面全体に背景を敷く（背景画像はウィンドウ全面へ拡大するので左右の余白は見えない）
+    auto MetaDrawBackdrop = [&](const std::string& imgPath) {
+        DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, MetaColor(gameConfig.backdrop), TRUE);
+        int bg = MetaImage(imgPath);
+        if (bg >= 0) DrawExtendGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, bg, TRUE);
+    };
+
+    // タイトル/セレクトのカーソル位置と、メインループへ「終了したい」と伝えるフラグ
+    int titleCursor = 0;
+    int selectCursor = 0;
+    bool metaWantExit = false;
+    std::string metaBgmPlaying = "";
+
+    // ---- メタシーン（タイトル / ステージセレクト）の更新と描画 ----
+    // メインループの先頭から呼ばれ、この中で ScreenFlip() まで済ませる。
+    // 呼び出し側は直後に continue するので、ゲームプレイ本体は丸ごと飛ぶ。
+    auto UpdateAndDrawMetaScene = [&]() {
+        // このシーン専用の入力エッジ検出。
+        // ゲームプレイ側の lastLeftClick は早期continueで更新されないため流用できない。
+        static bool mPrevClick = false, mPrevUp = false, mPrevDown = false;
+        static bool mPrevLeft = false, mPrevRight = false, mPrevDecide = false, mPrevCancel = false;
+
+        int mx, my; GetMousePoint(&mx, &my);
+        bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+        bool clickEdge = click && !mPrevClick;
+
+        bool kUp     = CheckHitKey(KEY_INPUT_UP) != 0    || CheckHitKey(KEY_INPUT_W) != 0;
+        bool kDown   = CheckHitKey(KEY_INPUT_DOWN) != 0  || CheckHitKey(KEY_INPUT_S) != 0;
+        bool kLeft   = CheckHitKey(KEY_INPUT_LEFT) != 0  || CheckHitKey(KEY_INPUT_A) != 0;
+        bool kRight  = CheckHitKey(KEY_INPUT_RIGHT) != 0 || CheckHitKey(KEY_INPUT_D) != 0;
+        bool kDecide = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
+        // 「戻る」は BackSpace と X。ステージセレクトでは Esc も「戻る」として受ける
+        // （タイトルの Esc は、下で「ゲームをおわる」として扱う）。
+        bool kEsc = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
+        bool kCancel = CheckHitKey(KEY_INPUT_BACK) != 0 || CheckHitKey(KEY_INPUT_X) != 0
+                    || (kEsc && currentScene == STAGE_SELECT);
+        // タイトルで Esc を押したときだけ終了する。押しっぱなしで入ってきた Esc は無視する
+        // （プレイ中のメニューの「セレクトへ」などで Esc を押したまま戻ってきても、終了しないように）。
+        static bool mPrevEsc = true;
+        if (kEsc && !mPrevEsc && currentScene == TITLE) metaWantExit = true;
+        mPrevEsc = kEsc;
+
+        bool upEdge = kUp && !mPrevUp, downEdge = kDown && !mPrevDown;
+        bool leftEdge = kLeft && !mPrevLeft, rightEdge = kRight && !mPrevRight;
+        bool decideEdge = kDecide && !mPrevDecide, cancelEdge = kCancel && !mPrevCancel;
+
+        // 押せるものの上にカーソルがあるか。
+        // この画面のボタン・マス目は既に hover を計算しているので、それをそのまま拾う。
+        bool metaPointing = false;
+
+        // ゲームプレイ側と同じ脱出口。早期continueでメインループ末尾の判定を飛ばすため、
+        // これが無いとタイトル画面から十字キー全押しで抜けられなくなる。
+        if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
+            && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) {
+            metaWantExit = true;
+        }
+
+        // BGM。シーンが変わったときだけ切り替える（毎フレーム呼ぶと鳴り直す）
+        const std::string& wantBgm = (currentScene == TITLE) ? gameConfig.titleBgm : gameConfig.selectBgm;
+        if (wantBgm != metaBgmPlaying) {
+            metaBgmPlaying = wantBgm;
+            if (wantBgm.empty()) SoundManager::Get().StopBgm();
+            else                 SoundManager::Get().PlayBgm(wantBgm);
+        }
+
+        SetDrawScreen(DX_SCREEN_BACK);
+        ClearDrawScreen();
+
+        if (currentScene == TITLE) {
+            MetaDrawBackdrop(gameConfig.titleBg);
+
+            // ロゴ・タイトル・サブタイトルを描く（メニューは後段でまとめて扱う）
+            for (const auto& e : gameConfig.titleElements) {
+                if (!e.visible) continue;
+                if (e.type == "image") {
+                    int h = MetaImage(e.image);
+                    if (h < 0) continue;
+                    // align=="center" のとき x,y は中心なので左上へ直す
+                    float l = (e.align == "center") ? (e.x - e.w * 0.5f) : e.x;
+                    float t = (e.align == "center") ? (e.y - e.h * 0.5f) : e.y;
+                    DrawExtendGraph(GameCfg::ToScreenX(l), GameCfg::ToScreenY(t),
+                                    GameCfg::ToScreenX(l) + GameCfg::ToScreenLen(e.w),
+                                    GameCfg::ToScreenY(t) + GameCfg::ToScreenLen(e.h), h, TRUE);
+                } else if (e.type == "text") {
+                    MetaDrawText(e.text, e.x, e.y, e.fontSize, e.align, MetaRoleColor(e.colorRole), e.edge);
+                }
+            }
+
+            // メニュー
+            const GameCfg::Element* menu = gameConfig.FindElement("menu");
+            int itemCount = (int)gameConfig.menuItems.size();
+            if (menu != nullptr && menu->visible && itemCount > 0) {
+                if (titleCursor < 0) titleCursor = itemCount - 1;
+                if (titleCursor >= itemCount) titleCursor = 0;
+                if (upEdge)   { titleCursor = (titleCursor - 1 + itemCount) % itemCount; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+                if (downEdge) { titleCursor = (titleCursor + 1) % itemCount; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+
+                int chosen = -1;
+                for (int i = 0; i < itemCount; i++) {
+                    float l, t, w, h; MetaMenuItemRect(*menu, i, l, t, w, h);
+                    int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
+                    int x2 = x1 + GameCfg::ToScreenLen(w), y2 = y1 + GameCfg::ToScreenLen(h);
+                    bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                    if (hover) { titleCursor = i; metaPointing = true; } // マウスを乗せたらカーソルもそこへ移す
+                    MetaDrawButton(l, t, w, h, gameConfig.menuItems[i].label,
+                                   menu->fontSize, (titleCursor == i), true);
+                    if (hover && clickEdge) chosen = i;
+                }
+                if (decideEdge) chosen = titleCursor;
+
+                if (chosen >= 0 && chosen < itemCount) {
+                    const std::string& act = gameConfig.menuItems[chosen].action;
+                    SoundManager::Get().PlaySe(gameConfig.metaSe.decide);
+                    if (act == "quit") {
+                        metaWantExit = true;
+                    } else if (act == "continue") {
+                        // 最後に遊んだステージから再開する。記録が無ければセレクトへ送る。
+                        if (!saveData.lastPlayed.empty() && SwitchToStage(saveData.lastPlayed)) {
+                            metaBgmPlaying = ""; // ステージBGMへ切り替わったので追従させる
+                        } else {
+                            currentScene = STAGE_SELECT;
+                            selectCursor = 0;
+                        }
+                    } else { // "stage_select"
+                        currentScene = STAGE_SELECT;
+                        selectCursor = 0;
+                    }
+                }
+            }
+
+            MetaDrawText("[Enter]決定  [↑↓]選択  [Esc]終了", 320.0f, 448.0f, 14,
+                         "center", MetaColor(gameConfig.inkSub), true);
+        }
+        else if (currentScene == STAGE_SELECT) {
+            MetaDrawBackdrop(gameConfig.selectBg);
+            MetaDrawText(gameConfig.heading, gameConfig.headingX, gameConfig.headingY,
+                         gameConfig.headingFontSize, "center",
+                         MetaColor(gameConfig.inkAccent), true);
+
+            int count = (int)gameConfig.stages.size();
+            const GameCfg::Grid& g = gameConfig.grid;
+            int cols = (g.cols > 0) ? g.cols : 3;
+
+            if (count > 0) {
+                if (selectCursor < 0) selectCursor = 0;
+                if (selectCursor >= count) selectCursor = count - 1;
+                if (leftEdge)  { selectCursor = (selectCursor - 1 + count) % count; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+                if (rightEdge) { selectCursor = (selectCursor + 1) % count; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+                if (upEdge)    { selectCursor = (selectCursor - cols + count * 2) % count; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+                if (downEdge)  { selectCursor = (selectCursor + cols) % count; SoundManager::Get().PlaySe(gameConfig.metaSe.cursor); }
+            }
+
+            int chosen = -1;
+            for (int i = 0; i < count; i++) {
+                const GameCfg::StageEntry& s = gameConfig.stages[i];
+                bool unlocked = GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)i);
+                bool cleared = saveData.IsCleared(s.file);
+
+                float l = g.x + (i % cols) * (g.cellW + g.gapX);
+                float t = g.y + (i / cols) * (g.cellH + g.gapY);
+                int x1 = GameCfg::ToScreenX(l), y1 = GameCfg::ToScreenY(t);
+                int x2 = x1 + GameCfg::ToScreenLen(g.cellW), y2 = y1 + GameCfg::ToScreenLen(g.cellH);
+                bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                if (hover) { selectCursor = i; metaPointing = true; }
+                bool hot = (selectCursor == i);
+
+                // 枠
+                if (!unlocked)  SetDrawBright(150, 148, 145);
+                else if (hot)   SetDrawBright(255, 255, 255);
+                else            SetDrawBright(214, 209, 202);
+                DrawUiWindow(x1, y1, x2, y2, uiWindowHandle, GameCfg::UIK_CELL);
+                SetDrawBright(255, 255, 255);
+
+                // サムネイル。用意されていない場合はテーマ色のブロックで代替する
+                // （画像が無いだけでセルが空白になると、何が並んでいるのか分からなくなる）
+                int thumbTop = y1 + GameCfg::ToScreenLen(8.0f);
+                int thumbBot = y1 + GameCfg::ToScreenLen(g.cellH * 0.55f);
+                int thumbL = x1 + GameCfg::ToScreenLen(10.0f);
+                int thumbR = x2 - GameCfg::ToScreenLen(10.0f);
+                int th = unlocked ? MetaImage(s.thumbnail) : -1;
+                if (th >= 0) {
+                    DrawExtendGraph(thumbL, thumbTop, thumbR, thumbBot, th, TRUE);
+                } else {
+                    DrawBox(thumbL, thumbTop, thumbR, thumbBot,
+                            MetaColor(unlocked ? gameConfig.inkAccent : gameConfig.inkSub), TRUE);
+                }
+
+                // 名前と進捗
+                float labelY = t + g.cellH * 0.60f;
+                if (unlocked) {
+                    // セル幅から少し内側(左右6pxずつ)に収める
+                    MetaDrawTextFit(s.name, l + g.cellW * 0.5f, labelY, 15, g.cellW - 12.0f,
+                                    "center", MetaColor(gameConfig.ink), true);
+                    char prog[64];
+                    sprintf_s(prog, sizeof(prog), "%s  %d / %d",
+                              cleared ? "CLEAR" : "- - -",
+                              saveData.BestItems(s.file), s.itemTotal);
+                    MetaDrawText(prog, l + g.cellW * 0.5f, labelY + 22.0f, 13, "center",
+                                 cleared ? MetaColor(gameConfig.inkAccent) : MetaColor(gameConfig.inkSub), true);
+                } else {
+                    MetaDrawTextFit(gameConfig.lockedLabel, l + g.cellW * 0.5f, labelY, 15,
+                                    g.cellW - 12.0f, "center", MetaColor(gameConfig.inkSub), true);
+                }
+
+                if (hover && clickEdge) {
+                    if (unlocked) chosen = i;
+                    else SoundManager::Get().PlaySe(gameConfig.editSe.denied); // 選べない理由が伝わるように音で返す
+                }
+            }
+            if (decideEdge && selectCursor >= 0 && selectCursor < count) {
+                if (GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)selectCursor)) chosen = selectCursor;
+                else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+            }
+
+            // 「もどる」ボタン
+            //
+            // 画面下の中央ではなく左上に置く。
+            // ステージが9本(3行)になると一覧の3行目が y=356〜472 まで伸び、
+            // 下中央に置いたままでは真ん中のカードの名前と進捗をボタンが覆い隠してしまう。
+            // 見出しは中央寄せなので、左上の余白はどの本数でも必ず空いている。
+            {
+                float bw = 140.0f, bh = 34.0f;
+                float bl = 16.0f, bt = 20.0f;
+                int x1 = GameCfg::ToScreenX(bl), y1 = GameCfg::ToScreenY(bt);
+                int x2 = x1 + GameCfg::ToScreenLen(bw), y2 = y1 + GameCfg::ToScreenLen(bh);
+                bool hover = (mx >= x1 && mx <= x2 && my >= y1 && my <= y2);
+                if (hover) metaPointing = true;
+                MetaDrawButton(bl, bt, bw, bh, gameConfig.backLabel, 16, hover, true);
+                if ((hover && clickEdge) || cancelEdge) {
+                    SoundManager::Get().PlaySe(gameConfig.metaSe.cancel);
+                    currentScene = TITLE;
+                }
+            }
+
+            if (chosen >= 0 && chosen < count) {
+                SoundManager::Get().PlaySe(gameConfig.metaSe.decide);
+                if (SwitchToStage(gameConfig.stages[chosen].file)) {
+                    metaBgmPlaying = ""; // ステージBGMへ切り替わったので追従させる
+                }
+            }
+
+            MetaDrawText("[Enter]決定  [方向キー]選択  [BackSpace]もどる", 320.0f, 462.0f, 13,
+                         "center", MetaColor(gameConfig.inkSub), true);
+        }
+
+        mPrevClick = click; mPrevUp = kUp; mPrevDown = kDown;
+        mPrevLeft = kLeft; mPrevRight = kRight;
+        mPrevDecide = kDecide; mPrevCancel = kCancel;
+
+        // ゲーム内マウスカーソル。
+        // この2画面はボタンとステージのマス目をマウスで押せるので、プレイ中と同じ見た目にする。
+        // ここで描かないと、プレイから戻ってきたときに SetMouseDispFlag(FALSE) だけが残り、
+        // カーソルが1つも見えない画面になってしまう（描画末尾はcontinueで飛ばされるため）。
+        {
+            bool useOwnCursor = (cursorHandle >= 0);
+            SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
+            if (useOwnCursor) {
+                bool usePoint = metaPointing && cursorPointHandle >= 0;
+                int drawHandle = usePoint ? cursorPointHandle : cursorHandle;
+                // ずらし量の根拠はプレイ中のカーソル描画側のコメントを参照
+                const int cursorSize = 40;
+                int tipX = usePoint ? 13 : 12;
+                int tipY = 6;
+                DrawExtendGraph(mx - tipX, my - tipY, mx - tipX + cursorSize, my - tipY + cursorSize,
+                                drawHandle, TRUE);
+            }
+        }
+
+        // 早期continueでメインループ末尾を飛ばすため、ここで自分で締める。
+        // SoundManager::Update は再生し終わったSEのハンドルを回収する処理で、
+        // これを呼ばないとメニュー音を鳴らすたびにハンドルが溜まり続ける。
+        SoundManager::Get().Update();
+
+        ScreenFlip();
+    };
+
     // 最初のステージ初期化
     ResetStage();
 
-    while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
+    // ResetStage() は内部でステージBGMを鳴らして currentScene を PLAY にするので、
+    // タイトルから始めたい場合はその後で上書きする。
+    // 引数付き起動（エディタからのテストプレイ）ではタイトルを出さない。
+    if (!bootDirectToStage && gameConfig.titleEnabled) {
+        currentScene = TITLE;
+        SoundManager::Get().StopBgm();
+    }
+
+    // ===== システムメニュー（Esc）と操作一覧（F1）=====
+    //
+    // これまで Esc はメインループの継続条件に直結しており、押した瞬間に確認なしでゲームが終わっていた
+    // （一般のゲームでは「Esc＝ポーズ」と思って押す人が多く、展示や配布で事故になりやすい）。
+    // Esc はこのメニューを開く操作に変え、終了はメニューの中の「ゲームをおわる」（2回押して確定）へ移した。
+    //
+    // 作りは「入れ子のループ」。開いた瞬間の画面をコピーして固定表示し、その上にメニューを描く。
+    //   ・ゲーム本体の更新・入力処理には一切触れないので、メニュー中は世界が完全に止まり、
+    //     メニューの操作が編集操作（クリック選択・ドラッグ）として拾われる事故も起きない
+    //   ・閉じるときにマウスのボタンが離れるまで待つ（選んだクリックがゲーム側の「新しいクリック」に見えないよう）
+    // メインループ末尾の ScreenFlip の直前から呼ぶ（そこなら画面が描き終わっている）。
+    bool sysQuit = false; // メニューから「ゲームをおわる」を確定したとき true（メインループが見て抜ける）
+    auto RunSystemMenu = [&](bool helpOnly) {
+        int snap = MakeGraph(WINDOW_WIDTH, WINDOW_HEIGHT);
+        GetDrawScreenGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, snap);
+
+        // メニューの項目（id: 0=つづける 1=もういちど 2=セレクトへ 3=操作一覧 4=おわる）
+        struct SysItem { const char* label; int id; };
+        std::vector<SysItem> items;
+        items.push_back({ "つづける", 0 });
+        items.push_back({ "もういちど", 1 });
+        // タイトル画面を使わない設定のときは、セレクトへ戻れても意味が無いので出さない（リザルト画面と同じ方針）
+        if (gameConfig.titleEnabled && !gameConfig.stages.empty()) items.push_back({ "ステージセレクトへ", 2 });
+        items.push_back({ "操作一覧", 3 });
+        items.push_back({ "ゲームをおわる", 4 });
+
+        int page = helpOnly ? 1 : 0;   // 0=メニュー 1=操作一覧
+        int cur = 0;                   // キーボードで選んでいる項目
+        int lastHover = -1;            // 前フレームでマウスが指していた項目（動いたときだけ選択を追従させる）
+        bool confirmQuit = false;      // 「ゲームをおわる」を1回押した状態（もう1回で確定）
+        // 押しっぱなしで開いた直後に反応しないよう、開いた時点の状態を「前フレーム」として始める
+        bool pClick = true, pUp = true, pDown = true, pOk = true, pEsc = true, pF1 = true;
+        bool done = false;
+
+        // 画面の中心（編集画面ではゲーム画面の中心）。ゲーム画面の外の編集パネルは暗く沈める
+        const int ox = isEditMode ? monitorX : 0, oy = isEditMode ? monitorY : 0;
+        const int cx = ox + SCREEN_WIDTH / 2, cy = oy + SCREEN_HEIGHT / 2;
+        // 色はウィンドウの設定（theme）から引く。枠も他のウィンドウと同じ素材で描くので、
+        // 「UIデザイン」で枠や色を変えると、このメニューも一緒に変わる。
+        const int accent = UiInkAccent(), ink = UiInk(), sub = UiInkSub();
+
+        // 操作一覧の中身。左右2列で並べる
+        struct HelpRow { const char* key; const char* what; };
+        const HelpRow leftCol[] = {
+            { "あそぶ", "" },
+            { "A / D   ← / →", "左右に動く" },
+            { "W   ↑", "ジャンプ" },
+            { "Shift", "ダッシュ（使える場合）" },
+            { "Enter / 画面クリック", "弾を撃つ" },
+            { "", "" },
+            { "時間を操る（キー）", "" },
+            { "Space / 中ボタン", "時間停止（コストを消費）" },
+            { "停止中の ← →", "1コマずつ進める／戻す" },
+            { "R", "巻き戻し" },
+            { "F", "早送り" },
+            { "T / Z / X / C", "色・ズーム・暗転・明転" },
+            { "M", "効果音のミュート" },
+            { "Esc / F1", "メニュー / この一覧" },
+        };
+        const HelpRow rightCol[] = {
+            { "物を操る（マウス）", "" },
+            { "クリック", "選ぶ（物の上）" },
+            { "ドラッグ", "動かす" },
+            { "範囲ドラッグ", "まとめて選ぶ" },
+            { "Ctrl＋クリック", "選択に追加・解除" },
+            { "ホイール", "拡大・縮小" },
+            { "Ctrl＋ホイール", "回転（15度ごと）" },
+            { "つまみをドラッグ", "拡大縮小・回転" },
+            { "ダブルクリック", "向きを反転" },
+            { "右クリック", "円形メニュー" },
+            { "Ctrl＋Z / Ctrl＋Y", "取り消し / やり直し" },
+            { "G", "地面を置く（使えるとき）" },
+            { "", "" },
+            { "ヒント", "矢印と×は結果の予告" },
+        };
+
+        while (!done && ProcessMessage() == 0) {
+            int mx, my; GetMousePoint(&mx, &my);
+            bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+            bool kUp = CheckHitKey(KEY_INPUT_UP) != 0 || CheckHitKey(KEY_INPUT_W) != 0;
+            bool kDown = CheckHitKey(KEY_INPUT_DOWN) != 0 || CheckHitKey(KEY_INPUT_S) != 0;
+            bool kOk = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
+            bool kEsc = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
+            bool kF1 = CheckHitKey(KEY_INPUT_F1) != 0;
+            bool clickEdge = click && !pClick, upEdge = kUp && !pUp, downEdge = kDown && !pDown;
+            bool okEdge = kOk && !pOk, escEdge = kEsc && !pEsc, f1Edge = kF1 && !pF1;
+            pClick = click; pUp = kUp; pDown = kDown; pOk = kOk; pEsc = kEsc; pF1 = kF1;
+
+            // 十字キー全押しの脱出口は、ここでも生かしておく（メニューが固まったときの最後の手段）
+            if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
+                && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) { sysQuit = true; done = true; }
+
+            SetDrawScreen(DX_SCREEN_BACK);
+            ClearDrawScreen();
+            DrawGraph(0, 0, snap, FALSE);
+            // 全体を暗くして、メニューへ目が行くようにする
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 150);
+            DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(0, 0, 0), TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            if (page == 1) {
+                // ---- 操作一覧 ----
+                if (escEdge || f1Edge || clickEdge || okEdge) {
+                    if (helpOnly) done = true; else page = 0;
+                }
+                // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
+                const int pw = 900, ph = 440;
+                int px1 = cx - pw / 2, py1 = cy - ph / 2;
+                if (px1 < 8) px1 = 8;
+                DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
+                DrawString(px1 + 26, py1 + 22, "操作一覧", accent);
+                auto drawCol = [&](const HelpRow* rows, int n, int colX) {
+                    for (int i = 0; i < n; i++) {
+                        int ry = py1 + 52 + i * 24;
+                        if (rows[i].what[0] == '\0' && rows[i].key[0] == '\0') continue;
+                        if (rows[i].what[0] == '\0') { DrawString(colX, ry, rows[i].key, accent); continue; } // 見出し
+                        DrawString(colX, ry, rows[i].key, ink);
+                        DrawString(colX + 200, ry, rows[i].what, sub);
+                    }
+                };
+                drawCol(leftCol, (int)(sizeof(leftCol) / sizeof(leftCol[0])), px1 + 26);
+                drawCol(rightCol, (int)(sizeof(rightCol) / sizeof(rightCol[0])), px1 + 26 + pw / 2);
+                DrawString(px1 + 26, py1 + ph - 34, helpOnly ? "[F1] / [Esc] / クリックで閉じる" : "[Esc] / クリックでもどる", sub);
+            } else {
+                // ---- メニュー ----
+                const int n = (int)items.size();
+                const int bw = 260, bh = 38, gap = 8;
+                const int pw = bw + 70, ph = 76 + n * (bh + gap) + 24;
+                int px1 = cx - pw / 2, py1 = cy - ph / 2;
+                DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
+                DrawString(px1 + 26, py1 + 22, "ポーズ", accent);
+                int hover = -1;
+                for (int i = 0; i < n; i++) {
+                    int bx = cx - bw / 2, by = py1 + 52 + i * (bh + gap);
+                    if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) hover = i;
+                }
+                // マウスが指した項目へキーボードの選択も追従させる（どちらで操作しても同じ見た目になる）
+                if (hover >= 0 && hover != lastHover) { if (cur != hover) confirmQuit = false; cur = hover; }
+                lastHover = hover;
+                if (upEdge)   { cur = (cur + n - 1) % n; confirmQuit = false; }
+                if (downEdge) { cur = (cur + 1) % n;     confirmQuit = false; }
+                if (escEdge || f1Edge) done = true; // Esc でもう一度押すと閉じる（つづける と同じ）
+
+                int act = -1;
+                if (okEdge) act = items[cur].id;
+                if (clickEdge && hover >= 0) { cur = hover; act = items[hover].id; }
+
+                for (int i = 0; i < n; i++) {
+                    int bx = cx - bw / 2, by = py1 + 52 + i * (bh + gap);
+                    bool sel = (i == cur);
+                    bool quitRow = (items[i].id == 4);
+                    const char* label = items[i].label;
+                    if (quitRow && confirmQuit) label = "ほんとうに終わる？ もう一度";
+                    // 選んでいる項目は明るく、ほかは少し暗く（円形メニューの項目と同じ見せ方）
+                    SetDrawBright(sel ? 255 : 214, sel ? 255 : 209, sel ? 255 : 202);
+                    DrawUiWindow(bx, by, bx + bw, by + bh, uiWindowHandle, GameCfg::UIK_BUTTON);
+                    SetDrawBright(255, 255, 255);
+                    int lw = GetDrawStringWidth(label, (int)strlen(label));
+                    DrawString(bx + bw / 2 - lw / 2, by + bh / 2 - 8, label,
+                               (quitRow && confirmQuit) ? UiInkWarn() : (sel ? accent : ink));
+                }
+                DrawString(px1 + 26, py1 + ph - 36, "[↑↓] えらぶ  [Enter] きめる  [Esc] とじる", sub);
+
+                if (act == 0) done = true;
+                else if (act == 1) { ResetStage(); done = true; }
+                else if (act == 2) { currentScene = STAGE_SELECT; SoundManager::Get().StopBgm(); done = true; }
+                else if (act == 3) { page = 1; }
+                else if (act == 4) {
+                    // 終了は取り返しがつかないので、2回押して確定する（別の項目へ動かすと取り消し）
+                    if (confirmQuit) { sysQuit = true; done = true; }
+                    else { confirmQuit = true; SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                }
+            }
+
+            // ゲーム内カーソル（実物のカーソルを隠している設定のときだけ自前で描く）
+            {
+                bool useOwnCursor = !isDedicatedEditorMode && cursorHandle >= 0;
+                SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
+                if (useOwnCursor) DrawExtendGraph(mx - 12, my - 6, mx - 12 + 40, my - 6 + 40, cursorHandle, TRUE);
+            }
+            SoundManager::Get().Update();
+            ScreenFlip();
+        }
+        DeleteGraph(snap);
+        // 選んだクリックやキーが、閉じた直後のゲーム側で「新しい入力」に見えないよう、離れるまで待つ
+        while (ProcessMessage() == 0 && ((GetMouseInput() & (MOUSE_INPUT_LEFT | MOUSE_INPUT_RIGHT | MOUSE_INPUT_MIDDLE)) != 0
+               || CheckHitKey(KEY_INPUT_ESCAPE) || CheckHitKey(KEY_INPUT_RETURN) || CheckHitKey(KEY_INPUT_F1))) {
+            WaitTimer(10);
+        }
+    };
+
+    while (ProcessMessage() == 0 && !sysQuit)
     {
+        // Feature: タイトル画面・ステージセレクト画面 —
+        // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
+        //
+        // 条件式であちこちを潰す方式（currentScene != PLAY && != TITLE && ...）にすると、
+        // 今後シーンを足すたびに全ての判定箇所を直す必要があり、直し忘れが即バグになる。
+        // 先頭で抜けてしまえば、リザルト描画もCanUpdateもそもそも実行されない。
+        //
+        // なお ImGui の NewFrame と Render はどちらもループ末尾側にあるので、
+        // ここで continue すると対で飛ぶ。ScreenFlip と SoundManager::Update は
+        // UpdateAndDrawMetaScene の中で自前で呼んでいる。
+        if (currentScene == TITLE || currentScene == STAGE_SELECT) {
+            UpdateAndDrawMetaScene();
+            if (metaWantExit) break;
+            continue;
+        }
+
         // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
             STAGE_WIDTH = (float)stages[currentStageIdx].map[0].size() * TILE_SIZE;
@@ -2787,9 +6094,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
         if (currentMiddleClick && !lastMiddleClick) {
-            if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
-            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySe("ui_pause"); }
-            else { SoundManager::Get().PlaySe("ui_denied"); }
+            if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastMiddleClick = currentMiddleClick;
 
@@ -2797,9 +6104,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — 一時停止は編集コストを消費する継続系操作。停止解除は常に無料
         static bool lastPauseKey = false;
         if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) {
-            if (isPaused) { isPaused = false; SoundManager::Get().PlaySe("ui_pause"); }
-            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe("ui_pause"); }
-            else { SoundManager::Get().PlaySe("ui_denied"); }
+            if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastPauseKey = (CheckHitKey(KEY_INPUT_SPACE) != 0);
 
@@ -2815,9 +6122,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — 早送りは継続系操作。解除は常に無料
         static bool lastFFKey = false;
         if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) {
-            if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySe("ui_fastforward"); }
-            else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySe("ui_fastforward"); }
-            else { SoundManager::Get().PlaySe("ui_denied"); }
+            if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
+            else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
+            else { EditDeniedToggle(fastForwardOpEnabled, "早送り"); }
         }
         lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
 
@@ -2831,9 +6138,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (turningOff || (screenEffectOpEnabled && editCost >= currentEditCost.flatColorCycle)) {
                 if (!turningOff) editCost -= currentEditCost.flatColorCycle;
                 playerColorFilter = nextFilter;
-                SoundManager::Get().PlaySe("ui_color_cycle");
+                SoundManager::Get().PlaySe(gameConfig.editSe.colorFilter);
+            } else if (!screenEffectOpEnabled) {
+                EditDeniedToggle(false, "画面エフェクト");
             } else {
-                SoundManager::Get().PlaySe("ui_denied");
+                EditDeniedCost(currentEditCost.flatColorCycle);
             }
         }
         lastColorKey = currentColorKey;
@@ -2851,13 +6160,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (currF3 && !lastF3) isDebugDrawMode = !isDebugDrawMode;
         lastF3 = currF3;
 
-        isStepFrame = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
-        lastStepKey = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
+        // コマ送りは → で1コマ進める。← も同じく1コマ進めるが、コマ送りリフトだけは逆向きへ動く。
+        // 「上げすぎたら下げ直す」を巻き戻し(R)なしでできるようにするため
+        // （リフトは上限まで上がると止まるので、←が無いと一度行き過ぎると戻せなかった）。
+        {
+            static bool lastStepKeyL = false;
+            bool stepFwd  = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
+            bool stepBack = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_LEFT)  && !lastStepKeyL);
+            isStepFrame = (stepFwd || stepBack);
+            stepFrameDir = stepBack ? -1.0f : 1.0f;
+            lastStepKey  = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
+            lastStepKeyL = (CheckHitKey(KEY_INPUT_LEFT)  != 0);
+        }
+        if (isStepFrame) SoundManager::Get().PlaySe(gameConfig.editSe.step); // コマ送り1回ぶんの音
 
         static bool lastLeftClick = false;
         bool currentLeftClick = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
         static bool lastRightClick = false;
         bool currentRightClick = (GetMouseInput() & MOUSE_INPUT_RIGHT) != 0;
+        // このフレームのホイール回転量（上へ回すと正）。DxLibは前回の読み取りからの累積を返すので、
+        // 使う使わないに関わらず毎フレーム必ず読み捨てる（溜めておいて、あとでまとめて効くのを防ぐ）。
+        int wheelRot = GetMouseWheelRotVol();
+        bool editCtrlHeld = (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL));
 
         globalTimeScale = isFastForward ? 2.0f : 1.0f;
         float finalTimeScale = globalTimeScale;
@@ -2866,6 +6190,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool isRKeyPressed = (CheckHitKey(KEY_INPUT_R) && isEditMode && rewindOpEnabled && editCost > 0.0f);
         bool isPlayerRewinding = player.isRewinding || (isRKeyPressed && !isRotating && (selectedType == SELECT_PLAYER || selectedType == SELECT_NONE));
 
+        // 巻き戻しの音。押しっぱなしのあいだ鳴り続けないよう、押した瞬間だけ鳴らす。
+        // （音源 Rewind.wav はこれまで一度も使われていなかった）
+        {
+            static bool lastRewindKey = false;
+            if (isRKeyPressed && !lastRewindKey) SoundManager::Get().PlaySe(gameConfig.editSe.rewind);
+            lastRewindKey = isRKeyPressed;
+        }
+
         // 「巻き戻しが今アクティブか」の集約フラグ（コストドレイン計算用）
         bool isAnyRewindActive = isRKeyPressed || player.isRewinding;
         if (!isAnyRewindActive) for (auto& e : enemies)  if (e.isRewinding)  { isAnyRewindActive = true; break; }
@@ -2873,14 +6205,67 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!isAnyRewindActive) for (auto& b : bullets)  if (b.isRewinding)  { isAnyRewindActive = true; break; }
         if (!isAnyRewindActive) for (auto& it : items)   if (it.isRewinding) { isAnyRewindActive = true; break; }
 
+        // Feature: タイル破壊 — 壊したマスの巻き戻し復活。
+        //
+        // 壊れてからの経過フレームを、通常再生では増やし、巻き戻し中は減らす。
+        // 0まで戻ったマスは元のタイルへ戻す＝「巻き戻せば壊したブロックが直る」。
+        // 履歴の深さ(MAX_HISTORY_FRAMES)を超えたものは巻き戻しても届かないので記録から外す。
+        //
+        // 復活は「そのマスにプレイヤーが重なっていないとき」だけ行う。
+        // 重なったまま戻すと地形の中にめり込み、抜け出せなくなるため、
+        // 重なっている間は復活を先送りして、退いた瞬間に戻す。
+        if (!isPaused) {
+            auto& mpBroken = stages[currentStageIdx].map;
+            float phW = player.width * player.scale, phH = player.height * player.scale;
+            for (size_t bi = 0; bi < brokenTiles.size(); ) {
+                BrokenTile& bt = brokenTiles[bi];
+                if (isAnyRewindActive) bt.framesSinceBroken -= finalTimeScale;
+                else                   bt.framesSinceBroken += finalTimeScale;
+
+                if (bt.framesSinceBroken <= 0.0f) {
+                    float tx = (float)(bt.col * TILE_SIZE), ty = (float)(bt.row * TILE_SIZE);
+                    bool overlapsPlayer = (player.x < tx + TILE_SIZE && player.x + phW > tx &&
+                                           player.y < ty + TILE_SIZE && player.y + phH > ty);
+                    if (!overlapsPlayer) {
+                        if (bt.row < (int)mpBroken.size() && bt.col < (int)mpBroken[bt.row].size())
+                            mpBroken[bt.row][bt.col] = bt.originalId;
+                        brokenTiles.erase(brokenTiles.begin() + bi);
+                        continue;
+                    }
+                    bt.framesSinceBroken = 0.0f; // 退くまで復活を待つ
+                } else if (bt.framesSinceBroken > (float)MAX_HISTORY_FRAMES) {
+                    // 巻き戻しでは届かない過去になったので、壊れたまま確定させる
+                    brokenTiles.erase(brokenTiles.begin() + bi);
+                    continue;
+                }
+                bi++;
+            }
+        }
+
         // Feature: カット機能の復活 — このブロックには「個別オブジェクト編集」と「タイムラインカット」の
         // 2系統の操作が同居している。どちらか一方だけを許可したステージを作れるように、
         // 入口はORで通し、実際の操作ごとに objectEditOpEnabled / cutOpEnabled を個別に見る。
         if (isEditMode && (objectEditOpEnabled || cutOpEnabled)) {
             // コンテキストメニューの有効化
-            if (currentRightClick && !lastRightClick) { 
+            // このフレームだけの印：左クリックがメニューの項目を押した場合、同じクリックを背後の選択・ドラッグへ回さない
+            bool menuClickConsumed = false;
+            if (currentRightClick && !lastRightClick) {
+                // すでに選んでいる物（Ctrl+クリックで選んだ複数のうちの1つなど）を右クリックしたときは、選択を変えない。
+                // 選び直してしまうと、複数選択がその1つに縮んで、まとめて編集できなくなる。
+                bool rightOnSelected = false;
+                {
+                    int rk, ri;
+                    if (selectedType != SELECT_NONE && FindEditObjectAt(gx, gy, rk, ri)) {
+                        if (rk == 0) rightOnSelected = !selectedPlayers.empty();
+                        else if (rk == 1) rightOnSelected = std::find(selectedEnemies.begin(), selectedEnemies.end(), &enemies[ri]) != selectedEnemies.end();
+                        else rightOnSelected = std::find(selectedGimmicks.begin(), selectedGimmicks.end(), &gimmicks[ri]) != selectedGimmicks.end();
+                    }
+                }
                 // コンテキストメニューの当たり判定・選択のトリガー
-                if (gx >= player.x && gx <= player.x + player.width * player.scale &&
+                if (rightOnSelected) {
+                    // 選択はそのまま
+                }
+                else if (gx >= player.x && gx <= player.x + player.width * player.scale &&
                     gy >= player.y && gy <= player.y + player.height * player.scale) {
                     selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                     selectedPlayers.push_back(&player);
@@ -2937,10 +6322,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 selectedType = SELECT_GIMMICK;
                                 targetScale = &gim.width; // スケールを幅にマッピング！
                                 targetAngle = &gim.angle;
-                                targetSpeedScale = &gim.customTimer;
+                                targetSpeedScale = &gim.speedScale; // 従来はcustomTimerを流用しUI上は"N/A"だった
                                 targetPaused = &gim.isPaused;
                                 targetRewind = &gim.isRewinding;
-                                targetDirection = nullptr;
+                                targetDirection = &gim.direction; // 従来はnullptrでギミックだけFlipが死んでいた
                                 targetEnemyType = nullptr;
                                 targetGimmick = &gim;
                                 targetEnemy = nullptr;
@@ -2966,7 +6351,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 targetSpeedScale = nullptr;
                                 targetPaused = nullptr;
                                 targetRewind = nullptr;
-                                targetDirection = nullptr;
+                                targetDirection = &gim.direction; // 従来はnullptrでギミックだけFlipが死んでいた
                                 targetEnemyType = nullptr;
                                 targetGimmick = &gim;
                                 targetEnemy = nullptr;
@@ -2996,95 +6381,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 } else {
                     // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTAL専用の「Delete Cut」メニューは
                     // 廃止し、他のギミックと同じ標準コンテキストメニュー（巻き戻し/一時停止トグル等）を使う
-                    menu.height = 160;
                     menu.isOpen = true;
-                    menu.x = mx;
-                    menu.y = my;
+                    menu.x = max(RADIAL_MARGIN_X, min(WINDOW_WIDTH - RADIAL_MARGIN_X, mx));
+                    menu.y = max(RADIAL_MARGIN_Y, min(WINDOW_HEIGHT - RADIAL_MARGIN_Y, my));
+                    // 押しっぱなしのまま項目の方向へ動かして離す使い方に備える。
+                    // ただし画面の端で中心を内側へ寄せたとき（押した位置≠メニューの中心）は使わない。
+                    // 押した場所がすでに中心から離れているので、押して離しただけで項目が実行されてしまう。
+                    // その場合は、離したあとに項目を左クリックして選ぶ。
+                    menuHoldActive = (menu.x == mx && menu.y == my);
                 }
             }
 
-            // コンテキストメニューのアクショントリガー
+            // 右ボタンを押したまま項目の方向へ動かして離すと、その項目が実行される。
+            // 中心の不感帯の中で離したときは何もせず、メニューは開いたまま残す（離してから左クリックで選ぶ従来の使い方）。
+            if (!currentRightClick && lastRightClick && menu.isOpen && menuHoldActive) {
+                int idx = RadialSectorAt(menu.x, menu.y, mx, my, RadialCount());
+                if (idx >= 0 && selectedType != SELECT_NONE) {
+                    RunRadialIndex(idx);
+                    menu.isOpen = false;
+                }
+            }
+            if (!currentRightClick) menuHoldActive = false;
+
+            // 円形メニューの項目を左クリックで選ぶ。
+            //   ・項目の方向をクリック        … その項目を実行して閉じる
+            //   ・中心の不感帯をクリック      … 何もせず閉じる（キャンセル）
+            //   ・メニューの外側をクリック    … 閉じるだけ。同じクリックで通常の選択も行われる（従来どおり）
+            // 項目を押したクリックは、背後の選択・ドラッグへ回さない（以前は項目を押した直後に
+            // 同じクリックで範囲選択が始まり、選択が消えていた）。
             if (currentLeftClick && !lastLeftClick && menu.isOpen) {
-                if (mx >= menu.x && mx <= menu.x + menu.width && selectedType != SELECT_NONE) {
-                    // Feature: カット機能の復活 — タイムラインカットを選択している場合は専用メニュー（Delete Cutのみ）。
-                    // カットに対しては巻き戻し/一時停止/速度といった通常項目が全て無意味で、
-                    // かつ target 系ポインタがnullptrなので、通常メニューの処理へ流してはいけない（nullptr参照でクラッシュする）。
-                    if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
-                        if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            if (editCost >= currentEditCost.flatMenuToggle) {
-                                editCost -= currentEditCost.flatMenuToggle;
-                                // 巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
-                                for (auto it = gimmicks.begin(); it != gimmicks.end(); ++it) {
-                                    if (&(*it) == targetGimmick) { gimmicks.erase(it); break; }
-                                }
-                                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
-                                selectedType = SELECT_NONE;
-                                targetGimmick = nullptr;
-                                SoundManager::Get().PlaySe("ui_color_cycle");
-                            } else {
-                                SoundManager::Get().PlaySe("ui_denied");
-                            }
-                        }
-                        menu.isOpen = false;
-                    }
-                    else {
-                        // 巻き戻しの切り替え（Feature: 編集コストゲージ）
-                        if (my >= menu.y + 5 && my <= menu.y + 30) {
-                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetRewind = !(*targetRewind); }
-                            else SoundManager::Get().PlaySe("ui_denied");
-                            menu.isOpen = false;
-                        }
-                        // 一時停止の切り替え（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 31 && my <= menu.y + 55) {
-                            if (editCost >= currentEditCost.flatMenuToggle) { editCost -= currentEditCost.flatMenuToggle; *targetPaused = !(*targetPaused); }
-                            else SoundManager::Get().PlaySe("ui_denied");
-                            menu.isOpen = false;
-                        }
-                        // 速度 +0.5（Feature: 編集コストゲージ。ギミック選択時は元々no-opなので課金しない）
-                        else if (my >= menu.y + 56 && my <= menu.y + 80) {
-                            if (selectedType != SELECT_GIMMICK) {
-                                if (editCost >= currentEditCost.flatSpeedChange) { editCost -= currentEditCost.flatSpeedChange; *targetSpeedScale += 0.5f; }
-                                else SoundManager::Get().PlaySe("ui_denied");
-                            }
-                            menu.isOpen = false;
-                        }
-                        // 速度 -0.5（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 81 && my <= menu.y + 105) {
-                            if (selectedType != SELECT_GIMMICK) {
-                                if (editCost >= currentEditCost.flatSpeedChange) {
-                                    editCost -= currentEditCost.flatSpeedChange;
-                                    *targetSpeedScale -= 0.5f;
-                                    if (*targetSpeedScale < 0) *targetSpeedScale = 0;
-                                } else SoundManager::Get().PlaySe("ui_denied");
-                            }
-                            menu.isOpen = false;
-                        }
-                        // オブジェクトの向きを反転（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 106 && my <= menu.y + 130) {
-                            if (targetDirection != nullptr) {
-                                if (editCost >= currentEditCost.flatDirectionFlip) { editCost -= currentEditCost.flatDirectionFlip; *targetDirection = (*targetDirection == 0 ? 1 : 0); }
-                                else SoundManager::Get().PlaySe("ui_denied");
-                            }
-                            menu.isOpen = false;
-                        }
-                        // すべてリセット（Feature: 編集コストゲージ）
-                        else if (my >= menu.y + 131 && my <= menu.y + 155) {
-                            if (editCost >= currentEditCost.flatResetAll) {
-                                editCost -= currentEditCost.flatResetAll;
-                                if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
-                                    targetGimmick->width = 120.0f;
-                                    targetGimmick->spriteWidth = 120.0f; // 描画側(spriteWidth)も併せて戻す
-                                    targetGimmick->angle = (targetGimmick->type == GIMMICK_MANUAL_BRIDGE) ? 1.57079f : 0.0f;
-                                    targetGimmick->isPaused = false;
-                                    targetGimmick->isRewinding = false;
-                                } else {
-                                    *targetScale = 1.0f; *targetAngle = 0.0f; *targetSpeedScale = 1.0f; *targetPaused = false; *targetRewind = false;
-                                }
-                            } else SoundManager::Get().PlaySe("ui_denied");
-                            menu.isOpen = false;
-                        }
-                    }
-                } else { menu.isOpen = false; }
+                float ddx = (float)(mx - menu.x), ddy = (float)(my - menu.y);
+                if (selectedType != SELECT_NONE && sqrtf(ddx * ddx + ddy * ddy) <= RADIAL_OUTER) {
+                    int idx = RadialSectorAt(menu.x, menu.y, mx, my, RadialCount());
+                    if (idx >= 0) RunRadialIndex(idx);
+                    menu.isOpen = false;
+                    menuClickConsumed = true;
+                } else {
+                    menu.isOpen = false;
+                }
             }
 
             // エディタの範囲選択ドラッグ終了
@@ -3127,58 +6461,64 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                 }
 
-                // 単一ターゲット用の便利なポインタを最初に選択された要素にバインド
-                if (!selectedPlayers.empty()) {
-                    selectedType = SELECT_PLAYER;
-                    targetScale = &player.scale;
-                    targetAngle = &player.angle;
-                    targetSpeedScale = &player.speedScale;
-                    targetPaused = &player.isPaused;
-                    targetRewind = &player.isRewinding;
-                    targetDirection = &player.direction;
-                    targetEnemyType = nullptr;
-                    targetGimmick = nullptr;
-                    targetEnemy = nullptr;
+                // 単一ターゲット用の便利なポインタを、最初に選択された要素へ組み直す
+                SyncTargetsFromSelection();
+            }
+
+            // マウスホイールによる拡縮・回転。モニタの上で、1つ以上選択しているときだけ効く。
+            //   ホイール         … 敵・プレイヤーは倍率±0.1、ギミックは横幅±32px（可変地面はタイル1枚）
+            //   Ctrl＋ホイール   … 15度ずつ回す
+            // 回転に Shift ではなく Ctrl を使うのは、Shift がゲーム側のダッシュに使われていて、
+            // 編集中もプレイヤーが走り出してしまうため。
+            // 世界は止めない（つまみのドラッグと違い、1ノッチごとの瞬間的な操作なので）。
+            if (wheelRot != 0 && objectEditOpEnabled && !menu.isOpen && selectedType != SELECT_NONE
+                && mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT
+                && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate
+                && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting) {
+                // 取り消し用：0.4秒以内に続いたホイールは、同じ対象に対する1手としてまとめる。
+                {
+                    std::vector<EditSnap> cur;
+                    CaptureSelection(cur);
+                    int nowMs = GetNowCount();
+                    if (wheelUndoOpen && (nowMs - wheelUndoLastMs > 400 || !SameTargets(wheelUndoBefore, cur))) FlushWheelUndo();
+                    if (!wheelUndoOpen) { wheelUndoBefore = cur; wheelUndoOpen = true; }
+                    wheelUndoLastMs = nowMs;
                 }
-                else if (!selectedEnemies.empty()) {
-                    selectedType = SELECT_ENEMY;
-                    targetScale = &selectedEnemies[0]->scale;
-                    targetAngle = &selectedEnemies[0]->angle;
-                    targetSpeedScale = &selectedEnemies[0]->speedScale;
-                    targetPaused = &selectedEnemies[0]->isPaused;
-                    targetRewind = &selectedEnemies[0]->isRewinding;
-                    targetDirection = &selectedEnemies[0]->direction;
-                    targetEnemyType = &selectedEnemies[0]->type;
-                    targetGimmick = nullptr;
-                    targetEnemy = selectedEnemies[0];
+                if (editCtrlHeld) {
+                    ApplyAngleDelta((float)wheelRot * (EDIT_KNOB_PI / 12.0f));
+                    SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
+                } else {
+                    ApplyScaleDelta((float)wheelRot * 0.1f, (float)wheelRot * 32.0f, true);
+                    SoundManager::Get().PlaySe(gameConfig.editSe.scale);
                 }
-                else if (!selectedGimmicks.empty()) {
-                    selectedType = SELECT_GIMMICK;
-                    targetScale = &selectedGimmicks[0]->width;
-                    targetAngle = &selectedGimmicks[0]->angle;
-                    targetSpeedScale = &selectedGimmicks[0]->customTimer;
-                    targetPaused = &selectedGimmicks[0]->isPaused;
-                    targetRewind = &selectedGimmicks[0]->isRewinding;
-                    targetDirection = nullptr;
-                    targetEnemyType = nullptr;
-                    targetGimmick = selectedGimmicks[0];
-                    targetEnemy = nullptr;
+            }
+            // ホイールが止まって0.4秒たったら、まとめた操作を確定する
+            if (wheelUndoOpen && GetNowCount() - wheelUndoLastMs > 400) FlushWheelUndo();
+
+            // Ctrl+Z で取り消し、Ctrl+Y でやり直し。押した瞬間に1回だけ効く。
+            // タイムラインのカットを打ちかけているとき（1点目だけ打った状態）の Ctrl+Z は、その打ちかけを捨てる。
+            // ジェスチャ（ドラッグ等）の最中は受け付けない。
+            {
+                static bool lastUndoKey = false, lastRedoKey = false;
+                bool undoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Z);
+                bool redoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Y);
+                if (objectEditOpEnabled && !gestureActive && !isAreaSelecting && !menu.isOpen) {
+                    if (undoNow && !lastUndoKey) {
+                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySe(gameConfig.editSe.denied); ShowEditToast("カットの作成を取りやめました", 0); }
+                        else EditUndo();
+                    }
+                    if (redoNow && !lastRedoKey) EditRedo();
                 }
-                else {
-                    selectedType = SELECT_NONE;
-                    targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
-                    targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
-                    targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
-                }
+                lastUndoKey = undoNow; lastRedoKey = redoNow;
             }
 
             // エディタUI / ドラッグ操作
-            if (currentLeftClick && !menu.isOpen) {
+            if (currentLeftClick && !menu.isOpen && !menuClickConsumed) {
                 // 一時停止ボタンのチェック
                 if (!lastLeftClick && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
-                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySe("ui_pause"); }
-                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe("ui_pause"); }
-                    else { SoundManager::Get().PlaySe("ui_denied"); }
+                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+                    else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
                 }
 
                 // Feature: カット機能の復活 — 下部タイムライン帯へのCtrl+クリックでカット区間を作る。
@@ -3202,7 +6542,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (tempCutStart < 0.0f) {
                             // 1点目：始点を記録するだけ。ここではまだコストを消費しない
                             tempCutStart = ct;
-                            SoundManager::Get().PlaySe("ui_color_cycle");
+                            SoundManager::Get().PlaySe(gameConfig.editSe.cut);
                         } else if (editCost >= pendingCutCost) {
                             // 2点目：区間が確定。クリック順に関係なく小さい方を始点にそろえる
                             float start = (ct > tempCutStart ? tempCutStart : ct);
@@ -3210,7 +6550,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 幅が無いに等しいカットは意味がない上、境界の判定が不安定になるので弾く
                             if (end - start < 0.01f) {
                                 tempCutStart = -1.0f;
-                                SoundManager::Get().PlaySe("ui_denied");
+                                EditDeniedWhy("カットの範囲が狭すぎます");
                             } else {
                                 editCost -= pendingCutCost;
                                 // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
@@ -3227,12 +6567,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 cut.isTimelineCut = true;
                                 gimmicks.push_back(cut);
                                 tempCutStart = -1.0f;
-                                SoundManager::Get().PlaySe("ui_fastforward");
+                                SoundManager::Get().PlaySe(gameConfig.editSe.cut);
                             }
                         } else {
                             // コスト不足。始点は残さず捨てて、打ち直しさせる
                             tempCutStart = -1.0f;
-                            SoundManager::Get().PlaySe("ui_denied");
+                            EditDeniedCost(pendingCutCost);
                         }
                     }
                 }
@@ -3246,23 +6586,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else if (my >= 100 && my <= 115 && targetAngle != nullptr) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
                     else if (my >= 120 && my <= 135 && targetSpeedScale != nullptr) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
                     else if (my >= 140 && my <= 155 && targetPaused != nullptr) {
-                        // Feature: 編集コストゲージ — 複数選択でも定額（対象数に関わらず一発分のコスト）
-                        if (editCost >= currentEditCost.flatMenuToggle) {
-                            editCost -= currentEditCost.flatMenuToggle;
-                            bool nextPaused = !(*targetPaused);
-                            for (auto* p : selectedPlayers) p->isPaused = nextPaused;
-                            for (auto* e : selectedEnemies) e->isPaused = nextPaused;
-                            for (auto* g : selectedGimmicks) g->isPaused = nextPaused;
-                        } else SoundManager::Get().PlaySe("ui_denied");
+                        EditTogglePause();  // 複数選択でも定額（対象数に関わらず一発分のコスト）。中身は共通入口
                     }
                     else if (my >= 160 && my <= 175 && targetRewind != nullptr) {
-                        if (editCost >= currentEditCost.flatMenuToggle) {
-                            editCost -= currentEditCost.flatMenuToggle;
-                            bool nextRewind = !(*targetRewind);
-                            for (auto* p : selectedPlayers) p->isRewinding = nextRewind;
-                            for (auto* e : selectedEnemies) e->isRewinding = nextRewind;
-                            for (auto* g : selectedGimmicks) g->isRewinding = nextRewind;
-                        } else SoundManager::Get().PlaySe("ui_denied");
+                        EditToggleRewind();
                     }
                     else if (my >= 180 && my <= 195 && targetEnemyType != nullptr) {
                         // 旧: %3 固定で最初の3種類しか巡回できなかった。ENEMY_TYPE_COUNTで全種別を巡回対象にする
@@ -3286,24 +6613,136 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float h = 32.0f;
                     float tileW = h * ((float)imgW / imgH);
                     float w = tileW * 3.0f; // 初期は3タイル分
-                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, w, h, 0.0f, 0.0f, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+
+                    // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
+                    // targetGimmick / selectedGimmicks の生ポインタが全てダングリングになる。
+                    // そのまま触ると不正アクセスで落ちるので、追加の前に選択を解除しておく
+                    // （タイムラインカット生成側と同じ手順）。
+                    selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                    selectedType = SELECT_NONE;
+                    targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+                    targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+                    targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+
+                    // 【重要】ここは以前 hitboxWidth / hitboxHeight の2つを渡し忘れており、
+                    // 集成初期化の値が1つずつ前へずれていた：
+                    //   hitboxWidth ← true(=1.0f) / hitboxHeight ← 0.0f / isActive ← 0.0f(=false)
+                    // true→float も 0.0f→bool も「定数式で元の値へ戻せる」ため narrowing とみなされず、
+                    // コンパイルは通ってしまう。その結果、Gキーで置いた地面は isActive==false のまま生成され、
+                    // 描画も当たり判定も全てスキップされて「置いても何も出てこない」状態だった。
+                    // Gimmickのメンバ順（type,x,y,width,height,spriteWidth,spriteHeight,
+                    // hitboxOffsetX,hitboxOffsetY,hitboxWidth,hitboxHeight,isActive,val1,val2,
+                    // angle,customTimer,isPaused,isRewinding,history）に合わせて19個を渡す。
+                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, w, h,
+                                         0.0f, 0.0f, w, h, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
                 }
                 lastGKey = currentGKey;
 
                 // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
-                if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
+                if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
                     mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
                     
+                    // 選択中のギミックの「つまみ」をつかんだかどうかを最初に見る。
+                    // ここで拾えなかった場合だけ、従来どおりブロック叩き・移動・選択へ進む。
+                    // 先に見るのは、つまみが相手の絵の上に重なっているため
+                    // （後回しにすると、つまみを狙ったつもりのクリックが移動や破壊になってしまう）。
+                    bool grabbedHandle = false;
+                    for (auto* g : selectedGimmicks) {
+                        if (!g->isActive) continue;
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue; // 大きさを変えられない相手にはつまみを出していない
+                        float hwX, hwY, hhX, hhY;
+                        GetGimmickResizeHandles(*g, hwX, hwY, hhX, hhY);
+                        // つまみはワールド座標で持ち、画面へは等倍で転送されるので、
+                        // マウス座標からカメラとモニタのぶんを引けばそのまま比較できる。
+                        if (gx >= hwX && gx <= hwX + GIM_HANDLE_SIZE && gy >= hwY && gy <= hwY + GIM_HANDLE_SIZE) {
+                            isScaling = true; lastMouseX = mx; lastMouseY = my; baseScale = g->width;
+                            grabbedHandle = true; break;
+                        }
+                        if (gx >= hhX && gx <= hhX + GIM_HANDLE_SIZE && gy >= hhY && gy <= hhY + GIM_HANDLE_SIZE) {
+                            isScalingHeight = true; lastMouseX = mx; lastMouseY = my; baseScale = g->spriteHeight;
+                            grabbedHandle = true; break;
+                        }
+                    }
+
+                    // 敵・プレイヤー・ギミックの回転つまみ、敵・プレイヤーの拡縮つまみ（選択がちょうど1つのときだけ出ている）。
+                    // 辺のつまみと同じ理由で、移動や選択より先に判定する。
+                    if (!grabbedHandle) {
+                        EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                        if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                            if (hCanRotate) {
+                                float kx, ky;
+                                GetEditKnob(hb, hAng, kx, ky);
+                                float ddx = gx - kx, ddy = gy - ky;
+                                if (ddx * ddx + ddy * ddy <= EDIT_KNOB_GRAB * EDIT_KNOB_GRAB) {
+                                    isHandleRotate = true; lastMouseX = mx; lastMouseY = my;
+                                    grabbedHandle = true;
+                                }
+                            }
+                            if (!grabbedHandle && hCanScale && targetScale != nullptr) {
+                                float chx, chy;
+                                GetEditCornerHandle(hb, chx, chy);
+                                const float m = 3.0f; // 見た目より少し広くつかめるようにする
+                                if (gx >= chx - m && gx <= chx + GIM_HANDLE_SIZE + m && gy >= chy - m && gy <= chy + GIM_HANDLE_SIZE + m) {
+                                    isHandleScale = true; lastMouseX = mx; lastMouseY = my;
+                                    handleBaseScale = *targetScale;
+                                    // 「マウスが指している点」を「その点が右下の角になる倍率」へ換算する。
+                                    // 足元の中心(枠の中心X・下端)が固定で、左右へ同じだけ広がるので、
+                                    // 中心から横へ離れた距離の2倍が、そのまま枠の幅（＝倍率）になる。
+                                    // 縦は下端が動かない（上へ伸びる）ので、マウスの高さは使わない。
+                                    float uw = hb.w / handleBaseScale; // 倍率1のときの幅
+                                    handleGrabP = 2.0f * (gx - (hb.x + hb.w * 0.5f)) / uw;
+                                    grabbedHandle = true;
+                                }
+                            }
+                        }
+                    }
+
                     // エディタでの破壊可能なブロックのクリックをチェック（破壊する！）
-                    bool blockClicked = false;
+                    // つまみをつかんでいた場合は、この先の破壊も選択も移動も行わない。
+                    bool blockClicked = grabbedHandle;
                     for (auto& gim : gimmicks) {
-                        if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                            if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
-                                gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
-                                gim.isActive = false;
+                        if (grabbedHandle) break;
+                        if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
+                        if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
+                            gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
+                            // プレイヤーの直接操作。大きさという概念が無いので attackerScale は 0 を渡す。
+                            // 従来ここだけSEを鳴らしていなかったが、TryBreakGimmickに集約したので鳴るようになる。
+                            if (TryBreakGimmick(gim, BREAK_PLAYER, 0.0f)) {
                                 blockClicked = true;
                                 break;
                             }
+                        }
+                    }
+
+                    // Feature: タイル破壊 — ギミックのブロックが無ければ、地形タイルの側を叩く。
+                    // タイル定義エディタで「プレイヤーが壊せる」を立てたタイルだけが割れる。
+                    if (!blockClicked) {
+                        if (TryBreakTile((int)(gy / TILE_SIZE), (int)(gx / TILE_SIZE), BREAK_PLAYER, 0.0f)) {
+                            blockClicked = true;
+                        }
+                    }
+
+                    // Ctrl＋クリック：クリックした物を選択に加える／選択から外す。
+                    // 範囲選択でしか複数選択できなかったので、離れた物を数体だけ選ぶのが面倒だった。
+                    // 加えるだけで、移動やつまみの操作には進まない（blockClicked を立てて通常の選択を飛ばす）。
+                    // Shift ではなく Ctrl なのは、Shift がゲーム側のダッシュに使われているため。
+                    if (!blockClicked && editCtrlHeld) {
+                        int ck, ci;
+                        if (FindEditObjectAt(gx, gy, ck, ci)) {
+                            if (ck == 0) {
+                                auto it = std::find(selectedPlayers.begin(), selectedPlayers.end(), &player);
+                                if (it != selectedPlayers.end()) selectedPlayers.erase(it); else selectedPlayers.push_back(&player);
+                            } else if (ck == 1) {
+                                Enemy* ep = &enemies[ci];
+                                auto it = std::find(selectedEnemies.begin(), selectedEnemies.end(), ep);
+                                if (it != selectedEnemies.end()) selectedEnemies.erase(it); else selectedEnemies.push_back(ep);
+                            } else {
+                                Gimmick* gp = &gimmicks[ci];
+                                auto it = std::find(selectedGimmicks.begin(), selectedGimmicks.end(), gp);
+                                if (it != selectedGimmicks.end()) selectedGimmicks.erase(it); else selectedGimmicks.push_back(gp);
+                            }
+                            SyncTargetsFromSelection();
+                            blockClicked = true;
                         }
                     }
 
@@ -3330,10 +6769,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
 
                         if (clickedOnSelected) {
-                            // グループドラッグを開始
-                            isDragging = true;
+                            // 既に選んである相手を再クリックした場合。
+                            //
+                            // ここは以前、押されているキーを一切見ずに必ず移動を始めていた。
+                            // そのため「選ぶ → Sを押しながら引っぱる」という自然な手順では
+                            // 一度も拡大できず、Sを押しながら"まだ選んでいない"相手を
+                            // クリックし直すしか方法が無かった。
+                            // 新規選択側と同じ振り分けをここにも置く（つまみを足した今も、
+                            // 従来のキー操作を覚えている人のために残す）。
                             lastMouseX = mx;
                             lastMouseY = my;
+                            if (CheckHitKey(KEY_INPUT_S)) {
+                                isScaling = true;
+                                if (!selectedGimmicks.empty())      baseScale = selectedGimmicks[0]->width;
+                                else if (!selectedEnemies.empty())  baseScale = selectedEnemies[0]->scale;
+                                else if (!selectedPlayers.empty())  baseScale = selectedPlayers[0]->scale;
+                            } else if (CheckHitKey(KEY_INPUT_W) && !selectedGimmicks.empty()) {
+                                isScalingHeight = true;
+                                baseScale = selectedGimmicks[0]->spriteHeight;
+                            } else if (CheckHitKey(KEY_INPUT_R)) {
+                                isRotating = true;
+                                if (!selectedGimmicks.empty())      baseAngle = selectedGimmicks[0]->angle;
+                                else if (!selectedEnemies.empty())  baseAngle = selectedEnemies[0]->angle;
+                                else if (!selectedPlayers.empty())  baseAngle = selectedPlayers[0]->angle;
+                            } else {
+                                // 何も押されていなければ従来どおりグループドラッグ
+                                isDragging = true;
+                            }
                         }
                         else {
                             // 新しいオブジェクトをクリックした場合、そのオブジェクトのみを選択
@@ -3395,7 +6857,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             selectedType = SELECT_GIMMICK;
                                             targetScale = &gim.width;
                                             targetAngle = &gim.angle;
-                                            targetSpeedScale = &gim.customTimer;
+                                            targetSpeedScale = &gim.speedScale; // 従来はcustomTimerを流用しUI上は"N/A"だった
                                             targetPaused = &gim.isPaused;
                                             targetRewind = &gim.isRewinding;
                                             targetDirection = nullptr;
@@ -3430,9 +6892,67 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                         }
                     }
+
+                    // ダブルクリックで向き反転。同じ物を0.3秒以内に2回押したら、選択中の物を反転する。
+                    // 反転は右クリックメニューの奥にしか無く、一番よく使う編集のわりに遠かった。
+                    // 1回目のクリックで始まるドラッグは移動量ゼロなので、位置には影響しない。
+                    if (!blockClicked) {
+                        int ck, ci;
+                        if (FindEditObjectAt(gx, gy, ck, ci)) {
+                            int nowMs = GetNowCount();
+                            if (ck == lastClickKind && ci == lastClickIdx && nowMs - lastClickMs <= 300) {
+                                EditFlip(); // コスト・禁止の判定は中で行う
+                                lastClickKind = -1;
+                                isDragging = false; // 2回目のクリックで始まったドラッグは取り消す
+                            } else {
+                                lastClickKind = ck; lastClickIdx = ci; lastClickMs = nowMs;
+                            }
+                        } else {
+                            lastClickKind = -1;
+                        }
+                    }
+                }
+
+                // 取り消し用：ジェスチャ（押してから離すまで）を始めた最初のフレームで、変形が掛かる前の状態を覚える。
+                // 変形はこの下で掛かるので、必ずここ（変形より前）で写し取る。
+                {
+                    bool gestureNow = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate
+                                   || isInspScale || isInspAngle || isInspSpeed;
+                    if (gestureNow && !gestureActive) {
+                        FlushWheelUndo();
+                        CaptureSelection(gestureBefore);
+                        gestureActive = true;
+                    }
+                }
+
+                // つまみのドラッグ。つかんでいる間は世界が止まるので、狙いを付けてゆっくり合わせられる。
+                //   拡縮 … 右下の角が指に付いてくる。つかんだ瞬間のずれは持ち越す（急に大きさが跳ねない）
+                //   回転 … 中心から指への向きがそのまま角度になる。15度の倍数の近くでは吸い付く
+                if (isHandleScale || isHandleRotate) {
+                    EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                    if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                        if (isHandleScale && targetScale != nullptr && handleBaseScale > 0.0f) {
+                            float uw = hb.w / (*targetScale);
+                            float p = 2.0f * (gx - (hb.x + hb.w * 0.5f)) / uw;
+                            SetUniformScale(handleBaseScale + (p - handleGrabP));
+                        }
+                        if (isHandleRotate) {
+                            float cx = hb.x + hb.w * 0.5f, cy = hb.y + hb.h * 0.5f;
+                            float target = atan2f(gx - cx, -(gy - cy)); // 真上が0、時計回りが正
+                            float da = WrapEditAngle(SnapEditAngle(target) - hAng);
+                            ApplyAngleDelta(da);
+                        }
+                    }
                 }
 
                 // 選択されたすべてのオブジェクトに一斉に変形を適用
+                // Feature: 編集リアクション — 「編集はタイムラインの外側にある」という方針。
+                //
+                // 変形するとき、現在値だけでなく巻き戻し履歴の同じ軸も一括で同じ量だけずらす。
+                // こうしないと「傾けた直後に巻き戻すと角度だけ元に戻る」「幅は履歴に無いので残る」といった
+                // 軸ごとにバラバラな挙動になり、プレイヤーから何が保存され何が戻るのか読めなくなる。
+                // 巻き戻すのは位置・速度・生死だけ、編集した形はそのまま維持される、に統一する。
+                // 履歴は最大600件だがドラッグ中のフレームだけの処理なのでコストは無視できる。
                 if (isDragging && selectedType != SELECT_NONE) {
                     float prevGx = (float)(lastMouseX - monitorX) + cameraX;
                     float prevGy = (float)(lastMouseY - monitorY) + cameraY;
@@ -3440,36 +6960,56 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dy = gy - prevGy;
 
                     for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
-                    for (auto* e : selectedEnemies) { e->x += dx; e->y += dy; e->vx = 0; e->vy = 0; }
-                    for (auto* g : selectedGimmicks) { g->x += dx; g->y += dy; }
-                    
+                    // アセット側で禁止されている操作は、選択に混ざっていても飛ばす。
+                    // 選択時点ではなくここで1体ずつ見るのは、複数選択に
+                    // 禁止された相手とそうでない相手が混ざりうるため。
+                    for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_MOVE)) continue;
+                        e->x += dx; e->y += dy; e->vx = 0; e->vy = 0;
+                        e->editDirtyMask |= EDIT_DIRTY_POS;
+                        for (auto& h : e->history) { h.x += dx; h.y += dy; }
+                    }
+                    for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_MOVE)) continue;
+                        g->x += dx; g->y += dy;
+                        g->editDirtyMask |= EDIT_DIRTY_POS;
+                        for (auto& h : g->history) { h.x += dx; h.y += dy; }
+                    }
+
                     lastMouseX = mx;
                     lastMouseY = my;
                 }
                 if (isScaling && selectedType != SELECT_NONE) {
+                    // 敵・プレイヤーは縦のマウス移動で一様に拡大縮小（従来どおり）。
+                    // ギミックの横幅だけは横のマウス移動で変える。
+                    // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
+                    // 実際の変形は共通入口 ApplyScaleDelta（つまみ・ホイール・INSPECTOR と共用）。
                     float ds = (float)(lastMouseY - my) * 0.01f;
-                    float dw = (float)(lastMouseY - my) * 1.0f;
-                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
-                    for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
-                    for (auto* g : selectedGimmicks) {
-                        g->width += dw;
-                        if (g->width < 10.0f) g->width = 10.0f;
-                        if (g->type == GIMMICK_SCALABLE_GROUND) {
-                            int imgW, imgH;
-                            GetGraphSize(jimenHandle, &imgW, &imgH);
-                            float tileW = g->spriteHeight * ((float)imgW / imgH);
-                            g->width = roundf(g->width / tileW) * tileW;
-                            if (g->width < tileW) g->width = tileW;
-                        }
-                        g->spriteWidth = g->width; // 描画と重量スイッチはspriteWidthを見るため同期が必須
-                    }
+                    float dw = (float)(mx - lastMouseX) * 1.0f;
+                    ApplyScaleDelta(ds, dw);
                     lastMouseY = my;
+                    lastMouseX = mx;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
                     float dh = (float)(lastMouseY - my) * 1.0f;
                     for (auto* g : selectedGimmicks) {
-                        g->spriteHeight += dh;
-                        if (g->spriteHeight < 10.0f) g->spriteHeight = 10.0f;
+                        if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
+                        g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
+                        // 下端を固定して上へ伸ばす。
+                        //
+                        // 以前は y を据え置いたまま高さだけ増やしていたので、
+                        // 地面に置いた箱は下へ伸びて地面にめり込み、上端はまったく動かなかった。
+                        // 「箱を高くして登る」という遊び方がそもそも成立していなかった。
+                        // editBaseY も同じだけ動かすのは、動く足場のように毎フレーム
+                        // editBaseY から位置を組み直す型でも下端を保つため。
+                        float beforeH = g->spriteHeight;
+                        float wantH = g->spriteHeight + dh;
+                        if (wantH < 10.0f) wantH = 10.0f;
+                        // 上へ伸ばした先が天井・足場に新しく食い込むなら、手前で止める
+                        g->spriteHeight = FitGimmickHeight(*g, wantH);
+                        float grownH = g->spriteHeight - beforeH;
+                        g->y -= grownH;
+                        g->editBaseY -= grownH;
                         if (g->type == GIMMICK_SCALABLE_GROUND) {
                             int imgW, imgH;
                             GetGraphSize(jimenHandle, &imgW, &imgH);
@@ -3484,34 +7024,49 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 if (isRotating && selectedType != SELECT_NONE) {
                     float da = (float)(mx - lastMouseX) * 0.02f;
-                    for (auto* p : selectedPlayers) { p->angle += da; }
-                    for (auto* e : selectedEnemies) { e->angle += da; }
-                    for (auto* g : selectedGimmicks) { g->angle += da; }
+                    ApplyAngleDelta(da); // 変形の実体は共通入口。AI所有の角度を持つ型などは中で除外される
                     lastMouseX = mx;
                 }
                 if (isInspScale && selectedType != SELECT_NONE) {
                     float ds = (float)(mx - lastMouseX) * 0.01f;
                     float dw = (float)(mx - lastMouseX) * 1.0f;
-                    for (auto* p : selectedPlayers) { p->scale += ds; if (p->scale < 0.1f) p->scale = 0.1f; }
-                    for (auto* e : selectedEnemies) { e->scale += ds; if (e->scale < 0.1f) e->scale = 0.1f; }
-                    for (auto* g : selectedGimmicks) { g->width += dw; if (g->width < 10.0f) g->width = 10.0f; g->spriteWidth = g->width; }
+                    ApplyScaleDelta(ds, dw);
                     lastMouseX = mx;
                 }
                 if (isInspAngle && selectedType != SELECT_NONE) {
                     float da = (float)(mx - lastMouseX) * 0.02f;
-                    for (auto* p : selectedPlayers) { p->angle += da; }
-                    for (auto* e : selectedEnemies) { e->angle += da; }
-                    for (auto* g : selectedGimmicks) { g->angle += da; }
+                    ApplyAngleDelta(da);
                     lastMouseX = mx;
                 }
                 if (isInspSpeed && selectedType != SELECT_NONE) {
                     float dsp = (float)(mx - lastMouseX) * 0.05f;
                     for (auto* p : selectedPlayers) { p->speedScale += dsp; if (p->speedScale < 0) p->speedScale = 0; }
-                    for (auto* e : selectedEnemies) { e->speedScale += dsp; if (e->speedScale < 0) e->speedScale = 0; }
+                    for (auto* e : selectedEnemies) {
+                        if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
+                        e->speedScale += dsp; if (e->speedScale < 0) e->speedScale = 0;
+                        e->editDirtyMask |= EDIT_DIRTY_SPEED;
+                    }
+                    // Feature: 編集リアクション — ギミックもspeedScaleを持つようになったのでここで動かせる
+                    for (auto* g : selectedGimmicks) {
+                        if (IsGimmickEditLocked(*g, EDITOP_SPEED)) continue;
+                        g->speedScale += dsp; if (g->speedScale < 0) g->speedScale = 0;
+                        g->editDirtyMask |= EDIT_DIRTY_SPEED;
+                    }
                     lastMouseX = mx;
                 }
             } else { 
-                isDragging = isScaling = isScalingHeight = isRotating = false; 
+                // 編集ジェスチャを確定した瞬間の音。
+                //
+                // 従来、編集ツールは「拒否されたときだけ音が鳴り、成功したときは無音」という
+                // 一貫性の無い状態だった。掴んでいる間ずっと鳴らすとうるさいので、
+                // マウスを離して確定した瞬間に1回だけ鳴らす。
+                // 取り消し用：ジェスチャが終わったので、前後の差を1手として記録する
+                if (gestureActive) { PushUndo(gestureBefore, 0.0f, false); gestureActive = false; gestureBefore.clear(); }
+                if (isScaling || isScalingHeight || isHandleScale) SoundManager::Get().PlaySe(gameConfig.editSe.scale);
+                else if (isRotating || isHandleRotate)             SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
+                else if (isDragging)                               SoundManager::Get().PlaySe(gameConfig.editSe.move);
+                isDragging = isScaling = isScalingHeight = isRotating = false;
+                isHandleScale = isHandleRotate = false;
                 isInspScale = isInspAngle = isInspSpeed = false;
             }
         }
@@ -3522,7 +7077,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ただしドラッグ中・スケール変更中などの「エディタ操作中」は、操作対象が動くと掴めなくなるので
         // 従来どおり一律停止させる（＝最初の早期returnより後ろで判定する）。
         auto CanUpdate = [&](float ox, float oy, float ow, float oh, float scale, bool isObjPaused, bool ignoresPause = false) {
-            if (currentScene != PLAY || isDragging || isScaling || isScalingHeight || isRotating || isShowingMessage) return false;
+            // 「PLAY以外は全部止める」ではなく、止めたいシーンを明示する。
+            // タイトルやステージセレクトはメインループの先頭で早期continueしており
+            // そもそもここへ来ないが、条件を曖昧にしておくと将来シーンを足したときに
+            // 意図しない場所が止まる/動くという事故につながる。
+            if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY
+                || isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isShowingMessage) return false;
             if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
             if (isStepFrame) return true;
             if (ignoresPause) return true;
@@ -3562,6 +7122,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bullets[i].isPlayerOwned = true; // プレイヤーの弾
                     bullets[i].isRewinding = false;
                     bullets[i].history.clear();
+                    SoundManager::Get().PlaySe(gameConfig.playerSe.shoot); // 射撃音（従来は無音だった）
                     break;
                 }
             }
@@ -3576,20 +7137,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // edge-trigger方式にする。天井に頭をぶつけて即座にisJumpingがfalseへ戻っても、キーを押しっぱなしのままでは
         // 再発火しないため、SE連続再生や不自然な連続ジャンプを防げる。
         static bool lastJumpKey = false;
-        bool currentJumpKey = CheckHitKey(KEY_INPUT_W) != 0;
+        // 矢印キーでも動ける。時間停止中の ← → は「コマ送り」に使っているので、
+        // 動かすのは停止していないときだけ（コマ送りのたびにプレイヤーも歩いてしまわないように）。
+        const bool arrowMoveOk = !isPaused;
+        bool currentJumpKey = CheckHitKey(KEY_INPUT_W) != 0 || (arrowMoveOk && CheckHitKey(KEY_INPUT_UP) != 0);
         if (currentScene == PLAY && canPlayerAct) {
             float baseSpd = editorPlayerCaps.baseSpeed;
             float baseJmp = (float)editorPlayerCaps.baseJumpPower;
             bool isShift = (CheckHitKey(KEY_INPUT_LSHIFT) || CheckHitKey(KEY_INPUT_RSHIFT));
             // ダッシュ能力があればShiftでダッシュ、なければ通常速度のみ
-            float speed = (isShift && editorPlayerCaps.canDash) ? baseSpd * 2.0f : baseSpd;
+            bool wantDash = (isShift && editorPlayerCaps.canDash);
+            float speed = wantDash ? baseSpd * 2.0f : baseSpd;
             player.vx = 0;
-            if (CheckHitKey(KEY_INPUT_A)) { player.vx = -speed; player.direction = 1; }
-            if (CheckHitKey(KEY_INPUT_D)) { player.vx = speed; player.direction = 0; }
+            if (CheckHitKey(KEY_INPUT_A) || (arrowMoveOk && CheckHitKey(KEY_INPUT_LEFT)))  { player.vx = -speed; player.direction = 1; }
+            if (CheckHitKey(KEY_INPUT_D) || (arrowMoveOk && CheckHitKey(KEY_INPUT_RIGHT))) { player.vx = speed; player.direction = 0; }
+            // ダッシュ開始音。押しっぱなしで鳴り続けないよう、走り出した瞬間だけ鳴らす
+            // （ジャンプと同じエッジ検出の考え方）。
+            static bool lastDashing = false;
+            bool nowDashing = wantDash && (player.vx != 0.0f);
+            if (nowDashing && !lastDashing) SoundManager::Get().PlaySe(gameConfig.playerSe.dash);
+            lastDashing = nowDashing;
             if (currentJumpKey && !lastJumpKey && !player.isJumping) {
                 player.vy = baseJmp;
                 player.isJumping = true;
-                SoundManager::Get().PlaySe("jump");
+                SoundManager::Get().PlaySe(gameConfig.playerSe.jump);
             }
         } else {
             player.vx = 0;
@@ -3600,11 +7171,71 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         SetDrawScreen(gameScreen);
         ClearDrawScreen();
 
+        // 【描画順】背景はこのフェーズの一番最初に描くこと。
+        //
+        // 以前この背景描画はゴール・チェックポイント・ギミックを描いたあとに置かれていた。
+        // 背景は画面全体を塗るので、先に描かれていたそれらを毎フレーム塗り潰してしまう。
+        // これまで表面化しなかったのは、既存ステージが1つも背景レイヤーを持っておらず
+        // ループの中身が一度も走っていなかったため。背景を付けた途端に
+        // 「ギミックとゴールが消える」という形で出る。
+        // Feature 1: 背景レイヤー（遠景）の描画
+        //
+        // drawOrder の小さい順に描く。以前はベクタの順のまま描いていて drawOrder を完全に無視しており、
+        // Lab_Editor のプレビュー（こちらはソート済み）と前後関係が食い違っていた。
+        // 毎フレーム並べ替えるのは無駄なので、添字だけを並べ替える。
+        {
+            const auto& bgs = stages[currentStageIdx].backgrounds;
+            std::vector<int> bgOrder(bgs.size());
+            for (size_t i = 0; i < bgs.size(); i++) bgOrder[i] = (int)i;
+            std::sort(bgOrder.begin(), bgOrder.end(),
+                      [&bgs](int a, int b) { return bgs[a].drawOrder < bgs[b].drawOrder; });
+            for (int bi : bgOrder) {
+                const BackgroundLayer& bl = bgs[bi];
+                // 画像が無くても色が指定されていれば、その色で画面いっぱいを塗る。
+                // 画像と色の両方がある場合は、色を下地にして画像を重ねる。
+                if (bl.hasColor) {
+                    DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bl.colorRGB, TRUE);
+                }
+                if (bl.handle < 0) continue;
+                int imgW, imgH;
+                GetGraphSize(bl.handle, &imgW, &imgH);
+                if (imgW > 0 && imgH > 0) {
+                    float parallaxCamX = cameraX * bl.scrollRate;
+                    float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
+                    float drawY = -parallaxCamY + bl.offsetY;
+                    if (bl.loop) {
+                        // 繰り返す背景：画像1枚ぶんの幅で割った余りだけ動かし、画面の幅を覆い尽くすまで横へ並べる。
+                        //
+                        // 以前は「2枚だけ」並べていたので、画像が画面より狭いと右側に隙間ができ、
+                        // offsetX をプラスにすると左側に隙間ができた（先頭が画面の内側から始まるため）。
+                        float x = -fmodf(parallaxCamX, (float)imgW) + bl.offsetX;
+                        while (x > 0.0f) x -= (float)imgW; // 左端に隙間が出ない位置まで戻す
+                        for (; x < (float)SCREEN_WIDTH; x += (float)imgW) {
+                            DrawGraph((int)x, (int)drawY, bl.handle, TRUE);
+                        }
+                    } else {
+                        // 繰り返さない背景：1枚だけを、スクロールに合わせて動かす（端まで行ったら画面の外へ出ていく）。
+                        // 以前はループしない設定でも余りで巻き戻していたため、1枚の背景が途中で唐突に先頭へ飛んでいた。
+                        DrawGraph((int)(-parallaxCamX + bl.offsetX), (int)drawY, bl.handle, TRUE);
+                    }
+                }
+            }
+        }
+
+
         auto CheckCollision = [](float x1, float y1, float w1, float h1, float x2, float y2, float w2, float h2) {
             return (x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2);
         };
 
         float ts = isStepFrame ? 1.0f : finalTimeScale;
+
+        // Feature: 編集リアクション — 画面エフェクトの現在値を、当たり判定側からも読めるよう共有する。
+        // 明暗やズームは1フレーム遅れて追従する値(fxCur*)を使うが、
+        // 見えている画面と判定を一致させたいので、追従後の値をそのまま渡すのが正しい。
+        g_screenFx.brightness  = fxCurBright;
+        g_screenFx.zoom        = fxCurZoom;
+        g_screenFx.colorFilter = playerColorFilter;
+        g_screenFx.fastForward = isFastForward;
         Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
         BehaviorInterpreter::globalOpsThisFrame = 0; // Feature: Puzzle-like Behavior Scripting (M2) — 全スクリプト実行体の命令数予算を毎フレームリセット
         BehaviorInterpreter::globalFrameCounter += 1.0f; // Feature: Composite Multi-Part Objects (Parts-M2) — TIME_FIELD演出用（ポーズ中も止めずに加算し続ける必要があるためこのままにする）
@@ -3670,16 +7301,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 player.vy += GRAVITY * pts; 
-                
+
+                // このフレームで実際に動く量を、縦も横も同じ時間スケールで出す。
+                //
+                // 以前は横だけ pts を掛け、縦は player.vy をそのまま足していた。
+                // 重力は pts ぶん加速するので、早送り中(pts=2)は
+                //   ・横は2倍進む
+                //   ・縦は等倍しか進まないのに落ちる勢いだけ2倍で増える
+                // という食い違った放物線になり、ジャンプしている間だけ動きが変わって見えた。
+                // ダッシュ中はさらに横が2倍なので、跳んだ瞬間に前へ滑っていくように見える。
+                //
+                // 当たり判定側は「速度」ではなく「このフレームの移動量」を基準に
+                // めり込み許容値(vy + 8px 等)を決めているので、判定にも同じ値を渡す。
+                // 床や天井に当たると判定側がこの値を0にするので、それを見て本体の速度を止める。
+                float stepVy = player.vy * pts;
+
                 // X/Y方向の移動と衝突判定を共通化
-                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, player.vy, player.vy,
+                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, stepVy, stepVy,
                                                           player.width, player.height, player.scale,
                                                           stages[currentStageIdx].map, tileDefs, gimmicks);
 
                 // 従来の足場との着地衝突判定
-                bool platGrounded = CheckPlatformCollision(player.x, player.y, player.vy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex);
+                bool platGrounded = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex);
+                // Feature: 編集リアクション（共通層）— 個別に一時停止した敵は足場になる。
+                // 相手が何であっても必ず通用する手札として用意することで、
+                // 「届かない高さは、そこにいる敵を止めて踏み台にする」という解法がどのステージでも成立する。
+                if (!platGrounded) {
+                    platGrounded = CheckFrozenEnemyPlatform(player.x, player.y, stepVy,
+                                                            player.width, player.height, player.scale, enemies);
+                }
+                // 何かに当たって移動量が0にされたなら、速度そのものも止める。
+                // pts が0（速度0に編集された）のときは移動していないだけなので触らない。
+                if (pts > 0.0f && stepVy == 0.0f) player.vy = 0.0f;
                 
                 if (isGrounded || platGrounded) {
+                    // 着地音。空中から地面に着いた瞬間だけ鳴らす。
+                    // isJumping は接地している間ずっと false なので、
+                    // 「直前は true だった」ときに限定しないと毎フレーム鳴り続ける。
+                    if (player.isJumping) SoundManager::Get().PlaySe(gameConfig.playerSe.land);
                     player.isJumping = false;
                 }
 
@@ -3693,12 +7352,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive) continue;
                     if (gim.isTimelineCut) continue; // タイムラインカットは座標を持たないので、このAABB判定の対象外
                     bool touching = CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
-                    if (touching && !gim.portalWasTouching && !gim.param.empty()) {
+                    // 編集リアクション：
+                    //  ・幅を広げる → 出口が「広げたぶんだけ先」へずれる。同じポータル対でも到達点を伸ばせる。
+                    //  ・向き反転   → 一方通行になる（入口としては働かず、出口専用になる）。
+                    //  ・傾ける     → 出口の高さがずれる（上下の別ルートへ飛ばせる）。
+                    EditReaction pr = GetGimmickEditReaction(gim);
+                    if (touching && !gim.portalWasTouching && !gim.param.empty() && !pr.flipped) {
                         for (auto& other : gimmicks) {
                             if (&other == &gim || other.type != GIMMICK_CUT_PORTAL || !other.isActive) continue;
                             if (other.param != gim.param) continue;
-                            player.x = other.x;
-                            player.y = other.y;
+                            player.x = other.x + (gim.width - gim.editBaseWidth);
+                            player.y = other.y - sinf(pr.tilt) * 96.0f;
                             other.portalWasTouching = true; // 転送先での即時再トリガーを防ぐ
                             const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
@@ -3748,8 +7412,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 1. 砂時計リフトの更新（プレイヤーが乗っているとゆっくり降下）
                 for (auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_FALLING_LIFT && gim.isActive) {
+                        // 編集リアクション：
+                        //  ・幅を広げる → 支える面積が増えて沈むのが遅くなる（渡りきる時間を稼げる）。
+                        //  ・幅を狭める → 一気に沈む。
+                        //  ・向き反転   → 沈まずに逆へ浮上する（上の足場へ運んでもらえる）。
+                        //  ・傾ける     → 傾けた向きへ滑りながら沈む。
+                        //  ・速度       → 沈下速度そのものが変わる。
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float sinkSpeed = gdef ? gdef->sinkSpeed : 1.5f;
+                        EditReaction lr = GetGimmickEditReaction(gim);
+                        float sinkSpeed = (gdef ? gdef->sinkSpeed : 1.5f) * lr.MassMul() * gim.speedScale;
+                        if (lr.flipped) sinkSpeed = -sinkSpeed; // 反転で浮上する
                         float maxDepth = gdef ? gdef->maxDepthOffset : 20.0f;
                         float objW = (float)player.width * player.scale;
                         float objH = (float)player.height * player.scale;
@@ -3758,8 +7430,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.spriteWidth) {
                             float threshold = player.vy + 8.0f;
                             if (footY >= gim.y && footY <= gim.y + threshold) {
-                                gim.y += sinkSpeed * pts; // ゆっくり降下
-                                if (gim.y > groundY - maxDepth) gim.y = groundY - maxDepth; // 地面を限界とする
+                                gim.y += cosf(lr.tilt) * sinkSpeed * pts; // ゆっくり降下
+                                gim.x += sinf(lr.tilt) * sinkSpeed * pts; // 傾けた向きへ滑る
+                                if (sinkSpeed > 0.0f && gim.y > groundY - maxDepth) gim.y = groundY - maxDepth; // 地面を限界とする
+                                if (gim.y < -200.0f) gim.y = -200.0f; // 浮上時に画面外へ飛び去らないよう天井を張る
                             }
                         }
                     }
@@ -3772,10 +7446,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 「最初に見つかったスイッチ」を全ドアに適用する（後方互換）。
                 struct SwitchState { const Gimmick* gim; bool active; };
                 std::vector<SwitchState> switchStates;
-                for (const auto& switchGim : gimmicks) {
+                // 押された瞬間を検出するために customTimer を書き換えるので、const参照にはできない
+                for (auto& switchGim : gimmicks) {
                     if (switchGim.type != GIMMICK_WEIGHT_SWITCH || !switchGim.isActive) continue;
                     const GimmickDef* gdef = FindGimmickDef(switchGim.assetId);
-                    float switchTriggerThreshold = gdef ? gdef->triggerWidthThreshold : 140.0f;
+                    EditReaction sr = GetGimmickEditReaction(switchGim);
+                    // 編集リアクション：
+                    //  ・幅を広げる → 要求される重さが緩む（小さいボックスでも押せるようになる）。
+                    //  ・幅を狭める → より大きく拡大したボックスでないと反応しない。
+                    //  ・向き反転   → 条件が反転し「何も乗っていないとき」に作動する常時ONスイッチになる。
+                    float switchTriggerThreshold = (gdef ? gdef->triggerWidthThreshold : 140.0f) * sr.MassMul();
                     bool active = false;
                     for (const auto& boxGim : gimmicks) {
                         if (boxGim.type == GIMMICK_SCALABLE_BOX && boxGim.isActive) {
@@ -3786,6 +7466,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                         }
                     }
+
+                    // Feature: 編集リアクション — 敵の重さでもスイッチを押せるようにする。
+                    //
+                    // これは「編集していない状態の挙動」を変えてしまう唯一の項目なので、
+                    // 既存ステージの解法を壊さないよう明示的なオプトインにしてある。
+                    // ステージJSONのparamに "enemyweight" を含めたスイッチだけが敵に反応する。
+                    // paramは文字列としてLab_Editorを素通りするため、エディタ側の改修は要らない。
+                    if (switchGim.param.find("enemyweight") != std::string::npos) {
+                        for (const auto& e : enemies) {
+                            if (!e.isActive) continue;
+                            float ew = (float)e.hitboxWidth * e.scale;
+                            float eh = (float)e.hitboxHeight * e.scale;
+                            // スイッチの真上に乗っているか（足元がスイッチ上面付近にあるか）
+                            if (e.x + ew >= switchGim.x && e.x <= switchGim.x + switchGim.spriteWidth) {
+                                float feet = e.y + eh;
+                                if (feet >= switchGim.y - 12.0f && feet <= switchGim.y + switchGim.spriteHeight + 12.0f) {
+                                    // 拡大された敵ほど重い。等倍でも押せる幅を基準にする
+                                    if (ew * e.scale >= switchTriggerThreshold * 0.25f) active = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if (sr.flipped) active = !active; // 反転で条件が裏返る
+
+                    // スイッチが入った瞬間の音。
+                    // 重量スイッチには seActivate が設定済みだったのに再生箇所がどこにも無く、
+                    // 設定だけが空回りしていた。状態が変わった瞬間だけ鳴らす。
+                    // 「押されている状態」をギミック側の customTimer に覚えさせている
+                    // （専用のメンバを増やさずに前フレームの状態を持ち越すため）。
+                    bool wasPressed = (switchGim.customTimer > 0.5f);
+                    if (active && !wasPressed) {
+                        const GimmickDef* gdefSw = FindGimmickDef(switchGim.assetId);
+                        if (gdefSw) SoundManager::Get().PlaySe(gdefSw->seActivate);
+                    }
+                    switchGim.customTimer = active ? 1.0f : 0.0f;
+
                     switchStates.push_back({ &switchGim, active });
                 }
 
@@ -3793,6 +7510,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (auto& gim : gimmicks) {
                     if (gim.type == GIMMICK_GATE_DOOR) {
                         if (gim.val1 > 0.5f) continue; // OpenDoorイベントで手動オープン済みのドアは自動ロジックの対象外
+                        // Feature: 編集リアクション — 倒した扉は「足場」として使う状態なので、
+                        // スイッチ連動でisActiveを毎フレーム上書きされると床ごと消えてしまう。
+                        // 倒れている間は自動開閉の対象から外し、プレイヤーが作った足場を維持する。
+                        if (GimmickIsTipped(gim)) { gim.isActive = true; continue; }
                         bool switchActive = false;
                         if (!gim.param.empty()) {
                             for (auto& sw : switchStates) if (sw.gim->param == gim.param) switchActive = switchActive || sw.active;
@@ -3857,11 +7578,81 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: Configurable Behavior Parameters (M1) — このフレームのEnemyDefを一度だけ引く
                     const EnemyDef* edef = FindEnemyDef(enemy.assetId);
 
+                    // ================= Feature: 編集リアクション（共通の前処理）=================
+                    // このフレームの「プレイヤーが配置時からどれだけ手を加えたか」を一度だけ求め、
+                    // 以降の全ての分岐で共有する。
+                    EditReaction er = GetEnemyEditReaction(enemy, edef);
+
+                    // AI分岐が enemy.vx を上書きする前の値。速度を上げすぎた相手に慣性を持たせるのに使う
+                    // （専用のメンバを増やさずに済むよう、上書き前のこの瞬間に退避しておく）。
+                    float erPrevVx = enemy.vx;
+
+                    // 全型に共通で効く倍率。各AI分岐はEnemyDefの数値にこれを掛けて使うことで、
+                    // 「拡大すると重くて鈍い」「暗いと相手に見つかりにくい」といったルールが
+                    // 型ごとに書かなくても揃って効くようになる。
+                    float erMass = er.MassMul(); // 拡大で鈍く、縮小で軽快に
+
+                    // 索敵範囲の倍率。画面を暗くすれば見つかりにくく、明るくすれば見つかりやすい。
+                    // 明暗の編集ツール(X/C)が、これまで一部のギミック以外に何の意味も持たなかったのを埋める。
+                    float erVision = 1.0f;
+                    if (fxCurBright < 0.6f)      erVision = 0.6f;
+                    else if (fxCurBright > 1.3f) erVision = 1.4f;
+
+                    // 弱点色。色フィルタ(Tキー)が弱点と一致している間は動きが鈍る。
+                    // 弱点はtype_enumから機械的に決めるので、今後追加される型にも自動で割り当たる。
+                    bool erWeakColor = (playerColorFilter != 0 && playerColorFilter == (((int)enemy.type % 3) + 1));
+                    if (erWeakColor) erMass *= 0.7f;
+
+                    // 早送り中の攻撃間隔の詰まり具合。これまでSTATIONARY/PATROL_SHOOTERにしか無かったが、
+                    // 「雑に早送りで駆け抜けるとリスクが上がる」というルールは全型に効いてよい。
+                    float erFfAtk = isFastForward ? (edef ? edef->fastForwardAttackMult : 2.2f) : 1.0f;
+
+                    // Feature: 編集リアクションのJSON宣言 — アセット側で宣言された効果を解釈し、
+                    // 共通の倍率に合流させる。宣言が無ければ何も変わらない（既存アセットは全て空）。
+                    // これにより、C++に固有実装を書かなくてもJSONだけで反応を足せる。
+                    DeclaredEffects erDecl = GetEnemyDeclaredEffects(enemy, edef, er);
+                    if (erDecl.any) {
+                        erMass   *= erDecl.mulMoveSpeed;
+                        erVision *= erDecl.mulSightRange;
+                        erFfAtk  *= erDecl.mulAttackRate;
+                        if (erDecl.destroy) {
+                            enemy.hp = 0;
+                            enemy.isActive = false;
+                        }
+                    }
+
+                    // AI分岐が傾きを自前で解釈したか。しなかった型には分岐の後で
+                    // 「傾けた向きへ坂道のように滑る」という汎用の反応を掛ける。
+                    bool erTiltHandled = false;
+
+                    // プレイヤーが実際に「向き反転」ツールを使ったかどうか。
+                    //
+                    // EditReaction::flipped は「今の向きが配置時と違う」でしかないため、
+                    // AIが毎フレーム enemy.direction をプレイヤーの位置から書き換える型では、
+                    // プレイヤーが左右を行き来するだけで勝手に true/false が点滅してしまう。
+                    // 実際これが原因で、砲台の「反転させると味方撃ちになる」は
+                    // プレイヤーの立ち位置だけで弾の所属が入れ替わる状態になっていた。
+                    // 編集されたという事実はダーティビットにしか残らないので、そちらを見る。
+                    //
+                    // ※ JUMPER と SHIELD は「自分で direction を書き換えて反転を消費する」ことが
+                    //    仕様なので、あちらは今までどおり er.flipped を使う。
+                    bool erFlipEdited = ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u);
+                    (void)erFfAtk; (void)erVision; // 型によっては使わないための抑制
+                    // =========================================================================
+
                     // 敵タイプ(EnemyType)ごとに行動ロジックを分岐させる
                     switch (enemy.type) {
                         case ENEMY_PATROL: {
                             // シンプルAI：patrolLeft ～ patrolRight の範囲でパトロール
-                            float enemySpeed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f);
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 重く鈍くなる代わりに破城槌になり、進路上の壊せるブロックを押し割る。
+                            //  ・縮小     → 軽く速くなり、崖でも止まらずに落ちていく（落として下へ運べる）。
+                            //  ・傾ける   → 転がりモード。巡回範囲を無視して傾けた向きへ進み続ける。
+                            //  ・向き反転 → 巡回範囲の端を待たずその場で折り返す。
+                            //  ・速度を上げすぎる → 慣性で折り返しに失敗し、自分から崖へ飛び出す（共通の後処理）。
+                            //  ・暗転     → 足元が見えなくなり、崖でも止まらなくなる。
+                            float enemySpeed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f) * erMass;
                             // 巡回範囲が未設定なら ±200px で初期化
                             if (enemy.patrolLeft < 0 && enemy.patrolRight < 0) {
                                 enemy.patrolLeft = std::max<float>(0.0f, enemy.x - 200.0f);
@@ -3892,9 +7683,57 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 空中に浮いている個体（足場の無い所に配置された敵）まで崖判定で止めてしまうと
                             // その場で永久に向きを変え続けるだけになるので、今まさに接地している時だけ崖を見る。
                             bool groundedNowP = (std::abs(enemy.vy) < 1.0f) && probeTileP(enemy.x + bodyW * 0.5f, enemy.y + bodyH + 4.0f);
-                            bool turnByTerrain = wallAheadP || (groundedNowP && !groundAheadP);
 
-                            if (enemy.direction == 0) {
+                            // 縮小されている、または画面が暗いときは崖を見なくなる。
+                            // 小さくすれば軽くて速い代わりに落ちる、という取引にすることで
+                            // 「落として下の階層へ運ぶ」「谷へ落として排除する」という使い道が生まれる。
+                            bool seesCliff = !(er.shrunk || g_screenFx.brightness < 0.6f);
+                            bool turnByTerrain = wallAheadP || (seesCliff && groundedNowP && !groundAheadP);
+
+                            // 拡大されたまるびは破城槌になり、進路上の壊せるブロックを押し割って進む。
+                            // ドッスンの着地時と同じく、その場で相手のisActiveを落とすだけなので
+                            // ギミック配列の要素数は変わらず、選択中ポインタを壊す心配がない。
+                            {
+                                // 体当たりでブロックを割る。壊せるかどうかはブロック側の設定が決めるので、
+                                // ここで拡大されているかを見る必要はなくなった（大きさの条件は breakMinScale）。
+                                float ramX = (enemy.direction == 0) ? (enemy.x + bodyW) : (enemy.x - 8.0f);
+                                for (auto& gimRam : gimmicks) {
+                                    if (gimRam.type != GIMMICK_BREAKABLE_BLOCK || !gimRam.isActive) continue;
+                                    if (ramX >= gimRam.x && ramX <= gimRam.x + gimRam.spriteWidth &&
+                                        enemy.y + bodyH > gimRam.y && enemy.y < gimRam.y + gimRam.spriteHeight) {
+                                        if (TryBreakGimmick(gimRam, BREAK_RAM, enemy.scale)) {
+                                            wallAheadP = false; // 割った直後は壁扱いを解いて進ませる
+                                            turnByTerrain = false;
+                                        }
+                                    }
+                                }
+                                // Feature: タイル破壊 — 進路上の地形タイルも同じ条件で押し割る。
+                                // 体の高さぶんを半マス刻みで見るのは、1点だけだと背の高い個体が
+                                // 壁の一部しか割らずにその場で引っかかってしまうため。
+                                int ramColT = (int)(ramX / TILE_SIZE);
+                                for (float fy = 2.0f; fy < bodyH; fy += TILE_SIZE * 0.5f) {
+                                    if (TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), ramColT, BREAK_RAM, enemy.scale)) {
+                                        wallAheadP = false;
+                                        turnByTerrain = false;
+                                    }
+                                }
+                            }
+
+                            if (er.tilted) {
+                                // 転がりモード：まるびは丸いので、傾けられるとその向きへ転がり続ける。
+                                // 巡回範囲という「見えない壁」を無視するため、坂道のように使って
+                                // スイッチの上や谷の向こうまで運べる。壁に当たったときだけ跳ね返る。
+                                erTiltHandled = true;
+                                float rollDir = (er.tilt > 0.0f) ? 1.0f : -1.0f;
+                                enemy.direction = (rollDir > 0.0f) ? 0 : 1;
+                                float rollSpeed = enemySpeed * (1.0f + std::abs(sinf(er.tilt)) * 1.5f);
+                                enemy.vx = rollDir * rollSpeed;
+                                if (wallAheadP) {
+                                    // 壁では跳ね返る（見た目の回転も逆向きになるので挙動が読める）
+                                    enemy.angle = enemy.editBaseAngle - er.tilt;
+                                    enemy.vx = 0.0f;
+                                }
+                            } else if (enemy.direction == 0) {
                                 enemy.vx = enemySpeed;
                                 if (turnByTerrain || (enemy.patrolRight > 0 && enemy.x + enemy.vx >= enemy.patrolRight)) {
                                     enemy.direction = 1;
@@ -3911,8 +7750,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_JUMPER: {
                             // ジャンプAI：定期的にジャンプ（タイルマップ＋足場両方で着地チェック）
-                            float jumpInterval = edef ? edef->actionInterval : 90.0f;
-                            float jumpPowerMult = edef ? edef->jumpPowerMult : 0.7f;
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 重いぶん跳ぶ間隔が伸びるが、一度の跳躍が高くなる。
+                            //  ・縮小     → 小刻みに跳ね続ける。
+                            //  ・傾ける   → 真上ではなく傾けた向きへ斜めに跳ぶ（跳ぶ先を誘導できる）。
+                            //  ・向き反転 → 着地のたびに左右交互へ跳ぶ移動体になる。
+                            //  ・速度0    → 跳ばなくなり、その場の台になる。
+                            float jumpInterval = (edef ? edef->actionInterval : 90.0f) * er.scaleRatio;
+                            float jumpPowerMult = (edef ? edef->jumpPowerMult : 0.7f) * er.scaleRatio;
+                            // 傾けは「跳ぶ向き」の指定。跳ぶまでの待機中に床を滑らせない。
+                            if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets;
                             enemy.vx = 0.0f;
 
@@ -3930,7 +7778,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             if (isGrounded && enemy.customTimer >= jumpInterval) {
-                                enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpPowerMult;
+                                float jumpMag = (float)(-editorPlayerCaps.baseJumpPower) * jumpPowerMult;
+                                enemy.vy = -jumpMag;
+                                if (er.tilted) {
+                                    // 編集で向けられた方向へ跳ぶ。真上が基準なので、
+                                    // 未編集なら従来どおりの真上ジャンプと完全に一致する。
+                                    erTiltHandled = true;
+                                    float jumpHx = 0.0f, jumpHy = -1.0f;
+                                    GetEnemyHeading(enemy, er, REST_UP, jumpHx, jumpHy);
+                                    enemy.vx = jumpHx * jumpMag;
+                                    enemy.vy = jumpHy * jumpMag;
+                                } else if (er.flipped) {
+                                    // 向きを反転させると、着地のたびに左右交互へ跳ぶ移動体になる
+                                    enemy.vx = (enemy.direction == 0 ? 1.0f : -1.0f) * jumpMag * 0.5f;
+                                    enemy.direction = (enemy.direction == 0) ? 1 : 0;
+                                }
                                 enemy.customTimer = 0.0f;
                             }
                             break;
@@ -3939,16 +7801,50 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 固定AI：全方位からプレイヤーへ正確に狙い撃つ。発射直前は画面を軽くズームインして溜めを予告する。
                             // 編集機能連動：早送り中は攻撃間隔がfastForwardAttackMult倍で詰まり、雑に駆け抜けるとリスクが上がる
                             // （一時停止はCanUpdate経由で既にタイマーごと止まるため、丁寧に近づけば安全という差別化になる）。
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける   → 手動照準。その瞬間に追尾を止め、傾けた向きへ次の一発を撃つ。
+                            //  ・拡大／縮小 → 弾の大きさと速さが変わる。
+                            //  ・向き反転 → その瞬間に追尾を止め、向けられた側へ真横に次の一発を撃つ。
+                            //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
+                            //  ・暗転     → 溜めの予告ズームが弱まり、いつ撃たれるか読みにくくなる。
                             float shootInterval = edef ? edef->actionInterval : 120.0f;
-                            float projSpeed = edef ? edef->projectileSpeed : 0.6f;
+                            float projSpeed = (edef ? edef->projectileSpeed : 0.6f) * erMass;
                             float ffAtkMultS = edef ? edef->fastForwardAttackMult : 2.2f;
                             enemy.vx = 0.0f;
+                            // 【重要】傾けは「狙いを決める操作」なので、共通の後処理にある
+                            // 「傾けた向きへ坂道を滑る」反応を二重に掛けてはいけない。
+                            // これまで erTiltHandled を撃つ瞬間（＝イベントの起きたフレーム）にしか
+                            // 立てていなかったため、狙いを付けてから撃つまでのあいだ毎フレーム
+                            // 横へ押され続け、その場に据え付けたはずの砲台が床を滑って移動していた。
+                            // 傾いている間はずっと「自分で解釈済み」と宣言しておく。
+                            if (er.tilted) erTiltHandled = true;
 
                             float pCenterXs = player.x + (player.width * player.scale) / 2.0f;
                             float pCenterYs = player.y + (player.height * player.scale) / 2.0f;
                             float eCenterXs = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
                             float eCenterYs = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
-                            enemy.direction = (pCenterXs < eCenterXs) ? 1 : 0;
+                            // ---- このフレームの狙い（毎フレーム決める）----
+                            // 砲身のようなパーツは ParentAim でこの結果を読むので、絵と弾が必ず一致する。
+                            // 照準砲台と同じ約束：編集された瞬間に追尾を止め、向けられた方向へ1発撃ち、
+                            // 撃ったら編集を消費して追尾へ戻る。編集中はプレイヤーの位置を見ない。
+                            bool aimedByEditS = (er.tilted || erFlipEdited);
+                            {
+                                float ax, ay;
+                                if (er.tilted) {
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
+                                } else if (erFlipEdited) {
+                                    ax = (enemy.direction == 1) ? -1.0f : 1.0f;
+                                    ay = 0.0f;
+                                } else {
+                                    ax = pCenterXs - eCenterXs; ay = pCenterYs - eCenterYs;
+                                    float ad = sqrtf(ax * ax + ay * ay);
+                                    if (ad < 1.0f) ad = 1.0f;
+                                    ax /= ad; ay /= ad;
+                                }
+                                enemy.aimAngle = atan2f(ay, ax);
+                                enemy.direction = (ax < 0.0f) ? 1 : 0;
+                            }
 
                             enemy.customTimer += ets * (isFastForward ? ffAtkMultS : 1.0f);
 
@@ -3961,34 +7857,60 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             if (enemy.customTimer >= shootInterval) {
-                                float dxS = pCenterXs - eCenterXs;
-                                float dyS = pCenterYs - eCenterYs;
-                                float distS = sqrtf(dxS * dxS + dyS * dyS);
-                                if (distS < 1.0f) distS = 1.0f;
+                                // 狙いは毎フレーム上で決めてある。ここではその向きへ撃つだけ。
+                                float dirXs = cosf(enemy.aimAngle);
+                                float dirYs = sinf(enemy.aimAngle);
+                                // 弾を体の外へ出してから撃つ（砲口の位置）。
+                                //
+                                // 従来は自分の中心にそのまま湧かせていた。敵の弾はプレイヤーにしか当たらないので
+                                // それでも問題にならなかったが、反転させた砲台の弾は「プレイヤー側の弾」になり、
+                                // 他の敵＝自分自身にも当たるようになる。拡大した砲台は体が大きく、しかも
+                                // 弾速が erMass ぶん遅くなるため、1フレームで体を抜けられずに自分の弾で死ぬ。
+                                // 射線方向へ半サイズぶん押し出しておけば、どんな大きさ・速さでも自爆しない。
+                                float muzzleRs = sqrtf((float)enemy.hitboxWidth * enemy.scale * (float)enemy.hitboxWidth * enemy.scale
+                                                     + (float)enemy.hitboxHeight * enemy.scale * (float)enemy.hitboxHeight * enemy.scale) * 0.5f + 4.0f;
+                                // 発射音。従来 seAttack は「飛びかかり」と「体当たり」でしか鳴らしておらず、
+                                // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
+                                // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = eCenterXs;
-                                        bullets[i].y = eCenterYs;
+                                        bullets[i].x = eCenterXs + dirXs * muzzleRs;
+                                        bullets[i].y = eCenterYs + dirYs * muzzleRs;
                                         float spdS = BULLET_SPEED * projSpeed;
-                                        bullets[i].vx = dxS / distS * spdS;
-                                        bullets[i].vy = dyS / distS * spdS;
-                                        bullets[i].isPlayerOwned = false; // 敵の弾
+                                        bullets[i].vx = dirXs * spdS;
+                                        bullets[i].vy = dirYs * spdS;
+                                        bullets[i].scale = er.scaleRatio;
+                                        bullets[i].isPlayerOwned = erFlipEdited; // 反転で味方撃ちになる
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
                                     }
                                 }
                                 enemy.customTimer = 0.0f;
+                                if (aimedByEditS) {
+                                    // 撃ったら編集を消費して追尾へ戻す（基準を今の姿勢・向きへ置き直す）
+                                    enemy.editBaseAngle = enemy.angle;
+                                    enemy.editBaseDirection = enemy.direction;
+                                    enemy.editDirtyMask &= ~(unsigned int)(EDIT_DIRTY_ANGLE | EDIT_DIRTY_DIR);
+                                }
                             }
                             break;
                         }
                         case ENEMY_PATROL_SHOOTER: {
                             // 索敵＆射撃AI。索敵後は全方位からプレイヤーへ正確に狙い撃つ（従来は水平のみ）。
                             // 編集機能連動：早送り中は攻撃間隔がfastForwardAttackMult倍で詰まる（STATIONARYと同様の設計）。
-                            float detectX = edef ? edef->triggerRange : 300.0f;
-                            float detectY = edef ? edef->detectionRangeY : 100.0f;
-                            float patrolSpd = edef ? edef->moveSpeed : 0.5f;
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 索敵範囲が広がる代わりに歩きが鈍る。
+                            //  ・縮小     → 索敵が狭くなり、すり抜けやすくなる。
+                            //  ・傾ける   → 照準が固定され、プレイヤーではなく傾けた向きへ撃つ。
+                            //  ・向き反転 → 見つけても撃たずに逃げ出す（プレイヤーと反対側へ歩き続ける）。
+                            //  ・暗転     → 索敵範囲が縮み、目の前まで気付かれない。
+                            float detectX = (edef ? edef->triggerRange : 300.0f) * er.scaleRatio * erVision;
+                            float detectY = (edef ? edef->detectionRangeY : 100.0f) * er.scaleRatio * erVision;
+                            float patrolSpd = (edef ? edef->moveSpeed : 0.5f) * erMass;
                             float cooldown = edef ? edef->cooldownTime : 60.0f;
                             float projSpeed = edef ? edef->projectileSpeed : 0.5f;
                             float ffAtkMultP = edef ? edef->fastForwardAttackMult : 2.2f;
@@ -4011,6 +7933,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.vx = WALK_SPEED * ets * patrolSpd;
                                     if (enemy.x >= enemy.patrolRight) enemy.direction = 1;
                                 }
+                            } else if (enemy.aiState == 1 && erFlipEdited) {
+                                // 向き反転 → 見つけても撃たずに逃げ出す。
+                                //
+                                // この挙動は上のコメントで宣言されていながら実装が存在しなかった。
+                                // プレイヤーと反対側を向いて歩き続け、射撃のタイマーも進めない
+                                // （溜めのズーム演出も出さない）ので、撃たれたくない場面を
+                                // 反転ツール1回で無力化できる、という使い道になる。
+                                //
+                                // 判定に EditReaction::flipped ではなくダーティビットを使うのは、
+                                // すぐ下の分岐が毎フレーム enemy.direction を書き換えるため、
+                                // flipped だとプレイヤーの左右の位置で勝手に点滅してしまうから。
+                                enemy.direction = (player.x < enemy.x) ? 0 : 1;
+                                enemy.vx = (enemy.direction == 1) ? (-WALK_SPEED * ets * patrolSpd)
+                                                                  : ( WALK_SPEED * ets * patrolSpd);
                             } else if (enemy.aiState == 1) {
                                 enemy.vx = 0.0f;
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
@@ -4027,6 +7963,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     float dyP = pCenterY - eCenterY;
                                     float distP = sqrtf(dxP * dxP + dyP * dyP);
                                     if (distP < 1.0f) distP = 1.0f;
+                                    // 発射音。従来 seAttack は「飛びかかり」と「体当たり」でしか鳴らしておらず、
+                                    // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
+                                    // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
+                                    if (edef) SoundManager::Get().PlaySe(edef->seAttack);
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
@@ -4050,11 +7990,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // ===== ここから追加タイプ =====
                         case ENEMY_WALKER: {
                             // 歩いてくる：索敵範囲内にいる間だけプレイヤー方向へ歩く。崖のふちで止まる。
-                            float triggerRangeWk = edef ? edef->triggerRange : 300.0f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.35f);
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 重く鈍いが、進路上の壊せるブロックを押し割る。
+                            //  ・縮小     → 軽く速くなり、崖でも止まらず落ちていく。
+                            //  ・向き反転 → プレイヤーから逃げる方向へ歩く。
+                            //  ・傾ける   → 向いている方向へ歩く。90度倒すと足が前に出ず止まり、180度で逆走する。
+                            //  ・暗転     → 索敵範囲が縮む。
+                            float triggerRangeWk = (edef ? edef->triggerRange : 300.0f) * erVision;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.35f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeWk) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // 反転ツールで逃走に転じる。判定にダーティビットを使うのは、
+                                // EditReaction::flipped が「配置時と向きが違う」でしかなく、
+                                // プレイヤーを追って自分から向きを変えただけでも真になってしまうため
+                                // （プレイヤーが左右を行き来するたび勝手に逃走モードが点滅していた）。
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 歩行は地面に縛られているので、向きベクトルの水平成分だけを使う。
+                                // 2次元の向きをそのまま速度にすると、傾けた歩行敵が宙に歩き出して地形判定と噛み合わなくなる。
+                                float walkHx = 0.0f, walkHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, walkHx, walkHy);
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.vx = walkHx * speed;
+
+                                // WALKERは壊せるブロックを押し割って進む（可否はブロック側の設定が決める）
+                                {
+                                    float ramXw = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                    for (auto& gimW : gimmicks) {
+                                        if (gimW.type != GIMMICK_BREAKABLE_BLOCK || !gimW.isActive) continue;
+                                        if (ramXw >= gimW.x && ramXw <= gimW.x + gimW.spriteWidth &&
+                                            enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimW.y &&
+                                            enemy.y < gimW.y + gimW.spriteHeight) {
+                                            TryBreakGimmick(gimW, BREAK_RAM, enemy.scale);
+                                        }
+                                    }
+                                    // Feature: タイル破壊 — 進路上の地形タイルも押し割る
+                                    int ramColW = (int)(ramXw / TILE_SIZE);
+                                    float bodyHw = (float)enemy.hitboxHeight * enemy.scale;
+                                    for (float fy = 2.0f; fy < bodyHw; fy += TILE_SIZE * 0.5f) {
+                                        TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), ramColW, BREAK_RAM, enemy.scale);
+                                    }
+                                }
 
                                 float aheadX = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale + 8.0f);
                                 float footY = enemy.y + (float)enemy.hitboxHeight * enemy.scale + 4.0f;
@@ -4066,7 +8042,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     int tid = mpW[tRowW][tColW];
                                     groundAhead = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
                                 }
-                                if (!groundAhead) enemy.vx = 0.0f;
+                                // 縮小されている、または暗くて足元が見えないときは崖で止まらず落ちる
+                                if (!groundAhead && !er.shrunk && g_screenFx.brightness >= 0.6f) enemy.vx = 0.0f;
                             } else {
                                 enemy.vx = 0.0f;
                             }
@@ -4074,12 +8051,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_CHASER: {
                             // 追っかけてくる：索敵範囲内にいる間だけWALKERに加え、壁に当たると自動でジャンプする
-                            float triggerRangeCh = edef ? edef->triggerRange : 300.0f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.55f);
-                            float jumpPowerMult = edef ? edef->jumpPowerMult : 0.8f;
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 重くて壁を越えられなくなる（段差で足止めできる）。
+                            //  ・縮小     → 軽くなって跳躍力が上がり、より高い壁も越えてくる。
+                            //  ・傾ける   → 向いている方向へ進む。90度倒すと止まり、180度で逆走する。
+                            //  ・向き反転 → 逃げに転じる。
+                            //  ・暗転     → 索敵範囲が縮む。
+                            float triggerRangeCh = (edef ? edef->triggerRange : 300.0f) * erVision;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.55f) * erMass;
+                            float jumpPowerMult = (edef ? edef->jumpPowerMult : 0.8f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeCh) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // WALKERと同じ理由でダーティビットを見る（flippedだと追跡中に点滅する）
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 地面に縛られた移動なので、向きベクトルの水平成分だけを使う
+                                float chaseHx = 0.0f, chaseHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, chaseHx, chaseHy);
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.vx = chaseHx * speed;
 
                                 float aheadX = enemy.x + (enemy.direction == 1 ? -4.0f : (float)enemy.hitboxWidth * enemy.scale + 4.0f);
                                 float midY = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
@@ -4091,7 +8081,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     int tid = mpC[tRowC][tColC];
                                     wallAhead = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
                                 }
-                                if (wallAhead && std::abs(enemy.vy) < 1.0f) {
+                                // 拡大されて重くなった個体は壁を越えられない（段差で足止めできる）
+                                if (wallAhead && std::abs(enemy.vy) < 1.0f && !er.enlarged) {
                                     enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpPowerMult;
                                 }
                             } else {
@@ -4101,15 +8092,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_DASH_CHARGER: {
                             // 突進：射程内に入ると溜め→高速直進→クールダウン。auxState: 0待機/1溜め/2突進/3クールダウン
-                            float triggerRange = edef ? edef->triggerRange : 260.0f;
-                            float chargeTime = edef ? edef->chargeTime : 30.0f;
-                            float dashSpeedMult = edef ? edef->dashSpeedMult : 1.5f;
-                            float dashDuration = edef ? edef->dashDuration : 40.0f;
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける   → 本体が向いている方向へそのまま突進する。突進中は重力を切るので、
+                            //               45度傾ければ斜め45度に一直線へ飛ぶ。壊せるブロックへの誘導に使える。
+                            //  ・拡大     → 溜めが長く突進も長い、重い破城槌になる（壊せるブロックを粉砕する）。
+                            //  ・縮小     → 溜めが短くなり、短距離を何度も突進してくる。
+                            //  ・向き反転 → プレイヤーとは逆方向へ突進する。
+                            //  ・暗転     → 突進を始める間合いが近くなる。
+                            float triggerRange = (edef ? edef->triggerRange : 260.0f) * erVision;
+                            float chargeTime = (edef ? edef->chargeTime : 30.0f) * er.scaleRatio;
+                            float dashSpeedMult = (edef ? edef->dashSpeedMult : 1.5f) * erMass;
+                            float dashDuration = (edef ? edef->dashDuration : 40.0f) * er.scaleRatio;
                             float cooldownTime = edef ? edef->cooldownTime : 70.0f;
                             float distXd = player.x - enemy.x;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f;
-                                if (std::abs(distXd) < triggerRange) { enemy.auxState = 1; enemy.customTimer = chargeTime; enemy.direction = (distXd < 0) ? 1 : 0; }
+                                if (std::abs(distXd) < triggerRange) {
+                                    enemy.auxState = 1; enemy.customTimer = chargeTime;
+                                    enemy.direction = (distXd < 0) ? 1 : 0;
+                                    if (erFlipEdited) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逆へ突進
+                                }
                             } else if (enemy.auxState == 1) {
                                 enemy.vx = 0.0f;
                                 // 溜め中はプレイヤーの回り込みに対応できるよう、突進が始まる瞬間まで方向を追従させ続ける
@@ -4118,7 +8121,64 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (enemy.customTimer <= 0) { enemy.auxState = 2; enemy.customTimer = dashDuration; }
                             } else if (enemy.auxState == 2) {
                                 float dashSpeed = DASH_SPEED * ets * dashSpeedMult;
-                                enemy.vx = (enemy.direction == 1) ? -dashSpeed : dashSpeed;
+                                // 突進の向き。基準は「前(左右)」なので、未編集なら従来と同じ水平突進になる。
+                                //
+                                // 以前はここが真上を基準にした式だったため、ほんの少し傾けただけで
+                                // 突然ほぼ真上へ飛び出すという不連続が起きていた。
+                                // 前を基準にすれば傾き0が水平突進と連続してつながる。
+                                float dashHx = 0.0f, dashHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, dashHx, dashHy);
+                                enemy.vx = dashHx * dashSpeed;
+                                if (er.tilted) {
+                                    // 傾けられているあいだだけ重力を打ち消して軸方向へまっすぐ飛ばす。
+                                    // 重力を残すと斜め突進が途中で失速して落ち、角度どおりに飛ばない。
+                                    //
+                                    // 逆に、傾けられていないときに vy を触ってはいけない。
+                                    // 水平突進で vy=0 にすると崖から飛び出したときに空中で静止してしまう。
+                                    erTiltHandled = true;
+                                    enemy.vy = dashHy * dashSpeed;
+                                }
+                                // 拡大された突進は破城槌になり、当たった壊せるブロックを粉砕する。
+                                // 判定点は進行方向の先端へ出す（斜めや真上への突進でも当たるように）。
+                                {
+                                    float ramHalfW = (float)enemy.hitboxWidth  * enemy.scale * 0.5f;
+                                    float ramHalfH = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                                    for (auto& gimD : gimmicks) {
+                                        if (gimD.type != GIMMICK_BREAKABLE_BLOCK || !gimD.isActive) continue;
+                                        bool ramHit;
+                                        if (er.tilted) {
+                                            // 斜め・真上への突進では、進行方向の先端1点がブロックに入ったかで見る
+                                            float ramXd = enemy.x + ramHalfW + dashHx * (ramHalfW + 8.0f);
+                                            float ramYd = enemy.y + ramHalfH + dashHy * (ramHalfH + 8.0f);
+                                            ramHit = (ramXd >= gimD.x && ramXd <= gimD.x + gimD.spriteWidth &&
+                                                      ramYd >= gimD.y && ramYd <= gimD.y + gimD.spriteHeight);
+                                        } else {
+                                            // 水平突進は従来どおり。先端のXが重なり、かつ体の高さ全体で縦に重なるか
+                                            float ramXd = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                            ramHit = (ramXd >= gimD.x && ramXd <= gimD.x + gimD.spriteWidth &&
+                                                      enemy.y + (float)enemy.hitboxHeight * enemy.scale > gimD.y &&
+                                                      enemy.y < gimD.y + gimD.spriteHeight);
+                                        }
+                                        if (ramHit) TryBreakGimmick(gimD, BREAK_RAM, enemy.scale);
+                                    }
+                                    // Feature: タイル破壊 — 突進の先端が入ったマスの地形も割る。
+                                    // 傾けた突進では進行方向そのものが変わるので、
+                                    // ギミック側と同じく先端1点（向きベクトルぶん外へ出した点）で見る。
+                                    {
+                                        if (er.tilted) {
+                                            float tipX = enemy.x + ramHalfW + dashHx * (ramHalfW + 8.0f);
+                                            float tipY = enemy.y + ramHalfH + dashHy * (ramHalfH + 8.0f);
+                                            TryBreakTile((int)(tipY / TILE_SIZE), (int)(tipX / TILE_SIZE), BREAK_RAM, enemy.scale);
+                                        } else {
+                                            float tipX = enemy.x + (enemy.direction == 1 ? -8.0f : (float)enemy.hitboxWidth * enemy.scale);
+                                            int colD = (int)(tipX / TILE_SIZE);
+                                            float bodyHd = (float)enemy.hitboxHeight * enemy.scale;
+                                            for (float fy = 2.0f; fy < bodyHd; fy += TILE_SIZE * 0.5f) {
+                                                TryBreakTile((int)((enemy.y + fy) / TILE_SIZE), colD, BREAK_RAM, enemy.scale);
+                                            }
+                                        }
+                                    }
+                                }
                                 enemy.customTimer -= ets;
                                 if (enemy.customTimer <= 0) { enemy.auxState = 3; enemy.customTimer = cooldownTime; }
                             } else {
@@ -4130,12 +8190,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_FALLER: {
                             // 待機(0)：静止 → プレイヤーが真下を通ると落下(1、前半は落下予兆の溜め・後半は実落下) → 着地後クールダウン(2) → 元の高さへ復帰
-                            float triggerWidth = edef ? edef->triggerRange : 24.0f;
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける   → 本体が向いている方向へそのまま落ちる。90度倒せば真横へ、
+                            //               180度回せば真上へ突き上げる。落下中は重力を切って軸方向へ加速する。
+                            //  ・向き反転 → 基準の落下方向が向いている側へ30度振れる（従来の斜め落下）。
+                            //  ・拡大     → 着地の衝撃波が大きくなる。壊せるブロックをまとめて割れる。
+                            //  ・縮小     → 衝撃波を起こせなくなり、ただの安全な台になる（EnemyIsStandable参照）。
+                            //  ・速度を下げる → ゆっくり落ちるので、乗って運んでもらう昇降機として使える。
+                            //  ・移動     → 復帰先も一緒に移動する（動かしたのに元の位置へ帰るのでは意味がないため）。
+                            //  ・早送り   → 既存どおり左右にジッターして直下が読みにくくなる。
+                            float triggerWidth = (edef ? edef->triggerRange : 24.0f) * erVision;
                             float fallDelay = edef ? edef->fallDelay : 10.0f;
                             float cooldownTime = edef ? edef->cooldownTime : 120.0f;
-                            float shockwaveRadiusF = edef ? edef->shockwaveRadius : 60.0f;
+                            // 拡大すると衝撃波の範囲も比例して広がる
+                            float shockwaveRadiusF = (edef ? edef->shockwaveRadius : 60.0f) * er.scaleRatio;
                             float ffJitter = edef ? edef->fastForwardJitter : 30.0f;
-                            float diagonalSpeedF = edef ? edef->diagonalFallSpeed : 2.5f;
                             // スポーン（＝ステージ配置）時点のX/Y/向きを一度だけ記録しておく。
                             // これが「元の場所」＝復帰先の基準になる（配置位置そのものをそのまま復帰先にする）。
                             // 編集機能連動：向きはauxF1に記録し、以後プレイヤーが「方向反転」編集ツールで
@@ -4146,7 +8216,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 enemy.auxF3 = enemy.x;
                                 enemy.auxFlag = true;
                             }
-                            bool aimedSideways = ((int)enemy.auxF1) != enemy.direction;
+                            // 移動編集で持ち上げられたら、復帰先(auxF2/auxF3)も一緒に動かす。
+                            // これをしないと「せっかく安全な場所へどかしたのに、次の周期で元の位置へ戻ってくる」
+                            // という、動かした意味が消える挙動になる。
+                            if (er.moved) {
+                                enemy.auxF3 += er.movedX;
+                                enemy.auxF2 += er.movedY;
+                                enemy.editBaseX = enemy.x;
+                                enemy.editBaseY = enemy.y;
+                                enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_POS;
+                            }
+                            // 落下方向。編集で変えられた姿勢をそのまま落下ベクトルにする。
+                            // 未編集なら (0,1)＝真下になるので、従来の自由落下と完全に一致する。
+                            float fallHx = 0.0f, fallHy = 1.0f;
+                            GetEnemyHeading(enemy, er, REST_DOWN, fallHx, fallHy);
+                            if (er.tilted) erTiltHandled = true;
                             if (enemy.auxState == 0) {
                                 enemy.vx = 0.0f; enemy.vy = 0.0f;
                                 if (std::abs(player.x - enemy.x) < triggerWidth && player.y > enemy.y) {
@@ -4155,18 +8239,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                             } else if (enemy.auxState == 1) {
                                 if (enemy.customTimer > 0) {
-                                    // 落下予兆（溜め）フェーズ：描画側で影を成長させて見せる
+                                    // 落下予兆（溜め）フェーズ：描画側で影を成長させて見せる。
+                                    //
+                                    // vy も必ず0にすること。重力は switch へ来る前に毎フレーム enemy.vy へ
+                                    // 足されているので、vx だけ止めていた従来は「予兆」のはずのこの26フレームで
+                                    // 真下へ175pxほど落ちてしまっていた。
+                                    // そのせいで、向きを変えたドッスンは「まず真下へ落ちてから向いている方向へ
+                                    // スラムする」という二段構えの動きに見えていた。
+                                    // ここで止めることで、実際に動くのは常に「向いている方向」だけになり、
+                                    // 同時に影が大きくなる予兆の演出が初めて意味を持つ。
                                     enemy.vx = 0.0f;
+                                    enemy.vy = 0.0f;
                                     enemy.customTimer -= ets;
                                 } else {
-                                    // 実落下フェーズ。編集機能連動：
-                                    // ・「方向反転」ツールでスポーン時から向きを変えられていたら、その向きへ斜めに落ちる
-                                    //   （プレイヤーが狙いを付けて誘導し、真下から外れた場所のギミックを起動できるようにする）
-                                    // ・早送り中は左右にジッターして直下を読みにくくする
-                                    //   （スローモーション中はets自体が小さくなるため、自然に予兆がゆっくり見えて見切りやすくなる）
-                                    float diagVx = aimedSideways ? ((enemy.direction == 0 ? 1.0f : -1.0f) * diagonalSpeedF * ets) : 0.0f;
-                                    float jitterVx = isFastForward ? sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f : 0.0f;
-                                    enemy.vx = diagVx + jitterVx;
+                                    // 実落下フェーズ。編集で向けられた方向へ「まっすぐ」加速して突っ込む。
+                                    //
+                                    // 重力を足すのではなく速度そのものを軸方向へ置き換えているのがポイントで、
+                                    // こうしないと真横に向けても重力に引かれて結局下に落ちてしまい、
+                                    // 「見た目は横を向いているのに真下へ落ちる」という食い違いが残る。
+                                    // 速さは直前フレームの速さに重力ぶんを足して作るので、
+                                    // 真下を向いているあいだは従来の自由落下と数値まで完全に一致する。
+                                    // 速さの持ち越しに vx/vy を使うのは、この2つが EnemyState に入っており
+                                    // 巻き戻しと自然に噛み合うため（新しい履歴フィールドを増やさずに済む）。
+                                    // ⚠ 速さを測るときは、このフレームの重力ぶんを引いた「前フレーム末の速度」を使う。
+                                    // enemy.vy にはこの分岐へ来る前に既に重力が足されているので、
+                                    // そのまま測ってさらに重力を足すと加速度が2倍になり、真下へ落ちる場合ですら
+                                    // 従来の自由落下より倍の速さで落ちてしまう。
+                                    float fallStep = GRAVITY * ets;
+                                    float fallPrevVy = enemy.vy - fallStep;
+                                    float fallSpd = sqrtf(enemy.vx * enemy.vx + fallPrevVy * fallPrevVy) + fallStep;
+                                    if (fallSpd < fallStep) fallSpd = fallStep; // 落下開始フレーム(速度0)の下限
+                                    enemy.vx = fallHx * fallSpd;
+                                    enemy.vy = fallHy * fallSpd;
+
+                                    // 早送り中は進行方向と直角に揺すって、着弾点を読みにくくする
+                                    // （スローモーション中はets自体が小さくなるため、自然に予兆がゆっくり見えて見切りやすくなる）。
+                                    // 真下に落ちているときだけ横揺れになるよう、軸に垂直な向き(-hy, hx)へ足す。
+                                    if (isFastForward) {
+                                        float jitter = sinf(enemy.y * 0.15f) * ffJitter * ets * 0.1f;
+                                        enemy.vx += -fallHy * jitter;
+                                        enemy.vy +=  fallHx * jitter;
+                                    }
 
                                     // 着地判定 —
                                     // 【重要】ここは以前 `std::abs(enemy.vy) < 0.5f`（＝速度がほぼ0なら着地とみなす）だったが、
@@ -4184,8 +8297,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // CheckGridCollisionY / CheckPlatformCollision は座標と速度を参照渡しで書き換えるため、
                                     // 必ずコピーを渡して本体の x / y / vy を汚さないようにする
                                     // （とくに x は斜め落下の着地点＝復帰の起点になるので触られると困る）。
+                                    //
+                                    // 【重要】プローブは必ず「落下している向き」へ出すこと。
+                                    // 真下だけを見る実装のままだと、真横に向けたドッスンは壁にめり込んだあと
+                                    // 永久に着地判定が成立せず、クールダウンにも復帰にも進めなくなって固まる。
                                     bool landedOnGround = false;
-                                    if (enemy.vy >= 0.0f) { // 上昇中に「着地」しないようにガードする
+                                    if (fallHy > 0.05f && enemy.vy >= 0.0f) {
+                                        // 下向き成分があるときだけ、従来どおりの接地プローブを使う
+                                        // （足場やギミックの上に乗る判定はこちらでしか取れない）。
                                         float probeX = enemy.x;
                                         float probeY = enemy.y + 2.0f;
                                         float probeVY = 1.0f;
@@ -4196,19 +8315,71 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
                                         landedOnGround = (tileGround || platGround);
                                     }
+                                    if (!landedOnGround) {
+                                        // 落下方向の少し先にタイルがあるかを直接見る。
+                                        // 真横スラム・真上への突き上げ・斜め落下はこちらで着地を拾う。
+                                        auto& mpFa = stages[currentStageIdx].map;
+                                        float halfWfa = (float)enemy.hitboxWidth  * enemy.scale * 0.5f;
+                                        float halfHfa = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                                        float probeAx = enemy.x + halfWfa + fallHx * (halfWfa + 4.0f);
+                                        float probeAy = enemy.y + halfHfa + fallHy * (halfHfa + 4.0f);
+                                        int tColFa = (int)(probeAx / TILE_SIZE);
+                                        int tRowFa = (int)(probeAy / TILE_SIZE);
+                                        if (!mpFa.empty() && tRowFa >= 0 && tRowFa < (int)mpFa.size() &&
+                                            tColFa >= 0 && tColFa < (int)mpFa[0].size()) {
+                                            int tidFa = mpFa[tRowFa][tColFa];
+                                            if (tidFa >= 0 && tidFa < (int)tileDefs.size() && tileDefs[tidFa].isCollidable) {
+                                                landedOnGround = true;
+                                            }
+                                        }
+                                    }
+                                    // マップの外へ飛び出したら、そこで打ち切って復帰へ向かわせる。
+                                    // 真上や真横へ向けたドッスンは遮る地形が無いと延々と飛び続けてしまい、
+                                    // 画面外はるか遠くまで行ってから戻ってくることになる。
+                                    {
+                                        auto& mpBn = stages[currentStageIdx].map;
+                                        float mapWpx = (float)(mpBn.empty() ? 0 : mpBn[0].size()) * TILE_SIZE;
+                                        float mapHpx = (float)mpBn.size() * TILE_SIZE;
+                                        if (enemy.x < 0.0f || enemy.y < 0.0f ||
+                                            enemy.x > mapWpx || enemy.y > mapHpx) {
+                                            landedOnGround = true;
+                                        }
+                                    }
+                                    // 最後の安全網 —
+                                    // 何かの拍子に着地を取り逃しても、重力を切っている以上そのまま
+                                    // 永久に飛び続けてしまう。POUNCERの滞空上限(dashDuration)と同じ考え方で、
+                                    // 落下フェーズに時間の上限を設けて必ずクールダウンへ抜けられるようにする。
+                                    enemy.customTimer -= ets; // このフェーズでは経過時間として使う（負の値へ進む）
+                                    if (enemy.customTimer <= -FALLER_MAX_AIRTIME) landedOnGround = true;
                                     if (landedOnGround) {
                                         // 着地の瞬間：踏みつけだけでなく着地地点周辺にもショックウェイブ判定を発生させる
                                         float ew_scaledF = (float)enemy.hitboxWidth * enemy.scale;
                                         float eh_scaledF = (float)enemy.hitboxHeight * enemy.scale;
                                         float pw_scaledF = (float)player.width * player.scale;
                                         float ph_scaledF = (float)player.height * player.scale;
-                                        float ecxF = enemy.x + ew_scaledF / 2.0f;
-                                        float ecyF = enemy.y + eh_scaledF;
+                                        // 衝撃の中心は「ぶつかった面」に置く。
+                                        //
+                                        // 以前はここを常に「足元の中心」(x+幅/2, y+高さ) にしていた。
+                                        // 真下へ落ちるドッスンならそれで正しいが、
+                                        // プレイヤーが横向きに回したドッスンは壁に体当たりするので、
+                                        // 衝撃の中心が進行方向と反対側（＝体の後ろ）に来てしまい、
+                                        // 目の前の壊せる壁が衝撃波の半径から外れて一切壊れなかった。
+                                        // 実測では、等倍のドッスンが壁に密着していても
+                                        // 壁のマス中心までの距離が半径をわずかに超え、判定そのものが走らなかった。
+                                        //
+                                        // 体の中心から落下方向へ半身ぶんずらした点を中心にすれば、
+                                        // どの向きに回しても「ぶつかった面」が衝撃の中心になる。
+                                        // 真下へ落ちる場合 (fallHx=0, fallHy=1) は
+                                        // (x+幅/2, y+高さ/2+高さ/2) となり従来と完全に同じ値になるので、
+                                        // 既存ステージのドッスンの挙動は変わらない。
+                                        float ecxF = enemy.x + ew_scaledF / 2.0f + fallHx * (ew_scaledF / 2.0f);
+                                        float ecyF = enemy.y + eh_scaledF / 2.0f + fallHy * (eh_scaledF / 2.0f);
                                         float pcxF = player.x + pw_scaledF / 2.0f;
                                         float pcyF = player.y + ph_scaledF / 2.0f;
                                         float ddxF = pcxF - ecxF, ddyF = pcyF - ecyF;
                                         float distF = sqrtf(ddxF * ddxF + ddyF * ddyF);
-                                        if (distF <= shockwaveRadiusF && !isPlayerRewinding && player.invulnTimer <= 0.0f) {
+                                        // 縮小されたドッスンは衝撃波を起こせない（乗れる安全な台として振る舞う）
+                                        if (!er.shrunk && distF <= shockwaveRadiusF && !isPlayerRewinding && player.invulnTimer <= 0.0f) {
                                             player.hp--;
                                             player.invulnTimer = 60.0f;
                                             float knockDirF = (distF > 0.01f) ? (ddxF / distF) : ((pcxF < ecxF) ? -1.0f : 1.0f);
@@ -4216,16 +8387,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             player.vy = -4.0f;
                                             if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
                                         }
-                                        // 着地地点周辺の壊せるブロックも一緒に破壊する（斜め誘導で狙って割れるようにするギミック連携）
+                                        // 着地地点周辺の壊せるブロックも一緒に破壊する（向きを変えて狙って割れるようにするギミック連携）。
+                                        //
+                                        // 従来あった「縮小中は何も壊せない」という条件は外してある。
+                                        // スラムするときなら編集状態に関係なく壊しにいき、
+                                        // 壊せるかどうかはブロック側の設定（breakBySlam / breakMinScale）が決める、という分担にした。
                                         for (auto& gimF : gimmicks) {
-                                            if (gimF.type == GIMMICK_BREAKABLE_BLOCK && gimF.isActive) {
-                                                float bgcx = gimF.x + gimF.spriteWidth / 2.0f;
-                                                float bgcy = gimF.y + gimF.spriteHeight / 2.0f;
-                                                float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
-                                                if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
-                                                    gimF.isActive = false;
-                                                    const GimmickDef* gdefFaller = FindGimmickDef(gimF.assetId);
-                                                    if (gdefFaller) SoundManager::Get().PlaySe(gdefFaller->seActivate);
+                                            if (gimF.type != GIMMICK_BREAKABLE_BLOCK || !gimF.isActive) continue;
+                                            float bgcx = gimF.x + gimF.spriteWidth / 2.0f;
+                                            float bgcy = gimF.y + gimF.spriteHeight / 2.0f;
+                                            float bgdx = bgcx - ecxF, bgdy = bgcy - ecyF;
+                                            if (sqrtf(bgdx * bgdx + bgdy * bgdy) <= shockwaveRadiusF) {
+                                                TryBreakGimmick(gimF, BREAK_SLAM, enemy.scale);
+                                            }
+                                        }
+                                        // Feature: タイル破壊 — 衝撃波の届く範囲の地形タイルも砕く。
+                                        // 円の外接矩形ぶんのマスを走査し、マスの中心が半径内にあるものだけ壊す
+                                        // （矩形のまま壊すと、見えている衝撃波の円より広く壊れて不自然になる）。
+                                        {
+                                            int rowLo = (int)((ecyF - shockwaveRadiusF) / TILE_SIZE);
+                                            int rowHi = (int)((ecyF + shockwaveRadiusF) / TILE_SIZE);
+                                            int colLo = (int)((ecxF - shockwaveRadiusF) / TILE_SIZE);
+                                            int colHi = (int)((ecxF + shockwaveRadiusF) / TILE_SIZE);
+                                            for (int rr = rowLo; rr <= rowHi; rr++) {
+                                                for (int cc = colLo; cc <= colHi; cc++) {
+                                                    float tcx = (cc + 0.5f) * TILE_SIZE, tcy = (rr + 0.5f) * TILE_SIZE;
+                                                    float ddx = tcx - ecxF, ddy = tcy - ecyF;
+                                                    if (sqrtf(ddx * ddx + ddy * ddy) > shockwaveRadiusF) continue;
+                                                    TryBreakTile(rr, cc, BREAK_SLAM, enemy.scale);
                                                 }
                                             }
                                         }
@@ -4280,22 +8469,40 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 撃たれていること自体に意味が無かった。全方位＋角度ずらしにすると
                             // 「弾と弾の隙間がどこに来るか」を読んで抜ける遊びになり、一時停止やスローとも噛み合う。
                             // radialFire=false のままなら従来と完全に同じ挙動になる。
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける   → 弾幕全体の発射角がずれる。弾と弾の隙間の位置を任意に回せる。
+                            //  ・拡大     → 弾数が増えて密になる（無理に増やしすぎないよう上限を設ける）。
+                            //  ・縮小     → 弾数が減り、隙間が広がる。縮めて抜ける、が正攻法になる。
+                            //  ・向き反転 → 渦の回転方向が逆になる。
+                            //  ・速度     → 斉射間隔と渦の回り方が変わる（etsが効くので自動）。
                             float shootInterval = edef ? edef->actionInterval : 150.0f;
                             float spreadAngle = edef ? edef->spreadAngle : 0.35f;
                             int spreadCount = (edef && edef->spreadCount > 0) ? edef->spreadCount : 3;
+                            // 弾プール(MAX_BULLETS)は敵もプレイヤーも共有している。
+                            // 拡大しすぎた1体に使い切られるとプレイヤーが撃てなくなるので必ず上限を設ける。
+                            spreadCount = (int)(spreadCount * er.scaleRatio + 0.5f);
+                            if (spreadCount < 2)  spreadCount = 2;
+                            if (spreadCount > 12) spreadCount = 12;
                             float projSpeed = edef ? edef->projectileSpeed : 0.5f;
                             bool radialFire = (edef && edef->radialFire);
                             float rotStep = edef ? edef->spreadRotationStep : 0.0f;
+                            if (erFlipEdited) rotStep = -rotStep; // 向きを反転すると渦が逆回りになる
                             enemy.vx = 0.0f;
                             enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                            enemy.customTimer += ets;
+                            enemy.customTimer += ets * erFfAtk;
                             if (enemy.customTimer >= shootInterval) {
                                 float baseDir = (enemy.direction == 0) ? 1.0f : -1.0f;
                                 // auxF1に「これまでの累積回転量」を貯めておく。斉射のたびにrotStep分だけ回る。
                                 // 2πを超えたら折り返し、長時間プレイしても値が発散しないようにする。
-                                float spin = enemy.auxF1;
+                                // 傾けたぶんを渦の累積回転に足し込む（auxF1の自動回転は上書きせず合成する）
+                                if (er.tilted) erTiltHandled = true;
+                                // 傾け・反転の解釈は他の型と共通にする（反転でも渦の向きがずれる）
+                                float spin = enemy.auxF1 + GetEnemyEditAngle(enemy, er, REST_UP);
                                 float ecxSp = enemy.x + (float)enemy.hitboxWidth * enemy.scale * 0.5f;
                                 float ecySp = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                                // 発射音は斉射ごとに1回。弾ごとに鳴らすと拡散弾の本数だけ音が重なる
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
                                 for (int a = 0; a < spreadCount; a++) {
                                     // 全方位モード：0～2πをspreadCount等分し、そこにspinを加算した向きへ撃つ。
                                     // 正面ファンモード：-spreadAngle ～ +spreadAngle を等間隔に割り振る（従来どおり）。
@@ -4320,6 +8527,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                                 bullets[i].vx = baseDir * spd * cosf(angle);
                                                 bullets[i].vy = spd * sinf(angle);
                                             }
+                                            bullets[i].scale = er.scaleRatio; // 拡大した本体の弾は大きい
                                             bullets[i].isPlayerOwned = false;
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
@@ -4327,7 +8535,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         }
                                     }
                                 }
-                                enemy.auxF1 = spin + rotStep;
+                                enemy.auxF1 = enemy.auxF1 + rotStep;
                                 if (enemy.auxF1 > 6.2831853f) enemy.auxF1 -= 6.2831853f;
                                 if (enemy.auxF1 < -6.2831853f) enemy.auxF1 += 6.2831853f;
                                 enemy.customTimer = 0.0f;
@@ -4335,44 +8543,152 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_AIMED_SHOOTER: {
-                            // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ
+                            // 照準弾：発射時のプレイヤー位置へ正確に狙い撃つ。
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける → 「手動照準」。砲身が傾けた向きへ固定され、次の一発だけそこへ撃つ。
+                            //             撃つと傾きを消費してプレイヤー追尾に戻るので、
+                            //             スイッチや壊せるブロックを撃たせたいたびに狙いを付け直す操作になる。
+                            //  ・拡大   → 大きく遅い弾。空中で追い越せるので足場感覚で扱える。
+                            //  ・縮小   → 小さく速い弾。避けにくいが、当たり判定も小さい。
+                            //  ・向き反転 → その瞬間に追尾を止め、向けられた側へ真横に次の一発を撃つ。
+                            //               弾の所属もプレイヤー側に変わり、他の敵や壊せるブロックに当たる。
+                            //  ・早送り → 発射間隔が詰まる。
+                            //  ・暗転   → 狙いがぶれる（プレイヤーの位置を正確に掴めなくなる）。
                             float shootInterval = edef ? edef->actionInterval : 130.0f;
-                            float projSpeed = edef ? edef->projectileSpeed : 0.55f;
+                            float projSpeed = (edef ? edef->projectileSpeed : 0.55f) * erMass;
                             enemy.vx = 0.0f;
-                            enemy.customTimer += ets;
+                            // 【重要】傾けは「狙いを決める操作」なので、共通の後処理にある
+                            // 「傾けた向きへ坂道を滑る」反応を二重に掛けてはいけない。
+                            // これまで erTiltHandled を撃つ瞬間（＝イベントの起きたフレーム）にしか
+                            // 立てていなかったため、狙いを付けてから撃つまでのあいだ毎フレーム
+                            // 横へ押され続け、その場に据え付けたはずの砲台が床を滑って移動していた。
+                            // 傾いている間はずっと「自分で解釈済み」と宣言しておく。
+                            if (er.tilted) erTiltHandled = true;
+                            enemy.customTimer += ets * erFfAtk;
+
+                            // ---- このフレームの狙いを決める（撃つ瞬間だけでなく毎フレーム）----
+                            //
+                            // 砲身パーツは ParentAim でこの結果を読むので、絵と弾の向きが必ず一致する。
+                            // 以前はパーツ側が DirectionToPlayer から狙いを組み直していたため、
+                            // 本体が追尾をやめる条件を足すたびに食い違いが生まれていた。
+                            //
+                            // 【この型の約束】編集された瞬間に追尾を止め、向けられた方向へ1発撃ち、
+                            //                 撃ったら編集を消費して追尾へ戻る。
+                            // 編集されている間の狙いは、プレイヤーの位置をいっさい見ない。
+                            // 「反転させたのに、相手の動きに合わせて砲身が動き続ける」のでは
+                            // 追尾を止めたことにならないため。
+                            bool aimedByEdit = (er.tilted || erFlipEdited);
+                            {
+                                float ax, ay;
+                                if (er.tilted) {
+                                    // 傾け＝手動照準。傾けた向きそのものを狙う。
+                                    GetEnemyTiltOnlyHeading(enemy, er, REST_UP, ax, ay);
+                                } else if (erFlipEdited) {
+                                    // 反転＝真横（向けられた側）へ固定。プレイヤーの高さも追わない。
+                                    ax = (enemy.direction == 1) ? -1.0f : 1.0f;
+                                    ay = 0.0f;
+                                } else {
+                                    // 未編集：プレイヤーを追う
+                                    float eCx = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
+                                    float eCy = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
+                                    float pCx = player.x + (player.width * player.scale) / 2.0f;
+                                    float pCy = player.y + (player.height * player.scale) / 2.0f;
+                                    ax = pCx - eCx; ay = pCy - eCy;
+                                    float ad = sqrtf(ax * ax + ay * ay);
+                                    if (ad < 1.0f) ad = 1.0f;
+                                    ax /= ad; ay /= ad;
+                                }
+                                enemy.aimAngle = atan2f(ay, ax);
+                                // 絵の向きは狙いに従わせる（台座と砲身と弾が必ず同じ側を向く）
+                                enemy.direction = (ax < 0.0f) ? 1 : 0;
+                            }
+
                             if (enemy.customTimer >= shootInterval) {
-                                float pCenterX = player.x + (player.width * player.scale) / 2.0f;
-                                float pCenterY = player.y + (player.height * player.scale) / 2.0f;
                                 float eCenterX = enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f;
                                 float eCenterY = enemy.y + (enemy.hitboxHeight * enemy.scale) / 2.0f;
-                                float dxA = pCenterX - eCenterX;
-                                float dyA = pCenterY - eCenterY;
-                                float distA = sqrtf(dxA * dxA + dyA * dyA);
-                                if (distA < 1.0f) distA = 1.0f;
-                                enemy.direction = (dxA < 0) ? 1 : 0;
+
+                                float dirXa = cosf(enemy.aimAngle);
+                                float dirYa = sinf(enemy.aimAngle);
+
+                                // 暗転中は狙いがぶれる。明るさが下がるほどブレ幅が大きくなる。
+                                // ブレは「撃った一発」にだけ乗せる。毎フレームの狙い(aimAngle)に乗せると
+                                // 砲身が細かく震えて、どこを狙っているのか読めなくなるため。
+                                if (fxCurBright < 0.6f) {
+                                    float jitter = (1.0f - fxCurBright) * 0.6f;
+                                    float shake = (float)(rand() % 201 - 100) / 100.0f * jitter;
+                                    float shaken = enemy.aimAngle + shake;
+                                    dirXa = cosf(shaken);
+                                    dirYa = sinf(shaken);
+                                }
+
+                                // 弾を体の外（砲口の位置）から撃つ。理由はSTATIONARY側の同じ処理のコメント参照。
+                                // 反転させた砲台の弾は他の敵に当たるようになるので、自分にも当たってしまう。
+                                float muzzleRa = sqrtf((float)enemy.hitboxWidth * enemy.scale * (float)enemy.hitboxWidth * enemy.scale
+                                                     + (float)enemy.hitboxHeight * enemy.scale * (float)enemy.hitboxHeight * enemy.scale) * 0.5f + 4.0f;
+                                // 発射音。従来 seAttack は「飛びかかり」と「体当たり」でしか鳴らしておらず、
+                                // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
+                                // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
-                                        bullets[i].x = eCenterX;
-                                        bullets[i].y = eCenterY;
+                                        bullets[i].x = eCenterX + dirXa * muzzleRa;
+                                        bullets[i].y = eCenterY + dirYa * muzzleRa;
                                         float spd = BULLET_SPEED * projSpeed;
-                                        bullets[i].vx = dxA / distA * spd;
-                                        bullets[i].vy = dyA / distA * spd;
-                                        bullets[i].isPlayerOwned = false;
+                                        bullets[i].vx = dirXa * spd;
+                                        bullets[i].vy = dirYa * spd;
+                                        bullets[i].scale = er.scaleRatio; // 拡大した砲台の弾は大きい
+                                        // 向きを反転させた砲台は「味方撃ち」になり、撃った弾が他の敵に当たる
+                                        bullets[i].isPlayerOwned = erFlipEdited;
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
                                     }
                                 }
                                 enemy.customTimer = 0.0f;
+
+                                // 手動照準は「一発ぶん」で消費する。
+                                //
+                                // 傾けたままにすると砲台が永久にそこを撃ち続ける置物になってしまい、
+                                // 狙いを付ける操作が一度きりの設置作業に変わってしまう。
+                                // 撃った直後に「今の姿勢」を新しい基準にすることで編集差分が0へ戻り、
+                                // 次の発射からはまたプレイヤーを追尾する。
+                                // 姿勢(enemy.angle)自体は傾けたまま残すので、台座は傾いたまま砲身だけが旋回して復帰する。
+                                //
+                                // 同じ「編集を一度だけ効かせる」処理は SHRINKER の向き反転にも前例がある。
+                                // なお editBaseAngle は EnemyState に入っていないため巻き戻しても消費は戻らない。
+                                // これは FALLER が復帰先(editBaseX/Y)を書き換えるのと同じ既存の割り切りに揃えてある。
+                                if (aimedByEdit) {
+                                    // 撃ったら編集を消費して追尾へ戻す。
+                                    // 基準を今の姿勢・今の向きへ置き直すと差が0になり、
+                                    // 次のフレームから er.tilted も erFlipEdited も false に戻る。
+                                    enemy.editBaseAngle = enemy.angle;
+                                    enemy.editBaseDirection = enemy.direction;
+                                    enemy.editDirtyMask &= ~(unsigned int)(EDIT_DIRTY_ANGLE | EDIT_DIRTY_DIR);
+                                }
                             }
                             break;
                         }
                         case ENEMY_FLOATER: {
                             // 浮遊敵：重力を打ち消してサインカーブで浮遊しながらゆっくり接近
-                            float amplitude = edef ? edef->floatAmplitude : 40.0f;
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 重くなって浮力を失い、そのまま落ちる。落として足場やスイッチに使える。
+                            //  ・縮小     → 軽くなって振幅も追尾速度も上がり、素早く絡んでくる。
+                            //  ・傾ける   → 浮遊の軸が傾き、縦揺れが斜め・横揺れに変わる。
+                            //  ・向き反転 → 追尾をやめて逆に逃げていく。
+                            //  ・移動     → 浮遊の中心高度も一緒に移動する。
+                            float amplitude = (edef ? edef->floatAmplitude : 40.0f) * erMass;
                             float frequency = edef ? edef->floatFrequency : 0.05f;
                             if (enemy.auxF2 == 0.0f) enemy.auxF2 = enemy.y;
+                            // 移動編集で持ち上げられたら浮遊中心も追従させる（元の高度へ戻ろうとしないように）
+                            if (er.moved) {
+                                enemy.auxF2 += er.movedY;
+                                enemy.editBaseX = enemy.x;
+                                enemy.editBaseY = enemy.y;
+                                enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_POS;
+                            }
                             enemy.customTimer += ets;
 
                             // 敵の行動改良 — 浮遊の中心高度(auxF2)をプレイヤーの高さへゆっくり寄せる。
@@ -4382,8 +8698,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 高度も追ってくるようにすると上下に逃げるだけでは振り切れなくなり、
                             // 代わりに一時停止やスローで止めて抜けるという編集ツール側の解答が要る相手になる。
                             // verticalTrackSpeed が 0（＝未設定の既存定義）なら高度は据え置きで従来どおり。
-                            float vTrack = edef ? edef->verticalTrackSpeed : 0.0f;
-                            float triggerRangeVt = edef ? edef->triggerRange : 300.0f;
+                            float vTrack = (edef ? edef->verticalTrackSpeed : 0.0f) * erMass;
+                            float triggerRangeVt = (edef ? edef->triggerRange : 300.0f) * erVision;
                             if (vTrack > 0.0f && std::abs(player.x - enemy.x) < triggerRangeVt) {
                                 // プレイヤーの中心の高さを目標にする（足元ではなく胴を狙うので接触しやすい）
                                 float targetCenterY = player.y + (float)player.height * player.scale * 0.5f;
@@ -4395,38 +8711,86 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (enemy.auxF2 < 0.0f) enemy.auxF2 = 0.0f; // 画面外の上空へ抜けていかないよう下限を張る
                             }
 
-                            float desiredY = enemy.auxF2 + sinf(enemy.customTimer * frequency) * amplitude;
-                            // enemy.yを直接上書きすると天井・床とのY方向衝突判定を素通りしてしまうため、
-                            // 目標Yとの差分をvyとして渡し、他の敵と同じ経路（共通の物理更新）でY衝突判定を通す
-                            enemy.vy = desiredY - enemy.y;
-                            float triggerRangeFl = edef ? edef->triggerRange : 300.0f;
+                            // 傾けられていると浮遊の軸そのものが倒れ、縦揺れが斜め・横揺れに変わる
+                            float swing = sinf(enemy.customTimer * frequency) * amplitude;
+                            float swingX = 0.0f;
+                            float swingY = swing;
+                            if (er.tilted) {
+                                erTiltHandled = true;
+                                swingX = swing * sinf(er.tilt);
+                                swingY = swing * cosf(er.tilt);
+                            }
+                            float desiredY = enemy.auxF2 + swingY;
+
+                            // 拡大されると浮力を失い、重力に任せて落下する。
+                            // 落としてスイッチを踏ませたり、下の足場を作ったりする使い道が生まれる。
+                            // （vyへ代入しない＝この分岐の手前で加算された重力がそのまま残る）
+                            if (!er.enlarged) {
+                                // enemy.yを直接上書きすると天井・床とのY方向衝突判定を素通りしてしまうため、
+                                // 目標Yとの差分をvyとして渡し、他の敵と同じ経路（共通の物理更新）でY衝突判定を通す
+                                enemy.vy = desiredY - enemy.y;
+                            }
+
+                            float triggerRangeFl = (edef ? edef->triggerRange : 300.0f) * erVision;
                             if (std::abs(player.x - enemy.x) < triggerRangeFl) {
-                                float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.2f);
+                                float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.2f) * erMass;
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // 向きを反転させると追尾をやめて逃げに転じる。
+                                // 判定にダーティビットを使うのは、EditReaction::flipped だと
+                                // プレイヤーを追って向きを変えただけで真になり、追尾中に点滅してしまうため。
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 接近の向きも傾けた姿勢に従わせる（縦の揺れは上の swing 側が担当するので水平成分だけ）
+                                float flHx = 0.0f, flHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, flHx, flHy);
+                                enemy.vx = flHx * speed;
+                                enemy.vx += swingX * frequency; // 傾けた軸ぶんの横揺れ
                             } else {
-                                enemy.vx = 0.0f;
+                                enemy.vx = swingX * frequency;
                             }
                             break;
                         }
                         case ENEMY_TELEPORTER: {
                             // テレポーター：一定間隔でプレイヤー付近へ瞬間移動する
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 出現距離が伸び、遠くにしか現れなくなる（間合いを稼げる）。
+                            //  ・縮小     → 距離が縮み、真横に貼り付いてくる。
+                            //  ・傾ける   → 出現する方角が固定される（回り込まれる側を選べる）。
+                            //  ・向き反転 → プレイヤーから離れる側へワープするようになる。
+                            //  ・速度0    → ワープそのものが止まる。
                             float interval = edef ? edef->actionInterval : 180.0f;
-                            float rangeMin = edef ? edef->teleportRangeMin : 120.0f;
-                            float rangeMax = edef ? edef->teleportRangeMax : 220.0f;
+                            float rangeMin = (edef ? edef->teleportRangeMin : 120.0f) * er.scaleRatio;
+                            float rangeMax = (edef ? edef->teleportRangeMax : 220.0f) * er.scaleRatio;
                             float rangeSpan = std::max<float>(0.0f, rangeMax - rangeMin);
                             enemy.vx = 0.0f;
+                            // 傾けは「出現する方角」の指定。ワープの合間に床を滑らせないよう、
+                            // 砲台と同じく傾いている間はずっと解釈済みにしておく。
+                            if (er.tilted) erTiltHandled = true;
                             enemy.customTimer += ets;
                             if (enemy.customTimer >= interval) {
                                 float sideX = (rand() % 2 == 0) ? 1.0f : -1.0f;
+                                // 向きを反転させると、プレイヤーから遠ざかる側にしか現れなくなる
+                                if (er.flipped) sideX = (player.x < enemy.x) ? 1.0f : -1.0f;
                                 float offsetX = rangeMin + (float)(rand() % (int)std::max<float>(1.0f, rangeSpan));
                                 // Y座標もプレイヤー基準で再抽選する（元々Xしか動かず地形にめり込む原因になっていた）
                                 float sideY = (rand() % 2 == 0) ? 1.0f : -1.0f;
                                 float offsetY = (float)(rand() % (int)std::max<float>(1.0f, rangeSpan * 0.5f));
                                 float destX = player.x + sideX * offsetX;
                                 float destY = player.y + sideY * offsetY;
+                                if (er.tilted) {
+                                    // 傾けられている場合、出現方角を向いている方向へ固定する（基準は真上）
+                                    erTiltHandled = true;
+                                    float radius = rangeMin + rangeSpan * 0.5f;
+                                    float tpHx = 0.0f, tpHy = -1.0f;
+                                    GetEnemyHeading(enemy, er, REST_UP, tpHx, tpHy);
+                                    destX = player.x + tpHx * radius;
+                                    destY = player.y + tpHy * radius;
+                                }
                                 if (destX < 0.0f) destX = 0.0f;
                                 if (destY < 0.0f) destY = 0.0f;
+
+                                // テレポート音。専用の音源がありながら一度も鳴らされていなかった。
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
 
                                 // 着地先が壁の中でないか簡易チェック。壁の中なら今回は見送り、customTimerを
                                 // リセットしないので次フレームに自動で再抽選される
@@ -4448,13 +8812,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SHRINKER: {
                             // 分裂もどき：索敵範囲内では通常時ゆっくり接近。被弾で縮小・高速化した後(auxFlag)は素早く接近する。
-                            float triggerRangeSk = edef ? edef->triggerRange : 300.0f;
+                            //
+                            // 編集リアクション：
+                            //  ・縮小     → 「もう縮む余地が無い」状態にできる。復活の権利を先に使い切らせるので、
+                            //               次の一撃で確実に倒せるようになる（撃つ前に縮めるのが正攻法）。
+                            //  ・拡大     → 復活の権利が戻る代わりに動きが鈍る。
+                            //  ・向き反転 → 追跡ではなく逃走に転じる。
+                            //  ・暗転     → 索敵範囲が狭まり、近づくまで気付かれない。
+                            float triggerRangeSk = (edef ? edef->triggerRange : 300.0f) * erVision;
                             float normalMult = edef ? edef->moveSpeed : 0.35f;
                             float enragedMult = edef ? edef->enragedMoveSpeed : 0.9f;
+
+                            // プレイヤーが自分の手で縮めたなら、それは「もう分裂した後」と同じ状態とみなす。
+                            // 拡大された場合は逆に、復活の権利を取り戻す。
+                            if (er.shrunk && !enemy.auxFlag)  enemy.auxFlag = true;
+                            if (er.enlarged && enemy.auxFlag) enemy.auxFlag = false;
+
                             float mult = enemy.auxFlag ? enragedMult : normalMult;
-                            float speed = editorPlayerCaps.baseSpeed * ets * mult;
+                            float speed = editorPlayerCaps.baseSpeed * ets * mult * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeSk) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
+                                if (erFlipEdited) enemy.direction = (enemy.direction == 1) ? 0 : 1; // 反転で逃走
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
                             } else {
                                 enemy.vx = 0.0f;
@@ -4463,10 +8841,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                         case ENEMY_SHIELD: {
                             // シールド：索敵範囲内ではゆっくり接近しつつ、一定間隔で無敵状態(auxFlag)を切り替える（無敵中は描画側で発光）
-                            float triggerRangeSh = edef ? edef->triggerRange : 300.0f;
-                            float offDuration = edef ? edef->shieldOffDuration : 150.0f;
-                            float onDuration = edef ? edef->shieldOnDuration : 90.0f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
+                            //
+                            // 編集リアクション：
+                            //  ・縮小     → 無敵の持続が短くなる。「撃つ前に縮める」のが正攻法になる。
+                            //  ・拡大     → 無敵が長引き、ほとんど撃ち込む隙が無くなる。
+                            //  ・向き反転 → 無敵のON/OFFが入れ替わる（今まさに無敵なら即座に解ける）。
+                            //  ・速度0    → 切り替えが止まり、そのときの状態で固定される。
+                            //  ・暗転     → 索敵範囲が縮む。
+                            float triggerRangeSh = (edef ? edef->triggerRange : 300.0f) * erVision;
+                            float offDuration = (edef ? edef->shieldOffDuration : 150.0f) * erMass;
+                            float onDuration = (edef ? edef->shieldOnDuration : 90.0f) * er.scaleRatio;
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeSh) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
@@ -4475,29 +8860,84 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             enemy.customTimer += ets;
-                            if (!enemy.auxFlag && enemy.customTimer >= offDuration) { enemy.auxFlag = true; enemy.customTimer = 0.0f; }
-                            else if (enemy.auxFlag && enemy.customTimer >= onDuration) { enemy.auxFlag = false; enemy.customTimer = 0.0f; }
+                            // 無敵の入り切りが変わる瞬間に音を鳴らす。
+                            // 見た目は金色の発光だけで、いつ切り替わったかが分かりにくかった。
+                            if (!enemy.auxFlag && enemy.customTimer >= offDuration) {
+                                enemy.auxFlag = true; enemy.customTimer = 0.0f;
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                            }
+                            else if (enemy.auxFlag && enemy.customTimer >= onDuration) {
+                                enemy.auxFlag = false; enemy.customTimer = 0.0f;
+                                if (edef) SoundManager::Get().PlaySe(edef->seDamage);
+                            }
+                            // 向きを反転させると無敵のON/OFFが入れ替わる。
+                            // auxFlagそのものは書き換えず表示上の状態だけ反転させると描画と食い違うので、
+                            // ここで実体ごと入れ替えてしまう（反転しっぱなしなら常に位相が逆になるだけ）。
+                            if (er.flipped) {
+                                enemy.auxFlag = !enemy.auxFlag;
+                                enemy.direction = enemy.editBaseDirection; // 反転は一度だけ効かせる
+                            }
                             break;
                         }
                         case ENEMY_MIMIC_GHOST: {
-                            // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生して過去の動きをなぞる
+                            // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生して過去の動きをなぞる。
+                            //
+                            // 編集リアクション：
+                            //  ・拡大     → 遅延が伸びる＝より古い過去をなぞるので、後ろへ離れていく。
+                            //  ・縮小     → 遅延が縮む＝今に近い動きをなぞるので、真後ろまで迫ってくる。
+                            //  ・傾ける   → 再生位置が左右にずれる。軌跡を横にずらして避けられる。
+                            //  ・速度     → 遅延の消化速度が変わる（速くすると追いつかれる）。
+                            //  ・向き反転 → 軌跡を左右反転して再生する（鏡像の自分が来る）。
+                            //  ・一時停止 → この型はignorePauseでグローバルの一時停止が効かないが、
+                            //               名指しの個別一時停止だけは効く（＝止めたいなら指定しろ、という差別化）。
+                            //  ・色フィルタ → 色を付けている間だけ実体化して弾が当たる（通常は無敵）。
+                            //  ・明転     → 光で消える（無害化）／暗転 → 遅延が縮んで強化される。
                             enemy.vx = 0.0f; enemy.vy = 0.0f;
+                            // 基準の遅延フレーム数はauxF1に一度だけ入れておき、
+                            // 編集による倍率はそこから毎フレーム導出する（初期化ガードを壊さないため）。
                             if (enemy.auxF1 <= 0.0f) enemy.auxF1 = edef ? edef->mimicDelayFrames : 90.0f;
-                            size_t delay = (size_t)enemy.auxF1;
+
+                            float delayF = enemy.auxF1 * er.scaleRatio;        // 大きいほど古い過去をなぞる
+                            if (er.speedRatio > 0.01f) delayF /= er.speedRatio; // 速くすると今に追いついてくる
+                            if (fxCurBright < 0.6f)    delayF *= 0.6f;          // 暗いと距離を詰めてくる
+                            if (delayF < 1.0f) delayF = 1.0f;
+                            if (delayF > (float)(MAX_HISTORY_FRAMES - 1)) delayF = (float)(MAX_HISTORY_FRAMES - 1);
+
+                            size_t delay = (size_t)delayF;
                             if (player.history.size() > delay) {
                                 const PlayerState& past = player.history[player.history.size() - 1 - delay];
-                                enemy.x = past.x;
+                                float gx2 = past.x;
+                                if (er.flipped) {
+                                    // 軌跡を左右反転して再生する。配置位置を鏡の面として折り返すので、
+                                    // 「自分の動きの鏡像」が反対側から迫ってくる。
+                                    gx2 = enemy.editBaseX * 2.0f - past.x;
+                                }
+                                if (er.tilted) {
+                                    // 傾けたぶん、再生位置を横へずらす
+                                    erTiltHandled = true;
+                                    gx2 += sinf(er.tilt) * 120.0f;
+                                }
+                                enemy.x = gx2;
                                 enemy.y = past.y;
                             }
                             break;
                         }
                         case ENEMY_SIZE_SHIFTER: {
                             // 大きさが変わる敵：索敵範囲内で接近しつつ、scaleが周期的に変化（当たり判定も連動）
-                            float triggerRangeSz = edef ? edef->triggerRange : 300.0f;
+                            //
+                            // 編集リアクション：
+                            //  ・拡大／縮小 → 「サイズロック」。この敵は普段AIが毎フレームscaleを書き換えているが、
+                            //                 プレイヤーが一度でも大きさを編集したら所有権を手放し、その大きさで固定される。
+                            //                 小さく固定して隙間を通す／大きく固定して足場にする、という両方の使い道がある。
+                            //                 Reset All（editDirtyMaskのクリア）で周期変化が再開する。
+                            //  ・傾ける   → 大きさの周期がずれる（膨らむ瞬間をずらせる）。
+                            //  ・速度0    → 周期が止まり、そのときの大きさのまま固定される。
+                            //  ・向き反転 → 大きくなる／小さくなるの位相が逆になる。
+                            float triggerRangeSz = (edef ? edef->triggerRange : 300.0f) * erVision;
                             float amplitude = edef ? edef->sizeAmplitude : 0.5f;
                             float frequency = edef ? edef->sizeFrequency : 0.04f;
                             float minSc = edef ? edef->minScale : 0.4f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.25f);
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.25f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeSz) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
@@ -4506,33 +8946,72 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             enemy.customTimer += ets;
-                            enemy.scale = 1.0f + sinf(enemy.customTimer * frequency) * amplitude;
-                            if (enemy.scale < minSc) enemy.scale = minSc;
+                            // 一度でも大きさを編集されたら、AIはscaleに触らない（＝プレイヤーが固定できる）。
+                            // この型はAIが毎フレームscaleを上書きするため、
+                            // 「配置時との差」では編集の有無を判別できず、明示的なダーティビットが必要になる。
+                            if (!(enemy.editDirtyMask & EDIT_DIRTY_SCALE)) {
+                                float phase = enemy.customTimer * frequency + er.tilt;
+                                if (erFlipEdited) phase = -phase; // 向き反転で膨張と収縮が入れ替わる
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.scale = 1.0f + sinf(phase) * amplitude;
+                                if (enemy.scale < minSc) enemy.scale = minSc;
+                            }
                             break;
                         }
                         case ENEMY_TEMPO_WARPER: {
-                            // 速さ操作敵：索敵範囲内で接近しつつ、speedScaleが周期的に激しく変化し接近速度が乱れる
-                            float triggerRangeTw = edef ? edef->triggerRange : 300.0f;
+                            // 速さ操作敵：索敵範囲内で接近しつつ、speedScaleが周期的に激しく変化し接近速度が乱れる。
+                            //
+                            // 編集リアクション：
+                            //  ・速度を編集する → 「テンポロック」。この敵はAIが毎フレームspeedScaleを書き換えるので
+                            //                     普段は速度が読めないが、一度でも速度を編集すると所有権を手放し、
+                            //                     指定した速さで固定される。Reset Allで自動変動が再開する。
+                            //  ・拡大     → 速さの振れ幅が大きくなり、さらに読みにくくなる。
+                            //  ・傾ける   → 変動の位相がずれる。
+                            //  ・向き反転 → 追跡ではなく逃走に転じる。
+                            float triggerRangeTw = (edef ? edef->triggerRange : 300.0f) * erVision;
                             float frequency = edef ? edef->tempoFrequency : 0.05f;
                             float tempoMin = edef ? edef->tempoMin : 0.3f;
                             float tempoMax = edef ? edef->tempoMax : 1.6f;
+                            // 拡大すると振れ幅が広がる（速いときはより速く、遅いときはより遅く）
+                            float tempoMid = (tempoMin + tempoMax) * 0.5f;
+                            tempoMin = tempoMid + (tempoMin - tempoMid) * er.scaleRatio;
+                            tempoMax = tempoMid + (tempoMax - tempoMid) * er.scaleRatio;
                             enemy.customTimer += ets;
-                            enemy.speedScale = tempoMin + (tempoMax - tempoMin) * (0.5f + 0.5f * sinf(enemy.customTimer * frequency));
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f);
+                            // 速度を一度でも編集されたら、AIはspeedScaleに触らない（プレイヤーがテンポを固定できる）。
+                            // ジオメトリのサイズロックと同じ考え方で、AIが値を握っている型に手綱を渡す仕組み。
+                            if (!(enemy.editDirtyMask & EDIT_DIRTY_SPEED)) {
+                                if (er.tilted) erTiltHandled = true;
+                                enemy.speedScale = tempoMin + (tempoMax - tempoMin)
+                                                 * (0.5f + 0.5f * sinf(enemy.customTimer * frequency + er.tilt));
+                            }
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeTw) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
-                                enemy.vx = (enemy.direction == 1) ? -speed : speed;
+                                // WALKER/CHASERと同じ理由でダーティビットを見る（flippedだと追跡中に点滅する）
+                                if ((enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) enemy.direction = (enemy.direction == 1) ? 0 : 1;
+                                // 地面に縛られた移動なので、向きベクトルの水平成分だけを使う
+                                float twHx = 0.0f, twHy = 0.0f;
+                                GetEnemyHeading(enemy, er, REST_FORWARD, twHx, twHy);
+                                enemy.vx = twHx * speed;
                             } else {
                                 enemy.vx = 0.0f;
                             }
                             break;
                         }
                         case ENEMY_BRIGHTNESS_PHANTOM: {
-                            // 明るさ操作敵：索敵範囲内で接近しつつ、射程内で画面を暗転させる
-                            float triggerRangeBp = edef ? edef->triggerRange : 300.0f;
-                            float range = edef ? edef->effectRange : 320.0f;
+                            // 明るさ操作敵：索敵範囲内で接近しつつ、射程内で画面を暗転させる。
+                            //
+                            // 編集リアクション：
+                            //  ・明転(Cキー) → プレイヤー自身が画面を明るくしている間は暗転させる力を打ち消せる。
+                            //                  「相手の妨害を、同じ編集ツールで正面から打ち消す」関係になっている。
+                            //  ・拡大     → 効果範囲が広がる。
+                            //  ・縮小     → 範囲が狭まり、近づかない限り無害になる。
+                            //  ・向き反転 → 暗転ではなく逆に明転させてくる（明暗ロック足場のあるステージで意味が変わる）。
+                            //  ・速度0    → 追ってこなくなるが、暗転そのものは続く。
+                            float triggerRangeBp = (edef ? edef->triggerRange : 300.0f) * erVision;
+                            float range = (edef ? edef->effectRange : 320.0f) * er.scaleRatio;
                             float brightnessMin = edef ? edef->brightnessMin : 0.35f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeBp) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
@@ -4541,18 +9020,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             float distB = std::abs(player.x - enemy.x);
-                            if (distB < range) {
+                            // プレイヤーが明転(C)を使っている間は打ち消される。
+                            // cHeldThisFrameは後段で判定されるため、1フレーム前の結果であるfxCurBrightを見る。
+                            bool counteredBp = (fxCurBright > 1.3f);
+                            if (distB < range && !counteredBp) {
                                 float t = 1.0f - (distB / range);
-                                Screen_SetBrightness(1.0f - t * (1.0f - brightnessMin));
+                                if (erFlipEdited) {
+                                    // 反転すると暗転ではなく明転させてくる
+                                    Screen_SetBrightness(1.0f + t * 0.7f);
+                                } else {
+                                    Screen_SetBrightness(1.0f - t * (1.0f - brightnessMin));
+                                }
                             }
                             break;
                         }
                         case ENEMY_COLOR_SHIFTER: {
-                            // 色調整敵：索敵範囲内で接近しつつ、射程内で画面を赤みがかった色調へシフトさせる
-                            float triggerRangeCs = edef ? edef->triggerRange : 300.0f;
-                            float range = edef ? edef->effectRange : 320.0f;
+                            // 色調整敵：索敵範囲内で接近しつつ、射程内で画面の色調をシフトさせる。
+                            //
+                            // 編集リアクション：
+                            //  ・色フィルタ(Tキー) → この敵が押し付けてくる色と同じ色を自分でも掛けている間は
+                            //                        打ち消せる。色ロック足場のあるステージでは
+                            //                        「足場を出すための色」を敵に奪われるので、これが解答になる。
+                            //  ・拡大／縮小 → 効果範囲が伸び縮みする。
+                            //  ・傾ける   → 押し付けてくる色が赤→緑→青と切り替わる。
+                            //  ・向き反転 → 補色（押し付ける色と残す色が逆）になる。
+                            float triggerRangeCs = (edef ? edef->triggerRange : 300.0f) * erVision;
+                            float range = (edef ? edef->effectRange : 320.0f) * er.scaleRatio;
                             float tintStrength = edef ? edef->tintStrength : 0.6f;
-                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f);
+                            float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.3f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeCs) {
                                 enemy.direction = (player.x < enemy.x) ? 1 : 0;
                                 enemy.vx = (enemy.direction == 1) ? -speed : speed;
@@ -4561,22 +9056,42 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             float distCol = std::abs(player.x - enemy.x);
-                            if (distCol < range) {
+                            // 傾けると押し付けてくる色が変わる（1=赤 / 2=緑 / 3=青）
+                            int shiftColor = 1 + (((er.tiltSteps % 3) + 3) % 3);
+                            if (er.tilted) erTiltHandled = true;
+                            // 同じ色を自分でも掛けていれば打ち消せる
+                            bool counteredCs = (playerColorFilter == shiftColor);
+                            if (distCol < range && !counteredCs) {
                                 float t = 1.0f - (distCol / range);
-                                Screen_SetTint(1.0f, 1.0f - t * tintStrength, 1.0f - t * tintStrength);
+                                float dim = 1.0f - t * tintStrength;
+                                float keep = 1.0f;
+                                if (erFlipEdited) { float tmp = dim; dim = keep; keep = tmp; } // 反転で補色になる
+                                if (shiftColor == 1)      Screen_SetTint(keep, dim, dim);
+                                else if (shiftColor == 2) Screen_SetTint(dim, keep, dim);
+                                else                      Screen_SetTint(dim, dim, keep);
                             }
                             break;
                         }
                         case ENEMY_ZOOM_DISRUPTOR: {
-                            // ズーム撹乱敵：射程内で画面ズームを周期的に揺さぶる
-                            float range = edef ? edef->effectRange : 280.0f;
-                            float amplitude = edef ? edef->zoomAmplitude : 0.25f;
+                            // ズーム撹乱敵：射程内で画面ズームを周期的に揺さぶる。
+                            //
+                            // 編集リアクション：
+                            //  ・速度0    → 揺さぶりのタイマーごと止まり、画面が落ち着く（最も素直な対処法）。
+                            //  ・拡大     → 揺れ幅が大きくなり、距離感が掴めなくなる。
+                            //  ・縮小     → 揺れ幅も範囲も小さくなる。
+                            //  ・傾ける   → 揺れの周期がずれる。
+                            //  ・向き反転 → ズームインではなくズームアウト方向に歪ませてくる。
+                            float range = (edef ? edef->effectRange : 280.0f) * er.scaleRatio;
+                            float amplitude = (edef ? edef->zoomAmplitude : 0.25f) * er.scaleRatio;
                             float frequency = edef ? edef->zoomFrequency : 0.08f;
                             enemy.vx = 0.0f;
                             enemy.customTimer += ets;
                             float distZ = std::abs(player.x - enemy.x);
                             if (distZ < range) {
-                                Screen_SetZoom(1.0f + sinf(enemy.customTimer * frequency) * amplitude);
+                                if (er.tilted) erTiltHandled = true;
+                                float wave = sinf(enemy.customTimer * frequency + er.tilt) * amplitude;
+                                if (er.flipped) wave = -wave; // 反転でズームアウト側へ歪む
+                                Screen_SetZoom(1.0f + wave);
                             }
                             break;
                         }
@@ -4587,13 +9102,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 一度だけ初速を与えたあとは重力任せにし、着地するまで速度に触らない
                             // （毎フレーム上書きすると放物線にならず、直線的な飛行になってしまう）。
                             // auxState: 0=追跡 / 1=溜め / 2=飛行中 / 3=着地硬直
-                            float triggerRangePc = edef ? edef->triggerRange : 200.0f;
-                            float chargeTimePc = edef ? edef->chargeTime : 22.0f;
-                            float jumpMultPc = edef ? edef->jumpPowerMult : 1.15f;
-                            float dashMultPc = edef ? edef->dashSpeedMult : 0.9f;
+                            //
+                            // 編集リアクション：
+                            //  ・傾ける   → 飛びかかりの射出角そのものを指定できる。真上や後方へ撃ち出して
+                            //               「敵を砲弾として使う」ことができる。
+                            //  ・拡大     → 重いぶん溜めが長くなるが、跳躍力と飛距離が伸びる。
+                            //  ・縮小     → 溜めが短くなり、小刻みに連続で飛びかかってくる。
+                            //  ・向き反転 → 溜め中に反転させると、その向きへ飛ぶ（狙いを付け替えられる）。
+                            //  ・一時停止 → 飛行中に止めると空中で固定され、そのまま足場になる。
+                            //  ・暗転     → 飛びかかりの間合いに入りにくくなる。
+                            float triggerRangePc = (edef ? edef->triggerRange : 200.0f) * erVision;
+                            // 大きいほど溜めが長く、小さいほど短い
+                            float chargeTimePc = (edef ? edef->chargeTime : 22.0f) * er.scaleRatio;
+                            float jumpMultPc = (edef ? edef->jumpPowerMult : 1.15f) * er.scaleRatio;
+                            float dashMultPc = (edef ? edef->dashSpeedMult : 0.9f) * er.scaleRatio;
                             float airLimitPc = edef ? edef->dashDuration : 120.0f;
                             float cooldownPc = edef ? edef->cooldownTime : 45.0f;
-                            float runSpeedPc = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.7f);
+                            float runSpeedPc = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.7f) * erMass;
                             float distXpc = player.x - enemy.x;
 
                             // 進行方向の足元に床が続いているか（崖から落ちないための判定）。
@@ -4626,8 +9151,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 enemy.customTimer -= ets;
                                 if (enemy.customTimer <= 0.0f) {
                                     // 初速を一度だけ与える。以降は共通の重力処理が放物線を作る
+                                    float launchMag = DASH_SPEED * dashMultPc;
                                     enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpMultPc;
-                                    enemy.vx = (enemy.direction == 1 ? -1.0f : 1.0f) * DASH_SPEED * dashMultPc;
+                                    enemy.vx = (enemy.direction == 1 ? -1.0f : 1.0f) * launchMag;
+                                    if (er.tilted || (enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u) {
+                                        // 編集で向きを変えられている場合は、その姿勢をそのまま射出方向にする。
+                                        // 真上が基準なので、真上に近づけるほど高く、倒すほど水平に遠くへ飛ぶ。
+                                        // 真下へ向ければ地面に叩きつけられる「砲弾」として使える。
+                                        //
+                                        // 初速を一度与えるだけで以降は重力任せにするので、
+                                        // 角度は放物線の打ち出し角として効く（飛行中に速度を上書きすると直線になってしまう）。
+                                        erTiltHandled = true;
+                                        float pounceHx = 0.0f, pounceHy = -1.0f;
+                                        GetEnemyHeading(enemy, er, REST_UP, pounceHx, pounceHy);
+                                        float mag = launchMag + (float)(-editorPlayerCaps.baseJumpPower) * jumpMultPc;
+                                        enemy.vx = pounceHx * mag;
+                                        enemy.vy = pounceHy * mag;
+                                    }
                                     enemy.auxState = 2;
                                     enemy.customTimer = 0.0f;
                                     if (edef) SoundManager::Get().PlaySe(edef->seAttack);
@@ -4671,6 +9211,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                             ScriptActor actor;
                             actor.timeScale = ets; // 早送り/スローモーションをスクリプト駆動の敵にも反映する
+                            FillScriptEditContext(actor, er); // Feature: 編集リアクション
                             actor.x = &enemy.x; actor.y = &enemy.y;
                             actor.vx = &enemy.vx; actor.vy = &enemy.vy;
                             actor.direction = &enemy.direction;
@@ -4732,7 +9273,198 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             BehaviorInterpreter::Tick(enemy.scriptState, actor);
                             break;
                         }
+
+                        case ENEMY_BOUNCING_WORM: {
+                            // 跳ね回る節足敵（機械いもむし）—
+                            // 重力を受けず、向いている方向へひたすら直進する。壁・床・天井に当たると
+                            // 反射し、そのたびに角度が少し乱れるので同じ軌道を繰り返さない。
+                            // 胴体はパーツとして頭の軌跡を辿る（追従処理はパーツ更新の直後にある）。
+                            //
+                            // 編集リアクション：
+                            //  ・回転     → 回した向きがそのまま進行方向になる。狙った所へ飛ばせる。
+                            //  ・向き反転 → 進行方向を左右に鏡写しする。
+                            //  ・拡大／縮小 → 体が大きいほど遅く、小さいほど速い（重さの比喩）。
+                            //  ・速度     → そのまま飛ぶ速さに掛かる（共通のets経由）。
+                            const float WORM_PI = 3.14159265f;
+                            float speedW = (edef ? edef->bounceSpeed : 3.0f);
+                            // 大きくすると重くて遅く、小さくすると軽くて速い。
+                            // 他の型（WALKER等）が erMass で表しているのと同じ比喩を、飛ぶ速さへ適用する。
+                            speedW *= erMass;
+                            if (speedW < 0.1f) speedW = 0.1f;
+                            float jitterMaxW = (edef ? edef->bounceRandomness : 25.0f) * (WORM_PI / 180.0f);
+
+                            // --- 進行方向(auxF1)の決定 ---
+                            //
+                            // この敵は向きを角度だけで表す。ところが描画側は direction==1 のとき
+                            // 絵を左右反転して描くので、「画面で見えている向き」は
+                            //     見た目の向き = angle + (direction==1 ? 180度 : 0)
+                            // になる。プレイヤーが回転ツールで angle を変えても、反転ツールで
+                            // direction を変えても、この1つの式を通して進行方向へ反映される。
+                            float dirOffsetW = (enemy.direction == 1) ? WORM_PI : 0.0f;
+                            if (!enemy.auxFlag) {
+                                // ステージのローダは全ての敵を direction=1（左向き）で作る。
+                                // この敵は角度だけで向きを表すので、置かれた瞬間に正面(0)へ揃える。
+                                // 揃えないと絵が左右反転された状態で描かれ、
+                                // 「45度で置いたのに逆向きへ飛んでいく」ことになる。
+                                enemy.direction = 0;
+                                enemy.editBaseDirection = 0; // 反転されたと誤解されないよう基準も合わせる
+                                dirOffsetW = 0.0f;
+                                enemy.auxF1 = enemy.angle;   // 置かれたときの角度がそのまま進む向き
+                                enemy.auxF2 = enemy.angle;
+                                enemy.auxF3 = 0.0f;          // 跳ね返った回数
+                                enemy.auxFlag = true;
+                            } else {
+                                // auxF2 には「前のフレームに自分が表した見た目の向き」を控えてある。
+                                // 今の見た目の向きがそれと違っていれば、その差はプレイヤーの編集なので受け取る。
+                                float shownW = NormalizeAngle(enemy.angle + dirOffsetW);
+                                if (fabsf(NormalizeAngle(shownW - enemy.auxF2)) > 0.0005f) {
+                                    enemy.auxF1 = shownW;
+                                }
+                            }
+                            float headingW = NormalizeAngle(enemy.auxF1);
+                            erTiltHandled = true; // 角度は自分で解釈するので、共通の「傾けたら滑る」を効かせない
+
+                            // --- 地形との当たり判定 ---
+                            // 自分の当たり判定の矩形が、通行できないタイルに重なるかどうかを見る。
+                            // UpdatePhysicsCollisions は「軸ごとに押し戻す」処理なので反射には使えず、
+                            // ここでは「その位置へ行けるか」だけを知りたいため専用の判定を置く。
+                            auto solidAtW = [&](float px, float py) -> bool {
+                                const auto& mpW = stages[currentStageIdx].map;
+                                if (mpW.empty()) return false;
+                                float bw = (float)enemy.hitboxWidth * enemy.scale;
+                                float bh = (float)enemy.hitboxHeight * enemy.scale;
+                                int c0 = (int)(px / TILE_SIZE), c1 = (int)((px + bw - 1.0f) / TILE_SIZE);
+                                int r0 = (int)(py / TILE_SIZE), r1 = (int)((py + bh - 1.0f) / TILE_SIZE);
+                                for (int rr = r0; rr <= r1; rr++) {
+                                    if (rr < 0 || rr >= (int)mpW.size()) continue;
+                                    for (int cc = c0; cc <= c1; cc++) {
+                                        if (cc < 0 || cc >= (int)mpW[rr].size()) continue;
+                                        int tid = mpW[rr][cc];
+                                        if (tid > 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) return true;
+                                    }
+                                }
+                                return false;
+                            };
+                            float bwW = (float)enemy.hitboxWidth * enemy.scale;
+                            float bhW = (float)enemy.hitboxHeight * enemy.scale;
+                            float mapRightW = (float)(stages[currentStageIdx].map.empty() ? 0 : stages[currentStageIdx].map[0].size()) * TILE_SIZE;
+                            float mapBottomW = (float)(stages[currentStageIdx].map.size()) * TILE_SIZE;
+                            // ステージの外枠も壁として扱う。これが無いと画面外へ出てしまい、
+                            // 共通処理の座標クランプに引っかかって端に張り付いたまま動かなくなる。
+                            auto blockedW = [&](float px, float py) -> bool {
+                                if (px < 0.0f || px > mapRightW - bwW) return true;
+                                if (py < 0.0f || py > mapBottomW - bhW) return true;
+                                return solidAtW(px, py);
+                            };
+
+                            float stepW = speedW * ets;
+                            float nvx = cosf(headingW) * stepW;
+                            float nvy = sinf(headingW) * stepW;
+                            bool hitX = blockedW(enemy.x + nvx, enemy.y);
+                            bool hitY = blockedW(enemy.x, enemy.y + nvy);
+                            // 角にちょうど飛び込んだ場合。片軸ずつでは当たらないので、両方を反転して跳ね返す。
+                            if (!hitX && !hitY && blockedW(enemy.x + nvx, enemy.y + nvy)) { hitX = true; hitY = true; }
+
+                            // --- 体当たりで壊す ---
+                            //
+                            // この敵は「向きを変えて壁へぶつけさせる道具」として使う相手なので、
+                            // ぶつかった先が壊せるものなら壊す。可否はこれまでどおり
+                            // ブロック／タイル側の設定（breakByRam・breakMinScale）が決める。
+                            //
+                            // 壊せる相手は、壊した瞬間に道が開く。そこで跳ね返ってしまうと
+                            // 開けた穴へ入らずその場で往復するだけになるので、
+                            // 壊して進めるようになった場合は反射させずにそのまま直進させる。
+                            bool brokeW = false;
+                            if (hitX || hitY) {
+                                // ぶつかりに行った先の矩形へ重なるマスを全部調べる。
+                                // 斜めに飛ぶ敵なので、当たった軸だけを進めた位置が実際の接触点になる。
+                                float tgtXw = enemy.x + (hitX ? nvx : 0.0f);
+                                float tgtYw = enemy.y + (hitY ? nvy : 0.0f);
+                                int bc0 = (int)(tgtXw / TILE_SIZE), bc1 = (int)((tgtXw + bwW - 1.0f) / TILE_SIZE);
+                                int br0 = (int)(tgtYw / TILE_SIZE), br1 = (int)((tgtYw + bhW - 1.0f) / TILE_SIZE);
+                                for (int rr = br0; rr <= br1; rr++) {
+                                    for (int cc = bc0; cc <= bc1; cc++) {
+                                        if (TryBreakTile(rr, cc, BREAK_RAM, enemy.scale)) brokeW = true;
+                                    }
+                                }
+                            }
+                            // 壊せるブロック（ギミック）は地形タイルと違って当たり判定に入っていないので、
+                            // ぶつかった瞬間ではなく「体が重なっているか」で見る。
+                            // 素通りするだけで壊せないと、地形タイルとの扱いが食い違ってしまう。
+                            for (auto& gimW2 : gimmicks) {
+                                if (gimW2.type != GIMMICK_BREAKABLE_BLOCK || !gimW2.isActive) continue;
+                                if (enemy.x + bwW <= gimW2.x || enemy.x >= gimW2.x + gimW2.spriteWidth) continue;
+                                if (enemy.y + bhW <= gimW2.y || enemy.y >= gimW2.y + gimW2.spriteHeight) continue;
+                                TryBreakGimmick(gimW2, BREAK_RAM, enemy.scale);
+                            }
+
+                            if (brokeW && !blockedW(enemy.x + nvx, enemy.y + nvy)) {
+                                // 壊して道が開いた。跳ね返らずにそのまま突き抜ける。
+                                hitX = false;
+                                hitY = false;
+                            }
+
+                            if (hitX || hitY) {
+                                float rx = hitX ? -nvx : nvx;
+                                float ry = hitY ? -nvy : nvy;
+                                float reflected = atan2f(ry, rx);
+                                // 正反射に乱れを足す。跳ね返るたびに違う方向へ散るようにするためで、
+                                // 乱数は巻き戻しても同じ値になるものを使う（BounceJitterUnitのコメント参照）。
+                                float jitter = BounceJitterUnit((int)enemy.auxF3, enemy.x, enemy.y) * jitterMaxW;
+                                float candidate = NormalizeAngle(reflected + jitter);
+                                // 乱れのせいで壁の内側を向いてしまうことがある。その場合は乱れを諦めて正反射に戻す
+                                // （そのまま進ませると壁にめり込んで抜け出せなくなる）。
+                                if (blockedW(enemy.x + cosf(candidate) * stepW, enemy.y + sinf(candidate) * stepW)) {
+                                    candidate = NormalizeAngle(reflected);
+                                }
+                                // それでも塞がっている（袋小路・角に詰まった）ときは、
+                                // 抜けられる向きが見つかるまで少しずつ回して逃がす。
+                                if (blockedW(enemy.x + cosf(candidate) * stepW, enemy.y + sinf(candidate) * stepW)) {
+                                    for (int tryI = 1; tryI <= 8; tryI++) {
+                                        float alt = NormalizeAngle(candidate + (WORM_PI / 4.0f) * tryI);
+                                        if (!blockedW(enemy.x + cosf(alt) * stepW, enemy.y + sinf(alt) * stepW)) { candidate = alt; break; }
+                                    }
+                                }
+                                headingW = candidate;
+                                enemy.auxF3 += 1.0f;
+                                if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack);
+                            }
+
+                            // 重力ぶんは読まずに毎フレーム速度を組み直すので、落下は自然に打ち消される。
+                            enemy.vx = cosf(headingW) * stepW;
+                            enemy.vy = sinf(headingW) * stepW;
+                            enemy.auxF1 = headingW;
+                            // 頭は必ず進行方向を向く。描画側が direction==1 で絵を反転するぶんを
+                            // ここで引いておくと、反転されていても頭は進行方向を向いたままになる。
+                            enemy.angle = NormalizeAngle(headingW - dirOffsetW);
+                            // 表した見た目の向きを控える。次のフレームで
+                            // 「プレイヤーが回した/反転したのか、自分が書いたのか」を見分けるのに使う。
+                            enemy.auxF2 = headingW;
+                            break;
+                        }
                     }
+
+                    // ================= Feature: 編集リアクション（共通の後処理）=================
+                    // AI分岐が決めたこのフレームの速度に、全型共通の反応を後がけする。
+                    // ここでまとめて処理しておくことで、敵タイプごとのAIを1つずつ書き換えなくても、
+                    // 今後追加される新しい型まで含めて必ず傾け・速度編集に反応するようになる。
+
+                    // 傾けられた相手は、その向きへ坂道を滑るように押される。
+                    // 傾きを自前で解釈する型（照準ロックや斜め落下など）には二重に掛けない。
+                    if (!erTiltHandled && er.tilted) {
+                        enemy.vx += sinf(er.tilt) * 0.35f * ets;
+                    }
+
+                    // 速くしすぎた相手は制御を失う。前フレームの速度を強く引きずるようになるので、
+                    // 折り返しや急停止に失敗してオーバーランする。
+                    // 「とりあえず速度を上げる」が万能の解にならないようにするための歯止め。
+                    if (er.speedRatio >= 2.0f) {
+                        enemy.vx = erPrevVx * 0.85f + enemy.vx * 0.15f;
+                    }
+
+                    // JSON宣言で NoGravity が指定されていれば、このフレームの落下をなかったことにする
+                    if (erDecl.noGravity) enemy.vy = 0.0f;
+                    // =========================================================================
 
                     // X/Y方向の移動と衝突判定を共通化
                     bool enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy, 
@@ -4741,6 +9473,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     // 足場との着地衝突判定
                     CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, &enemy.ridingGimmickIndex);
+                    // Feature: 編集リアクション（共通層）— 敵も止まった敵の上に乗る。
+                    // プレイヤー側だけ乗れて敵はすり抜ける、という食い違いを作らないため同じ判定を通す。
+                    // selfに自分を渡して、自分自身の上に着地してしまうのを防ぐ。
+                    CheckFrozenEnemyPlatform(enemy.x, enemy.y, enemy.vy,
+                                             enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, enemies, &enemy);
 
                     // 地面との衝突によりvy=0になった場合はisJumping相当をリセット
                     if (enemyGrounded) { enemy.vy = 0.0f; }
@@ -4758,6 +9495,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     // パーツは親のtype_enum(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
+                    //
+                    // 複合オブジェクトのパーツ追従 — AI が本体を動かし終えた「今の姿勢」を先に求めておく。
+                    // SetLocalOffset系がローカル→ワールドの合成に使い、ループ後の回収でも同じ値を使う。
+                    ParentPose ePartPose = MakeEnemyPose(enemy, edef);
                     if (edef) {
                         for (auto& part : enemy.parts) {
                             if (!part.isActive) continue;
@@ -4768,12 +9509,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                             ScriptActor partActor;
                             partActor.timeScale = ets; // 早送り/スローモーションをスクリプト駆動のパーツにも反映する
+                            FillScriptEditContext(partActor, er); // 親に加えられた編集をパーツにも伝える
                             partActor.x = &part.x; partActor.y = &part.y;
                             partActor.scale = &part.scale; partActor.angle = &part.angle;
                             partActor.hasParent = true;
                             partActor.parentX = enemy.x; partActor.parentY = enemy.y;
                             partActor.parentDirection = (enemy.direction == 0) ? 1.0f : -1.0f; // 0=右向き, 1=左向き（enemy.directionの規約に合わせる）
+                            partActor.parentAim = enemy.aimAngle; // 砲身など「本体の狙い」に追従するパーツ用
                             partActor.partIndex = part.partIndex;
+                            FillScriptPartTransform(partActor, part, ePartPose); // 親の拡大・傾けをパーツの位置計算へ合成する
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
                             partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
@@ -4798,12 +9542,97 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             };
                             BehaviorInterpreter::Tick(part.scriptState, partActor);
                         }
+                        // 複合オブジェクトのパーツ追従 — スクリプトがワールド座標を直接書いた場合に備えて
+                        // ローカルを取り直す（SetLocalOffset系しか使っていなければ何も起きない）。
+                        // 必ず ApplyPartsParentPose より前で呼ぶこと。
+                        CapturePartsLocal(enemy.parts, ePartPose);
                     }
                 }
                 if (canEnemyAct) {
                     enemy.history.push_back({ enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.direction, enemy.scale, enemy.angle, enemy.speedScale, enemy.isActive, enemy.isPaused, enemy.type, enemy.hp,
                                                enemy.customTimer, enemy.aiState, enemy.patrolLeft, enemy.patrolRight, enemy.auxF1, enemy.auxF2, enemy.auxState, enemy.auxFlag, enemy.auxF3 });
                     if (enemy.history.size() > MAX_HISTORY_FRAMES) enemy.history.erase(enemy.history.begin());
+                }
+            }
+            // 複合オブジェクトのパーツ追従 — ローカルオフセットと親の姿勢からワールド座標を組み直す。
+            // 巻き戻し中・一時停止中・編集ジェスチャ中（CanUpdateがfalse）でスクリプトが1ティックも
+            // 回らないフレームでも必ずここを通るので、パーツは常に本体へ張り付いたままになる。
+            // ドラッグで本体を掴んで動かしている最中にパーツだけ置き去りになる既存の不具合も、これで直る。
+            if (!enemy.parts.empty()) {
+                ApplyPartsParentPose(enemy.parts, MakeEnemyPose(enemy, FindEnemyDef(enemy.assetId)));
+
+                // 跳ね回る節足敵の胴体 — 頭の通った跡を一定距離ごとに辿って並ぶ。
+                //
+                // 他の型のパーツは親に固定オフセットで貼り付く剛体だが、この敵の胴体は
+                // 「頭が通った場所を、少し遅れて順番に通る」という別の繋がり方をする。
+                // そのため ApplyPartsParentPose が置いた位置をここで上書きする。
+                //
+                // 軌跡は専用のバッファを持たず、巻き戻し用の履歴(history)をそのまま使う。
+                // 履歴は巻き戻しで実際に巻き戻るので、胴体も何もしなくても正しく巻き戻る。
+                // 別のバッファを持つと、巻き戻したときに胴体だけ未来の形のまま残ってしまう。
+                if (enemy.type == ENEMY_BOUNCING_WORM) {
+                    const EnemyDef* wdef = FindEnemyDef(enemy.assetId);
+                    float gapW = (wdef && wdef->segmentGap > 0.0f) ? wdef->segmentGap : 22.0f;
+                    gapW *= enemy.scale; // 拡大された個体は節の間隔も一緒に広がる
+                    if (gapW < 1.0f) gapW = 1.0f;
+
+                    // 頭の中心。節も中心を軌跡へ合わせる（左上を合わせると大きさが違うときにずれる）。
+                    float headHalfW = (float)enemy.hitboxWidth * enemy.scale * 0.5f;
+                    float headHalfH = (float)enemy.hitboxHeight * enemy.scale * 0.5f;
+                    float trailX = enemy.x, trailY = enemy.y; // 履歴を遡る現在地（頭の左上座標系）
+                    float accW = 0.0f;                        // 直前の節からの距離
+                    size_t hIdx = enemy.history.size();
+                    float aheadCx = enemy.x + headHalfW, aheadCy = enemy.y + headHalfH; // 1つ前の節（最初は頭）の中心
+
+                    for (auto& seg : enemy.parts) {
+                        if (!seg.isActive) continue;
+                        bool placed = false;
+                        while (hIdx > 0) {
+                            const EnemyState& hs = enemy.history[--hIdx];
+                            float dxW = hs.x - trailX, dyW = hs.y - trailY;
+                            float segLen = sqrtf(dxW * dxW + dyW * dyW);
+                            if (accW + segLen >= gapW) {
+                                // ちょうど gapW になる位置は、たいてい履歴の2点の間にある。
+                                // 手前の点で止めると1フレームぶん行き過ぎて節の間隔がばらつくので、
+                                // 2点の間を按分して正確な位置を取る。
+                                float t = (segLen > 0.0001f) ? ((gapW - accW) / segLen) : 1.0f;
+                                trailX += dxW * t;
+                                trailY += dyW * t;
+                                hIdx++; // この履歴点はまだ使い切っていないので、次の節のために戻す
+                                accW = 0.0f;
+                                placed = true;
+                                break;
+                            }
+                            accW += segLen;
+                            trailX = hs.x; trailY = hs.y;
+                        }
+                        if (!placed) {
+                            // 出現直後などで履歴が足りないときは、進行方向の逆へ等間隔に並べて繋げる。
+                            // 何もしないと節が全部同じ場所に重なって1つの塊に見えてしまう。
+                            trailX -= cosf(enemy.auxF1) * gapW;
+                            trailY -= sinf(enemy.auxF1) * gapW;
+                            accW = 0.0f;
+                        }
+                        float segHalfW = seg.width * seg.scale * seg.parentUniform * 0.5f;
+                        float segHalfH = seg.height * seg.scale * seg.parentUniform * 0.5f;
+                        float segCx = trailX + headHalfW;
+                        float segCy = trailY + headHalfH;
+                        seg.x = segCx - segHalfW;
+                        seg.y = segCy - segHalfH;
+                        // 節は1つ前の節（先頭なら頭）のほうを向く。向きが揃うと1本の胴に見える。
+                        float toAheadX = aheadCx - segCx, toAheadY = aheadCy - segCy;
+                        if (toAheadX * toAheadX + toAheadY * toAheadY > 0.01f) {
+                            // 親の傾き(parentTilt)は描画時に加算されるので、ここでは引いて打ち消す。
+                            // 引かないと、頭を回すたびに胴体が二重に回ってしまう。
+                            seg.angle = atan2f(toAheadY, toAheadX) - seg.parentTilt;
+                        }
+                        aheadCx = segCx; aheadCy = segCy;
+                        // ここで書いたワールド座標を「適用済み」として控えておく。
+                        // 次フレームの CapturePartsLocal が「スクリプトが動かした」と誤解して
+                        // ローカルオフセットへ焼き込んでしまうのを防ぐ。
+                        seg.appliedX = seg.x;
+                        seg.appliedY = seg.y;
+                    }
                 }
             }
         }
@@ -4864,10 +9693,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float ph_scaled = (float)player.height * player.scale;
                         for (const auto& part : item.parts) {
                             if (!part.isActive) continue;
-                            float partW = (float)part.hitboxWidth * part.scale;
-                            float partH = (float)part.hitboxHeight * part.scale;
+                            float partHX, partHY, partW, partH;
+                            // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                            GetPartHitRect(part, partHX, partHY, partW, partH);
                             if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                partHX, partHY, partW, partH)) {
                                 item.isCollected = true;
                                 item.isActive = false;
                                 const ItemDef* idef = FindItemDef(item.assetId);
@@ -4902,6 +9732,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     if (item.isActive && !item.isCollected) {
                         const ItemDef* idefForParts = FindItemDef(item.assetId);
+                        // 複合オブジェクトのパーツ追従 — アイテムは編集できないので変換は恒等だが、
+                        // 敵・ギミックと同じ経路に乗せておくことで扱いを1つに統一する。
+                        ParentPose iPartPose = MakeItemPose(item);
                         if (idefForParts) {
                             for (auto& part : item.parts) {
                                 if (!part.isActive) continue;
@@ -4917,6 +9750,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 partActor.hasParent = true;
                                 partActor.parentX = item.x; partActor.parentY = item.y;
                                 partActor.partIndex = part.partIndex;
+                                FillScriptPartTransform(partActor, part, iPartPose);
                                 partActor.playerX = player.x; partActor.playerY = player.y;
                                 partActor.playSound = [](const std::string& slot) { SoundManager::Get().PlaySe(slot); };
                                 partActor.visualEffect = [&](const std::string& kind, float intensity) {
@@ -4925,12 +9759,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 };
                                 BehaviorInterpreter::Tick(part.scriptState, partActor);
                             }
+                            CapturePartsLocal(item.parts, iPartPose);
                         }
                     }
                     item.history.push_back({ item.x, item.y, item.isCollected });
                     if (item.history.size() > MAX_HISTORY_FRAMES) item.history.erase(item.history.begin());
                 }
             }
+            // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
+            if (!item.parts.empty()) ApplyPartsParentPose(item.parts, MakeItemPose(item));
         }
 
         // 3. 弾の更新（巻き戻し vs 通常物理）
@@ -4958,8 +9795,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             int curMapH = (int)stages[currentStageIdx].map.size();
                             int curMapW = curMapH > 0 ? (int)stages[currentStageIdx].map[0].size() : 0;
                             if (ty >= 0 && ty < curMapH && tx >= 0 && tx < curMapW) {
-                                TileType t = (TileType)stages[currentStageIdx].map[ty][tx];
-                                if (tileDefs[t].isCollidable) {
+                                int t = stages[currentStageIdx].map[ty][tx];
+                                // tileDefs の範囲チェックが必要。ここは isCollidable を読む13箇所のうち
+                                // 唯一ガードが無く、タイル定義を削除したステージを開くと範囲外参照になっていた
+                                // （タイルを削除してもステージ側の古いidは書き換わらないため）。
+                                if (t >= 0 && t < (int)tileDefs.size() && tileDefs[t].isCollidable) {
+                                    // 壊せるタイルなら、消える前にこの場で壊す。
+                                    //
+                                    // 【重要】ここで壊さないと壊せるタイルは弾では絶対に壊せない。
+                                    // 弾の破壊判定はずっと下の「プレイヤーの弾の当たり判定」側にあるが、
+                                    // そこへ行く前にこの壁衝突で isActive を落としてしまうため、
+                                    // 下の判定は毎回 isActive==false で素通りしていた。
+                                    // 「反転させた砲台で壊せるブロックを撃っても壊れない」の直接の原因がこれ。
+                                    // 壊せない壁に当たった場合は従来どおり消えるだけ。
+                                    if (bullets[i].isPlayerOwned) {
+                                        TryBreakTile(ty, tx, BREAK_BULLET, bullets[i].scale);
+                                    }
                                     bullets[i].isActive = false; // 壁に衝突して消滅
                                 }
                             }
@@ -4986,6 +9837,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         float dot = bullets[i].vx * nx + bullets[i].vy * ny;
                                         bullets[i].vx = bullets[i].vx - 2.0f * dot * nx;
                                         bullets[i].vy = bullets[i].vy - 2.0f * dot * ny;
+
+                                        // 編集リアクション：
+                                        //  ・幅を広げる → 反射した弾が加速する（遠くのスイッチまで届かせられる）。
+                                        //  ・向き反転   → 反射した弾の所属が入れ替わり、敵の弾を跳ね返して
+                                        //                 敵に当てられるようになる。
+                                        EditReaction mr = GetGimmickEditReaction(gim);
+                                        if (mr.scaleRatio > 1.0f) {
+                                            bullets[i].vx *= mr.scaleRatio;
+                                            bullets[i].vy *= mr.scaleRatio;
+                                        }
+                                        if (mr.flipped) bullets[i].isPlayerOwned = !bullets[i].isPlayerOwned;
 
                                         // 無限反射ループを避けるため、弾をミラーから少し押し出す
                                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
@@ -5024,17 +9886,58 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             } else {
                 bool canGimAct = CanUpdate(gim.x, gim.y, gim.spriteWidth, gim.spriteHeight, 1.0f, gim.isPaused);
                 if (canGimAct) {
-                    float gts = ts;
+                    // Feature: 編集リアクション — ギミックにも個体ごとの速度編集を効かせる。
+                    // これで「動く足場をゆっくりにして乗る」「回転橋を止める」といった操作が成立する。
+                    float gts = ts * gim.speedScale;
+
+                    // ============ Feature: 編集リアクション（ギミック共通の前処理）============
+                    // このギミックに加えられた編集差分を一度だけ求め、以降の分岐で共有する。
+                    EditReaction gr = GetGimmickEditReaction(gim);
+                    // 「幅を広げたぶん動きが重くなる」倍率。狭めれば軽快に、広げれば鈍重になる。
+                    float grMass = gr.MassMul();
+                    float grDir = gr.flipped ? -1.0f : 1.0f; // 向き反転で往復や回転が逆になる
+
+                    // Feature: 編集リアクション — 往復や昇降の「基準点」を持つギミックは、
+                    // 移動編集で掴んで動かされたら基準点も一緒に運ぶ。
+                    // これをしないと、動かした次のフレームに元の場所へ戻ってしまい、
+                    // 「動かせるのに動かした意味がない」という状態になる。
+                    if (gr.moved && (gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT)) {
+                        gim.editBaseX = gim.x;
+                        gim.editBaseY = gim.y;
+                        gim.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_POS;
+                        gr.moved = false;
+                    }
+
+                    // Feature: 編集リアクションのJSON宣言 — ギミック側もアセットで反応を足せる。
+                    {
+                        const GimmickDef* grDef = FindGimmickDef(gim.assetId);
+                        if (grDef != nullptr && !grDef->editReactions.empty()) {
+                            DeclaredEffects gfx = EvalDeclaredReactions(grDef->editReactions, gr);
+                            grMass *= gfx.mulMoveSpeed;
+                            if (gfx.reverseCycle) grDir = -grDir;
+                            if (gfx.destroy)      gim.isActive = false;
+                        }
+                    }
+                    // =====================================================================
+
                     if (gim.type == GIMMICK_ROTATING_BRIDGE) {
-                        // 橋を自動回転
+                        // 橋を自動回転。
+                        // 編集リアクション：幅を広げるほど重くて回転が遅くなり、向き反転で逆回りになる。
+                        // （この型のangleはAIが握っているので傾け編集は受け付けない＝GimmickAngleIsAiOwned）
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float rotSpeed = gdef ? gdef->rotationSpeed : 0.015f;
+                        float rotSpeed = (gdef ? gdef->rotationSpeed : 0.015f) * grMass * grDir;
                         gim.angle += rotSpeed * gts;
                     }
                     else if (gim.type == GIMMICK_CHIKUWA_BLOCK) {
                         // ちくわブロックロジック（gim.customTimerをrideTimer、gim.val1を元のY座標、gim.val2をfallDelay、gim.angleをisFallingフラグとして使用）
+                        // 編集リアクション：
+                        //  ・幅を広げる → 支える面積が増え、落ちるまでの猶予が伸びる。
+                        //  ・幅を狭める → すぐ落ちる。
+                        //  ・向き反転   → 落ちずに上へ飛んでいく（天井側の足場を作れる）。
+                        //  ・速度       → 猶予の進み方が変わる（gtsに乗る）。
+                        // （この型はangleを「落下中フラグ」に流用しているため傾け編集は受け付けない）
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float standDelay = gdef ? gdef->standDelayFrames : 45.0f;
+                        float standDelay = (gdef ? gdef->standDelayFrames : 45.0f) * gr.scaleRatio;
                         float standTolerance = gdef ? gdef->standTolerancePx : 10.0f;
                         float respawnDelay = gdef ? gdef->respawnDelayFrames : 180.0f;
                         // gim.val1 が未初期化(0)なら現在Yを記録し、fallDelayをセット
@@ -5072,8 +9975,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 落下中。gim.val2 は本来fallDelayだが、vyの管理に使いたいが別の変数がない。
                             // 代わりに val2 を少しずつ増やして擬似vyにする
                             gim.val2 += GRAVITY * gts;
-                            gim.y += gim.val2 * gts;
-                            if (gim.y > SCREEN_HEIGHT + 100) {
+                            gim.y += gim.val2 * gts * grDir; // 向き反転で上へ飛んでいく
+                            if (gim.y > SCREEN_HEIGHT + 100 || gim.y < -200.0f) {
                                 gim.customTimer += 1.0f * gts;
                                 if (gim.customTimer > respawnDelay) {
                                     gim.angle = 0.0f;
@@ -5085,11 +9988,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
                     else if (gim.type == GIMMICK_CHOMPER) {
-                        // 敵食いギミック
+                        // 敵食いギミック。
+                        // 編集リアクション：
+                        //  ・幅／高さを変える → 捕食範囲がそのまま伸び縮みする。
+                        //  ・向き反転         → プレイヤーを食わなくなる代わりに、敵だけを食い続ける
+                        //                       （敵を排除する装置として使い回せる）。
                         // 対プレイヤー
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
-                        if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                        if (!gr.flipped && CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             player.hp = 0;
                             const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
@@ -5099,7 +10006,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (enemy.isActive && CheckCollision(enemy.x, enemy.y, (float)enemy.hitboxWidth * enemy.scale, (float)enemy.hitboxHeight * enemy.scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                 enemy.hp = 0;
                                 enemy.isActive = false;
-                                gim.isActive = false; // 互いに消滅
+                                // 向きを反転させた個体は消えずに残り、次の敵も食べ続ける
+                                if (!gr.flipped) gim.isActive = false; // 互いに消滅
                                 const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                                 if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                             }
@@ -5110,29 +10018,92 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // Feature: 動く足場の空中配置対応（友人フィードバック対応）— 従来は配置Yを上端として
                         // 常に下方向にのみ振動する式だったため、空中に置いても地面側へ沈むように見えていた。
                         // 配置Yを振動の中心とし、±travel/2の範囲で往復するようにする。
+                        // 編集リアクション：
+                        //  ・傾ける     → 往復の軸そのものが傾く。縦揺れの足場を横移動や斜め移動に変えられる。
+                        //  ・幅を広げる → 往復距離が伸びる（届かなかった場所まで運んでくれる）。
+                        //  ・速度       → 往復が速く/遅くなる。
+                        //  ・向き反転   → 往復の位相が逆になり、待ち合わせのタイミングをずらせる。
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float travel = gdef ? gdef->travelDistance : 96.0f;
-                        float oscSpeed = gdef ? gdef->oscillationSpeed : 0.02f;
-                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y - travel * 0.5f; gim.val2 = gim.y + travel * 0.5f; }
+                        float travel = (gdef ? gdef->travelDistance : 96.0f) * gr.scaleRatio;
+                        float oscSpeed = (gdef ? gdef->oscillationSpeed : 0.02f) * grMass;
                         gim.customTimer += oscSpeed * gts;
-                        float t = (sinf(gim.customTimer) + 1.0f) * 0.5f;
-                        gim.y = gim.val1 + (gim.val2 - gim.val1) * t;
+                        // -1〜+1の往復量。位相は向き反転で入れ替わる
+                        float wave = sinf(gim.customTimer) * grDir;
+                        // 配置位置(editBase*)を中心として、傾けた軸の向きへ往復させる。
+                        // val1/val2/customTimerは既に別用途で埋まっているため、軸の基準にはeditBaseX/Yを使う。
+                        gim.x = gim.editBaseX + sinf(gr.tilt) * travel * 0.5f * wave;
+                        gim.y = gim.editBaseY + cosf(gr.tilt) * travel * 0.5f * wave;
                     }
                     else if (gim.type == GIMMICK_FRAMESTEP_LIFT) {
                         // コマ送りリフト：一時停止中の→キー（コマ送り）1回ごとに一歩だけ動く
+                        // 編集リアクション：
+                        //  ・幅を広げる → 1コマあたりの移動量が増える（少ないコマ送りで遠くまで行ける）。
+                        //  ・傾ける     → 昇降ではなく傾けた向きへ進む。
+                        //  ・向き反転   → 進む向きが逆になる。
+                        //  ・速度       → 1コマの刻み幅が変わる。
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                        float travel = gdef ? gdef->travelDistance : 128.0f;
-                        float stepInc = gdef ? gdef->stepIncrement : 0.15f;
-                        if (gim.val1 == 0.0f && gim.val2 == 0.0f) { gim.val1 = gim.y; gim.val2 = gim.y + travel; }
+                        float travel = (gdef ? gdef->travelDistance : 128.0f) * gr.scaleRatio;
+                        float stepInc = (gdef ? gdef->stepIncrement : 0.15f) * gim.speedScale;
                         if (isStepFrame) {
-                            gim.customTimer += stepInc;
-                            if (gim.customTimer > 1.0f) gim.customTimer = 0.0f;
+                            // 送った向き（→=+1 / ←=-1）にそのまま従う。
+                            // 端で折り返さず止めるのは、上限を越えた瞬間に一番下へ瞬間移動していたため。
+                            // 乗っている側から見ると足場が消えて落とされるのと同じで、
+                            // 「1コマずつ確かめながら上げる」という操作と噛み合わなかった。
+                            gim.customTimer += stepInc * grDir * stepFrameDir;
+                            if (gim.customTimer > 1.0f) gim.customTimer = 1.0f;
+                            if (gim.customTimer < 0.0f) gim.customTimer = 0.0f;
                         }
-                        gim.y = gim.val1 + (gim.val2 - gim.val1) * gim.customTimer;
+                        // 基準の向きは「真上」。コマを送るほど上がっていく。
+                        //
+                        // 以前はここが +Y（真下）で、assets側が travelDistance に負の値を書いて
+                        // 上昇させるつもりでいた。ところが未指定を表す番兵も負の値なので、
+                        // ApplyGimmickDefaultParams が -160 を既定値 128 で上書きしてしまい、
+                        // 「コマを送ると下がっていく」状態になっていた。
+                        // 距離は必ず正の値として扱い、向きは式の側で持つ。
+                        // 逆に下げたい場合は従来どおり「向き反転」で grDir が -1 になる。
+                        gim.x = gim.editBaseX + sinf(gr.tilt) * travel * gim.customTimer;
+                        gim.y = gim.editBaseY - cosf(gr.tilt) * travel * gim.customTimer;
+                    }
+                    else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
+                        // 編集リアクション：45度以上傾けると自重で崩れる。
+                        // クリックで直接叩かなくても、離れた場所のブロックを回して壊せるようになる。
+                        // isActiveは巻き戻し履歴に入っているので、巻き戻せばちゃんと元通り積み直る。
+                        // 自重で崩れるかどうかもブロック側の設定（breakByTip）で切れるようにしてある。
+                        // 大きさという概念が無いので attackerScale は 0 を渡す。
+                        if (gr.tipped) TryBreakGimmick(gim, BREAK_TIP, 0.0f);
+                    }
+                    else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
+                        // 編集リアクション：
+                        //  ・縮小する → 支えを失って転がる岩になる。傾けた向き（無ければ向き反転の向き）へ
+                        //               転がっていくので、下のスイッチを押させたり通路を空けたりできる。
+                        //  ・等倍以上 → 従来どおりその場を塞ぐ固定障害物のまま。
+                        // val1/val2/customTimerがこの型では未使用なので、val1を疑似的な横速度として使う。
+                        if (gr.shrunk) {
+                            float rollDir = (gr.tilt != 0.0f) ? ((gr.tilt > 0.0f) ? 1.0f : -1.0f) : (gr.flipped ? -1.0f : 1.0f);
+                            gim.val1 += rollDir * 0.12f * gts;
+                            if (gim.val1 >  4.0f) gim.val1 =  4.0f;
+                            if (gim.val1 < -4.0f) gim.val1 = -4.0f;
+                            gim.x += gim.val1 * gts;
+                            gim.angle += gim.val1 * 0.05f * gts; // 転がっている見た目にする
+                        } else {
+                            gim.val1 = 0.0f;
+                        }
+                    }
+                    else if (gim.type == GIMMICK_CHECKPOINT) {
+                        // 編集リアクション：
+                        //  ・拡大する   → 作動範囲が広がる（通り道から外れていても記録される）。
+                        //  ・向き反転   → 一度きりの制限が外れ、通るたびに復帰地点を上書きし直す。
+                        // 実際の記録処理は接触判定側にあるので、ここでは再武装だけ行う。
+                        if (gr.flipped) gim.val1 = 0.0f;
                     }
                     else if (gim.type == GIMMICK_FASTFORWARD_GATE) {
-                        // 早送りゲート：早送りモード中(Fキー)だけ通過できる壁
-                        gim.isActive = !isFastForward;
+                        // 早送りゲート：早送りモード中(Fキー)だけ通過できる壁。
+                        // 編集リアクション：
+                        //  ・傾ける   → 開く条件が反転し、「早送り中だけ閉じる」壁になる。
+                        //  ・向き反転 → 早送りではなくコマ送り（一時停止中の→キー）で開くゲートに変わる。
+                        if (gr.flipped)      gim.isActive = !isStepFrame;
+                        else if (gr.tipped)  gim.isActive = isFastForward;
+                        else                 gim.isActive = !isFastForward;
                     }
                     else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
                              || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
@@ -5141,36 +10112,66 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float pw_s = (float)player.width * player.scale;
                         float ph_s = (float)player.height * player.scale;
                         if (CheckCollision(player.x, player.y, pw_s, ph_s, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                            // 編集リアクション：
+                            //  ・幅／高さを変える → 効果範囲がそのまま伸び縮みする（判定にspriteサイズを使っているため自動）。
+                            //  ・向き反転         → 効果が反転する（暗転↔明転、ズームイン↔ズームアウト、色↔補色）。
+                            //  ・速度             → 効果の強さが変わる（1.0が既定値）。
+                            float fxStr = gim.speedScale; // 速度編集をそのまま「効果の強さ」に読み替える
                             if (gim.type == GIMMICK_BRIGHTNESS_ZONE) {
                                 // val1 > 0.5 なら明転、それ以外は暗転（デフォルト）
                                 float bright = gdef ? gdef->brightLevel : 1.6f;
                                 float dark = gdef ? gdef->darkLevel : 0.35f;
-                                Screen_SetBrightness(gim.val1 > 0.5f ? bright : dark);
+                                bool wantBright = (gim.val1 > 0.5f);
+                                if (gr.flipped) wantBright = !wantBright;
+                                float lvl = wantBright ? bright : dark;
+                                Screen_SetBrightness(1.0f + (lvl - 1.0f) * fxStr);
                             } else if (gim.type == GIMMICK_COLOR_ZONE) {
                                 float r = gdef ? gdef->tintR : 1.0f, g = gdef ? gdef->tintG : 0.6f, b = gdef ? gdef->tintB : 1.0f;
-                                Screen_SetTint(r, g, b); // 紫がかった色調（既定値）
+                                if (gr.flipped) { r = 2.0f - r; g = 2.0f - g; b = 2.0f - b; } // 補色寄りへ反転
+                                Screen_SetTint(1.0f + (r - 1.0f) * fxStr,
+                                               1.0f + (g - 1.0f) * fxStr,
+                                               1.0f + (b - 1.0f) * fxStr);
                             } else if (gim.type == GIMMICK_ZOOM_LENS) {
-                                Screen_SetZoom(gdef ? gdef->zoomLevel : 1.6f);
+                                float z = gdef ? gdef->zoomLevel : 1.6f;
+                                if (gr.flipped) z = (z > 0.01f) ? (1.0f / z) : 1.0f; // 反転でズームアウトになる
+                                Screen_SetZoom(1.0f + (z - 1.0f) * fxStr);
                             } else { // GIMMICK_SLOWMO_FIELD（視覚効果のみのスローモーション演出）
-                                Screen_SetZoom(gdef ? gdef->zoomLevel : 1.3f);
-                                Screen_SetBrightness(gdef ? gdef->brightLevel : 0.85f);
+                                float z = gdef ? gdef->zoomLevel : 1.3f;
+                                float b2 = gdef ? gdef->brightLevel : 0.85f;
+                                if (gr.flipped) { z = (z > 0.01f) ? (1.0f / z) : 1.0f; b2 = 2.0f - b2; }
+                                Screen_SetZoom(1.0f + (z - 1.0f) * fxStr);
+                                Screen_SetBrightness(1.0f + (b2 - 1.0f) * fxStr);
                             }
                         }
                     }
                     else if (gim.type == GIMMICK_COLOR_LOCK_PLATFORM) {
-                        // 色ロック足場：paramの色番号とプレイヤーの色フィルタが一致する時だけ実体化する
+                        // 色ロック足場：paramの色番号とプレイヤーの色フィルタが一致する時だけ実体化する。
+                        // 編集リアクション：
+                        //  ・傾ける   → 要求する色が赤→緑→青と1段ずつ進む（足場の出し方を組み替えられる）。
+                        //  ・向き反転 → 条件が反転し「その色以外なら実体化する」足場になる。
                         int requiredColor = gim.param.empty() ? 1 : atoi(gim.param.c_str());
-                        gim.isActive = (requiredColor == playerColorFilter);
+                        // 60度ごとに1色ずらす。負の傾きでも正しく巡回するよう剰余を正規化する
+                        requiredColor = ((((requiredColor - 1 + gr.tiltSteps) % 3) + 3) % 3) + 1;
+                        bool colorMatch = (requiredColor == playerColorFilter);
+                        gim.isActive = gr.flipped ? !colorMatch : colorMatch;
                     }
                     else if (gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
-                        // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する
+                        // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する。
+                        // 編集リアクション：
+                        //  ・向き反転   → 要求する明暗が入れ替わる（dark↔bright）。
+                        //  ・幅を広げる → 判定のしきい値が緩くなり、中途半端な明るさでも実体化する。
                         bool wantsBright = (gim.param == "bright");
-                        gim.isActive = wantsBright ? (fxCurBright > 1.3f) : (fxCurBright < 0.6f);
+                        if (gr.flipped) wantsBright = !wantsBright;
+                        // 拡大するほどしきい値が1.0へ寄る＝条件が緩む
+                        float loose = (gr.scaleRatio > 1.0f) ? (gr.scaleRatio - 1.0f) * 0.3f : 0.0f;
+                        if (loose > 0.35f) loose = 0.35f;
+                        gim.isActive = wantsBright ? (fxCurBright > 1.3f - loose) : (fxCurBright < 0.6f + loose);
                     }
                     else if (gim.type == GIMMICK_CUSTOM_SCRIPT) {
                         // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで駆動する
                         ScriptActor actor;
                         actor.timeScale = gts; // 早送り/スローモーションをスクリプト駆動のギミックにも反映する
+                        FillScriptEditContext(actor, gr); // Feature: 編集リアクション
                         actor.x = &gim.x; actor.y = &gim.y;
                         actor.angle = &gim.angle; // Feature: Composite Multi-Part Objects (Parts-M2)
                         actor.playerX = player.x; actor.playerY = player.y;
@@ -5204,6 +10205,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: Composite Multi-Part Objects (Parts-M3)
                     // パーツは親のtype(挙動タイプ)に関係なく、独立して自分のスクリプトを実行する
                     const GimmickDef* gdefForParts = FindGimmickDef(gim.assetId);
+                    // 複合オブジェクトのパーツ追従 — ギミック本体が動き終えた「今の姿勢」
+                    ParentPose gPartPose = MakeGimmickPose(gim);
                     if (gdefForParts) {
                         for (auto& part : gim.parts) {
                             if (!part.isActive) continue;
@@ -5217,8 +10220,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             partActor.x = &part.x; partActor.y = &part.y;
                             partActor.scale = &part.scale; partActor.angle = &part.angle;
                             partActor.hasParent = true;
+                            FillScriptEditContext(partActor, gr); // 親に加えられた編集をパーツにも伝える（敵のパーツと揃える）
                             partActor.parentX = gim.x; partActor.parentY = gim.y;
+                            partActor.parentDirection = (gim.direction == 0) ? 1.0f : -1.0f; // 0=正方向, それ以外=反転
                             partActor.partIndex = part.partIndex;
+                            FillScriptPartTransform(partActor, part, gPartPose);
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
                             partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
@@ -5249,15 +10255,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!isPlayerRewinding) {
                                 float pw_ = (float)player.width * player.scale;
                                 float ph_ = (float)player.height * player.scale;
-                                float partW = (float)part.hitboxWidth * part.scale;
-                                float partH = (float)part.hitboxHeight * part.scale;
+                                float partHX, partHY, partW, partH;
+                                // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                GetPartHitRect(part, partHX, partHY, partW, partH);
                                 if (CheckCollision(player.x, player.y, pw_, ph_,
-                                                    part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                    partHX, partHY, partW, partH)) {
                                     player.hp--;
                                     if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
                                 }
                             }
                         }
+                        CapturePartsLocal(gim.parts, gPartPose); // 必ず ApplyPartsParentPose より前
                     }
                 }
                 if (canGimAct) {
@@ -5268,6 +10276,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 gim.lastDeltaX = gim.x - beforeGimX;
                 gim.lastDeltaY = gim.y - beforeGimY;
             }
+            // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
+            if (!gim.parts.empty()) ApplyPartsParentPose(gim.parts, MakeGimmickPose(gim));
         }
 
         // プレイヤーが能動的に使う画面エフェクト操作（敵/ギミックの演出より後に適用し、プレイヤーの意図を優先する）
@@ -5275,7 +10285,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
         bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
         if (currentScene == PLAY && canPlayerAct) {
-            zHeldThisFrame = CheckHitKey(KEY_INPUT_Z) != 0;
+            // Ctrl+Z は取り消しなので、ズームの Z としては数えない（コストを使ってしまう）
+            zHeldThisFrame = (CheckHitKey(KEY_INPUT_Z) != 0) && !editCtrlHeld;
             xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
             cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
             bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
@@ -5314,7 +10325,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (auto& g : gimmicks) g.isRewinding = false;
                 for (auto& b : bullets)  b.isRewinding = false;
                 for (auto& it : items)   it.isRewinding = false;
-                SoundManager::Get().PlaySe("ui_denied");
+                SoundManager::Get().PlaySe(gameConfig.editSe.costEmpty);
             }
         }
 
@@ -5363,7 +10374,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 1. プレイヤー vs トゲ（即死）
             for (const auto& gim : gimmicks) {
                 if (gim.type == GIMMICK_SPIKES && gim.isActive) {
-                    if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                    // Feature: 編集リアクション — 45度以上倒したトゲは刺が横を向き、踏んでも死ななくなる
+                    // （足場側の判定はCheckPlatformCollisionが拾う）。
+                    // 拡大・縮小した場合は判定範囲もそれに追従する。
+                    if (GimmickIsTipped(gim)) continue;
+                    float sbx, sby, sbw, sbh;
+                    GetGimmickCollisionBox(gim, sbx, sby, sbw, sbh);
+                    if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, sbx, sby, sbw, sbh)) {
                         ResetStage();
                         break;
                     }
@@ -5398,12 +10415,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float partCx = 0.0f;
                     for (const auto& part : gimHz.parts) {
                         if (!part.isActive || !part.deadly) continue;
-                        float partW = (float)part.hitboxWidth * part.scale;
-                        float partH = (float)part.hitboxHeight * part.scale;
+                        float partHX, partHY, partW, partH;
+                        // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                        GetPartHitRect(part, partHX, partHY, partW, partH);
                         if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                           part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                           partHX, partHY, partW, partH)) {
                             hitDeadlyPart = true;
-                            partCx = part.x + part.hitboxOffsetX + partW / 2.0f;
+                            partCx = partHX + partW / 2.0f;
                             break;
                         }
                     }
@@ -5431,6 +10449,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         bool isThisEnemyRew = (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
                         if (isThisEnemyRew) continue;
 
+                        // Feature: 編集リアクション（共通層）—
+                        // ・個別に一時停止した敵は「足場」になるので、乗った瞬間に被弾しては成立しない。
+                        // ・個別に巻き戻し中の敵は過去の再生＝残像なので、すり抜けられる。
+                        // ・型ごとに「編集されて無害化した状態」もここに含まれる（縮めたドッスン等）。
+                        if (EnemyIsHarmless(enemy)) continue;
+
                         float ew_scaled = (float)enemy.hitboxWidth * enemy.scale;
                         float eh_scaled = (float)enemy.hitboxHeight * enemy.scale;
                         bool hitBody = CheckCollision(player.x, player.y, pw_scaled, ph_scaled, enemy.x, enemy.y, ew_scaled, eh_scaled);
@@ -5439,10 +10463,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         bool hitPart = false;
                         for (const auto& part : enemy.parts) {
                             if (!part.isActive) continue;
-                            float partW = (float)part.hitboxWidth * part.scale;
-                            float partH = (float)part.hitboxHeight * part.scale;
+                            float partHX, partHY, partW, partH;
+                            // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                            GetPartHitRect(part, partHX, partHY, partW, partH);
                             if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled,
-                                                part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                                partHX, partHY, partW, partH)) {
                                 hitPart = true;
                                 break;
                             }
@@ -5465,7 +10490,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 攻撃するたびに胴体を消費する敵（いもむし）の処理。
                                 // 尾＝parts配列の末尾側なので、後ろから探して最初に見つかった生存パーツを落とす。
                                 // こうすると「頭から順に短くなる」のではなく、尻尾から削れていく見た目になる。
-                                if (edef != nullptr && edef->consumePartOnAttack) {
+                                // Feature: 編集リアクション — 弱点色のフィルタを掛けている間は節を消費しない。
+                                // いもむしは「攻撃させて節を減らす」のが本来の攻略だが、
+                                // 色フィルタで実体を歪めている間はその消耗を止められる。
+                                // 節を温存させたまま通したい場面（後で足場として使いたい等）の逃げ道になる。
+                                bool suppressConsume = (g_screenFx.colorFilter != 0 &&
+                                                        g_screenFx.colorFilter == EnemyWeakColor(enemy.type));
+                                if (edef != nullptr && edef->consumePartOnAttack && !suppressConsume) {
                                     bool consumed = false;
                                     for (int pi = (int)enemy.parts.size() - 1; pi >= 0; pi--) {
                                         if (enemy.parts[pi].isActive) {
@@ -5503,10 +10534,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (enemy.isActive) {
                                 bool isThisEnemyRew = (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
                                 if (isThisEnemyRew) continue;
+                                // Feature: 編集リアクション（共通層）— 巻き戻し中の敵は残像なので弾も貫通する。
+                                // 接触ダメージだけ無効で弾は当たる、という半端な状態にすると
+                                // 「すり抜けられる相手」という理解と噛み合わなくなるため揃える。
+                                if (enemy.isRewinding) continue;
 
                                 float ew_scaled = (float)enemy.hitboxWidth * enemy.scale;
                                 float eh_scaled = (float)enemy.hitboxHeight * enemy.scale;
-                                if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
+                                if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, enemy.x, enemy.y, ew_scaled, eh_scaled)) {
+                                    // Feature: 編集リアクション — 実体を持たない状態の敵は弾が素通りする
+                                    // （まぼろしは色フィルタを合わせている間だけ撃てる）
+                                    if (EnemyIsBulletProof(enemy)) continue;
                                     if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) {
                                         // シールド発動中はダメージ無効（弾だけ消える）
                                         bullets[i].isActive = false;
@@ -5561,10 +10599,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     const EnemyDef* edefForParts = FindEnemyDef(enemy.assetId);
                                     for (auto& part : enemy.parts) {
                                         if (!part.isActive) continue;
-                                        float partW = (float)part.hitboxWidth * part.scale;
-                                        float partH = (float)part.hitboxHeight * part.scale;
-                                        if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f,
-                                                            part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                        float partHX, partHY, partW, partH;
+                                        // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                        GetPartHitRect(part, partHX, partHY, partW, partH);
+                                        if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale,
+                                                            partHX, partHY, partW, partH)) {
                                             if (part.hp > 0) {
                                                 part.hp--;
                                                 bool partDied = part.hp <= 0;
@@ -5598,15 +10637,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // プレイヤーの弾が破壊可能なブロックにヒット
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
-                                if (gim.type == GIMMICK_BREAKABLE_BLOCK && gim.isActive) {
-                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
-                                        gim.isActive = false;
+                                if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
+                                if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                                    // 弾の大きさは撃った側の大きさを引き継いでいるので、それを相手の大きさとして渡す。
+                                    // 反転させた砲台の弾もここを通るため、ブロック側で「弾で壊れる」を切っておけば
+                                    // 敵に撃たせても壊れない、という設計ができる。
+                                    if (TryBreakGimmick(gim, BREAK_BULLET, bullets[i].scale)) {
                                         bullets[i].isActive = false;
-                                        const GimmickDef* gdef = FindGimmickDef(gim.assetId);
-                                        if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                                         break;
                                     }
                                 }
+                            }
+                        }
+
+                        // Feature: タイル破壊 — 弾が地形タイルに当たった場合。
+                        // 弾の中心が入っているマスを見る。壊せたらその弾は消える（ブロックと同じ扱い）。
+                        if (bullets[i].isActive) {
+                            float bcx = bullets[i].x + 8.0f * bullets[i].scale;
+                            float bcy = bullets[i].y + 8.0f * bullets[i].scale;
+                            if (TryBreakTile((int)(bcy / TILE_SIZE), (int)(bcx / TILE_SIZE), BREAK_BULLET, bullets[i].scale)) {
+                                bullets[i].isActive = false;
                             }
                         }
 
@@ -5617,10 +10667,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 const GimmickDef* gdefForPartHit = FindGimmickDef(gim.assetId);
                                 for (auto& part : gim.parts) {
                                     if (!part.isActive) continue;
-                                    float partW = (float)part.hitboxWidth * part.scale;
-                                    float partH = (float)part.hitboxHeight * part.scale;
-                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f,
-                                                        part.x + part.hitboxOffsetX, part.y + part.hitboxOffsetY, partW, partH)) {
+                                    float partHX, partHY, partW, partH;
+                                    // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
+                                    GetPartHitRect(part, partHX, partHY, partW, partH);
+                                    if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale,
+                                                        partHX, partHY, partW, partH)) {
                                         if (part.hp > 0) {
                                             part.hp--;
                                             bool partDied = part.hp <= 0;
@@ -5652,7 +10703,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     } else {
                         // 敵の弾がプレイヤーにヒット
                         if (!isPlayerRewinding) {
-                            if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f, 16.0f, player.x, player.y, pw_scaled, ph_scaled)) {
+                            if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, player.x, player.y, pw_scaled, ph_scaled)) {
                                 player.hp--;
                                 if (player.hp <= 0) {
                                     currentScene = RESULT_GAMEOVER;
@@ -5728,19 +10779,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // ===== deadly タイル判定 =====
+        //
+        // 【重要】以前はプレイヤーの「横中央・体の90%の高さ」という1点しか見ていなかった。
+        // ところが着地補正（CheckGridCollisionY）は必ず y = セル上端 - 体の高さ に揃えるので、
+        // 着地した瞬間に体の下端はちょうどセルの境界に乗る。
+        // その状態で 0.9 の高さを見ると、サンプルされるのは必ず「1つ上のマス」になり、
+        // 立っているマスは絶対に調べられなかった。
+        // つまり「当たり判定あり＋即死」のタイル（棘ブロック）は完全に無害な足場で、
+        // 「当たり判定なし」の棘だけが、落下中にセルへ入り込むおかげで偶然効いていた。
+        //
+        // 1点をやめ、プレイヤーの当たり判定矩形に重なる全タイルを見る形にする。
+        // 接地時に足元のマスを拾うため、下方向へ1pxだけ広げて調べる。
+        // これで「乗る」「横から当たる」「頭をぶつける」の3つが同時に成立するようになる。
         if (currentScene == PLAY && !isPlayerRewinding) {
             float _pw = (float)player.width * player.scale;
             float _ph = (float)player.height * player.scale;
-            int tileRow = (int)((player.y + _ph * 0.9f) / TILE_SIZE);
-            int tileCol = (int)((player.x + _pw * 0.5f) / TILE_SIZE);
             const auto& curStageMap = stages[currentStageIdx].map;
-            if (tileRow >= 0 && tileRow < (int)curStageMap.size() &&
-                tileCol >= 0 && tileCol < (int)curStageMap[0].size()) {
-                int tid = curStageMap[tileRow][tileCol];
-                if (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].deadly) {
-                    currentScene = RESULT_GAMEOVER;
+            int mapRows = (int)curStageMap.size();
+            int mapCols = mapRows > 0 ? (int)curStageMap[0].size() : 0;
+            // 端のピクセルが隣のマスへはみ出して誤判定しないよう、右端・下端は1px内側で数える
+            int rowTop = (int)(player.y / TILE_SIZE);
+            // 足元のマスを必ず含める。接地しているとき体の下端はちょうどセル境界に乗るので、
+            // この式は「今まさに立っているマス」を指す。棘ブロックの上に立ったら死ぬ、が成立する条件。
+            int rowBottom = (int)((player.y + _ph) / TILE_SIZE);
+            int colLeft = (int)(player.x / TILE_SIZE);
+            int colRight = (int)((player.x + _pw - 1.0f) / TILE_SIZE);
+            bool touchedDeadly = false;
+            for (int r = rowTop; r <= rowBottom && !touchedDeadly; ++r) {
+                if (r < 0 || r >= mapRows) continue;
+                for (int c = colLeft; c <= colRight; ++c) {
+                    if (c < 0 || c >= mapCols) continue;
+                    int tid = curStageMap[r][c];
+                    if (tid < 0 || tid >= (int)tileDefs.size() || !tileDefs[tid].deadly) continue;
+                    touchedDeadly = true;
+                    break;
                 }
             }
+            if (touchedDeadly) currentScene = RESULT_GAMEOVER;
         }
 
         // 空中足場の描画
@@ -5751,7 +10826,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // ステージギミックの描画
         for (const auto& gim : gimmicks) {
-            if (!gim.isActive) continue;
+            // 色ロック足場・明暗ロック足場は、条件が合っていない間 isActive=false になる型。
+            // この2つは「まだ実体化していない」ことを半透明のゴーストで示す描画を自前で持っているのに、
+            // ここで一律に弾いていたためその分岐へ到達できず、条件が合うまで完全に消えていた。
+            // どこに足場が現れるのかが画面に無いと、色や明るさを切り替える手掛かりが一切無くなる。
+            bool drawsGhostWhenInactive = (gim.type == GIMMICK_COLOR_LOCK_PLATFORM
+                                        || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM);
+            if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
@@ -5777,13 +10858,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
-                // ヒビの入った石ブロック画像をスケーリングして描画（カスタムスプライト優先）
+                // ヒビの入った石ブロック画像をスケーリングして描画（カスタムスプライト優先）。
+                // 編集リアクションで傾けられると崩れるので、崩れる寸前の傾きが見えるよう回転描画する。
                 int useHandle = gim.handle >= 0 ? gim.handle : breakableBlockHandle;
-                int bx1 = (int)(gim.x - cameraX);
-                int by1 = (int)(gim.y - cameraY);
-                int bx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int by2 = (int)(gim.y + gim.spriteHeight - cameraY);
-                DrawExtendGraph(bx1, by1, bx2, by2, useHandle, TRUE);
+                DrawGimmickRotated(gim, useHandle, cameraX, cameraY,
+                                   gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
             }
             else if (gim.type == GIMMICK_FALLING_LIFT) {
                 // リフト画像を描画（カスタムスプライト優先）
@@ -5837,6 +10916,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 SetDrawBright(255, 255, 255);
+
+                // 「どれだけ広げれば足りるのか」をスイッチの上に出す。
+                //
+                // これが無いと、箱をどこまで広げればよいのかを当てずっぽうで探すことになる。
+                // 必要な幅は「スイッチ自身を広げると緩む」という既存の反応を含めて求める。
+                // 押されているかどうかは更新側(重量スイッチとドアの開閉ロジック)が
+                // customTimer に控えているので、判定を書き写さずそれを読む。
+                {
+                    bool pressed = (gim.customTimer > 0.5f);
+                    int gaugeColor = pressed ? GetColor(120, 230, 120) : GetColor(255, 190, 90);
+                    int gy1 = y1 - 12;
+                    // param に enemyweight を含むスイッチは「敵の重さ」で入る。
+                    // こちらは必要な幅がまったく別の基準（箱の1/4）になるので、
+                    // 箱向けの目安線を出すとかえって誤解させる。何で押せるのかだけを示す。
+                    if (gim.param.find("enemyweight") != std::string::npos) {
+                        DrawString(x1, gy1 - 20, "ENEMY", gaugeColor);
+                    } else {
+                        float needW = (swDef ? swDef->triggerWidthThreshold : 140.0f)
+                                    * GetGimmickEditReaction(gim).MassMul();
+                        int gx2 = (int)(gim.x + needW - cameraX);
+                        DrawLine(x1, gy1, gx2, gy1, gaugeColor);
+                        DrawLine(x1, gy1 - 4, x1, gy1 + 4, gaugeColor);          // 左の爪
+                        DrawLine(gx2, gy1 - 4, gx2, gy1 + 4, gaugeColor);        // 右の爪
+                        char needBuf[32];
+                        sprintf_s(needBuf, sizeof(needBuf), "%.0fpx", needW);
+                        DrawString(x1, gy1 - 20, needBuf, gaugeColor);
+                    }
+                }
             }
             else if (gim.type == GIMMICK_SCALABLE_BOX) {
                 // 拡大可能ブロック画像を描画（カスタムスプライト優先）
@@ -5850,13 +10957,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_GATE_DOOR) {
-                // ゲートドア画像を描画（カスタムスプライト優先）
+                // ゲートドア画像を描画（カスタムスプライト優先）。
+                // 編集リアクションで倒すと足場になるため、倒れている姿勢がそのまま見えるように回転描画する。
                 int useHandle = gim.handle >= 0 ? gim.handle : doorHandle;
-                int x1 = (int)(gim.x - cameraX);
-                int y1 = (int)(gim.y - cameraY);
-                int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
-                DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
+                DrawGimmickRotated(gim, useHandle, cameraX, cameraY,
+                                   gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
+                if (GimmickIsTipped(gim)) {
+                    // 倒して足場に転用中であることを明示する
+                    DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "FLOOR", UiInkOk());
+                }
             }
             else if (gim.type == GIMMICK_CUT_PORTAL && !gim.isTimelineCut) {
                 // Feature: ポータルの作り直し（友人フィードバック対応）— タイムライン比率(val1/val2)ではなく、
@@ -5871,13 +10980,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
             }
             else if (gim.type == GIMMICK_SPIKES) {
-                // トゲトゲ画像を描画（カスタムスプライト優先）
+                // トゲトゲ画像を描画（カスタムスプライト優先）。
+                // 45度以上倒すと刺が横を向いて無害な足場に変わるので、
+                // 「今は刺さるのか、乗れるのか」が姿勢だけで読めるよう必ず回転描画する。
                 int useHandle = gim.handle >= 0 ? gim.handle : spikesHandle;
-                int sx1 = (int)(gim.x - cameraX);
-                int sy1 = (int)(gim.y - cameraY);
-                int sx2 = (int)(gim.x + gim.spriteWidth - cameraX);
-                int sy2 = (int)(gim.y + gim.spriteHeight - cameraY);
-                DrawExtendGraph(sx1, sy1, sx2, sy2, useHandle, TRUE);
+                bool spikeSafe = GimmickIsTipped(gim);
+                if (spikeSafe) SetDrawBright(150, 200, 255); // 無害化中は青みがかった色で示す
+                DrawGimmickRotated(gim, useHandle, cameraX, cameraY,
+                                   gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
+                if (spikeSafe) {
+                    SetDrawBright(255, 255, 255);
+                    DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 18, "SAFE", UiInkOk());
+                }
             }
             else if (gim.type == GIMMICK_SCALABLE_GROUND) {
                 // 画像サイズに合わせてタイリング描画する（カスタムスプライト優先）
@@ -5976,13 +11090,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (gim.type == GIMMICK_FRAMESTEP_LIFT) DrawString(mx1, my1 - 18, "STEP", GetColor(255, 255, 0));
             }
             else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
-                // 岩（固定障害物）の描画（カスタムスプライト優先）
+                // 岩の描画（カスタムスプライト優先）。
+                // 縮小すると転がり出すので、転がっている回転が見えるように回転描画する。
                 int rx1 = (int)(gim.x - cameraX);
                 int ry1 = (int)(gim.y - cameraY);
                 int rx2 = (int)(gim.x + gim.spriteWidth - cameraX);
                 int ry2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
-                    DrawExtendGraph(rx1, ry1, rx2, ry2, gim.handle, TRUE);
+                    DrawGimmickRotated(gim, gim.handle, cameraX, cameraY,
+                                       gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
                 } else {
                     DrawBox(rx1, ry1, rx2, ry2, GetColor(120, 120, 125), TRUE);
                     DrawBox(rx1, ry1, rx2, ry2, GetColor(60, 60, 65), FALSE);
@@ -6103,24 +11219,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         };
 
-        // Feature 1: 背景レイヤー（遠景）の描画
-        for (const auto& bl : stages[currentStageIdx].backgrounds) {
-            if (bl.handle >= 0) {
-                int imgW, imgH;
-                GetGraphSize(bl.handle, &imgW, &imgH);
-                if (imgW > 0 && imgH > 0) {
-                    float parallaxCamX = cameraX * bl.scrollRate;
-                    float parallaxCamY = cameraY * bl.scrollRate; // 縦スクロール対応：横と同じ比率で背景を追従させる
-                    float drawX = -fmod(parallaxCamX, (float)imgW) + bl.offsetX;
-                    float drawY = -parallaxCamY + bl.offsetY;
-                    DrawGraph((int)drawX, (int)drawY, bl.handle, TRUE);
-                    if (bl.loop) {
-                        DrawGraph((int)(drawX + imgW), (int)drawY, bl.handle, TRUE);
-                    }
-                }
-            }
-        }
-
         // Feature 1: 装飾レイヤー (背面) の描画
         DrawLayer(stages[currentStageIdx].decoMapBack);
 
@@ -6132,14 +11230,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             for (int tx = 0; tx < mapColCount; tx++) {
                 int tid = currentMap[ty][tx];
                 if (tid <= 0 || tid >= (int)tileDefs.size()) continue;
-                if (tileDefs[tid].handle < 0) continue;
+                // 画像も色も無いタイルは描きようがないので飛ばす。
+                // 以前は handle < 0 だけで飛ばしていたため、タイル定義エディタで色だけ
+                // 指定したタイルがゲーム画面に一切現れなかった。
+                if (tileDefs[tid].handle < 0 && !tileDefs[tid].hasColor) continue;
                 int drawX = tx * TILE_SIZE - (int)cameraX;
                 int drawY = ty * TILE_SIZE - (int)cameraY;
                 if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
-                    // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
-                    DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
-                        tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
-                        tileDefs[tid].handle, TRUE);
+                    if (tileDefs[tid].handle >= 0) {
+                        // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
+                        DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
+                            tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
+                            tileDefs[tid].handle, TRUE);
+                    } else {
+                        // 画像が無く色だけ指定されているタイルは、その色で1マスを塗る
+                        DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].colorRGB, TRUE);
+                    }
                     if (isDebugDrawMode && tileDefs[tid].isCollidable) {
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
                     }
@@ -6159,7 +11265,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)(item.y - cameraY);
                 int useHandle = item.handle >= 0 ? item.handle : coinHandle;
-                DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
+                if (item.angle == 0.0f) {
+                    DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
+                } else {
+                    // 配置で角度が付いているときだけ回転描画に切り替える。
+                    // DrawRotaGraph3 は中心を軸に縦横別倍率で回せるので、拡大描画の見え方を保ったまま回せる。
+                    int imgW = 0, imgH = 0;
+                    GetGraphSize(useHandle, &imgW, &imgH);
+                    if (imgW > 0 && imgH > 0) {
+                        DrawRotaGraph3(icx + (int)(item.spriteWidth / 2.0f), icy + (int)(item.spriteHeight / 2.0f),
+                                       imgW / 2, imgH / 2,
+                                       (double)item.spriteWidth / imgW, (double)item.spriteHeight / imgH,
+                                       item.angle, useHandle, TRUE, FALSE);
+                    }
+                }
                 DrawPartsPass(item.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
@@ -6203,16 +11322,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 「今どういう状態か」を示す必要がある無敵中(SHIELD)だけに限定する。
                 if (enemy.type == ENEMY_SHIELD && enemy.auxFlag) SetDrawBright(255, 230, 100); // 無敵中は金色に発光
                 else SetDrawBright(255, 255, 255);
+                // 本体の絵に掛ける角度。
+                //
+                // 砲台のように「本体＝台座／回るのはパーツ（砲身）だけ」という構成の敵は、
+                // プレイヤーの回転をここへ掛けると台座まで傾いてしまう。
+                // その型では配置されたときの姿勢(bodyRestAngle)のまま描き、
+                // 回転はパーツ側の parentTilt だけに効かせる。
+                float bodyAngle = enemy.angle;
+                {
+                    const EnemyDef* drawDef = FindEnemyDef(enemy.assetId);
+                    if (drawDef != nullptr && drawDef->bodyIgnoresTilt) bodyAngle = enemy.bodyRestAngle;
+                }
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
-                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, enemy.angle, enemy.direction != 0);
+                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, enemy.direction != 0);
                 } else if (enemy.direction == 0) {
                     // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
-                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE);
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE);
                 } else {
-                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, enemy.angle, enemy.handle, TRUE, TRUE);
+                    DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE, TRUE);
                 }
                 SetDrawBright(255, 255, 255); // 輝度リセット
                 
@@ -6302,6 +11432,306 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
                     DrawBox((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), GetColor(255, 255, 0), FALSE);
+
+                    // 大きさを変える「つまみ」。右辺が横幅、上辺が縦幅。
+                    // 引っぱれない相手には出さない（出ているのに動かない、を作らないため）。
+                    if (!IsGimmickEditLocked(*g, EDITOP_SCALE)) {
+                        float hwX, hwY, hhX, hhY;
+                        GetGimmickResizeHandles(*g, hwX, hwY, hhX, hhY);
+                        int hs = (int)GIM_HANDLE_SIZE;
+                        int wx1 = (int)(hwX - cameraX), wy1 = (int)(hwY - cameraY);
+                        int hx1 = (int)(hhX - cameraX), hy1 = (int)(hhY - cameraY);
+                        int fill = GetColor(255, 235, 120), edge = GetColor(40, 36, 30);
+                        // 横つまみ（右辺の中央）：左右を向いた矢印を線で描く。
+                        // 文字で「⇔」と描くとフォント次第で豆腐になるので、図形で描く。
+                        DrawBox(wx1, wy1, wx1 + hs, wy1 + hs, fill, TRUE);
+                        DrawBox(wx1, wy1, wx1 + hs, wy1 + hs, edge, FALSE);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + hs - 3, wy1 + hs / 2, edge);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + 6, wy1 + hs / 2 - 3, edge);
+                        DrawLine(wx1 + 3, wy1 + hs / 2, wx1 + 6, wy1 + hs / 2 + 3, edge);
+                        DrawLine(wx1 + hs - 3, wy1 + hs / 2, wx1 + hs - 6, wy1 + hs / 2 - 3, edge);
+                        DrawLine(wx1 + hs - 3, wy1 + hs / 2, wx1 + hs - 6, wy1 + hs / 2 + 3, edge);
+                        // 縦つまみ（上辺の中央）：上下を向いた矢印
+                        DrawBox(hx1, hy1, hx1 + hs, hy1 + hs, fill, TRUE);
+                        DrawBox(hx1, hy1, hx1 + hs, hy1 + hs, edge, FALSE);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2, hy1 + hs - 3, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2 - 3, hy1 + 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + 3, hx1 + hs / 2 + 3, hy1 + 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + hs - 3, hx1 + hs / 2 - 3, hy1 + hs - 6, edge);
+                        DrawLine(hx1 + hs / 2, hy1 + hs - 3, hx1 + hs / 2 + 3, hy1 + hs - 6, edge);
+                        // 引っぱっている間は今の値をその場に出す（何pxまで広げたのかが分からないと止め所が無い）
+                        if (isScaling || isScalingHeight) {
+                            char szBuf[32];
+                            sprintf_s(szBuf, sizeof(szBuf), isScaling ? "W:%.0f" : "H:%.0f",
+                                      isScaling ? g->spriteWidth : g->spriteHeight);
+                            int tx = (int)(g->x - cameraX);
+                            int ty = (int)(g->y - cameraY) - 20;
+                            DrawBox(tx - 3, ty - 2, tx + 60, ty + 18, GetColor(30, 26, 24), TRUE);
+                            DrawString(tx, ty, szBuf, GetColor(255, 235, 120));
+                        }
+                    }
+                }
+            }
+        }
+
+        // 敵・プレイヤー・ギミックのつまみ（選択がちょうど1つのときだけ）。
+        // 右下の四角が拡縮、枠から伸びた先の丸が回転。丸は対象の角度に合わせて枠のまわりを回る。
+        // 位置は GetEditKnob / GetEditCornerHandle が決めており、つかむ判定も同じ関数なので、
+        // 見えている場所とつかめる場所は一致する。
+        if (isEditMode) {
+            EditBox hb; float hAng; bool hCanScale, hCanRotate;
+            if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                int fill = GetColor(255, 235, 120), edge = GetColor(40, 36, 30);
+                int hs = (int)GIM_HANDLE_SIZE;
+                if (hCanScale) {
+                    float chx, chy;
+                    GetEditCornerHandle(hb, chx, chy);
+                    int x1 = (int)(chx - cameraX), y1 = (int)(chy - cameraY);
+                    DrawBox(x1, y1, x1 + hs, y1 + hs, fill, TRUE);
+                    DrawBox(x1, y1, x1 + hs, y1 + hs, edge, FALSE);
+                    // 左上⇔右下の斜めの両矢印（図形で描く。文字の矢印はフォント次第で豆腐になるため）
+                    DrawLine(x1 + 3, y1 + 3, x1 + hs - 3, y1 + hs - 3, edge);
+                    DrawLine(x1 + 3, y1 + 3, x1 + 3, y1 + 7, edge);
+                    DrawLine(x1 + 3, y1 + 3, x1 + 7, y1 + 3, edge);
+                    DrawLine(x1 + hs - 3, y1 + hs - 3, x1 + hs - 3, y1 + hs - 7, edge);
+                    DrawLine(x1 + hs - 3, y1 + hs - 3, x1 + hs - 7, y1 + hs - 3, edge);
+                }
+                if (hCanRotate) {
+                    float kx, ky;
+                    GetEditKnob(hb, hAng, kx, ky);
+                    float ccx = hb.x + hb.w * 0.5f, ccy = hb.y + hb.h * 0.5f;
+                    float rEdge = (hb.w > hb.h ? hb.w : hb.h) * 0.5f; // 枠の端までの距離
+                    // 枠の端からつまみまでを線でつなぐ（どの物のつまみかが分かる）
+                    DrawLine((int)(ccx + sinf(hAng) * rEdge - cameraX), (int)(ccy - cosf(hAng) * rEdge - cameraY),
+                             (int)(kx - cameraX), (int)(ky - cameraY), edge);
+                    DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS, fill, TRUE);
+                    DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS, edge, FALSE);
+                }
+                // つかんでいる間は今の値をその場に出す（どこまで回した・何倍にしたのかが分からないと止め所が無い）
+                if ((isHandleScale || isHandleRotate) && targetScale != nullptr) {
+                    char hbuf[32];
+                    if (isHandleScale) sprintf_s(hbuf, sizeof(hbuf), "x%.2f", *targetScale);
+                    else               sprintf_s(hbuf, sizeof(hbuf), "%.0f deg", WrapEditAngle(hAng) * 180.0f / EDIT_KNOB_PI);
+                    int tx = (int)(hb.x - cameraX);
+                    int ty = (int)(hb.y - cameraY) - 20;
+                    DrawBox(tx - 3, ty - 2, tx + 78, ty + 18, GetColor(30, 26, 24), TRUE);
+                    DrawString(tx, ty, hbuf, GetColor(255, 235, 120));
+                }
+            }
+        }
+
+        // ===== 編集の「結果プレビュー」と、ホバー（マウスを重ねた物）の表示 =====
+        //
+        // 編集は「やってみないと何が起きるか分からない」ものだった。
+        // 選んでいる敵が、今の姿勢のままだとどこへ撃つ・落ちる・突進するのかを、
+        // 確定する前に破線の矢印で見せる。つまみで回している最中もリアルタイムに動く
+        // （向きは敵の姿勢から毎フレーム求め直しているだけで、世界を進めて試しているわけではない）。
+        //
+        // 向きの求め方は、実際にAIが使う GetEnemyHeading / GetEnemyTiltOnlyHeading と同じ関数を通すので、
+        // 見えている矢印と実際の向きは食い違わない（砲台の「傾けた向きへ1発」も同じ約束）。
+        // 到達点は、実際に弾や体が止められる地形（衝突タイルと実体化した足場）までで切る。
+        if (isEditMode && currentScene == PLAY) {
+            const bool gestureNow = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate;
+
+            // 破線（ワールド座標で指定。画面へはカメラぶんだけずらして描く）
+            auto PvDashedLine = [&](float x1, float y1, float x2, float y2, int col) {
+                float dx = x2 - x1, dy = y2 - y1;
+                float len = sqrtf(dx * dx + dy * dy);
+                if (len < 1.0f) return;
+                float ux = dx / len, uy = dy / len;
+                for (float t = 0.0f; t < len; t += 12.0f) {
+                    float t2 = fminf(t + 7.0f, len);
+                    DrawLine((int)(x1 + ux * t - cameraX), (int)(y1 + uy * t - cameraY),
+                             (int)(x1 + ux * t2 - cameraX), (int)(y1 + uy * t2 - cameraY), col);
+                }
+            };
+            // 矢じり。先端(x,y)から向きの逆側へ開いた2本の線
+            auto PvArrowHead = [&](float x, float y, float ux, float uy, int col) {
+                const float L = 10.0f, W = 5.0f;
+                float bx = x - ux * L, by = y - uy * L;
+                float px = -uy * W, py = ux * W;
+                DrawTriangle((int)(x - cameraX), (int)(y - cameraY),
+                             (int)(bx + px - cameraX), (int)(by + py - cameraY),
+                             (int)(bx - px - cameraX), (int)(by - py - cameraY), col, TRUE);
+            };
+            // 文字の札。画面の外へはみ出さないよう、箱だけ内側へ寄せる（画面座標で指定）
+            auto PvChip = [&](int sx, int sy, const std::string& text, int col) {
+                int w = GetDrawStringWidth(text.c_str(), (int)text.size());
+                int x1 = sx, y1 = sy;
+                if (x1 + w + 12 > SCREEN_WIDTH) x1 = SCREEN_WIDTH - w - 12;
+                if (x1 < 2) x1 = 2;
+                if (y1 < 2) y1 = 2;
+                if (y1 + 22 > SCREEN_HEIGHT) y1 = SCREEN_HEIGHT - 22;
+                DrawBox(x1, y1, x1 + w + 10, y1 + 20, GetColor(30, 26, 24), TRUE);
+                DrawBox(x1, y1, x1 + w + 10, y1 + 20, col, FALSE);
+                DrawString(x1 + 5, y1 + 2, text.c_str(), col);
+            };
+            // 始点から向き(dx,dy)へ進めて、最初に地形へぶつかる点を探す。ぶつかったら true。
+            // 4pxごとに2x2の点が地形と重なるかを見る（SolidOverlapArea は大きさ変更のめり込み防止と同じ判定）。
+            auto PvCastRay = [&](float sx, float sy, float dx, float dy, float maxLen, float& ex, float& ey) -> bool {
+                ex = sx; ey = sy;
+                for (float t = 0.0f; t <= maxLen; t += 4.0f) {
+                    float px = sx + dx * t, py = sy + dy * t;
+                    if (SolidOverlapArea(px - 1.0f, py - 1.0f, 2.0f, 2.0f, nullptr) > 0.5f) return true;
+                    ex = px; ey = py;
+                }
+                return false;
+            };
+
+            // --- 結果プレビュー（選んでいる敵だけ）---
+            for (auto* pe : selectedEnemies) {
+                if (!pe->isActive) continue;
+                const EnemyDef* pdef = FindEnemyDef(pe->assetId);
+                EditReaction per = GetEnemyEditReaction(*pe, pdef);
+                const bool flipDirty = ((pe->editDirtyMask & EDIT_DIRTY_DIR) != 0u);
+                float ew = (float)pe->hitboxWidth * pe->scale, eh = (float)pe->hitboxHeight * pe->scale;
+                float ecx = pe->x + ew * 0.5f, ecy = pe->y + eh * 0.5f;
+
+                float hx = 0.0f, hy = 0.0f, reach = 600.0f;
+                bool have = false, edited = true, isShot = false;
+                std::string label;
+                switch (pe->type) {
+                case ENEMY_STATIONARY:
+                case ENEMY_AIMED_SHOOTER:
+                    // 傾け＝その向きへ1発、反転＝向けた側へ真横に1発。編集していない間はプレイヤーを追うので出さない。
+                    if (per.tilted) {
+                        GetEnemyTiltOnlyHeading(*pe, per, REST_UP, hx, hy);
+                        have = true;
+                    } else if (flipDirty) {
+                        hx = (pe->direction == 1) ? -1.0f : 1.0f; hy = 0.0f;
+                        have = true;
+                    }
+                    isShot = true;
+                    label = flipDirty ? "次の一発（味方の弾）" : "次の一発";
+                    break;
+                case ENEMY_FALLER:
+                    GetEnemyHeading(*pe, per, REST_DOWN, hx, hy);
+                    have = true;
+                    edited = (per.tilted || flipDirty);
+                    label = edited ? "落ちる向き" : "落下";
+                    reach = 500.0f;
+                    break;
+                case ENEMY_DASH_CHARGER:
+                    // 傾けたときだけ、向いている方向へ一直線に突進する（傾けていなければ左右でプレイヤーを追う）
+                    if (per.tilted) {
+                        GetEnemyHeading(*pe, per, REST_FORWARD, hx, hy);
+                        have = true;
+                        float dsm = pdef ? pdef->dashSpeedMult : 1.5f;
+                        float dd  = (pdef ? pdef->dashDuration : 40.0f) * per.scaleRatio;
+                        reach = DASH_SPEED * dsm * per.MassMul() * dd; // 傾き中は重力を切って直進するので、そのまま距離になる
+                        if (reach > 700.0f) reach = 700.0f;
+                        label = "突進";
+                    }
+                    break;
+                default: break;
+                }
+                if (!have) continue;
+
+                // 始点：弾なら実際に湧く砲口、体が動く型ならその向きの体の縁
+                float startR = isShot ? (sqrtf(ew * ew + eh * eh) * 0.5f + 4.0f)
+                                      : (fabsf(hx) * ew * 0.5f + fabsf(hy) * eh * 0.5f);
+                float sx0 = ecx + hx * startR, sy0 = ecy + hy * startR;
+                float ex, ey;
+                bool blocked = PvCastRay(sx0, sy0, hx, hy, reach, ex, ey);
+
+                int col = isShot ? GetColor(255, 110, 90) : GetColor(255, 200, 80);
+                if (!edited) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 110); // 編集していない（いつもの動き）は薄く
+                PvDashedLine(sx0, sy0, ex, ey, col);
+                PvArrowHead(ex, ey, hx, hy, col);
+                if (blocked) {
+                    // 行き止まり：当たる点に×を付ける
+                    int bx = (int)(ex + hx * 4.0f - cameraX), by = (int)(ey + hy * 4.0f - cameraY);
+                    DrawLine(bx - 5, by - 5, bx + 5, by + 5, GetColor(255, 255, 255));
+                    DrawLine(bx - 5, by + 5, bx + 5, by - 5, GetColor(255, 255, 255));
+                }
+                if (!edited) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                // 札は矢印の始点のそばへ置く。下へ向かう矢印のときは札が矢印に被らないよう上側へ、
+                // それ以外は下側へ（上側はつまみの数値表示や名前の札と重なりやすいため）。
+                PvChip((int)(sx0 - cameraX) + 8, (int)(sy0 - cameraY) + (hy > 0.5f ? -30 : 14), label, col);
+            }
+
+            // --- ホバー（何も操作していないとき、マウスの下にある物）---
+            const bool inMonitor = (mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT);
+            if (objectEditOpEnabled && inMonitor && !menu.isOpen && !isAreaSelecting && !gestureNow
+                && !isInspScale && !isInspAngle && !isInspSpeed && !isShowingMessage) {
+                // 選んでいる物のつまみの上なら、つまみの説明を出す
+                bool onHandle = false;
+                {
+                    EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                    if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                        if (hCanRotate) {
+                            float kx, ky;
+                            GetEditKnob(hb, hAng, kx, ky);
+                            float ddx = gx - kx, ddy = gy - ky;
+                            if (ddx * ddx + ddy * ddy <= EDIT_KNOB_GRAB * EDIT_KNOB_GRAB) {
+                                onHandle = true;
+                                DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS + 3, GetColor(255, 255, 255), FALSE);
+                                PvChip((int)(kx - cameraX) + 14, (int)(ky - cameraY) - 10, "回す（15度ごとに吸着）", GetColor(255, 235, 120));
+                            }
+                        }
+                        if (!onHandle && hCanScale && targetScale != nullptr) {
+                            float chx, chy;
+                            GetEditCornerHandle(hb, chx, chy);
+                            const float m = 3.0f;
+                            if (gx >= chx - m && gx <= chx + GIM_HANDLE_SIZE + m && gy >= chy - m && gy <= chy + GIM_HANDLE_SIZE + m) {
+                                onHandle = true;
+                                DrawBox((int)(chx - cameraX) - 2, (int)(chy - cameraY) - 2,
+                                        (int)(chx - cameraX) + (int)GIM_HANDLE_SIZE + 2, (int)(chy - cameraY) + (int)GIM_HANDLE_SIZE + 2,
+                                        GetColor(255, 255, 255), FALSE);
+                                PvChip((int)(chx - cameraX) + 16, (int)(chy - cameraY) + 4, "引いて拡大・縮小", GetColor(255, 235, 120));
+                            }
+                        }
+                    }
+                }
+                int hvKind = -1, hvIdx = -1;
+                if (!onHandle && FindEditObjectAt(gx, gy, hvKind, hvIdx)) {
+                    EditBox hb2 = { 0, 0, 0, 0 };
+                    std::string nm;
+                    bool already = false;     // すでに選んでいる物か
+                    std::string lockedOps;    // 変えられない操作の一覧
+                    auto addLock = [&](bool locked, const char* opName) {
+                        if (locked) { if (!lockedOps.empty()) lockedOps += "・"; lockedOps += opName; }
+                    };
+                    if (hvKind == 0) {
+                        hb2 = PlayerEditBox(player); nm = "プレイヤー";
+                        for (auto* sp : selectedPlayers) if (sp == &player) already = true;
+                    } else if (hvKind == 1) {
+                        Enemy& he = enemies[hvIdx];
+                        hb2 = EnemyEditBox(he);
+                        const EnemyDef* hd = FindEnemyDef(he.assetId);
+                        nm = (hd && !hd->name.empty()) ? hd->name : he.assetId;
+                        for (auto* se : selectedEnemies) if (se == &he) already = true;
+                        addLock(IsEnemyEditLocked(he, EDITOP_MOVE), "移動");
+                        addLock(IsEnemyEditLocked(he, EDITOP_SCALE), "大きさ");
+                        addLock(IsEnemyEditLocked(he, EDITOP_ROTATE), "回転");
+                        addLock(IsEnemyEditLocked(he, EDITOP_FLIP), "反転");
+                    } else {
+                        Gimmick& hg = gimmicks[hvIdx];
+                        hb2 = GimmickEditBox(hg);
+                        const GimmickDef* gd = FindGimmickDef(hg.assetId);
+                        nm = (gd && !gd->name.empty()) ? gd->name : hg.assetId;
+                        for (auto* sg : selectedGimmicks) if (sg == &hg) already = true;
+                        addLock(IsGimmickEditLocked(hg, EDITOP_MOVE), "移動");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_SCALE), "大きさ");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_ROTATE), "回転");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_FLIP), "反転");
+                    }
+                    int hx1 = (int)(hb2.x - cameraX), hy1 = (int)(hb2.y - cameraY);
+                    int hx2 = (int)(hb2.x + hb2.w - cameraX), hy2 = (int)(hb2.y + hb2.h - cameraY);
+                    if (!already) {
+                        // 選ぶ前の候補：白い細枠（選択済みの黄色い枠と区別できる）
+                        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+                        DrawBox(hx1 - 1, hy1 - 1, hx2 + 1, hy2 + 1, GetColor(255, 255, 255), FALSE);
+                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    }
+                    // すでに選んでいる物の名前は、結果プレビューの札と重なって読みにくくなるので出さない
+                    // （ただし変更不可の項目があるときは、理由として出す）。
+                    if (!already || !lockedOps.empty()) {
+                        std::string tip = nm;
+                        if (!already) tip += "  クリックで選択";
+                        if (!lockedOps.empty()) tip += "  （変更不可：" + lockedOps + "）";
+                        PvChip(hx1, hy1 - 24, tip, lockedOps.empty() ? GetColor(235, 235, 235) : GetColor(255, 190, 120));
+                    }
                 }
             }
         }
@@ -6322,9 +11752,41 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int bcx = (int)(bullets[i].x - cameraX) + BULLET_DRAW_SIZE / 2;
                 int bcy = (int)(bullets[i].y - cameraY) + BULLET_DRAW_SIZE / 2;
                 float bulletAngle = atan2f(bullets[i].vy, bullets[i].vx);
-                float bulletFit = ComputeFitScale(bullets[i].handle, (float)BULLET_DRAW_SIZE, (float)BULLET_DRAW_SIZE);
+                // Feature: 編集リアクション — 撃った敵の大きさを弾の見た目にも反映する
+                float bulletFit = ComputeFitScale(bullets[i].handle, (float)BULLET_DRAW_SIZE, (float)BULLET_DRAW_SIZE) * bullets[i].scale;
                 DrawRotaGraph(bcx, bcy, bulletFit, bulletAngle, bullets[i].handle, TRUE);
             }
+        }
+
+        // 「大きさが足りなくて壊せなかった」ことを、その場に出す。
+        //
+        // 敵やギミックの絵に隠れないよう、ワールド座標の描画の最後に置く。
+        // 表示するのは必要な倍率だけで、どう大きくするかは書かない
+        //  （拡大のしかたは既に手元にある操作なので、足りないのは「いくつ要るか」だけ）。
+        if (g_breakSizeHint.timer > 0.0f) {
+            if (g_breakSizeHint.justTriggered) {
+                // 「その操作では通らない」ことを伝える既存の音を流用する
+                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                g_breakSizeHint.justTriggered = false;
+            }
+            int hintX = (int)(g_breakSizeHint.x - cameraX);
+            int hintY = (int)(g_breakSizeHint.y - cameraY);
+            char hintBuf[64];
+            sprintf_s(hintBuf, sizeof(hintBuf), u8"%.1f倍以上で壊せる", g_breakSizeHint.need);
+            // 地形の上に直接書くと背景の色に溶けて読めないので、暗い下地を敷いてから書く
+            int hintW = GetDrawStringWidth(hintBuf, (int)strlen(hintBuf));
+            // 対象が画面の端にあると文字が切れて読めなくなるので、文字の箱だけ画面内へ寄せる
+            // （枠は対象のマスに残したままなので、どのマスの話かは分かる）。
+            int textX = hintX;
+            if (textX + hintW + 4 > SCREEN_WIDTH) textX = SCREEN_WIDTH - hintW - 4;
+            if (textX < 4) textX = 4;
+            int textY = hintY - 24;
+            if (textY < 2) textY = hintY + TILE_SIZE + 4; // 上に出ないときはマスの下へ回す
+            DrawBox(textX - 4, textY - 2, textX + hintW + 4, textY + 20, GetColor(30, 26, 24), TRUE);
+            DrawString(textX, textY, hintBuf, GetColor(255, 210, 120));
+            // どのマスの話なのかを枠で示す（文字だけだと対象が分からない）
+            DrawBox(hintX, hintY, hintX + TILE_SIZE, hintY + TILE_SIZE, GetColor(255, 210, 120), FALSE);
+            if (!isPaused) g_breakSizeHint.timer -= 1.0f; // 一時停止中は減らさず、読む時間を作る
         }
 
         // OSD：コイン枚数と編集コストゲージ（正しくプレビューされるようにgameScreen内に描画）
@@ -6334,7 +11796,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
         {
             const int panelX1 = 8, panelY1 = 8, panelX2 = 196, panelY2 = 84;
-            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle);
+            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle, GameCfg::UIK_OSD);
 
             // --- 1段目：コインの取得枚数 ---
             DrawUiIcon(34, 30, 34, coinHandle);
@@ -6347,13 +11809,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
             bool isLow = ratio < 0.2f;
             bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-            int barColor = isLow ? (blinkOn ? GetColor(255, 80, 80) : GetColor(90, 30, 30)) : GetColor(0, 170, 225);
+            // 点滅の暗いほうは、明るいほうの色を暗くして作る（設定で色を変えても、点滅が成り立つように）
+            int barColor = isLow ? (blinkOn ? UiGaugeLow()
+                                            : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
+                                 : UiGaugeFill();
 
             DrawUiIcon(34, 60, 38, energyHandle);
             // ゲージの器は暗い溝にしておく。こうしておけば残量が減ってバーが後退しても、
             // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
             const int gx1 = 54, gy1 = 50, gx2 = 186, gy2 = 70;
-            DrawBox(gx1, gy1, gx2, gy2, GetColor(56, 52, 48), TRUE);
+            DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
             DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
             DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
             char editCostStr[32];
@@ -6372,15 +11837,84 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawString(206, 34, "MUTED", GetColor(200, 200, 200));
         }
 
+        // ===== 編集操作のフィードバック表示（見た目だけ。進行には関わらない）=====
+
+        // (1) 編集コストの増減を、ゲージの横へ浮かべる。
+        // 消費は EditXxx・色フィルタ・カットなど十数箇所に散っているので、各所へ表示処理を足すのではなく、
+        // 「前フレームから1以上動いた」という結果の側を1箇所で見張る（被弾音の検出と同じ考え方）。
+        // 時間経過の自然回復や継続消費は1フレームあたり1に届かないので、拾わない。
+        if (editCostSeen >= 0.0f) {
+            float dCost = editCost - editCostSeen;
+            if (dCost >= 1.0f || dCost <= -1.0f) {
+                // 数フレーム続けて動いた場合（ホイールで連続して拡大した等）は、合計を出す
+                bool sameSign = (costFloatValue < 0.0f) == (dCost < 0.0f);
+                costFloatValue = (costFloatTimer > 30.0f && sameSign) ? costFloatValue + dCost : dCost;
+                costFloatTimer = 70.0f;
+            }
+        }
+        editCostSeen = editCost;
+        if (isEditMode && currentScene == PLAY && costFloatTimer > 0.0f) {
+            char cb[24];
+            sprintf_s(cb, sizeof(cb), "%+.0f", costFloatValue);
+            int cfx = 204;
+            int cfy = 54 - (int)((70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
+            int cfAlpha = costFloatTimer < 20.0f ? (int)(255.0f * costFloatTimer / 20.0f) : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, cfAlpha);
+            DrawBox(cfx - 4, cfy - 2, cfx + GetDrawStringWidth(cb, (int)strlen(cb)) + 4, cfy + 18, GetColor(30, 26, 24), TRUE);
+            DrawString(cfx, cfy, cb, costFloatValue < 0.0f ? GetColor(255, 130, 110) : GetColor(120, 230, 140));
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            costFloatTimer -= 1.0f;
+        }
+
+        // (2) 世界が止まっていることを、画面の縁の色と右上の札で示す。
+        // これまで「止まっている」のは左パネルの小さな PAUSED 表示と、物が動かないことでしか分からなかった。
+        //   琥珀色 … 時間停止中（SPACE で止めた状態。コストを消費し続ける）
+        //   水色   … 編集中（ドラッグやつまみをつかんでいる間だけ止まる。離せば再開。コストは減らない）
+        if (isEditMode && currentScene == PLAY && !isShowingMessage) {
+            bool gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate;
+            if (gestureFrozen || isPaused) {
+                int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
+                DrawBox(0, 0, SCREEN_WIDTH, 3, frameCol, TRUE);
+                DrawBox(0, SCREEN_HEIGHT - 3, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
+                DrawBox(0, 0, 3, SCREEN_HEIGHT, frameCol, TRUE);
+                DrawBox(SCREEN_WIDTH - 3, 0, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                const char* stateMsg = gestureFrozen ? "編集中：時間が止まっています" : "時間停止中   [SPACE]で再開";
+                int smW = GetDrawStringWidth(stateMsg, (int)strlen(stateMsg));
+                int smX2 = SCREEN_WIDTH - 10, smX1 = smX2 - smW - 20;
+                DrawBox(smX1, 10, smX2, 34, GetColor(30, 26, 24), TRUE);
+                DrawBox(smX1, 10, smX2, 34, frameCol, FALSE);
+                DrawString(smX1 + 10, 14, stateMsg, frameCol);
+            }
+        }
+
+        // (3) トースト。取り消し／やり直し／拒否の理由を、ゲーム画面の下寄りに短く出す。
+        // 下端の操作ヘルプ（2行）より上に置く。
+        if (isEditMode && editToastTimer > 0.0f && !editToastText.empty()) {
+            int tw = GetDrawStringWidth(editToastText.c_str(), (int)editToastText.size());
+            int tx1 = SCREEN_WIDTH / 2 - tw / 2 - 14, tx2 = SCREEN_WIDTH / 2 + tw / 2 + 14;
+            int ty1 = SCREEN_HEIGHT - 92, ty2 = ty1 + 28;
+            int toastCol = editToastKind == 2 ? GetColor(255, 130, 110)
+                         : editToastKind == 1 ? GetColor(130, 230, 150) : GetColor(235, 235, 235);
+            int tAlpha = editToastTimer < 20.0f ? (int)(255.0f * editToastTimer / 20.0f) : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, tAlpha);
+            DrawBox(tx1, ty1, tx2, ty2, GetColor(30, 26, 24), TRUE);
+            DrawBox(tx1, ty1, tx2, ty2, toastCol, FALSE);
+            DrawString(tx1 + 14, ty1 + 6, editToastText.c_str(), toastCol);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            editToastTimer -= 1.0f;
+        }
+
         // ヘルプガイドのOSDオーバーレイ
         // 実際のキー割り当てに合わせた表記にしてある（ジャンプは[W]、[SPACE]は一時停止、
         // 一時停止中の[→]がコマ送り）。ここが実装とズレていると、編集ツール前提のステージが
         // 「操作が分からないから詰む」だけの理不尽なものになってしまうため、必ず同期させること。
         if (isPaused) {
-            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]: Step 1 Frame  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
-            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, [S]+Drag Vert. to Scale, [R]+Drag Horiz. to Rotate, RightClick for Menu", GetColor(200, 200, 200));
+            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]/[LEFT]: Step 1 Frame (Lift Up/Down)  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
+            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, Drag the Handles to Resize, [R]+Drag to Rotate, RightClick for Menu", GetColor(200, 200, 200));
         } else {
-            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]:Move  [W]:Jump  [SHIFT]:Dash  [ENTER]/Click Screen:Shot", GetColor(50, 255, 50));
+            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]/[<][>]:Move  [W]/[^]:Jump  [SHIFT]:Dash  [ENTER]/Click:Shot  [F1]:Help  [ESC]:Menu", GetColor(50, 255, 50));
             DrawString(10, SCREEN_HEIGHT - 22, "EDIT: [R]:Rewind  [SPACE]:Pause  [F]:FastFwd  [T]:Color  [Z]:Zoom  [X]:Dark  [C]:Bright  [M]:Mute", GetColor(120, 220, 255));
         }
 
@@ -6388,49 +11922,175 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (isShowingMessage) {
             // UI素材化 — 半透明の黒箱から UIウィンドウ.png の枠へ差し替える。
             // 背景がクリーム色になるので、文字は白ではなく暗いインク色で描く。
-            int boxX = 20, boxY = SCREEN_HEIGHT - 110, boxW = SCREEN_WIDTH - 40, boxH = 90;
-            DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle);
+            //
+            // 複数行対応 — DrawString は自動折り返しも改行もしない1行描画なので、
+            // 長い説明を書くと枠からはみ出して読めなくなっていた（1行＝全角28文字が限界）。
+            // 「どのキーを押すのか」と「押すと何が起きるのか」は1行に収まらないことが多く、
+            // 操作を教える文章がそもそも書けない状態だった。
+            // メッセージ本文の改行で行を分け、1行ずつ描く。
+            //
+            // Lab_Editor のメッセージ編集欄は複数行テキストボックスなので、
+            // 保存されるのは CRLF になる。エディタを通さず手でJSONを書けば LF になる。
+            // どちらで来ても同じように読めるよう、CR は行末から取り除いてから描く。
+            std::vector<std::string> msgLines;
+            {
+                std::string cur;
+                for (char ch : currentMessageText) {
+                    if (ch == '\n') { msgLines.push_back(cur); cur.clear(); }
+                    else if (ch != '\r') { cur += ch; }
+                }
+                msgLines.push_back(cur);
+                // 枠に収まる行数で打ち切る。溢れたぶんを詰めて描くと枠の外へ流れ出てしまう
+                const size_t MSG_MAX_LINES = 3;
+                if (msgLines.size() > MSG_MAX_LINES) msgLines.resize(MSG_MAX_LINES);
+            }
+            // 枠の高さは行数に合わせて伸ばす。1行しか無いときは従来と同じ 90px のままにして、
+            // 既存ステージのメッセージの見え方を変えない。
+            const int MSG_LINE_H = 20;
+            // 置き方（左右の余白・下の余白・1行のときの高さ）は「UIデザイン」の設定。既定は 20 / 20 / 90
+            int boxX = g_uiStyle.messageMarginX, boxW = SCREEN_WIDTH - g_uiStyle.messageMarginX * 2;
+            int boxH = g_uiStyle.messageHeight + ((int)msgLines.size() - 1) * MSG_LINE_H;
+            int boxY = SCREEN_HEIGHT - g_uiStyle.messageMarginBottom - boxH;
+            DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle, GameCfg::UIK_MESSAGE);
             if (!currentMessageSpeaker.empty()) {
                 DrawString(boxX + 18, boxY + 14, currentMessageSpeaker.c_str(), UiInkAccent());
             }
-            DrawString(boxX + 18, boxY + (currentMessageSpeaker.empty() ? 20 : 38), currentMessageText.c_str(), UiInk());
+            int lineY = boxY + (currentMessageSpeaker.empty() ? 20 : 38);
+            for (const auto& line : msgLines) {
+                DrawString(boxX + 18, lineY, line.c_str(), UiInk());
+                lineY += MSG_LINE_H;
+            }
             DrawString(boxX + boxW - 118, boxY + boxH - 26, "[ENTER] to close", UiInkSub());
         }
 
+        // Feature: 進行状況のセーブ — PLAY からクリアへ移った瞬間だけ記録する。
+        // 毎フレーム書くと磨耗するし、代入元ごとに書くと書き漏らす。
+        // プレイヤーの被弾・死亡・クリアの効果音。
+        //
+        // ダメージを与える処理は6箇所以上に散らばっているので、そこへ1つずつ音を足すと
+        // 必ずどこかが漏れる。「HPが減った」「シーンが切り替わった」という結果の側を
+        // 1箇所で見張る形にして、追加のたびに直す場所が増えないようにする。
+        // （クリアのセーブ記録が同じ理由でこの直後に1箇所だけ置かれているのと同じ考え方）
+        {
+            static int lastPlayerHp = -1;
+            if (lastPlayerHp < 0) lastPlayerHp = player.hp; // 初回はそのまま覚えるだけ
+            if (currentScene == PLAY && player.hp < lastPlayerHp) {
+                SoundManager::Get().PlaySe(gameConfig.playerSe.damage);
+            }
+            lastPlayerHp = player.hp;
+
+            if (prevSceneForSave == PLAY && currentScene == RESULT_GAMEOVER) {
+                SoundManager::Get().PlaySe(gameConfig.playerSe.death);
+                SoundManager::Get().PlaySe(gameConfig.metaSe.gameover);
+            }
+            if (prevSceneForSave == PLAY && currentScene == RESULT_VICTORY) {
+                SoundManager::Get().PlaySe(gameConfig.metaSe.clear);
+            }
+        }
+
+        if (prevSceneForSave == PLAY && currentScene == RESULT_VICTORY) {
+            // 取得数はゲーム内OSDと同じ数え方（isCollected な全アイテム）にそろえる。
+            // コイン専用のカウンタは存在しないので、ここだけコインに絞ると
+            // プレイ中の表示とセレクト画面の表示が食い違う。
+            int gotItems = 0;
+            for (const auto& it : items) { if (it.isCollected) gotItems++; }
+            GameCfg::RecordClear(saveData, currentStageFileName, gotItems);
+            GameCfg::WriteSaveData(saveData);
+            Logger::Info("GameCfg", "RecordClear",
+                "cleared " + currentStageFileName + " items=" + std::to_string(gotItems));
+        }
+        prevSceneForSave = currentScene;
+
         // リザルト画面
-        if (currentScene != PLAY) {
+        //
+        // ボタンは縦積み。横並びにすると日本語ラベル（「つぎのステージへ」等）が入らない。
+        // 矩形は「描画」と「クリック判定」で同じ値を使い回す（PAUSE_BUTTON_* と同じ方針。
+        // 片方だけ動かすと、見た目の端を押しても反応しない領域ができる）。
+        if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY) {
             SetDrawBlendMode(DX_BLENDMODE_ALPHA, 180);
             DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GetColor(0, 0, 0), TRUE);
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
-            int btnW = 160, btnH = 50;
-            int btnX = SCREEN_WIDTH / 2 - btnW / 2;
-            int btnY = SCREEN_HEIGHT / 2 + 30;
+            // 「つぎのステージへ」を出せるか判定する。
+            // 今プレイしているステージが game_config.json の一覧の何番目かを探し、
+            // 次のエントリがあり、かつ（今回のクリアを反映済みのセーブで）解放されていること。
+            int curIdx = -1;
+            for (int i = 0; i < (int)gameConfig.stages.size(); i++) {
+                if (gameConfig.stages[i].file == currentStageFileName) { curIdx = i; break; }
+            }
+            bool hasNext = false;
+            int nextIdx = -1;
+            if (currentScene == RESULT_VICTORY && curIdx >= 0 && curIdx + 1 < (int)gameConfig.stages.size()) {
+                nextIdx = curIdx + 1;
+                hasNext = GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)nextIdx);
+            }
 
+            // 出すボタンを上から順に組み立てる（0=つぎへ / 1=もういちど / 2=セレクトへ）
+            struct ResultBtn { const char* label; int kind; };
+            ResultBtn btns[3];
+            int btnCount = 0;
+            if (hasNext) btns[btnCount++] = { gameConfig.nextLabel.c_str(), 0 };
+            btns[btnCount++] = { gameConfig.retryLabel.c_str(), 1 };
+            // タイトル画面を使わない設定のときはセレクトへ戻れても意味が無いので出さない
+            if (gameConfig.titleEnabled && !gameConfig.stages.empty()) {
+                btns[btnCount++] = { gameConfig.selectLabel.c_str(), 2 };
+            }
+
+            const int RESULT_BTN_W = 220, RESULT_BTN_H = 40, RESULT_BTN_GAP = 10;
+            int btnX = SCREEN_WIDTH / 2 - RESULT_BTN_W / 2;
+            int btnTop = SCREEN_HEIGHT / 2 + 6;
+
+            // ゲーム画面は等倍で monitorX/monitorY の位置へ転送されるので、
+            // ウィンドウ座標のマウスを内部解像度側へ寄せてから判定する。
             int relX = isEditMode ? (mx - monitorX) : mx;
             int relY = isEditMode ? (my - monitorY) : my;
-            bool isHover = (relX >= btnX && relX <= btnX + btnW && relY >= btnY && relY <= btnY + btnH);
 
-            if (currentLeftClick && !prevLeftClick && isHover) {
-                ResetStage();
-            }
-
-            SetFontSize(48);
-            if (currentScene == RESULT_GAMEOVER) {
-                DrawString(SCREEN_WIDTH / 2 - 120, SCREEN_HEIGHT / 2 - 50, "GAME OVER", GetColor(255, 50, 50));
-            }
-            else {
-                DrawString(SCREEN_WIDTH / 2 - 100, SCREEN_HEIGHT / 2 - 50, "VICTORY!", GetColor(255, 255, 50));
+            // 見出し
+            SetFontSize(40);
+            {
+                const std::string& head = (currentScene == RESULT_GAMEOVER)
+                                        ? gameConfig.gameoverText : gameConfig.victoryText;
+                int hw = GetDrawStringWidth(head.c_str(), (int)head.size());
+                DrawString(SCREEN_WIDTH / 2 - hw / 2, SCREEN_HEIGHT / 2 - 76, head.c_str(),
+                           (currentScene == RESULT_GAMEOVER) ? GetColor(255, 90, 90) : GetColor(255, 235, 80));
             }
             SetFontSize(16);
 
-            // UI素材化 — RETRYボタンも UIウィンドウ.png の枠で描く。
-            // ホバー中は輝度を上げて「押せる」ことを示す（枠の絵は1枚しか無いため色味で差をつける）。
-            if (isHover) SetDrawBright(255, 255, 255);
-            else         SetDrawBright(205, 200, 194);
-            DrawUiWindow(btnX, btnY, btnX + btnW, btnY + btnH, uiWindowHandle);
-            SetDrawBright(255, 255, 255);
-            DrawString(btnX + 58, btnY + 18, "RETRY", isHover ? UiInkAccent() : UiInk());
+            // クリア時はそのステージの取得数も出す（セレクト画面の表示と同じ数え方）
+            if (currentScene == RESULT_VICTORY && curIdx >= 0) {
+                char prog[64];
+                sprintf_s(prog, sizeof(prog), "ITEM  %d / %d",
+                          saveData.BestItems(currentStageFileName), gameConfig.stages[curIdx].itemTotal);
+                int pw2 = GetDrawStringWidth(prog, (int)strlen(prog));
+                DrawString(SCREEN_WIDTH / 2 - pw2 / 2, SCREEN_HEIGHT / 2 - 26, prog, GetColor(230, 230, 230));
+            }
+
+            for (int i = 0; i < btnCount; i++) {
+                int y1 = btnTop + i * (RESULT_BTN_H + RESULT_BTN_GAP);
+                int y2 = y1 + RESULT_BTN_H;
+                bool isHover = (relX >= btnX && relX <= btnX + RESULT_BTN_W && relY >= y1 && relY <= y2);
+
+                if (isHover) SetDrawBright(255, 255, 255);
+                else         SetDrawBright(205, 200, 194);
+                DrawUiWindow(btnX, y1, btnX + RESULT_BTN_W, y2, uiWindowHandle, GameCfg::UIK_BUTTON);
+                SetDrawBright(255, 255, 255);
+                int lw = GetDrawStringWidth(btns[i].label, (int)strlen(btns[i].label));
+                DrawString(btnX + RESULT_BTN_W / 2 - lw / 2, y1 + RESULT_BTN_H / 2 - 8,
+                           btns[i].label, isHover ? UiInkAccent() : UiInk());
+
+                if (currentLeftClick && !prevLeftClick && isHover) {
+                    if (btns[i].kind == 0 && nextIdx >= 0) {
+                        SwitchToStage(gameConfig.stages[nextIdx].file); // 中で ResetStage が呼ばれ PLAY へ戻る
+                    } else if (btns[i].kind == 1) {
+                        ResetStage();
+                    } else {
+                        // セレクトへ戻る。ResetStage は呼ばない（次に選んだときに走る）
+                        currentScene = STAGE_SELECT;
+                        SoundManager::Get().StopBgm();
+                    }
+                    break; // このフレームで複数のボタンに反応させない
+                }
+            }
         }
 
         // --- 最終ワークスペースレイアウト出力 ---
@@ -6440,7 +12100,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
             // UI素材化 — 左パネルを UIウィンドウ.png の9スライス枠で描く。
             // 素材が明るいクリーム色なので、この中に載せる文字は全て暗いインク色(UiInk系)に統一する。
-            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle);
+            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL);
             
             // パネルタイトルと、いま再生中か一時停止中かの表示。
             // 「再生中/一時停止中」は文字だけでなく専用アイコン（UI再生中.png / UI一時停止中.png）でも示す。
@@ -6474,14 +12134,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float leftRatio = editCost / currentEditCost.maxCost;
                 if (leftRatio < 0.0f) leftRatio = 0.0f; if (leftRatio > 1.0f) leftRatio = 1.0f;
                 DrawUiIcon(38, 262, 30, energyHandle);
-                DrawBox(60, 254, 226, 272, GetColor(56, 52, 48), TRUE);
-                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, GetColor(0, 170, 225), TRUE);
+                DrawBox(60, 254, 226, 272, UiGaugeBack(), TRUE);
+                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, UiGaugeFill(), TRUE);
                 DrawBox(60, 254, 226, 272, UiInkAccent(), FALSE);
                 DrawFormatString(66, 257, GetColor(255, 255, 255), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
             }
 
-            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle); // 右パネル（インスペクター）
-            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle);        // 下部パネル（タイムライン）
+            // マウスでの編集操作の一覧。つまみ・ホイール・ダブルクリックは画面上に説明が出ないので、
+            // 知らないと辿り着けない。操作が使えない（オブジェクト編集が封印された）ステージでは灰色にする。
+            {
+                int gc = objectEditOpEnabled ? UiInk() : UiInkSub();
+                DrawString(24, 292, "マウス操作", UiInkSub());
+                DrawString(24, 314, "ホイール：拡大縮小", gc);
+                DrawString(24, 334, "Ctrl+ホイール：回転", gc);
+                DrawString(24, 354, "つまみ：引いて変形", gc);
+                DrawString(24, 374, "ダブルクリック：反転", gc);
+                DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
+                DrawString(24, 414, "Ctrl+Z：取り消し", gc);
+                DrawString(24, 434, "Ctrl+Y：やり直し", gc);
+            }
+
+            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL); // 右パネル（インスペクター）
+            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle, GameCfg::UIK_PANEL);        // 下部パネル（タイムライン）
 
             // モニタープレビューウィンドウ
             DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
@@ -6505,7 +12179,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
             // 帯そのものは暗い溝にしておく。パネルがクリーム色になったので、
             // 帯まで明るくすると「どこがタイムラインか」の輪郭が消えてしまう。
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(56, 52, 48), TRUE);
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiGaugeBack(), TRUE);
             DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiInkAccent(), FALSE);
             float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
             DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
@@ -6617,14 +12291,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawFormatString(WINDOW_WIDTH - 240, 100, UiInkSub(), "Angle: N/A");
                 }
                 
-                if (selectedType == SELECT_GIMMICK) {
-                    DrawFormatString(WINDOW_WIDTH - 240, 120, UiInkSub(), "Speed: N/A");
+                // Feature: 編集リアクション — ギミックもspeedScaleを持つようになったため、
+                // 以前の「ギミック選択時は無条件でN/A」という分岐は不要になった。
+                if (targetSpeedScale != nullptr) {
+                    DrawFormatString(WINDOW_WIDTH - 240, 120, isInspSpeed ? UiInkAccent() : UiInk(), "Speed: %.1f", *targetSpeedScale);
                 } else {
-                    if (targetSpeedScale != nullptr) {
-                        DrawFormatString(WINDOW_WIDTH - 240, 120, isInspSpeed ? UiInkAccent() : UiInk(), "Speed: %.1f", *targetSpeedScale);
-                    } else {
-                        DrawFormatString(WINDOW_WIDTH - 240, 120, UiInkSub(), "Speed: N/A");
-                    }
+                    DrawFormatString(WINDOW_WIDTH - 240, 120, UiInkSub(), "Speed: N/A");
                 }
 
                 // 個別一時停止はアイコンでも示す（この対象だけ時間が止まっているかどうか）
@@ -6642,14 +12314,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 
                 if (selectedType == SELECT_ENEMY && targetEnemyType != nullptr) {
-                    const char* typeName = "UNKNOWN";
-                    if (*targetEnemyType == ENEMY_PATROL) typeName = "PATROL";
-                    else if (*targetEnemyType == ENEMY_JUMPER) typeName = "JUMPER";
-                    else if (*targetEnemyType == ENEMY_STATIONARY) typeName = "STATIONARY";
-                    DrawFormatString(WINDOW_WIDTH - 240, 180, UiInkOk(), "Type: %s", typeName);
+                    // 以前は3種類しか名前解決しておらず、残り19種は全て"UNKNOWN"と表示されていた。
+                    // インスペクタのType行は敵タイプ巡回編集の結果を確認する唯一の手段なので全種を出す。
+                    DrawFormatString(WINDOW_WIDTH - 240, 180, UiInkOk(), "Type: %s", EnemyTypeName(*targetEnemyType));
                 }
 
-                DrawString(WINDOW_WIDTH - 240, 210, "(Drag values / click to toggle)", UiInkSub());
+                // Feature: 編集リアクション — 今この個体に効いている編集を1行で示す。
+                // 「傾けたら照準が固定された」のような反応は、起きていることが読めなければ
+                // パズルの手札として使いようがないため、UIでの可視化は機能の一部として必須。
+                {
+                    EditReaction ins;
+                    bool hasReact = false;
+                    if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
+                        ins = GetEnemyEditReaction(*targetEnemy, FindEnemyDef(targetEnemy->assetId));
+                        hasReact = true;
+                    } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && !targetGimmick->isTimelineCut) {
+                        ins = GetGimmickEditReaction(*targetGimmick);
+                        hasReact = true;
+                    }
+                    std::string body;
+                    auto appendTag = [&](const char* tag) {
+                        if (!body.empty()) body += "+";
+                        body += tag;
+                    };
+                    if (hasReact) {
+                        if (ins.enlarged)      appendTag("BIG");
+                        if (ins.shrunk)        appendTag("SMALL");
+                        if (ins.tipped)        appendTag("TIPPED");
+                        else if (ins.tilted)   appendTag("TILT");
+                        if (ins.frozen)        appendTag("STOP");
+                        else if (ins.hastened) appendTag("FAST");
+                        else if (ins.slowed)   appendTag("SLOW");
+                        if (ins.flipped)       appendTag("FLIP");
+                        if (ins.selfPaused)    appendTag("PAUSED");
+                        if (ins.selfRewinding) appendTag("REWIND");
+                        if (ins.moved)         appendTag("MOVED");
+                    }
+                    std::string reactStr = "React: " + (body.empty() ? std::string("NONE") : body);
+                    DrawString(WINDOW_WIDTH - 240, 195, reactStr.c_str(), body.empty() ? UiInkSub() : UiInkAccent());
+                }
+
+                DrawString(WINDOW_WIDTH - 240, 215, "(Drag values / click to toggle)", UiInkSub());
             }
 
             // 下部一時停止ボタン。
@@ -6663,42 +12368,59 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool pbHover = (mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2);
                 if (pbHover) SetDrawBright(255, 255, 255);
                 else         SetDrawBright(214, 209, 202);
-                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle);
+                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle, GameCfg::UIK_PANEL);
                 SetDrawBright(255, 255, 255);
                 // 「押すとどうなるか」はアイコンだけで伝わるので、PAUSE/RESUMEの文字は出さない
                 DrawUiIcon((PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2, (PAUSE_BUTTON_Y1 + PAUSE_BUTTON_Y2) / 2,
                            20, isPaused ? uiPlayHandle : uiPauseHandle);
             }
 
-            // コンテキストメニューポップアップの描画
+            // 右クリックの円形メニュー。中心から見て、マウスが向いている項目を強調する。
             if (menu.isOpen) {
-                // UI素材化 — ポップアップメニューも UIウィンドウ.png の枠で描く
-                DrawUiWindow(menu.x, menu.y, menu.x + menu.width, menu.y + menu.height, uiWindowHandle);
-
-                // Feature: カット機能の復活 — カット選択中は「Delete Cut」だけを出す専用メニュー
-                if (targetGimmick != nullptr && targetGimmick->isTimelineCut) {
-                    DrawString(menu.x + 10, menu.y + 10, "Delete Cut", UiInkWarn()); // 目立つ赤で表示
-                    DrawString(menu.x + 10, menu.y + 40, "(timeline cut)", UiInkSub());
+                std::vector<RadialItem> ritems;
+                BuildRadialItems(ritems);
+                int hover = RadialSectorAt(menu.x, menu.y, mx, my, (int)ritems.size());
+                int accent = UiInkAccent();
+                // 中心の目印と不感帯。マウスが向いている項目へは線を引いて、どれが選ばれるかを見せる。
+                if (hover >= 0) {
+                    DrawLine(menu.x, menu.y, menu.x + RADIAL_OFS[hover][0], menu.y + RADIAL_OFS[hover][1], accent);
                 }
-                else {
-                    char rewindStr[32];
-                    sprintf_s(rewindStr, sizeof(rewindStr), "Rewind: %s", (targetRewind && *targetRewind) ? "ON" : "OFF");
-                    char pausedStr[32];
-                    sprintf_s(pausedStr, sizeof(pausedStr), "Pause: %s", (targetPaused && *targetPaused) ? "ON" : "OFF");
+                DrawCircle(menu.x, menu.y, (int)RADIAL_DEAD, accent, FALSE);
+                DrawCircle(menu.x, menu.y, 4, accent, TRUE);
+                for (int i = 0; i < (int)ritems.size(); i++) {
+                    const RadialItem& it = ritems[i];
+                    int x1 = menu.x + RADIAL_OFS[i][0] - RADIAL_ITEM_W / 2;
+                    int y1 = menu.y + RADIAL_OFS[i][1] - RADIAL_ITEM_H / 2;
+                    bool isHover = (i == hover);
+                    // 押せない項目は暗くして、文字も灰色にする（コスト不足・この対象では使えない）
+                    if (!it.enabled)  SetDrawBright(150, 148, 145);
+                    else if (isHover) SetDrawBright(255, 255, 255);
+                    else              SetDrawBright(214, 209, 202);
+                    DrawUiWindow(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, uiWindowHandle, GameCfg::UIK_RADIAL);
+                    SetDrawBright(255, 255, 255);
+                    int labelColor = !it.enabled ? UiInkSub() : (it.id == 6 ? UiInkWarn() : (isHover ? accent : UiInk()));
+                    int lw = GetDrawStringWidth(it.label.c_str(), (int)it.label.size());
+                    int sw = GetDrawStringWidth(it.sub.c_str(), (int)it.sub.size());
+                    DrawString(x1 + (RADIAL_ITEM_W - lw) / 2, y1 + 4, it.label.c_str(), labelColor);
+                    DrawString(x1 + (RADIAL_ITEM_W - sw) / 2, y1 + 22, it.sub.c_str(), it.enabled ? UiInkSub() : UiInkSub());
+                    if (isHover && it.enabled) DrawBox(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, accent, FALSE);
+                }
+            }
 
-                    DrawString(menu.x + 10, menu.y + 10, rewindStr, UiInk());
-                    DrawString(menu.x + 10, menu.y + 35, pausedStr, UiInk());
-
-                    if (selectedType == SELECT_GIMMICK) {
-                        DrawString(menu.x + 10, menu.y + 60, "Speed: N/A", UiInkSub());
-                        DrawString(menu.x + 10, menu.y + 85, "Speed: N/A", UiInkSub());
-                        DrawString(menu.x + 10, menu.y + 110, "Flip: N/A", UiInkSub());
-                    } else {
-                        DrawString(menu.x + 10, menu.y + 60, "Speed +0.5", UiInk());
-                        DrawString(menu.x + 10, menu.y + 85, "Speed -0.5", UiInk());
-                        DrawString(menu.x + 10, menu.y + 110, "Flip Object", UiInk());
-                    }
-                    DrawString(menu.x + 10, menu.y + 135, "Reset All", UiInk());
+            // Feature: 編集リアクション（共通層）の可視化 —
+            // 一時停止した敵は「乗れる足場」に、巻き戻し中の敵は「すり抜けられる残像」になる。
+            // どちらも見た目が普段と同じままでは、乗ってよいのか触れたら死ぬのかが判断できないので、
+            // 敵の頭上に状態を明示する。
+            for (const auto& enemyHud : enemies) {
+                if (!enemyHud.isActive) continue;
+                int hx = (int)(enemyHud.x - cameraX);
+                int hy = (int)(enemyHud.y - cameraY) - 18;
+                if (enemyHud.isPaused) {
+                    DrawString(hx, hy, "|| STAND", UiInkOk());       // 止まっている＝踏み台にできる
+                } else if (enemyHud.isRewinding) {
+                    DrawString(hx, hy, "<< PHASE", UiInkAccent());   // 巻き戻し中＝すり抜けられる
+                } else if (EnemyIsHarmless(enemyHud)) {
+                    DrawString(hx, hy, "SAFE", UiInkOk());           // 型ごとの条件で無害化している
                 }
             }
 
@@ -6721,7 +12443,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // UIウィンドウ.pngの枠と一時停止アイコンを合わせた表示に差し替える。
                 const int puX1 = WINDOW_WIDTH / 2 - 110, puY1 = WINDOW_HEIGHT / 2 - 34;
                 const int puX2 = WINDOW_WIDTH / 2 + 110, puY2 = WINDOW_HEIGHT / 2 + 34;
-                DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle);
+                DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle, GameCfg::UIK_MENU);
                 DrawUiIcon(puX1 + 44, (puY1 + puY2) / 2, 36, uiPauseHandle);
                 DrawString(puX1 + 78, (puY1 + puY2) / 2 - 8, "PAUSED", UiInk());
             }
@@ -6766,7 +12488,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         std::string id = e["id"];
                                         int def_idx = -1;
                                         for(int k=0; k<enemyDefs.size(); k++) { if(enemyDefs[k].id == id) { def_idx=k; break; } }
-                                        if (def_idx >= 0) editorPlacedEnemies.push_back({def_idx, e["x"], e["y"]});
+                                        if (def_idx >= 0) {
+                                            PlacedEnemy pe = {def_idx, e["x"], e["y"]};
+                                            pe.scale = e.value("scale", 1.0f);
+                                            pe.angle = e.value("angle", 0.0f);
+                                            editorPlacedEnemies.push_back(pe);
+                                        }
                                     }
                                 }
                                 if (j.contains("gimmicks")) {
@@ -6777,6 +12504,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         if (def_idx >= 0) {
                                             PlacedGimmick pg = {def_idx, e["x"], e["y"], ""};
                                             if (e.contains("param")) pg.stringParam = e["param"];
+                                            pg.scale = e.value("scale", 1.0f);
+                                            pg.scaleY = e.value("scaleY", pg.scale);
+                                            pg.angle = e.value("angle", 0.0f);
                                             editorPlacedGimmicks.push_back(pg);
                                         }
                                     }
@@ -6786,7 +12516,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         std::string id = e["id"];
                                         int def_idx = -1;
                                         for(int k=0; k<itemDefs.size(); k++) { if(itemDefs[k].id == id) { def_idx=k; break; } }
-                                        if (def_idx >= 0) editorPlacedItems.push_back({def_idx, e["x"], e["y"]});
+                                        if (def_idx >= 0) {
+                                            PlacedItem pi = {def_idx, e["x"], e["y"]};
+                                            pi.scale = e.value("scale", 1.0f);
+                                            pi.angle = e.value("angle", 0.0f);
+                                            editorPlacedItems.push_back(pi);
+                                        }
                                     }
                                 }
                                 if (j.contains("player_capabilities")) {
@@ -6833,22 +12568,48 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             ImGui::Separator();
             if (ImGui::Button(u8"ステージを保存 (Save)")) {
-                json stageData;
+                // 【重要】既存ファイルを読み込んでから上書きする。
+                //
+                // 以前はここで空の json を作って enemies/gimmicks/items/player_capabilities だけを
+                // 書き出していたため、この保存を1回押すだけで地形マップ・背景・トリガー・BGM・
+                // 巡回範囲といった他の全ての情報が消えていた（Lab_Editorで作ったステージが壊れる）。
+                // 既存の内容を土台にして、この画面が扱う3つの配列だけを差し替える。
+                json stageData = json::object();
+                {
+                    std::ifstream prev("assets/stages/" + currentStageFileName);
+                    if (prev.is_open()) {
+                        json loaded = json::parse(prev, nullptr, false);
+                        if (!loaded.is_discarded() && loaded.is_object()) stageData = loaded;
+                    }
+                }
                 stageData["enemies"] = json::array();
                 for (auto& e : editorPlacedEnemies) {
                     json j = { {"id", enemyDefs[e.def_idx].id}, {"x", e.x}, {"y", e.y} };
+                    // 既定値のときはキーを書かない（既存ステージに余計な差分を出さないため）
+                    if (e.scale != 1.0f) j["scale"] = e.scale;
+                    if (e.angle != 0.0f) j["angle"] = e.angle;
                     stageData["enemies"].push_back(j);
                 }
                 stageData["gimmicks"] = json::array();
                 for (auto& g : editorPlacedGimmicks) {
                     json j = { {"id", gimmickDefs[g.def_idx].id}, {"x", g.x}, {"y", g.y} };
                     if (g.stringParam != "") j["param"] = g.stringParam;
+                    if (g.scale != 1.0f) j["scale"] = g.scale;
+                    if (g.scaleY != 1.0f) j["scaleY"] = g.scaleY;
+                    if (g.angle != 0.0f) j["angle"] = g.angle;
                     stageData["gimmicks"].push_back(j);
                 }
                 stageData["items"] = json::array();
                 for (auto& i : editorPlacedItems) {
                     json j = { {"id", itemDefs[i.def_idx].id}, {"x", i.x}, {"y", i.y} };
+                    if (i.scale != 1.0f) j["scale"] = i.scale;
+                    if (i.angle != 0.0f) j["angle"] = i.angle;
                     stageData["items"].push_back(j);
+                }
+                // 保存と同時に、メモリ上のステージが持つ性能も更新する。
+                // ここを忘れると、保存したのに ResetStage で保存前の値へ戻ってしまう。
+                if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size()) {
+                    stages[currentStageIdx].playerCaps = editorPlayerCaps;
                 }
                 stageData["player_capabilities"] = {
                     {"canDoubleJump", editorPlayerCaps.canDoubleJump},
@@ -6964,17 +12725,92 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ただし専用エディタモード(ImGui)のときだけはOSカーソルのままにする。
         // ImGuiのウィンドウはこの後に描かれるため、自前カーソルだとImGuiの上に出せず
         // パネル上でカーソルが見えなくなってしまうから。
+        //
+        // 指差しカーソル —
+        // 実物のマウスカーソルは、押せるものの上へ来ると矢印から指差しの手に変わる。
+        // ゲーム内カーソルも同じにしておかないと、「ここは押せるのか、それとも
+        // 背景なのか」を試しにクリックしてみないと判別できない。
+        // 判定は下の ShouldPointCursor にまとめてあり、実際にクリックを受け付ける箇所と
+        // 同じ矩形・同じ有効条件を見ている（見た目と操作がズレないようにするため）。
         {
             bool useOwnCursor = !isDedicatedEditorMode && cursorHandle >= 0;
             SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
             if (useOwnCursor) {
                 int cmx = 0, cmy = 0;
                 GetMousePoint(&cmx, &cmy);
-                // 素材の矢印の先端は 640x640 キャンバス上の (188, 93) 付近にある。
-                // 表示サイズ40pxに縮めると先端は左上から (12, 6) の位置に来るので、
-                // その分だけ左上へずらして描くと、絵の先端が実際のマウス座標と一致する。
+
+                // 今カーソルの下にあるものが「押せるもの」かどうか。
+                bool pointing = false;
+                {
+                    // 1) 一時停止／再開ボタン（常に押せる。コスト不足なら拒否音が鳴るが押せることに変わりはない）
+                    if (cmx >= PAUSE_BUTTON_X1 && cmx <= PAUSE_BUTTON_X2 &&
+                        cmy >= PAUSE_BUTTON_Y1 && cmy <= PAUSE_BUTTON_Y2) {
+                        pointing = true;
+                    }
+                    // 2) 開いているコンテキストメニューの上
+                    else if (menu.isOpen && RadialSectorAt(menu.x, menu.y, cmx, cmy, RadialCount()) >= 0) {
+                        pointing = true;
+                    }
+                    // 3) インスペクタの操作行。
+                    // 対象ポインタがnullptrの行は「その対象では意味を持たない」＝押しても何も起きないので、
+                    // クリック処理と同じくnullチェックを通ったものだけを押せる扱いにする。
+                    else if (objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - 240 &&
+                             ((cmy >= 80  && cmy <= 95  && targetScale != nullptr) ||
+                              (cmy >= 100 && cmy <= 115 && targetAngle != nullptr) ||
+                              (cmy >= 120 && cmy <= 135 && targetSpeedScale != nullptr) ||
+                              (cmy >= 140 && cmy <= 155 && targetPaused != nullptr) ||
+                              (cmy >= 160 && cmy <= 175 && targetRewind != nullptr) ||
+                              (cmy >= 180 && cmy <= 195 && targetEnemyType != nullptr))) {
+                        pointing = true;
+                    }
+                    // 4) 下部のタイムライン帯（カットの作成・選択ができるとき）
+                    else if (cutOpEnabled && cmy >= WINDOW_HEIGHT - 60 && cmy <= WINDOW_HEIGHT - 20) {
+                        pointing = true;
+                    }
+                    // 5) モニター内の、編集対象にできるオブジェクト。
+                    // 右クリックでの選択判定と同じ矩形を見る（プレイヤーは表示サイズ、
+                    // 敵は当たり判定×倍率、ギミックはスプライトサイズ）。
+                    else if (isEditMode && objectEditOpEnabled &&
+                             cmx >= monitorX && cmx <= monitorX + SCREEN_WIDTH &&
+                             cmy >= monitorY && cmy <= monitorY + SCREEN_HEIGHT) {
+                        float wx = (float)(cmx - monitorX) + cameraX;
+                        float wy = (float)(cmy - monitorY) + cameraY;
+                        if (wx >= player.x && wx <= player.x + player.width * player.scale &&
+                            wy >= player.y && wy <= player.y + player.height * player.scale) {
+                            pointing = true;
+                        }
+                        if (!pointing) {
+                            for (const auto& eHov : enemies) {
+                                if (!eHov.isActive) continue;
+                                float ew = (float)eHov.hitboxWidth * eHov.scale;
+                                float eh = (float)eHov.hitboxHeight * eHov.scale;
+                                if (wx >= eHov.x && wx <= eHov.x + ew &&
+                                    wy >= eHov.y && wy <= eHov.y + eh) { pointing = true; break; }
+                            }
+                        }
+                        if (!pointing) {
+                            for (const auto& gHov : gimmicks) {
+                                // タイムラインカットはワールド座標を持たない（x,y,w,hが全て0）ので、
+                                // ここで判定するとマップ左上の1点が常に押せる扱いになってしまう。
+                                if (!gHov.isActive || gHov.isTimelineCut) continue;
+                                if (wx >= gHov.x && wx <= gHov.x + gHov.spriteWidth &&
+                                    wy >= gHov.y && wy <= gHov.y + gHov.spriteHeight) { pointing = true; break; }
+                            }
+                        }
+                    }
+                }
+
+                // 指差しの絵が読めなかった場合は従来どおり矢印のまま（描画が消えるより良い）
+                bool usePoint = pointing && cursorPointHandle >= 0;
+                int drawHandle = usePoint ? cursorPointHandle : cursorHandle;
+                // 絵の「指す先」をマウス座標へ合わせるためのずらし量。
+                // 矢印の先端は 640x640 キャンバス上の (188, 93)、指差しの指先は (212, 99) 付近にある。
+                // 表示サイズ40pxに縮めると左上から (12, 6) / (13, 6) の位置に来るので、その分だけ左上へずらす。
                 const int cursorSize = 40;
-                DrawExtendGraph(cmx - 12, cmy - 6, cmx - 12 + cursorSize, cmy - 6 + cursorSize, cursorHandle, TRUE);
+                int tipX = usePoint ? 13 : 12;
+                int tipY = 6;
+                DrawExtendGraph(cmx - tipX, cmy - tipY, cmx - tipX + cursorSize, cmy - tipY + cursorSize,
+                                drawHandle, TRUE);
             }
         }
 
@@ -6985,6 +12821,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (iof.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
+        }
+
+        // Esc でシステムメニュー、F1 で操作一覧を開く。
+        // 画面を描き終えたこの位置で開くので、開いた瞬間の画面をそのまま固定表示できる。
+        // 押しっぱなしで繰り返し開かないよう、押した瞬間（エッジ）だけを見る。
+        {
+            static bool lastEscKey = true, lastF1Key = true;
+            bool escNow = CheckHitKey(KEY_INPUT_ESCAPE) != 0, f1Now = CheckHitKey(KEY_INPUT_F1) != 0;
+            bool openMenu = escNow && !lastEscKey, openHelp = f1Now && !lastF1Key;
+            lastEscKey = escNow; lastF1Key = f1Now;
+            if (openMenu || openHelp) {
+                RunSystemMenu(openHelp && !openMenu);
+                lastEscKey = true; lastF1Key = true; // 閉じるときのキーでもう一度開かない
+            }
         }
 
         ScreenFlip();

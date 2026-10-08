@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
@@ -30,6 +30,21 @@ public class TileDef
     // srcW, srcH : 切り出す矩形の幅・高さ（ピクセル単位）
     public int srcW { get; set; } = 0;
     public int srcH { get; set; } = 0;
+
+    // Feature: タイル破壊 — このタイルを「どの壊し方で」壊せるか。
+    // 壊せるブロック（ギミック）の breakByXxx と同じ考え方を地形タイルへ広げたもの。
+    // 既定は全て false なので、ここを立てない限りタイルは従来どおり絶対に壊れない。
+    // 【重要】C++側(DrawPixel.cpp の TileDefinition)と必ず対で追加すること。
+    // 片方だけだと、エディタで保存した瞬間にキーが消える／ゲームが読まない、のどちらかになる。
+    public bool breakBySlam { get; set; } = false;   // ドッスンの落下衝撃で壊れる
+    public bool breakByRam { get; set; } = false;    // 敵の体当たり・突進で壊れる
+    public bool breakByBullet { get; set; } = false; // 弾で壊れる
+    public bool breakByPlayer { get; set; } = false; // プレイヤーの直接操作（クリック）で壊れる
+    // 壊すのに必要な相手の大きさ(scale)。0以下なら大きさを問わない。
+    // 「拡大した敵の突進でなければ壊せない壁」をJSONだけで作るための条件。
+    public float breakMinScale { get; set; } = 0.0f;
+    // 壊れたときに鳴らす効果音ID（se.json / ui_se.json のid）。空なら無音。
+    public string breakSe { get; set; } = "";
 }
 
 // ===== 背景レイヤー定義 (Feature 1) =====
@@ -39,6 +54,10 @@ public class BackgroundLayer
 {
     // 背景画像のファイル名（相対パス）。
     public string sprite { get; set; } = "";
+    // 画像を使わず単色で塗りたいときの色（"#RRGGBB"）。空なら単色塗りをしない。
+    // 画像が無いレイヤーは今まで「何も描かない層」でしかなく、背景が全部空だと
+    // 画面が黒いままだった。空だけの背景などを画像なしで作れるようにするための設定。
+    public string color { get; set; } = "";
     // 描画順。数値が小さいほど奥（先）に描かれ、大きいほど手前に描かれる。
     public int drawOrder { get; set; } = 0;
     // スクロール速度の倍率。1.0でプレイヤー（前景）と同じ速さで動き、0に近いほどゆっくり動いて
@@ -310,7 +329,9 @@ public class StageData
                         X = e["x"]?.Value<float>() ?? 0,
                         Y = e["y"]?.Value<float>() ?? 0,
                         PatrolLeft = e["patrol_left"]?.Value<float>() ?? -1,
-                        PatrolRight = e["patrol_right"]?.Value<float>() ?? -1
+                        PatrolRight = e["patrol_right"]?.Value<float>() ?? -1,
+                        Scale = e["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = e["angle"]?.Value<float>() ?? 0f
                     });
 
             // ギミック — 配置座標とオプションパラメータ(param)を読み込む。
@@ -321,7 +342,11 @@ public class StageData
                         Id = g["id"]?.Value<string>() ?? "",
                         X = g["x"]?.Value<float>() ?? 0,
                         Y = g["y"]?.Value<float>() ?? 0,
-                        Param = g["param"]?.Value<string>() ?? ""
+                        Param = g["param"]?.Value<string>() ?? "",
+                        Scale = g["scale"]?.Value<float>() ?? 1.0f,
+                        // scaleY を省略した既存ステージは等方拡大として読む（ゲーム側と同じ既定）
+                        ScaleY = g["scaleY"]?.Value<float>() ?? g["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = g["angle"]?.Value<float>() ?? 0f
                     });
 
             // アイテム — 配置座標を読み込む。
@@ -331,7 +356,9 @@ public class StageData
                     {
                         Id = i["id"]?.Value<string>() ?? "",
                         X = i["x"]?.Value<float>() ?? 0,
-                        Y = i["y"]?.Value<float>() ?? 0
+                        Y = i["y"]?.Value<float>() ?? 0,
+                        Scale = i["scale"]?.Value<float>() ?? 1.0f,
+                        Angle = i["angle"]?.Value<float>() ?? 0f
                     });
 
             // プラットフォーム — 当たり判定用の矩形（始点・終点座標）の一覧を読み込む。
@@ -411,6 +438,9 @@ public class StageData
             var ej = new JObject { ["id"] = e.Id, ["x"] = e.X, ["y"] = e.Y };
             if (e.PatrolLeft >= 0) ej["patrol_left"] = e.PatrolLeft;
             if (e.PatrolRight >= 0) ej["patrol_right"] = e.PatrolRight;
+            // 既定値と同じなら書かない（既存ステージへ余計な差分を出さないため）
+            if (e.Scale != 1.0f) ej["scale"] = e.Scale;
+            if (e.Angle != 0f) ej["angle"] = e.Angle;
             ea.Add(ej);
         }
         j["enemies"] = ea;
@@ -421,12 +451,23 @@ public class StageData
         {
             var gj = new JObject { ["id"] = g.Id, ["x"] = g.X, ["y"] = g.Y };
             if (!string.IsNullOrEmpty(g.Param)) gj["param"] = g.Param;
+            if (g.Scale != 1.0f) gj["scale"] = g.Scale;
+            if (g.ScaleY != 1.0f) gj["scaleY"] = g.ScaleY;
+            if (g.Angle != 0f) gj["angle"] = g.Angle;
             ga.Add(gj);
         }
         j["gimmicks"] = ga;
 
-        // アイテム — id・座標のみのシンプルな構造なのでSelectで一括変換する。
-        j["items"] = new JArray(Items.Select(i => new JObject { ["id"] = i.Id, ["x"] = i.X, ["y"] = i.Y }));
+        // アイテム — 大きさ・角度は既定値のときだけ省略する（敵・ギミックと同じ扱い）。
+        var ia2 = new JArray();
+        foreach (var i in Items)
+        {
+            var ij = new JObject { ["id"] = i.Id, ["x"] = i.X, ["y"] = i.Y };
+            if (i.Scale != 1.0f) ij["scale"] = i.Scale;
+            if (i.Angle != 0f) ij["angle"] = i.Angle;
+            ia2.Add(ij);
+        }
+        j["items"] = ia2;
 
         // プラットフォーム — 始点・終点座標をそのままJSONオブジェクトへ変換する。
         j["platforms"] = new JArray(Platforms.Select(p =>
@@ -681,6 +722,15 @@ public class EditCostSettings
     [System.ComponentModel.DisplayName("カット作成")]
     [System.ComponentModel.Category("コスト(単発)")]
     public float flatCutCreate { get; set; } = 20.0f;
+
+    // カットで飛ばす区間の長さに応じて、1タイルあたり上乗せされる消費量。
+    // ゲーム内の総コストは flatCutCreate + cutCostPerTile × 飛ばすタイル数 で、
+    // 「長く飛ばすほど高くつく」ぶんをこちらが受け持つ（プレイ中の表示は "CUT COST = 20 + 1.2 / tile"）。
+    // ※このプロパティが無いと、ゲーム側が書いたcutCostPerTileをLab_Editorの保存時に取りこぼしてしまう。
+    //   実際、この欄を足すまでは、エディタで保存し直したステージから毎回この設定が消えていた。
+    [System.ComponentModel.DisplayName("カット/1タイル")]
+    [System.ComponentModel.Category("コスト(単発)")]
+    public float cutCostPerTile { get; set; } = 1.2f;
 }
 
 // ===== 配置オブジェクト =====
@@ -703,6 +753,14 @@ public class PlacedEnemy
     // 巡回行動をする敵の場合の、巡回範囲の右端座標。-1は「未設定（巡回しない）」を意味する。
     [System.ComponentModel.DisplayName("巡回右端")]
     public float PatrolRight { get; set; } = -1;
+    // 配置ごとの大きさ・角度の初期値。
+    // アセット定義の大きさは「その種類の標準」で、ここはそれを配置単位で上書きする。
+    // 同じ敵を大小いくつも並べたい、最初から傾けて置きたい、といった調整に使う。
+    // 既定値（1.0 / 0）のときはステージJSONへ書き出さないので、既存ステージの差分は増えない。
+    [System.ComponentModel.DisplayName("大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // マップ上に実際に1体配置されたギミック1個分の情報。
@@ -720,6 +778,17 @@ public class PlacedGimmick
     // このギミック固有の追加パラメータ（ギミックの種類によって意味が変わる文字列）。
     [System.ComponentModel.DisplayName("パラメータ")]
     public string Param { get; set; } = "";
+    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）。
+    //
+    // ギミックだけ横幅と縦幅を別々に持つ。ゲーム内の編集ツールが
+    // 横幅(Sドラッグ)と縦幅(Wドラッグ)を独立して変える作りになっているためで、
+    // 配置ごとの初期値も同じ粒度で持てないと「編集機能と同じ反応」にならない。
+    [System.ComponentModel.DisplayName("横の大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("縦の大きさ")]
+    public float ScaleY { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // マップ上に実際に1個配置されたアイテム1個分の情報。
@@ -734,6 +803,11 @@ public class PlacedItem
     // 配置するY座標。
     [System.ComponentModel.DisplayName("Y座標")]
     public float Y { get; set; }
+    // 配置ごとの大きさ・角度の初期値（詳細は PlacedEnemy の同名プロパティのコメント参照）
+    [System.ComponentModel.DisplayName("大きさ")]
+    public float Scale { get; set; } = 1.0f;
+    [System.ComponentModel.DisplayName("角度(rad)")]
+    public float Angle { get; set; } = 0f;
 }
 
 // 当たり判定用の矩形1個分の情報（足場・壁など、見た目のタイルとは別に判定だけを持たせたい場合に使う）。
@@ -829,17 +903,46 @@ public class EnemyDef
     // ここに無いキーは、エディタでアセットを保存し直した瞬間にenemies.jsonから黙って消える。
     // いずれも false / -1 が「従来どおりの挙動」を意味する既定値。
     public bool ignorePause { get; set; } = false;               // trueならプレイヤーの一時停止を無視して動き続ける（幽霊タイプ用）
+    // trueなら、プレイヤーが回転させても本体の絵は傾かない（回るのはパーツだけ）。
+    // 砲台のように「本体＝台座／回るのは砲身パーツ」という構成の敵で使う。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
+    public bool bodyIgnoresTilt { get; set; } = false;
     public bool radialFire { get; set; } = false;                // 拡散弾タイプ：trueなら正面ファンではなく360度全方位へ撃つ
     public float spreadRotationStep { get; set; } = -1.0f;       // 拡散弾タイプ：1斉射ごとに発射角度をずらす量（ラジアン）。渦巻き弾幕になる
     public float verticalTrackSpeed { get; set; } = -1.0f;       // 浮遊タイプ：浮遊の中心高度をプレイヤーの高さへ寄せる速さ（px/フレーム）
     public float riseSpeed { get; set; } = -1.0f;                // 落下タイプ：着地後、元の高さへ戻る速さ（px/フレーム）。0以下なら瞬間復帰
+
+    // 跳ね回る節足敵（機械いもむし）専用の調整項目。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で追加すること。
+    // 片方だけだと、エディタで保存した瞬間にキーが消えるか、ゲームが読まないかのどちらかになる。
+    public float bounceSpeed { get; set; } = -1.0f;              // 頭が直進する速さ（px/フレーム）。重力を受けないので常にこの速さで飛ぶ
+    public float bounceRandomness { get; set; } = -1.0f;         // 跳ね返るたびに反射角へ足す乱れの最大値（度）。0なら物理どおりの正反射
+    public float segmentGap { get; set; } = -1.0f;               // 胴体の節と節の間隔（px）
     // プレイヤーへ接触ダメージを与えるたびに、パーツ(parts)を尾側から1つ消費するか。
     // いもむしのように「攻撃するほど胴体が短くなり、使い切ると力尽きる」相手を作るためのフラグ。
     public bool consumePartOnAttack { get; set; } = false;
 
+    // ==== このアセットに対して禁止する編集操作 ====
+    // 「この敵だけは拡大させたくない」といった場ごとの縛りを設定で表せるようにするもの。
+    // 既定は全て false（＝何でも編集できる）なので、既存アセットの挙動は変わらない。
+    // ※ C++側の EnemyDef にも同名フィールドがある。片方だけだと保存時に消える。
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
+
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==20(ENEMY_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     // BlockCanvasControlで組み立てたビジュアルスクリプト（ブロックの木構造）をJSON化して保持する。
     public JArray script { get; set; } = new JArray();
+
+    // Feature: 編集リアクションのJSON宣言 — 「ゲーム中に編集されたらどう変わるか」を
+    // C++を書き換えずJSONだけで組むためのブロック（C++側 DrawPixel.cpp の EnemyDef.editReactions と対応）。
+    // 中身の構造はC++側でしか解釈しないので、ここでは JObject のまま素通しして保存し直せるようにしておく。
+    // 【重要】このプロパティが無いと、エディタで開いて保存した瞬間に edit_reactions が黙って消える。
+    public JObject edit_reactions { get; set; } = new JObject();
 
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1体の敵を複数の画像パーツの組み合わせで構成したい場合のパーツ一覧（空なら単一画像のまま）。
@@ -889,6 +992,30 @@ public class GimmickDef
     public float zoomLevel { get; set; } = -1.0f;                 // ズーム演出の倍率
     public float warpOffsetPx { get; set; } = -1.0f;              // ワープ（瞬間移動）させる距離（ピクセル）
 
+    // ==== 壊せるブロック(type_enum=3)の破壊条件 ====
+    // 「誰が壊せるか」をブロック側の設定にすることで、
+    // 「ドッスンの落下衝撃でしか壊れない壁」のような場をエディタだけで作れるようにする。
+    // 他の挙動パラメータと違い -1 の「未指定」番兵は使わず、素直な bool にしてある
+    // （挙動パラメータ欄は bool のプロパティをチェックボックスとして描くため）。
+    // 既定値は「今までどおり誰でも壊せる汎用ブロック」。
+    // このギミックに対して禁止する編集操作（詳細は EnemyDef の同名プロパティのコメント参照）
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
+
+    public bool breakBySlam { get; set; } = true;    // ドッスンの落下衝撃で壊れる
+    public bool breakByRam { get; set; } = true;      // 突進・歩行・巡回の体当たりで壊れる
+    public bool breakByBullet { get; set; } = true;   // 弾で壊れる
+    public bool breakByPlayer { get; set; } = true;   // プレイヤーの直接操作（クリック）で壊れる
+    public bool breakByTip { get; set; } = true;      // 45度以上傾けられると自重で崩れる
+    // 壊すのに必要な相手の大きさ（倍率）。0なら大きさを問わない。
+    // 敵の衝撃にだけ掛かり、プレイヤーの操作と自重崩壊には掛からない。
+    public float breakMinScale { get; set; } = 0.0f;
+
     // 新ギミックロスター対応 — 「作動中」の見た目に差し替えるための第2スプライト。
     // 重量スイッチの押し込み（スイッチオフ.png ⇔ スイッチオン.png）のように、
     // 状態がひと目で分かる必要があるギミック向け。空文字なら sprite 1枚だけで描画する。
@@ -897,6 +1024,9 @@ public class GimmickDef
 
     // Feature: Puzzle-like Behavior Scripting (M2/M6) — type_enum==24(GIMMICK_CUSTOM_SCRIPT)の時に使うJSON ASTブロック配列
     public JArray script { get; set; } = new JArray();
+
+    // Feature: 編集リアクションのJSON宣言（詳細はEnemyDefの同名プロパティのコメント参照）
+    public JObject edit_reactions { get; set; } = new JObject();
 
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1つのギミックを複数の画像パーツの組み合わせで構成したい場合のパーツ一覧。
@@ -920,6 +1050,15 @@ public class ItemDef
     // サウンド SE (Feature 3)
     // アイテムを取得した際に再生する効果音のID。
     public string seCollect { get; set; } = "";
+
+    // このアイテムに対して禁止する編集操作（詳細は EnemyDef の同名プロパティのコメント参照）
+    public bool noScale { get; set; } = false;
+    public bool noRotate { get; set; } = false;
+    public bool noMove { get; set; } = false;
+    public bool noFlip { get; set; } = false;
+    public bool noPause { get; set; } = false;
+    public bool noRewind { get; set; } = false;
+    public bool noSpeed { get; set; } = false;
     // Hitbox (Feature: Visual Hitbox Editor)
     // 見た目の画像と当たり判定の大きさ・位置がずれる場合に調整するための値。
     public int hitboxOffsetX { get; set; } = 0;

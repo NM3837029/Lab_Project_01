@@ -2,29 +2,64 @@
   {
     "id": "ui_pause",
     "name": "UI:一時停止/解除",
-    "file": "se/ItemDash.wav",
+    "file": "se/Paused.wav",
     "isLoop": false,
     "volume": 0.45
   },
   {
     "id": "ui_fastforward",
     "name": "UI:早送り切替",
-    "file": "se/ItemDoubleJump.wav",
+    "file": "se/FastFoward.wav",
     "isLoop": false,
     "volume": 0.45
   },
   {
     "id": "ui_color_cycle",
     "name": "UI:色フィルタ切替",
-    "file": "se/ItemFireFlower.wav",
+    "file": "se/ColorChange.wav",
+    "isLoop": false,
+    "volume": 0.45
+  },
+  {
+    "id": "ui_rewind",
+    "name": "UI:巻き戻し",
+    "file": "se/Rewind.wav",
     "isLoop": false,
     "volume": 0.45
   },
   {
     "id": "ui_denied",
-    "name": "UI:操作不能(封印中)",
+    "name": "UI:操作できない",
     "file": "se/shieldCrack.wav",
     "isLoop": false,
     "volume": 0.55
+  },
+  {
+    "id": "ui_cursor",
+    "name": "UI:カーソル移動",
+    "file": "se/coin.wav",
+    "isLoop": false,
+    "volume": 0.35
+  },
+  {
+    "id": "ui_decide",
+    "name": "UI:決定",
+    "file": "se/ItemCoin.wav",
+    "isLoop": false,
+    "volume": 0.45
+  },
+  {
+    "id": "ui_cancel",
+    "name": "UI:戻る",
+    "file": "se/ItemDash.wav",
+    "isLoop": false,
+    "volume": 0.4
+  },
+  {
+    "id": "ui_edit_apply",
+    "name": "UI:編集を適用",
+    "file": "se/ItemDoubleJump.wav",
+    "isLoop": false,
+    "volume": 0.35
   }
 ]

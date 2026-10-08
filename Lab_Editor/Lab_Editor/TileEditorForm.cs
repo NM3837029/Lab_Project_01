@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 
 namespace Lab_Editor;
 
@@ -34,9 +34,14 @@ public class TileEditorForm : Form
     // コンストラクタ。
     // 引数 assetsPath  : アセットフォルダのパス（画像の相対パス解決やtiles.json保存先に使う）
     // 引数 currentTiles: 編集開始時点の既存タイル定義一覧
-    public TileEditorForm(string assetsPath, List<TileDef> currentTiles)
+    // 壊せるブロック（ギミック）の設定をこの画面から触るために保持する。
+    // null のまま呼ばれた場合はギミック設定ボタンを出さない（従来どおりタイルだけの編集になる）。
+    private readonly AssetDefinitions? assets;
+
+    public TileEditorForm(string assetsPath, List<TileDef> currentTiles, AssetDefinitions? assets = null)
     {
         this.assetsPath = assetsPath;
+        this.assets = assets;
         // 呼び出し元のリストを直接書き換えてしまわないよう、各要素をコピーした
         // 新しいTileDefインスタンスとして複製し、独立したリストを保持する
         tiles = currentTiles.Select(t => new TileDef
@@ -44,6 +49,9 @@ public class TileEditorForm : Form
             id = t.id, name = t.name, color = t.color,
             collidable = t.collidable, deadly = t.deadly, sprite = t.sprite,
             srcX = t.srcX, srcY = t.srcY, srcW = t.srcW, srcH = t.srcH,
+            breakBySlam = t.breakBySlam, breakByRam = t.breakByRam,
+            breakByBullet = t.breakByBullet, breakByPlayer = t.breakByPlayer,
+            breakMinScale = t.breakMinScale, breakSe = t.breakSe,
         }).ToList();
 
         // UI部品を組み立て→グリッドへ反映→Undo履歴の初期状態としてプッシュ、の順で初期化する
@@ -57,8 +65,9 @@ public class TileEditorForm : Form
     private void InitUI()
     {
         Text = "タイル定義エディタ";
-        Size = new Size(820, 560);
-        MinimumSize = new Size(600, 420);
+        // 破壊条件の列が増えたぶん、既定の幅を広げておく（狭いままだと全列が潰れて読めない）
+        Size = new Size(1060, 600);
+        MinimumSize = new Size(820, 460);
         StartPosition = FormStartPosition.CenterParent;
         Font = new Font("Meiryo UI", 9);
 
@@ -88,7 +97,8 @@ public class TileEditorForm : Form
         pnlPreview.Paint += PnlPreview_Paint;
 
         // ==== 下部: ボタン（右詰めFlowLayoutPanelで自動配置、はみ出す心配がない） ====
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        // ボタンが増えたので、1行に収まらない場合は折り返せる高さを確保しておく
+        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 96 };
         // 右側に「キャンセル」「保存して閉じる」を右詰めで配置するFlowLayoutPanel
         var flowRight = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         btnClose = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
@@ -99,7 +109,7 @@ public class TileEditorForm : Form
         flowRight.Controls.Add(btnClose);
         flowRight.Controls.Add(btnSave);
         // 左側に「追加」「削除」「複製」「元に戻す」「やり直す」を左詰めで配置するFlowLayoutPanel
-        var flowLeft = new FlowLayoutPanel { Dock = DockStyle.Left, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8), AutoSize = true };
+        var flowLeft = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8), WrapContents = true };
         btnAdd = new Button { Text = "＋ タイル追加", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
         btnAdd.Click += BtnAdd_Click;
         var btnDel = new Button { Text = "🗑 削除", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
@@ -112,9 +122,17 @@ public class TileEditorForm : Form
         _btnUndo.Click += (s, e) => TilesUndo();
         _btnRedo = new Button { Text = "↪ やり直す (Ctrl+Y)", AutoSize = true, Padding = new Padding(8, 5, 8, 5), Enabled = false };
         _btnRedo.Click += (s, e) => TilesRedo();
-        flowLeft.Controls.AddRange(new Control[] { btnAdd, btnDel, btnDuplicate, _btnUndo, _btnRedo });
-        pnlBottom.Controls.Add(flowRight);
+        // 「壊せるブロック」はタイルではなくギミックとして作られているため、
+        // タイル定義エディタを探しに来たユーザーがそこへ辿り着けるよう導線を置く。
+        var btnBreakableGim = new Button { Text = "🧱 壊せるブロック(ギミック)の設定", AutoSize = true, Padding = new Padding(8, 5, 8, 5) };
+        btnBreakableGim.Click += (s, e) => EditBreakableGimmicks();
+        flowLeft.Controls.AddRange(new Control[] { btnAdd, btnDel, btnDuplicate, _btnUndo, _btnRedo, btnBreakableGim });
+        // Dockは「後から追加したものほど内側」になる。右詰めのボタン群を先に確保してから、
+        // 残りの領域を左詰め（折り返しあり）のボタン群に使わせる。
+        flowRight.Dock = DockStyle.Right;
+        flowRight.AutoSize = true;
         pnlBottom.Controls.Add(flowLeft);
+        pnlBottom.Controls.Add(flowRight);
 
         // ==== 中央: DataGridView ====
         // タイル定義一覧のメイン編集グリッド。列幅は自動でパネル幅一杯に広がる(Fill)ようにしている
@@ -139,12 +157,24 @@ public class TileEditorForm : Form
         // Feature: タイル表示範囲調整機能 — spriteがタイルセット画像の場合に、そのうちどの矩形を使うか
         // （画像内の切り出し開始位置X/Y、切り出し幅W、切り出し高さH）を保持する4列。
         // 値が0（未設定）の場合は画像全体を使う扱いになる（PnlPreview_Paint等を参照）。
-        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcX", HeaderText = "範囲X", FillWeight = 30, ValueType = typeof(int) });
-        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcY", HeaderText = "範囲Y", FillWeight = 30, ValueType = typeof(int) });
-        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcW", HeaderText = "範囲W", FillWeight = 30, ValueType = typeof(int) });
-        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcH", HeaderText = "範囲H", FillWeight = 30, ValueType = typeof(int) });
+        // 表示範囲(srcX/Y/W/H)は「🖼 範囲」ボタンから視覚的に決める値で、直接打つことはまず無い。
+        // 破壊条件の列を足したことで全列が潰れてしまったため、こちらは隠して幅を譲る
+        // （値そのものは今までどおり保持・保存される）。
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcX", HeaderText = "範囲X", Visible = false, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcY", HeaderText = "範囲Y", Visible = false, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcW", HeaderText = "範囲W", Visible = false, ValueType = typeof(int) });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "srcH", HeaderText = "範囲H", Visible = false, ValueType = typeof(int) });
 
         // ボタン列: 色選択（クリックした行に対してColorDialogを開き、colorセルへ反映する）
+        // Feature: タイル破壊 — このタイルを壊せる手段。既定は全てオフなので、
+        // 触らなければ従来どおり「絶対に壊れない地形」のまま。
+        dgv.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakBySlam", HeaderText = "叩きつけ", FillWeight = 46, ToolTipText = "ドッスンの落下衝撃で壊れる" });
+        dgv.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByRam", HeaderText = "体当たり", FillWeight = 46, ToolTipText = "敵の体当たり・突進で壊れる" });
+        dgv.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByBullet", HeaderText = "弾", FillWeight = 30, ToolTipText = "弾で壊れる" });
+        dgv.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByPlayer", HeaderText = "手動", FillWeight = 34, ToolTipText = "編集中にクリックすると壊れる" });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "breakMinScale", HeaderText = "必要倍率", FillWeight = 46, ValueType = typeof(float), ToolTipText = "壊すのに必要な相手の大きさ。0なら大きさを問わない" });
+        dgv.Columns.Add(new DataGridViewTextBoxColumn { Name = "breakSe", HeaderText = "破壊音ID", FillWeight = 60, ToolTipText = "壊れたときに鳴らす効果音ID。空なら無音" });
+
         var colColor = new DataGridViewButtonColumn { Name = "btnColor", HeaderText = "色選択", Text = "🎨", UseColumnTextForButtonValue = true, FillWeight = 40 };
         dgv.Columns.Add(colColor);
         // ボタン列: ファイル選択（クリックした行に対して画像選択ダイアログを開き、spriteセルへ反映する）
@@ -180,6 +210,9 @@ public class TileEditorForm : Form
     // セルの文字列値をintとして読み取るヘルパー。変換できない場合は0を返す。
     private static int IntCell(DataGridViewRow row, string col) => int.TryParse(row.Cells[col].Value?.ToString(), out int v) ? v : 0;
 
+    // 同上のfloat版。「必要な大きさ」のように小数で入る列に使う。
+    private static float FloatCell(DataGridViewRow row, string col) => float.TryParse(row.Cells[col].Value?.ToString(), out float v) ? v : 0f;
+
     // 現在のグリッドの表示内容から、TileDefのリストを組み立てて返す。
     // Undo履歴へのスナップショット保存や、保存(BtnSave_Click)時のデータ取得に使う共通処理。
     private List<TileDef> ReadTilesFromGrid()
@@ -201,6 +234,12 @@ public class TileEditorForm : Form
                 srcY = IntCell(row, "srcY"),
                 srcW = IntCell(row, "srcW"),
                 srcH = IntCell(row, "srcH"),
+                breakBySlam = row.Cells["breakBySlam"].Value is true,
+                breakByRam = row.Cells["breakByRam"].Value is true,
+                breakByBullet = row.Cells["breakByBullet"].Value is true,
+                breakByPlayer = row.Cells["breakByPlayer"].Value is true,
+                breakMinScale = FloatCell(row, "breakMinScale"),
+                breakSe = row.Cells["breakSe"].Value?.ToString() ?? "",
             });
         }
         return result;
@@ -254,7 +293,11 @@ public class TileEditorForm : Form
         dgv.Rows.Clear();
         foreach (var t in tiles)
         {
-            int rowIdx = dgv.Rows.Add(t.id, t.name, t.color, t.collidable, t.deadly, t.sprite, t.srcX, t.srcY, t.srcW, t.srcH, "🎨", "📁", "🖼 範囲");
+            int rowIdx = dgv.Rows.Add(t.id, t.name, t.color, t.collidable, t.deadly, t.sprite,
+                                      t.srcX, t.srcY, t.srcW, t.srcH,
+                                      t.breakBySlam, t.breakByRam, t.breakByBullet, t.breakByPlayer,
+                                      t.breakMinScale, t.breakSe,
+                                      "🎨", "📁", "🖼 範囲");
             // セルの背景色を、そのタイルの色(#RRGGBB)そのままに塗ることで、一覧を見ただけで色がわかるようにする。
             // 不正な色文字列が入っていた場合に例外で落ちないよう、失敗時は何もしない
             try { dgv.Rows[rowIdx].Cells["color"].Style.BackColor = ColorTranslator.FromHtml(t.color); } catch { }
@@ -430,6 +473,94 @@ public class TileEditorForm : Form
         PushHistory();
     }
 
+    // 「壊せるブロック（ギミック）の設定」ボタンの処理。
+    //
+    // タイル側の破壊条件とギミック側の破壊条件は、意味は同じなのに設定場所が離れている。
+    // ここでは gimmicks.json のうち壊せるブロック型のものだけを抜き出し、
+    // タイルの列と同じ並びで編集できる小さなグリッドを出す。
+    // OKを押すと gimmicks.json をその場で書き戻す（タイルの保存とは独立）。
+    private void EditBreakableGimmicks()
+    {
+        if (assets == null)
+        {
+            MessageBox.Show("アセット定義を読み込めていないため開けません。", "壊せるブロックの設定");
+            return;
+        }
+        // type_enum は GimmickType の並び順。壊せるブロック(GIMMICK_BREAKABLE_BLOCK)は3番。
+        // IDの名前一致で拾うと、ユーザーが自作した別名のブロックが漏れるため型で拾う。
+        var blocks = assets.Gimmicks.Where(g => g.type_enum == 3).ToList();
+        if (blocks.Count == 0)
+        {
+            MessageBox.Show("壊せるブロック型のギミックが定義されていません。", "壊せるブロックの設定");
+            return;
+        }
+
+        using var dlg = new Form
+        {
+            Text = "壊せるブロック（ギミック）の設定",
+            Size = new Size(760, 420),
+            StartPosition = FormStartPosition.CenterParent,
+            Font = new Font("Meiryo UI", 9),
+        };
+        var grid = new DataGridView
+        {
+            Dock = DockStyle.Fill,
+            AllowUserToAddRows = false,
+            AllowUserToDeleteRows = false,
+            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            Font = new Font("Meiryo UI", 9),
+        };
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "id", HeaderText = "ID", ReadOnly = true, FillWeight = 90 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "name", HeaderText = "名前", ReadOnly = true, FillWeight = 90 });
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakBySlam", HeaderText = "叩きつけ破壊", FillWeight = 55 });
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByRam", HeaderText = "体当たり破壊", FillWeight = 55 });
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByBullet", HeaderText = "弾で破壊", FillWeight = 45 });
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByPlayer", HeaderText = "手で破壊", FillWeight = 45 });
+        // 傾けて自重で崩れるのはギミックだけの概念（タイルは傾かない）なので、こちらにだけ出す
+        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "breakByTip", HeaderText = "傾けて崩す", FillWeight = 50 });
+        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "breakMinScale", HeaderText = "必要な大きさ", FillWeight = 55, ValueType = typeof(float) });
+        foreach (var g in blocks)
+            grid.Rows.Add(g.id, g.name, g.breakBySlam, g.breakByRam, g.breakByBullet, g.breakByPlayer, g.breakByTip, g.breakMinScale);
+
+        var pnl = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
+        var btnCancel = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5), DialogResult = DialogResult.Cancel };
+        var btnOk = new Button { Text = "💾 保存", AutoSize = true, Padding = new Padding(10, 5, 10, 5), DialogResult = DialogResult.OK };
+        flow.Controls.Add(btnCancel);
+        flow.Controls.Add(btnOk);
+        pnl.Controls.Add(flow);
+        dlg.Controls.Add(grid);
+        dlg.Controls.Add(pnl);
+        dlg.AcceptButton = btnOk;
+        dlg.CancelButton = btnCancel;
+
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        for (int i = 0; i < blocks.Count && i < grid.Rows.Count; i++)
+        {
+            var r = grid.Rows[i];
+            blocks[i].breakBySlam = r.Cells["breakBySlam"].Value is true;
+            blocks[i].breakByRam = r.Cells["breakByRam"].Value is true;
+            blocks[i].breakByBullet = r.Cells["breakByBullet"].Value is true;
+            blocks[i].breakByPlayer = r.Cells["breakByPlayer"].Value is true;
+            blocks[i].breakByTip = r.Cells["breakByTip"].Value is true;
+            blocks[i].breakMinScale = FloatCell(r, "breakMinScale");
+        }
+        try
+        {
+            // タイルの保存とは独立して、ここで gimmicks.json だけを書き戻す。
+            // SaveToFolder は9本のJSONを全部書き直してしまうので、対象を1本に絞る。
+            File.WriteAllText(Path.Combine(assetsPath, "gimmicks.json"),
+                              JsonConvert.SerializeObject(assets.Gimmicks, Formatting.Indented));
+            MessageBox.Show("壊せるブロックの設定を保存しました。", "壊せるブロックの設定");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("保存に失敗しました: " + ex.Message, "壊せるブロックの設定");
+        }
+    }
+
     // 検索ボックスの入力内容(txtSearch.Text)を使って、ID・名前が部分一致しない行を非表示にする絞り込み処理。
     private void ApplySearchFilter()
     {
@@ -466,6 +597,12 @@ public class TileEditorForm : Form
             srcY = IntCell(row, "srcY"),
             srcW = IntCell(row, "srcW"),
             srcH = IntCell(row, "srcH"),
+            breakBySlam = row.Cells["breakBySlam"].Value is true,
+            breakByRam = row.Cells["breakByRam"].Value is true,
+            breakByBullet = row.Cells["breakByBullet"].Value is true,
+            breakByPlayer = row.Cells["breakByPlayer"].Value is true,
+            breakMinScale = FloatCell(row, "breakMinScale"),
+            breakSe = row.Cells["breakSe"].Value?.ToString() ?? "",
         };
         tiles.Add(src);
         LoadGrid();
