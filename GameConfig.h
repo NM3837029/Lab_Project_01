@@ -143,6 +143,60 @@ namespace GameCfg {
         std::string gameover = "";           // ゲームオーバー
     };
 
+    // ------------------------------------------------------------
+    // ゲーム画面のウィンドウ（UIの枠）の見た目
+    //
+    // 「コインとゲージの枠」「メッセージ」「ボタン」「円形メニュー」などの枠は、
+    // これまで img/UIウィンドウ.png の固定の絵と、DrawPixel.cpp 内の決め打ちの数値・色で描かれていた。
+    // 見た目を変えるにはC++を書き換えるしかなかったので、ここへ出して Lab_Editor の
+    // 「ゲーム設定」→「UIデザイン」から変えられるようにする。
+    //
+    // 既定値は従来の見た目と完全に同じ（設定が無い／古い game_config.json でも何も変わらない）。
+    // ------------------------------------------------------------
+
+    // 枠の種類ごとの上書き。全体設定との違いだけを書けばよい。
+    struct UiWindowStyle {
+        std::string image;             // 空なら全体の frame_image を使う
+        Color tint{ 255, 255, 255 };   // 枠の色合わせ（乗算。白＝素材そのまま）
+        int opacity = 100;             // 不透明度(0-100%)
+        int destSlice = -1;            // 画面上の枠の太さ(px)。負なら全体の dest_slice
+    };
+
+    // 枠の種類。DrawUiWindow の最後の引数で指定する。
+    enum UiKind { UIK_OSD, UIK_MESSAGE, UIK_BUTTON, UIK_RADIAL, UIK_PANEL, UIK_MENU, UIK_CELL, UIK_COUNT };
+
+    struct UiStyle {
+        // 9スライス枠の素材と切り方
+        std::string frameImage = "img/UIウィンドウ.png"; // 空なら素材を使わず単色の枠で描く
+        int srcPad = 16;        // 素材から切り落とす透明な余白(px)
+        int srcSlice = 60;      // 素材側で「枠」として扱う縁の太さ(px)
+        int destSlice = 14;     // 画面上での枠の太さ(px)
+        Color fallbackFill{ 252, 246, 236 }; // 素材が無いときの単色枠（塗り）
+        Color fallbackEdge{ 20, 84, 132 };   // 素材が無いときの単色枠（縁）
+
+        // 文字・ゲージの色（ink / inkSub / inkAccent は theme と同じ値を GameConfig から写す）
+        Color ink{ 32, 34, 40 };
+        Color inkSub{ 112, 116, 126 };
+        Color inkAccent{ 20, 84, 132 };
+        Color inkWarn{ 196, 52, 52 };
+        Color inkOk{ 28, 122, 68 };
+        Color gaugeFill{ 0, 170, 225 };
+        Color gaugeLow{ 255, 80, 80 };
+        Color gaugeBack{ 56, 52, 48 };
+
+        // メッセージウィンドウの置き方（画面下に横いっぱい）
+        int messageMarginX = 20;       // 左右の余白(px)
+        int messageMarginBottom = 20;  // 下の余白(px)
+        int messageHeight = 90;        // 1行のときの高さ(px)。複数行のときは行数ぶん伸びる
+
+        UiWindowStyle win[UIK_COUNT];  // 枠の種類ごとの上書き
+    };
+
+    inline const char* UiKindKey(int k) {
+        static const char* keys[UIK_COUNT] = { "osd", "message", "button", "radial", "panel", "menu", "cell" };
+        return (k >= 0 && k < UIK_COUNT) ? keys[k] : "";
+    }
+
     struct GameConfig {
         int version = 1;
         std::string windowTitle = "Lab Project 01";
@@ -176,6 +230,9 @@ namespace GameCfg {
         std::string selectLabel = "STAGE SELECT";
         std::string victoryText = "VICTORY!";
         std::string gameoverText = "GAME OVER";
+
+        // ゲーム画面のウィンドウの見た目（詳細は UiStyle のコメント参照）
+        UiStyle ui;
 
         // 効果音の割り当て（詳細は上の各構造体のコメント参照）
         PlayerSe playerSe;
@@ -263,6 +320,52 @@ namespace GameCfg {
             out.inkAccent = ReadColor(t, "ink_accent", out.inkAccent);
             out.backdrop = ReadColor(t, "backdrop", out.backdrop);
         }
+
+        // ゲーム画面のウィンドウの見た目。無いキーは UiStyle の既定値（＝従来の見た目）のまま。
+        if (j.contains("ui_style") && j["ui_style"].is_object()) {
+            const json& u = j["ui_style"];
+            UiStyle& us = out.ui;
+            us.frameImage = u.value("frame_image", us.frameImage);
+            us.srcPad = u.value("src_pad", us.srcPad);
+            us.srcSlice = u.value("src_slice", us.srcSlice);
+            us.destSlice = u.value("dest_slice", us.destSlice);
+            us.fallbackFill = ReadColor(u, "fallback_fill", us.fallbackFill);
+            us.fallbackEdge = ReadColor(u, "fallback_edge", us.fallbackEdge);
+            us.inkWarn = ReadColor(u, "ink_warn", us.inkWarn);
+            us.inkOk = ReadColor(u, "ink_ok", us.inkOk);
+            us.gaugeFill = ReadColor(u, "gauge_fill", us.gaugeFill);
+            us.gaugeLow = ReadColor(u, "gauge_low", us.gaugeLow);
+            us.gaugeBack = ReadColor(u, "gauge_back", us.gaugeBack);
+            if (u.contains("message") && u["message"].is_object()) {
+                const json& m = u["message"];
+                us.messageMarginX = m.value("margin_x", us.messageMarginX);
+                us.messageMarginBottom = m.value("margin_bottom", us.messageMarginBottom);
+                us.messageHeight = m.value("height", us.messageHeight);
+            }
+            if (u.contains("windows") && u["windows"].is_object()) {
+                for (int k = 0; k < UIK_COUNT; k++) {
+                    const char* key = UiKindKey(k);
+                    if (!u["windows"].contains(key) || !u["windows"][key].is_object()) continue;
+                    const json& w = u["windows"][key];
+                    UiWindowStyle& ws = us.win[k];
+                    ws.image = w.value("image", ws.image);
+                    ws.tint = ReadColor(w, "tint", ws.tint);
+                    ws.opacity = w.value("opacity", ws.opacity);
+                    ws.destSlice = w.value("dest_slice", ws.destSlice);
+                }
+            }
+            // 壊れた値で描画が崩れない範囲へ丸める
+            if (us.srcPad < 0) us.srcPad = 0;
+            if (us.srcSlice < 1) us.srcSlice = 1;
+            if (us.destSlice < 2) us.destSlice = 2;
+            for (int k = 0; k < UIK_COUNT; k++) {
+                if (us.win[k].opacity < 0) us.win[k].opacity = 0;
+                if (us.win[k].opacity > 100) us.win[k].opacity = 100;
+            }
+            if (us.messageHeight < 40) us.messageHeight = 40;
+        }
+        // 文字色は theme と共有（タイトル／セレクトの文字と、ゲーム内ウィンドウの文字がずれないように）
+        out.ui.ink = out.ink; out.ui.inkSub = out.inkSub; out.ui.inkAccent = out.inkAccent;
 
         if (j.contains("title_screen") && j["title_screen"].is_object()) {
             const json& ts = j["title_screen"];

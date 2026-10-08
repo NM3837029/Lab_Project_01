@@ -1107,13 +1107,22 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
 // 描画モードの色深度に依存するため、DxLib_Init より前の静的初期化時に
 // 呼ばれる形にしたくないから。
 
-inline int UiInk() { return GetColor(32, 34, 40); }        // 主要テキスト（ほぼ黒）
-inline int UiInkSub() { return GetColor(112, 116, 126); }  // 補助テキスト・無効表示
-inline int UiInkAccent() { return GetColor(20, 84, 132); } // 強調（ウィンドウ枠の青と同系色）
-inline int UiInkWarn() { return GetColor(196, 52, 52); }   // 警告・削除など危険寄りの操作
-inline int UiInkOk() { return GetColor(28, 122, 68); }     // 正常・有効を示す緑
+// ゲーム画面のウィンドウの見た目の設定（assets/game_config.json の ui_style / theme）。
+// WinMain が設定を読んだ直後にここへ写す。既定値は従来の見た目と同じなので、
+// 設定が無くても何も変わらない。Lab_Editor の「ゲーム設定」→「UIデザイン」から変えられる。
+GameCfg::UiStyle g_uiStyle;
 
-// --- 9スライス描画のパラメータ ---
+inline int UiColorOf(const GameCfg::Color& c) { return GetColor(c.r, c.g, c.b); }
+inline int UiInk() { return UiColorOf(g_uiStyle.ink); }               // 主要テキスト（既定はほぼ黒）
+inline int UiInkSub() { return UiColorOf(g_uiStyle.inkSub); }         // 補助テキスト・無効表示
+inline int UiInkAccent() { return UiColorOf(g_uiStyle.inkAccent); }   // 強調（ウィンドウ枠の青と同系色）
+inline int UiInkWarn() { return UiColorOf(g_uiStyle.inkWarn); }       // 警告・削除など危険寄りの操作
+inline int UiInkOk() { return UiColorOf(g_uiStyle.inkOk); }           // 正常・有効を示す緑
+inline int UiGaugeFill() { return UiColorOf(g_uiStyle.gaugeFill); }   // 編集コストゲージの中身
+inline int UiGaugeLow() { return UiColorOf(g_uiStyle.gaugeLow); }     // 残りわずかのときの点滅色（明）
+inline int UiGaugeBack() { return UiColorOf(g_uiStyle.gaugeBack); }   // ゲージの器（暗い溝）
+
+// --- 9スライス描画 ---
 // 9スライスとは、1枚の枠絵を「四隅・上下左右の辺・中央」の9領域に切り分け、
 //   ・四隅は引き伸ばさない
 //   ・上下の辺は横方向だけ、左右の辺は縦方向だけ引き伸ばす
@@ -1121,52 +1130,104 @@ inline int UiInkOk() { return GetColor(28, 122, 68); }     // 正常・有効を
 // という描き方のこと。こうするとどんな大きさのウィンドウを作っても
 // 角の丸みや枠線の太さが潰れず、1枚の素材を全UIで使い回せる。
 //
-// UIウィンドウ.png は 640x640 で、周囲におよそ 17〜26px の透明な余白がある。
-// その余白まで含めて描くと小さいウィンドウが内側に痩せて見えるので、
-// 全周 16px を切り落とした内側だけを素材として扱う。
-const int UI_WIN_SRC_PAD = 16;                              // 素材から切り落とす透明余白(px)
-const int UI_WIN_SRC_SPAN = 640 - UI_WIN_SRC_PAD * 2;       // 実際に使う素材の一辺(px)
-const int UI_WIN_SRC_SLICE = 60;                            // 素材側で「枠」として扱う縁の太さ(px)
-const int UI_WIN_DEST_SLICE = 14;                           // 画面上での枠の太さ(px)
+// 切り方（素材から切り落とす余白・枠の太さ・画面上での枠の太さ）は、以前は定数だったが、
+// 素材を差し替えられるよう g_uiStyle の値（src_pad / src_slice / dest_slice）にした。
+// 既定値は従来の 16 / 60 / 14 で、640x640 の UIウィンドウ.png ならこれまでと完全に同じ結果になる。
+
+// 設定で指定された素材のハンドルを返す（初回だけ読み込み、以後は使い回す）。読めなければ -1。
+std::map<std::string, int> g_uiImageCache;
+int UiLoadImage(const std::string& path) {
+    if (path.empty()) return -1;
+    auto it = g_uiImageCache.find(path);
+    if (it != g_uiImageCache.end()) return it->second;
+    int h = LoadGraph(path.c_str());
+    if (h < 0) Logger::Error("DrawPixel", "UiLoadImage", "Failed to load ui frame image", path);
+    g_uiImageCache[path] = h;
+    return h;
+}
 
 // UIウィンドウを9スライスで描く。
-// handleが未読み込み(-1)の場合は、素材が無くてもUIが消えないよう単色の枠でフォールバックする。
-void DrawUiWindow(int x1, int y1, int x2, int y2, int handle) {
+//   handle … 既定の素材（img/UIウィンドウ.png）のハンドル。設定が既定の素材のままなら、これを使う
+//   kind   … 枠の種類（GameCfg::UiKind）。種類ごとの色合わせ・不透明度・素材の上書きを反映する。-1なら全体設定のみ
+// 素材が無い（未読み込み）場合は、UIが消えないよう単色の枠でフォールバックする。
+void DrawUiWindow(int x1, int y1, int x2, int y2, int handle, int kind = -1) {
     int w = x2 - x1;
     int h = y2 - y1;
     if (w <= 0 || h <= 0) return;
-    if (handle < 0) {
-        DrawBox(x1, y1, x2, y2, GetColor(252, 246, 236), TRUE);
-        DrawBox(x1, y1, x2, y2, GetColor(20, 84, 132), FALSE);
-        return;
+    const GameCfg::UiWindowStyle* ws = (kind >= 0 && kind < GameCfg::UIK_COUNT) ? &g_uiStyle.win[kind] : nullptr;
+
+    // 使う素材を決める。種類ごとの指定 → 全体の指定 の順。既定の素材のままなら呼び出し側のハンドルを使う
+    // （同じ絵を二重に読み込まないため）。
+    const std::string& path = (ws && !ws->image.empty()) ? ws->image : g_uiStyle.frameImage;
+    int img = (path == "img/UIウィンドウ.png") ? handle : UiLoadImage(path);
+
+    // 色合わせと不透明度。呼び出し側がすでに SetDrawBright / ブレンドを指定していること（ホバーで暗くする等）が
+    // あるので、置き換えずに掛け合わせ、描き終えたら元へ戻す。
+    int br = 255, bg = 255, bb = 255, bm = DX_BLENDMODE_NOBLEND, bp = 0;
+    GetDrawBright(&br, &bg, &bb);
+    GetDrawBlendMode(&bm, &bp);
+    bool restore = false;
+    if (ws) {
+        if (ws->tint.r != 255 || ws->tint.g != 255 || ws->tint.b != 255) {
+            SetDrawBright(br * ws->tint.r / 255, bg * ws->tint.g / 255, bb * ws->tint.b / 255);
+            restore = true;
+        }
+        if (ws->opacity < 100) {
+            int base = (bm == DX_BLENDMODE_ALPHA) ? bp : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, base * ws->opacity / 100);
+            restore = true;
+        }
     }
-    // 枠の太さは基本 UI_WIN_DEST_SLICE。ただしウィンドウ自体が小さいときに
-    // 左右（上下）の枠がぶつかって潰れないよう、短辺の1/3を上限にする。
-    int ds = UI_WIN_DEST_SLICE;
-    int limit = (w < h ? w : h) / 3;
-    if (ds > limit) ds = limit;
-    if (ds < 2) ds = 2;
 
-    const int ss = UI_WIN_SRC_SLICE;
-    const int sm = UI_WIN_SRC_SPAN - ss * 2; // 素材の中央部分の一辺
-    const int sx0 = UI_WIN_SRC_PAD, sx1 = sx0 + ss, sx2 = sx1 + sm;
-    const int sy0 = UI_WIN_SRC_PAD, sy1 = sy0 + ss, sy2 = sy1 + sm;
-    const int dx1 = x1 + ds, dx2 = x2 - ds;
-    const int dy1 = y1 + ds, dy2 = y2 - ds;
+    if (img < 0) {
+        DrawBox(x1, y1, x2, y2, UiColorOf(g_uiStyle.fallbackFill), TRUE);
+        DrawBox(x1, y1, x2, y2, UiColorOf(g_uiStyle.fallbackEdge), FALSE);
+    } else {
+        int iw = 0, ih = 0;
+        GetGraphSize(img, &iw, &ih);
+        // 枠の太さは基本 dest_slice。ただしウィンドウ自体が小さいときに
+        // 左右（上下）の枠がぶつかって潰れないよう、短辺の1/3を上限にする。
+        int ds = (ws && ws->destSlice >= 0) ? ws->destSlice : g_uiStyle.destSlice;
+        int limit = (w < h ? w : h) / 3;
+        if (ds > limit) ds = limit;
+        if (ds < 2) ds = 2;
 
-    // 四隅（引き伸ばさず、枠の太さぶんに縮めて描く）
-    DrawRectExtendGraph(x1,  y1,  dx1, dy1, sx0, sy0, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(dx2, y1,  x2,  dy1, sx2, sy0, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(x1,  dy2, dx1, y2,  sx0, sy2, ss, ss, handle, TRUE);
-    DrawRectExtendGraph(dx2, dy2, x2,  y2,  sx2, sy2, ss, ss, handle, TRUE);
-    // 上下の辺（横方向だけ引き伸ばす）
-    DrawRectExtendGraph(dx1, y1,  dx2, dy1, sx1, sy0, sm, ss, handle, TRUE);
-    DrawRectExtendGraph(dx1, dy2, dx2, y2,  sx1, sy2, sm, ss, handle, TRUE);
-    // 左右の辺（縦方向だけ引き伸ばす）
-    DrawRectExtendGraph(x1,  dy1, dx1, dy2, sx0, sy1, ss, sm, handle, TRUE);
-    DrawRectExtendGraph(dx2, dy1, x2,  dy2, sx2, sy1, ss, sm, handle, TRUE);
-    // 中央（縦横とも引き伸ばす）
-    DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sm, sm, handle, TRUE);
+        // 素材側の切り方。素材の大きさが想定と違っても破綻しないよう、余白と縁の太さを素材の大きさで頭打ちにする
+        int pad = g_uiStyle.srcPad;
+        if (pad * 2 >= iw - 2) pad = (iw - 2) / 2;
+        if (pad * 2 >= ih - 2) pad = (ih - 2) / 2;
+        if (pad < 0) pad = 0;
+        const int spanW = iw - pad * 2, spanH = ih - pad * 2;
+        int ss = g_uiStyle.srcSlice;
+        if (ss > spanW / 2 - 1) ss = spanW / 2 - 1;
+        if (ss > spanH / 2 - 1) ss = spanH / 2 - 1;
+        if (ss < 1) ss = 1;
+        const int smW = spanW - ss * 2; // 素材の中央部分の幅
+        const int smH = spanH - ss * 2; // 素材の中央部分の高さ
+        const int sx0 = pad, sx1 = sx0 + ss, sx2 = sx1 + smW;
+        const int sy0 = pad, sy1 = sy0 + ss, sy2 = sy1 + smH;
+        const int dx1 = x1 + ds, dx2 = x2 - ds;
+        const int dy1 = y1 + ds, dy2 = y2 - ds;
+
+        // 四隅（引き伸ばさず、枠の太さぶんに縮めて描く）
+        DrawRectExtendGraph(x1,  y1,  dx1, dy1, sx0, sy0, ss, ss, img, TRUE);
+        DrawRectExtendGraph(dx2, y1,  x2,  dy1, sx2, sy0, ss, ss, img, TRUE);
+        DrawRectExtendGraph(x1,  dy2, dx1, y2,  sx0, sy2, ss, ss, img, TRUE);
+        DrawRectExtendGraph(dx2, dy2, x2,  y2,  sx2, sy2, ss, ss, img, TRUE);
+        // 上下の辺（横方向だけ引き伸ばす）
+        DrawRectExtendGraph(dx1, y1,  dx2, dy1, sx1, sy0, smW, ss, img, TRUE);
+        DrawRectExtendGraph(dx1, dy2, dx2, y2,  sx1, sy2, smW, ss, img, TRUE);
+        // 左右の辺（縦方向だけ引き伸ばす）
+        DrawRectExtendGraph(x1,  dy1, dx1, dy2, sx0, sy1, ss, smH, img, TRUE);
+        DrawRectExtendGraph(dx2, dy1, x2,  dy2, sx2, sy1, ss, smH, img, TRUE);
+        // 中央（縦横とも引き伸ばす）
+        DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, smW, smH, img, TRUE);
+    }
+
+    if (restore) {
+        SetDrawBright(br, bg, bb);
+        SetDrawBlendMode(bm, bp);
+    }
 }
 
 // UIアイコンを (cx, cy) を中心に boxSize x boxSize の正方形へ収めて描く。
@@ -3160,6 +3221,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 従来どおり起動即プレイになる（設定が壊れても遊べなくならない）。
     GameCfg::GameConfig gameConfig;
     GameCfg::LoadGameConfig("assets/game_config.json", gameConfig);
+    g_uiStyle = gameConfig.ui; // ゲーム画面のウィンドウの見た目（枠・色）を描画側へ渡す
     if (!gameConfig.windowTitle.empty()) {
         SetMainWindowText(gameConfig.windowTitle.c_str());
     }
@@ -5468,7 +5530,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!enabled)   SetDrawBright(150, 148, 145);
         else if (hot)   SetDrawBright(255, 255, 255);
         else            SetDrawBright(214, 209, 202);
-        DrawUiWindow(x1, y1, x2, y2, uiWindowHandle);
+        DrawUiWindow(x1, y1, x2, y2, uiWindowHandle, GameCfg::UIK_BUTTON);
         SetDrawBright(255, 255, 255);
         unsigned int col = !enabled ? MetaColor(gameConfig.inkSub)
                          : (hot ? MetaColor(gameConfig.inkAccent) : MetaColor(gameConfig.ink));
@@ -5663,7 +5725,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (!unlocked)  SetDrawBright(150, 148, 145);
                 else if (hot)   SetDrawBright(255, 255, 255);
                 else            SetDrawBright(214, 209, 202);
-                DrawUiWindow(x1, y1, x2, y2, uiWindowHandle);
+                DrawUiWindow(x1, y1, x2, y2, uiWindowHandle, GameCfg::UIK_CELL);
                 SetDrawBright(255, 255, 255);
 
                 // サムネイル。用意されていない場合はテーマ色のブロックで代替する
@@ -5817,7 +5879,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 画面の中心（編集画面ではゲーム画面の中心）。ゲーム画面の外の編集パネルは暗く沈める
         const int ox = isEditMode ? monitorX : 0, oy = isEditMode ? monitorY : 0;
         const int cx = ox + SCREEN_WIDTH / 2, cy = oy + SCREEN_HEIGHT / 2;
-        const int accent = GetColor(255, 200, 80), ink = GetColor(235, 235, 235), sub = GetColor(160, 160, 160);
+        // 色はウィンドウの設定（theme）から引く。枠も他のウィンドウと同じ素材で描くので、
+        // 「UIデザイン」で枠や色を変えると、このメニューも一緒に変わる。
+        const int accent = UiInkAccent(), ink = UiInk(), sub = UiInkSub();
 
         // 操作一覧の中身。左右2列で並べる
         struct HelpRow { const char* key; const char* what; };
@@ -5884,36 +5948,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (helpOnly) done = true; else page = 0;
                 }
                 // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
-                const int pw = 900, ph = 420;
+                const int pw = 900, ph = 440;
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
                 if (px1 < 8) px1 = 8;
-                DrawBox(px1, py1, px1 + pw, py1 + ph, GetColor(30, 26, 24), TRUE);
-                DrawBox(px1, py1, px1 + pw, py1 + ph, accent, FALSE);
-                DrawString(px1 + 18, py1 + 12, "操作一覧", accent);
+                DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
+                DrawString(px1 + 26, py1 + 22, "操作一覧", accent);
                 auto drawCol = [&](const HelpRow* rows, int n, int colX) {
                     for (int i = 0; i < n; i++) {
-                        int ry = py1 + 44 + i * 24;
+                        int ry = py1 + 52 + i * 24;
                         if (rows[i].what[0] == '\0' && rows[i].key[0] == '\0') continue;
                         if (rows[i].what[0] == '\0') { DrawString(colX, ry, rows[i].key, accent); continue; } // 見出し
                         DrawString(colX, ry, rows[i].key, ink);
                         DrawString(colX + 200, ry, rows[i].what, sub);
                     }
                 };
-                drawCol(leftCol, (int)(sizeof(leftCol) / sizeof(leftCol[0])), px1 + 18);
-                drawCol(rightCol, (int)(sizeof(rightCol) / sizeof(rightCol[0])), px1 + 18 + pw / 2);
-                DrawString(px1 + 18, py1 + ph - 28, helpOnly ? "[F1] / [Esc] / クリックで閉じる" : "[Esc] / クリックでもどる", sub);
+                drawCol(leftCol, (int)(sizeof(leftCol) / sizeof(leftCol[0])), px1 + 26);
+                drawCol(rightCol, (int)(sizeof(rightCol) / sizeof(rightCol[0])), px1 + 26 + pw / 2);
+                DrawString(px1 + 26, py1 + ph - 34, helpOnly ? "[F1] / [Esc] / クリックで閉じる" : "[Esc] / クリックでもどる", sub);
             } else {
                 // ---- メニュー ----
                 const int n = (int)items.size();
                 const int bw = 260, bh = 38, gap = 8;
-                const int pw = bw + 60, ph = 60 + n * (bh + gap) + 20;
+                const int pw = bw + 70, ph = 76 + n * (bh + gap) + 24;
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
-                DrawBox(px1, py1, px1 + pw, py1 + ph, GetColor(30, 26, 24), TRUE);
-                DrawBox(px1, py1, px1 + pw, py1 + ph, accent, FALSE);
-                DrawString(px1 + 18, py1 + 14, "ポーズ", accent);
+                DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
+                DrawString(px1 + 26, py1 + 22, "ポーズ", accent);
                 int hover = -1;
                 for (int i = 0; i < n; i++) {
-                    int bx = cx - bw / 2, by = py1 + 44 + i * (bh + gap);
+                    int bx = cx - bw / 2, by = py1 + 52 + i * (bh + gap);
                     if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) hover = i;
                 }
                 // マウスが指した項目へキーボードの選択も追従させる（どちらで操作しても同じ見た目になる）
@@ -5928,19 +5990,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (clickEdge && hover >= 0) { cur = hover; act = items[hover].id; }
 
                 for (int i = 0; i < n; i++) {
-                    int bx = cx - bw / 2, by = py1 + 44 + i * (bh + gap);
+                    int bx = cx - bw / 2, by = py1 + 52 + i * (bh + gap);
                     bool sel = (i == cur);
                     bool quitRow = (items[i].id == 4);
                     const char* label = items[i].label;
                     if (quitRow && confirmQuit) label = "ほんとうに終わる？ もう一度";
-                    int fillCol = sel ? GetColor(70, 58, 36) : GetColor(46, 42, 38);
-                    int edgeCol = (quitRow && confirmQuit) ? GetColor(255, 130, 110) : (sel ? accent : GetColor(110, 104, 96));
-                    DrawBox(bx, by, bx + bw, by + bh, fillCol, TRUE);
-                    DrawBox(bx, by, bx + bw, by + bh, edgeCol, FALSE);
+                    // 選んでいる項目は明るく、ほかは少し暗く（円形メニューの項目と同じ見せ方）
+                    SetDrawBright(sel ? 255 : 214, sel ? 255 : 209, sel ? 255 : 202);
+                    DrawUiWindow(bx, by, bx + bw, by + bh, uiWindowHandle, GameCfg::UIK_BUTTON);
+                    SetDrawBright(255, 255, 255);
                     int lw = GetDrawStringWidth(label, (int)strlen(label));
-                    DrawString(bx + bw / 2 - lw / 2, by + bh / 2 - 8, label, sel ? accent : ink);
+                    DrawString(bx + bw / 2 - lw / 2, by + bh / 2 - 8, label,
+                               (quitRow && confirmQuit) ? UiInkWarn() : (sel ? accent : ink));
                 }
-                DrawString(px1 + 18, py1 + ph - 24, "[↑↓] えらぶ  [Enter] きめる  [Esc] とじる", sub);
+                DrawString(px1 + 26, py1 + ph - 36, "[↑↓] えらぶ  [Enter] きめる  [Esc] とじる", sub);
 
                 if (act == 0) done = true;
                 else if (act == 1) { ResetStage(); done = true; }
@@ -11710,7 +11773,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
         {
             const int panelX1 = 8, panelY1 = 8, panelX2 = 196, panelY2 = 84;
-            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle);
+            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle, GameCfg::UIK_OSD);
 
             // --- 1段目：コインの取得枚数 ---
             DrawUiIcon(34, 30, 34, coinHandle);
@@ -11723,13 +11786,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
             bool isLow = ratio < 0.2f;
             bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-            int barColor = isLow ? (blinkOn ? GetColor(255, 80, 80) : GetColor(90, 30, 30)) : GetColor(0, 170, 225);
+            // 点滅の暗いほうは、明るいほうの色を暗くして作る（設定で色を変えても、点滅が成り立つように）
+            int barColor = isLow ? (blinkOn ? UiGaugeLow()
+                                            : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
+                                 : UiGaugeFill();
 
             DrawUiIcon(34, 60, 38, energyHandle);
             // ゲージの器は暗い溝にしておく。こうしておけば残量が減ってバーが後退しても、
             // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
             const int gx1 = 54, gy1 = 50, gx2 = 186, gy2 = 70;
-            DrawBox(gx1, gy1, gx2, gy2, GetColor(56, 52, 48), TRUE);
+            DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
             DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
             DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
             char editCostStr[32];
@@ -11858,10 +11924,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 枠の高さは行数に合わせて伸ばす。1行しか無いときは従来と同じ 90px のままにして、
             // 既存ステージのメッセージの見え方を変えない。
             const int MSG_LINE_H = 20;
-            int boxX = 20, boxW = SCREEN_WIDTH - 40;
-            int boxH = 90 + ((int)msgLines.size() - 1) * MSG_LINE_H;
-            int boxY = SCREEN_HEIGHT - 20 - boxH;
-            DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle);
+            // 置き方（左右の余白・下の余白・1行のときの高さ）は「UIデザイン」の設定。既定は 20 / 20 / 90
+            int boxX = g_uiStyle.messageMarginX, boxW = SCREEN_WIDTH - g_uiStyle.messageMarginX * 2;
+            int boxH = g_uiStyle.messageHeight + ((int)msgLines.size() - 1) * MSG_LINE_H;
+            int boxY = SCREEN_HEIGHT - g_uiStyle.messageMarginBottom - boxH;
+            DrawUiWindow(boxX, boxY, boxX + boxW, boxY + boxH, uiWindowHandle, GameCfg::UIK_MESSAGE);
             if (!currentMessageSpeaker.empty()) {
                 DrawString(boxX + 18, boxY + 14, currentMessageSpeaker.c_str(), UiInkAccent());
             }
@@ -11982,7 +12049,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 if (isHover) SetDrawBright(255, 255, 255);
                 else         SetDrawBright(205, 200, 194);
-                DrawUiWindow(btnX, y1, btnX + RESULT_BTN_W, y2, uiWindowHandle);
+                DrawUiWindow(btnX, y1, btnX + RESULT_BTN_W, y2, uiWindowHandle, GameCfg::UIK_BUTTON);
                 SetDrawBright(255, 255, 255);
                 int lw = GetDrawStringWidth(btns[i].label, (int)strlen(btns[i].label));
                 DrawString(btnX + RESULT_BTN_W / 2 - lw / 2, y1 + RESULT_BTN_H / 2 - 8,
@@ -12010,7 +12077,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
             // UI素材化 — 左パネルを UIウィンドウ.png の9スライス枠で描く。
             // 素材が明るいクリーム色なので、この中に載せる文字は全て暗いインク色(UiInk系)に統一する。
-            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle);
+            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL);
             
             // パネルタイトルと、いま再生中か一時停止中かの表示。
             // 「再生中/一時停止中」は文字だけでなく専用アイコン（UI再生中.png / UI一時停止中.png）でも示す。
@@ -12044,8 +12111,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float leftRatio = editCost / currentEditCost.maxCost;
                 if (leftRatio < 0.0f) leftRatio = 0.0f; if (leftRatio > 1.0f) leftRatio = 1.0f;
                 DrawUiIcon(38, 262, 30, energyHandle);
-                DrawBox(60, 254, 226, 272, GetColor(56, 52, 48), TRUE);
-                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, GetColor(0, 170, 225), TRUE);
+                DrawBox(60, 254, 226, 272, UiGaugeBack(), TRUE);
+                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, UiGaugeFill(), TRUE);
                 DrawBox(60, 254, 226, 272, UiInkAccent(), FALSE);
                 DrawFormatString(66, 257, GetColor(255, 255, 255), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
             }
@@ -12064,8 +12131,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(24, 434, "Ctrl+Y：やり直し", gc);
             }
 
-            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle); // 右パネル（インスペクター）
-            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle);        // 下部パネル（タイムライン）
+            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL); // 右パネル（インスペクター）
+            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle, GameCfg::UIK_PANEL);        // 下部パネル（タイムライン）
 
             // モニタープレビューウィンドウ
             DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
@@ -12089,7 +12156,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
             // 帯そのものは暗い溝にしておく。パネルがクリーム色になったので、
             // 帯まで明るくすると「どこがタイムラインか」の輪郭が消えてしまう。
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(56, 52, 48), TRUE);
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiGaugeBack(), TRUE);
             DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiInkAccent(), FALSE);
             float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
             DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
@@ -12278,7 +12345,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool pbHover = (mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2);
                 if (pbHover) SetDrawBright(255, 255, 255);
                 else         SetDrawBright(214, 209, 202);
-                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle);
+                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle, GameCfg::UIK_PANEL);
                 SetDrawBright(255, 255, 255);
                 // 「押すとどうなるか」はアイコンだけで伝わるので、PAUSE/RESUMEの文字は出さない
                 DrawUiIcon((PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2, (PAUSE_BUTTON_Y1 + PAUSE_BUTTON_Y2) / 2,
@@ -12306,7 +12373,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (!it.enabled)  SetDrawBright(150, 148, 145);
                     else if (isHover) SetDrawBright(255, 255, 255);
                     else              SetDrawBright(214, 209, 202);
-                    DrawUiWindow(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, uiWindowHandle);
+                    DrawUiWindow(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, uiWindowHandle, GameCfg::UIK_RADIAL);
                     SetDrawBright(255, 255, 255);
                     int labelColor = !it.enabled ? UiInkSub() : (it.id == 6 ? UiInkWarn() : (isHover ? accent : UiInk()));
                     int lw = GetDrawStringWidth(it.label.c_str(), (int)it.label.size());
@@ -12353,7 +12420,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // UIウィンドウ.pngの枠と一時停止アイコンを合わせた表示に差し替える。
                 const int puX1 = WINDOW_WIDTH / 2 - 110, puY1 = WINDOW_HEIGHT / 2 - 34;
                 const int puX2 = WINDOW_WIDTH / 2 + 110, puY2 = WINDOW_HEIGHT / 2 + 34;
-                DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle);
+                DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle, GameCfg::UIK_MENU);
                 DrawUiIcon(puX1 + 44, (puY1 + puY2) / 2, 36, uiPauseHandle);
                 DrawString(puX1 + 78, (puY1 + puY2) / 2 - 8, "PAUSED", UiInk());
             }

@@ -108,6 +108,7 @@ public class GameConfigPageControl : UserControl
         var tabs = new TabControl { Dock = DockStyle.Fill, Font = UiTheme.Base };
         tabs.TabPages.Add(BuildTitleTab());
         tabs.TabPages.Add(BuildStagesTab());
+        tabs.TabPages.Add(BuildUiDesignTab());
         tabs.TabPages.Add(BuildMiscTab());
 
         var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46, BackColor = UiTheme.PanelBackLight };
@@ -319,6 +320,15 @@ public class GameConfigPageControl : UserControl
         return page;
     }
 
+    // ゲーム画面のウィンドウ（枠・文字色・ゲージ色・メッセージの置き方）の見た目を編集するタブ
+    private TabPage BuildUiDesignTab()
+    {
+        var page = new TabPage("UIデザイン");
+        // 文字色（標準・うすい・強調）は theme と共有なので、変わったらタイトル画面のキャンバスも描き直す
+        page.Controls.Add(new UiDesignPanel(_cfg, _projectRoot, () => _canvas.Invalidate()));
+        return page;
+    }
+
     private TabPage BuildMiscTab()
     {
         var page = new TabPage("その他");
@@ -363,11 +373,11 @@ public class GameConfigPageControl : UserControl
         p.Controls.Add(UiTheme.CreateSeparator(new Point(10, y), 420)); y += 14;
 
         p.Controls.Add(UiTheme.CreateLabel("テーマ色", new Point(10, y), true)); y += 22;
-        AddColorPicker(p, "標準の文字", "ink", ref y);
-        AddColorPicker(p, "うすい文字", "ink_sub", ref y);
-        AddColorPicker(p, "強調の文字", "ink_accent", ref y);
         AddColorPicker(p, "背景の下地", "backdrop", ref y);
-        y += 8;
+        // 文字の色（標準・うすい・強調）は、ゲーム画面のウィンドウの文字色と共通なので「UIデザイン」タブへ移した
+        var themeNote = UiTheme.CreateLabel("文字の色は「UIデザイン」タブで変えられます。", new Point(10, y));
+        themeNote.ForeColor = Color.DimGray; themeNote.Font = UiTheme.Small;
+        p.Controls.Add(themeNote); y += 28;
 
         p.Controls.Add(UiTheme.CreateSeparator(new Point(10, y), 420)); y += 14;
 
@@ -456,9 +466,6 @@ public class GameConfigPageControl : UserControl
         _txtRetry.Text = _cfg.result.retry_label;
         _txtSelect.Text = _cfg.result.select_label;
 
-        SetColorButton("ink", _cfg.theme.ink);
-        SetColorButton("ink_sub", _cfg.theme.ink_sub);
-        SetColorButton("ink_accent", _cfg.theme.ink_accent);
         SetColorButton("backdrop", _cfg.theme.backdrop);
 
         // メニュー項目

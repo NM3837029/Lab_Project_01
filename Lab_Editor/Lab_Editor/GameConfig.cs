@@ -28,6 +28,9 @@ public class GameConfig
     public bool title_enabled { get; set; } = true;
 
     public ThemeColors theme { get; set; } = new();
+    // ゲーム画面のウィンドウ（コイン・ゲージの枠、メッセージ、ボタン、円形メニュー…）の見た目。
+    // C++側 GameConfig.h の UiStyle と対応する。「UIデザイン」タブで編集する。
+    public UiStyleConfig ui_style { get; set; } = new();
     public TitleScreenConfig title_screen { get; set; } = new();
     public StageSelectConfig stage_select { get; set; } = new();
     public List<StageEntry> stages { get; set; } = new();
@@ -99,6 +102,73 @@ public class ThemeColors
     public int[] ink_sub { get; set; } = { 112, 116, 126 };
     public int[] ink_accent { get; set; } = { 20, 84, 132 };
     public int[] backdrop { get; set; } = { 246, 240, 228 };
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+// ゲーム画面のウィンドウの見た目。既定値は従来（C++に直書きだった値）と同じ。
+// 文字色（標準・うすい・強調）は theme と共有する。
+public class UiStyleConfig
+{
+    // 9スライス枠の素材。空にすると素材を使わず、単色の枠（fallback_*）で描く。
+    public string frame_image { get; set; } = "img/UIウィンドウ.png";
+    public int src_pad { get; set; } = 16;      // 素材から切り落とす透明な余白(px)
+    public int src_slice { get; set; } = 60;    // 素材側で「枠」として扱う縁の太さ(px)
+    public int dest_slice { get; set; } = 14;   // 画面上での枠の太さ(px)
+    public int[] fallback_fill { get; set; } = { 252, 246, 236 };
+    public int[] fallback_edge { get; set; } = { 20, 84, 132 };
+
+    public int[] ink_warn { get; set; } = { 196, 52, 52 };
+    public int[] ink_ok { get; set; } = { 28, 122, 68 };
+    public int[] gauge_fill { get; set; } = { 0, 170, 225 };
+    public int[] gauge_low { get; set; } = { 255, 80, 80 };
+    public int[] gauge_back { get; set; } = { 56, 52, 48 };
+
+    public UiMessageConfig message { get; set; } = new();
+    public UiWindowsConfig windows { get; set; } = new();
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+public class UiMessageConfig
+{
+    public int margin_x { get; set; } = 20;
+    public int margin_bottom { get; set; } = 20;
+    public int height { get; set; } = 90;
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+}
+
+// 枠の種類ごとの上書き。キーは C++側の GameCfg::UiKindKey と同じ。
+public class UiWindowsConfig
+{
+    public UiWindowStyleConfig osd { get; set; } = new();      // 左上のコイン・ゲージの枠
+    public UiWindowStyleConfig message { get; set; } = new();  // メッセージウィンドウ
+    public UiWindowStyleConfig button { get; set; } = new();   // ボタン（リザルト・ポーズメニューの項目）
+    public UiWindowStyleConfig radial { get; set; } = new();   // 右クリックの円形メニューの項目
+    public UiWindowStyleConfig panel { get; set; } = new();    // 編集画面のパネル・一時停止ボタン
+    public UiWindowStyleConfig menu { get; set; } = new();     // ポーズメニュー・操作一覧の大きな枠
+    public UiWindowStyleConfig cell { get; set; } = new();     // ステージセレクトのマス
+
+    [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
+
+    public static readonly string[] Keys = { "osd", "message", "button", "radial", "panel", "menu", "cell" };
+    public static readonly string[] Labels =
+    {
+        "コイン・ゲージの枠", "メッセージ", "ボタン", "円形メニューの項目", "編集パネル", "ポーズメニューの枠", "ステージセレクトのマス",
+    };
+    public UiWindowStyleConfig Get(int i) => i switch
+    {
+        0 => osd, 1 => message, 2 => button, 3 => radial, 4 => panel, 5 => menu, _ => cell,
+    };
+}
+
+public class UiWindowStyleConfig
+{
+    public string image { get; set; } = "";               // 空なら全体の frame_image
+    public int[] tint { get; set; } = { 255, 255, 255 };  // 色合わせ（乗算。白＝素材そのまま）
+    public int opacity { get; set; } = 100;               // 不透明度(0-100)
+    public int dest_slice { get; set; } = -1;             // 画面上の枠の太さ。負なら全体の dest_slice
 
     [JsonExtensionData] public IDictionary<string, JToken> _extra { get; set; } = new Dictionary<string, JToken>();
 }
