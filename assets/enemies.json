@@ -1112,8 +1112,8 @@
     "parts": [
       {
         "id": "pupils",
-        "sprite": "img/ドッスン黒目.png",
-        "offsetX": 0.0,
+        "sprite": "img/93_20261004212953.png",
+        "offsetX": -9.0,
         "offsetY": 0.0,
         "width": 48,
         "height": 48,
@@ -1176,6 +1176,23 @@
             ]
           }
         ]
+      },
+      {
+        "id": "part1",
+        "sprite": "img/93_20261004213149.png",
+        "offsetX": -18.0,
+        "offsetY": -6.0,
+        "width": 0,
+        "height": 0,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 32,
+        "hitboxHeight": 32,
+        "scale": 0.1,
+        "hp": 0,
+        "zOrder": 0,
+        "deadly": false,
+        "script": []
       }
     ]
   },
