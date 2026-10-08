@@ -5524,9 +5524,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool kLeft   = CheckHitKey(KEY_INPUT_LEFT) != 0  || CheckHitKey(KEY_INPUT_A) != 0;
         bool kRight  = CheckHitKey(KEY_INPUT_RIGHT) != 0 || CheckHitKey(KEY_INPUT_D) != 0;
         bool kDecide = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
-        // ESCキーはメインループの継続条件でゲーム終了に割り当てられているため、
-        // 「戻る」には使えない。BackSpace と X を使う。
-        bool kCancel = CheckHitKey(KEY_INPUT_BACK) != 0 || CheckHitKey(KEY_INPUT_X) != 0;
+        // 「戻る」は BackSpace と X。ステージセレクトでは Esc も「戻る」として受ける
+        // （タイトルの Esc は、下で「ゲームをおわる」として扱う）。
+        bool kEsc = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
+        bool kCancel = CheckHitKey(KEY_INPUT_BACK) != 0 || CheckHitKey(KEY_INPUT_X) != 0
+                    || (kEsc && currentScene == STAGE_SELECT);
+        // タイトルで Esc を押したときだけ終了する。押しっぱなしで入ってきた Esc は無視する
+        // （プレイ中のメニューの「セレクトへ」などで Esc を押したまま戻ってきても、終了しないように）。
+        static bool mPrevEsc = true;
+        if (kEsc && !mPrevEsc && currentScene == TITLE) metaWantExit = true;
+        mPrevEsc = kEsc;
 
         bool upEdge = kUp && !mPrevUp, downEdge = kDown && !mPrevDown;
         bool leftEdge = kLeft && !mPrevLeft, rightEdge = kRight && !mPrevRight;
@@ -5773,7 +5780,197 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         SoundManager::Get().StopBgm();
     }
 
-    while (ProcessMessage() == 0 && CheckHitKey(KEY_INPUT_ESCAPE) == 0)
+    // ===== システムメニュー（Esc）と操作一覧（F1）=====
+    //
+    // これまで Esc はメインループの継続条件に直結しており、押した瞬間に確認なしでゲームが終わっていた
+    // （一般のゲームでは「Esc＝ポーズ」と思って押す人が多く、展示や配布で事故になりやすい）。
+    // Esc はこのメニューを開く操作に変え、終了はメニューの中の「ゲームをおわる」（2回押して確定）へ移した。
+    //
+    // 作りは「入れ子のループ」。開いた瞬間の画面をコピーして固定表示し、その上にメニューを描く。
+    //   ・ゲーム本体の更新・入力処理には一切触れないので、メニュー中は世界が完全に止まり、
+    //     メニューの操作が編集操作（クリック選択・ドラッグ）として拾われる事故も起きない
+    //   ・閉じるときにマウスのボタンが離れるまで待つ（選んだクリックがゲーム側の「新しいクリック」に見えないよう）
+    // メインループ末尾の ScreenFlip の直前から呼ぶ（そこなら画面が描き終わっている）。
+    bool sysQuit = false; // メニューから「ゲームをおわる」を確定したとき true（メインループが見て抜ける）
+    auto RunSystemMenu = [&](bool helpOnly) {
+        int snap = MakeGraph(WINDOW_WIDTH, WINDOW_HEIGHT);
+        GetDrawScreenGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, snap);
+
+        // メニューの項目（id: 0=つづける 1=もういちど 2=セレクトへ 3=操作一覧 4=おわる）
+        struct SysItem { const char* label; int id; };
+        std::vector<SysItem> items;
+        items.push_back({ "つづける", 0 });
+        items.push_back({ "もういちど", 1 });
+        // タイトル画面を使わない設定のときは、セレクトへ戻れても意味が無いので出さない（リザルト画面と同じ方針）
+        if (gameConfig.titleEnabled && !gameConfig.stages.empty()) items.push_back({ "ステージセレクトへ", 2 });
+        items.push_back({ "操作一覧", 3 });
+        items.push_back({ "ゲームをおわる", 4 });
+
+        int page = helpOnly ? 1 : 0;   // 0=メニュー 1=操作一覧
+        int cur = 0;                   // キーボードで選んでいる項目
+        int lastHover = -1;            // 前フレームでマウスが指していた項目（動いたときだけ選択を追従させる）
+        bool confirmQuit = false;      // 「ゲームをおわる」を1回押した状態（もう1回で確定）
+        // 押しっぱなしで開いた直後に反応しないよう、開いた時点の状態を「前フレーム」として始める
+        bool pClick = true, pUp = true, pDown = true, pOk = true, pEsc = true, pF1 = true;
+        bool done = false;
+
+        // 画面の中心（編集画面ではゲーム画面の中心）。ゲーム画面の外の編集パネルは暗く沈める
+        const int ox = isEditMode ? monitorX : 0, oy = isEditMode ? monitorY : 0;
+        const int cx = ox + SCREEN_WIDTH / 2, cy = oy + SCREEN_HEIGHT / 2;
+        const int accent = GetColor(255, 200, 80), ink = GetColor(235, 235, 235), sub = GetColor(160, 160, 160);
+
+        // 操作一覧の中身。左右2列で並べる
+        struct HelpRow { const char* key; const char* what; };
+        const HelpRow leftCol[] = {
+            { "あそぶ", "" },
+            { "A / D   ← / →", "左右に動く" },
+            { "W   ↑", "ジャンプ" },
+            { "Shift", "ダッシュ（使える場合）" },
+            { "Enter / 画面クリック", "弾を撃つ" },
+            { "", "" },
+            { "時間を操る（キー）", "" },
+            { "Space / 中ボタン", "時間停止（コストを消費）" },
+            { "停止中の ← →", "1コマずつ進める／戻す" },
+            { "R", "巻き戻し" },
+            { "F", "早送り" },
+            { "T / Z / X / C", "色・ズーム・暗転・明転" },
+            { "M", "効果音のミュート" },
+            { "Esc / F1", "メニュー / この一覧" },
+        };
+        const HelpRow rightCol[] = {
+            { "物を操る（マウス）", "" },
+            { "クリック", "選ぶ（物の上）" },
+            { "ドラッグ", "動かす" },
+            { "範囲ドラッグ", "まとめて選ぶ" },
+            { "Ctrl＋クリック", "選択に追加・解除" },
+            { "ホイール", "拡大・縮小" },
+            { "Ctrl＋ホイール", "回転（15度ごと）" },
+            { "つまみをドラッグ", "拡大縮小・回転" },
+            { "ダブルクリック", "向きを反転" },
+            { "右クリック", "円形メニュー" },
+            { "Ctrl＋Z / Ctrl＋Y", "取り消し / やり直し" },
+            { "G", "地面を置く（使えるとき）" },
+            { "", "" },
+            { "ヒント", "矢印と×は結果の予告" },
+        };
+
+        while (!done && ProcessMessage() == 0) {
+            int mx, my; GetMousePoint(&mx, &my);
+            bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+            bool kUp = CheckHitKey(KEY_INPUT_UP) != 0 || CheckHitKey(KEY_INPUT_W) != 0;
+            bool kDown = CheckHitKey(KEY_INPUT_DOWN) != 0 || CheckHitKey(KEY_INPUT_S) != 0;
+            bool kOk = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
+            bool kEsc = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
+            bool kF1 = CheckHitKey(KEY_INPUT_F1) != 0;
+            bool clickEdge = click && !pClick, upEdge = kUp && !pUp, downEdge = kDown && !pDown;
+            bool okEdge = kOk && !pOk, escEdge = kEsc && !pEsc, f1Edge = kF1 && !pF1;
+            pClick = click; pUp = kUp; pDown = kDown; pOk = kOk; pEsc = kEsc; pF1 = kF1;
+
+            // 十字キー全押しの脱出口は、ここでも生かしておく（メニューが固まったときの最後の手段）
+            if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
+                && CheckHitKey(KEY_INPUT_LEFT) && CheckHitKey(KEY_INPUT_RIGHT)) { sysQuit = true; done = true; }
+
+            SetDrawScreen(DX_SCREEN_BACK);
+            ClearDrawScreen();
+            DrawGraph(0, 0, snap, FALSE);
+            // 全体を暗くして、メニューへ目が行くようにする
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 150);
+            DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(0, 0, 0), TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+            if (page == 1) {
+                // ---- 操作一覧 ----
+                if (escEdge || f1Edge || clickEdge || okEdge) {
+                    if (helpOnly) done = true; else page = 0;
+                }
+                // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
+                const int pw = 900, ph = 420;
+                int px1 = cx - pw / 2, py1 = cy - ph / 2;
+                if (px1 < 8) px1 = 8;
+                DrawBox(px1, py1, px1 + pw, py1 + ph, GetColor(30, 26, 24), TRUE);
+                DrawBox(px1, py1, px1 + pw, py1 + ph, accent, FALSE);
+                DrawString(px1 + 18, py1 + 12, "操作一覧", accent);
+                auto drawCol = [&](const HelpRow* rows, int n, int colX) {
+                    for (int i = 0; i < n; i++) {
+                        int ry = py1 + 44 + i * 24;
+                        if (rows[i].what[0] == '\0' && rows[i].key[0] == '\0') continue;
+                        if (rows[i].what[0] == '\0') { DrawString(colX, ry, rows[i].key, accent); continue; } // 見出し
+                        DrawString(colX, ry, rows[i].key, ink);
+                        DrawString(colX + 200, ry, rows[i].what, sub);
+                    }
+                };
+                drawCol(leftCol, (int)(sizeof(leftCol) / sizeof(leftCol[0])), px1 + 18);
+                drawCol(rightCol, (int)(sizeof(rightCol) / sizeof(rightCol[0])), px1 + 18 + pw / 2);
+                DrawString(px1 + 18, py1 + ph - 28, helpOnly ? "[F1] / [Esc] / クリックで閉じる" : "[Esc] / クリックでもどる", sub);
+            } else {
+                // ---- メニュー ----
+                const int n = (int)items.size();
+                const int bw = 260, bh = 38, gap = 8;
+                const int pw = bw + 60, ph = 60 + n * (bh + gap) + 20;
+                int px1 = cx - pw / 2, py1 = cy - ph / 2;
+                DrawBox(px1, py1, px1 + pw, py1 + ph, GetColor(30, 26, 24), TRUE);
+                DrawBox(px1, py1, px1 + pw, py1 + ph, accent, FALSE);
+                DrawString(px1 + 18, py1 + 14, "ポーズ", accent);
+                int hover = -1;
+                for (int i = 0; i < n; i++) {
+                    int bx = cx - bw / 2, by = py1 + 44 + i * (bh + gap);
+                    if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) hover = i;
+                }
+                // マウスが指した項目へキーボードの選択も追従させる（どちらで操作しても同じ見た目になる）
+                if (hover >= 0 && hover != lastHover) { if (cur != hover) confirmQuit = false; cur = hover; }
+                lastHover = hover;
+                if (upEdge)   { cur = (cur + n - 1) % n; confirmQuit = false; }
+                if (downEdge) { cur = (cur + 1) % n;     confirmQuit = false; }
+                if (escEdge || f1Edge) done = true; // Esc でもう一度押すと閉じる（つづける と同じ）
+
+                int act = -1;
+                if (okEdge) act = items[cur].id;
+                if (clickEdge && hover >= 0) { cur = hover; act = items[hover].id; }
+
+                for (int i = 0; i < n; i++) {
+                    int bx = cx - bw / 2, by = py1 + 44 + i * (bh + gap);
+                    bool sel = (i == cur);
+                    bool quitRow = (items[i].id == 4);
+                    const char* label = items[i].label;
+                    if (quitRow && confirmQuit) label = "ほんとうに終わる？ もう一度";
+                    int fillCol = sel ? GetColor(70, 58, 36) : GetColor(46, 42, 38);
+                    int edgeCol = (quitRow && confirmQuit) ? GetColor(255, 130, 110) : (sel ? accent : GetColor(110, 104, 96));
+                    DrawBox(bx, by, bx + bw, by + bh, fillCol, TRUE);
+                    DrawBox(bx, by, bx + bw, by + bh, edgeCol, FALSE);
+                    int lw = GetDrawStringWidth(label, (int)strlen(label));
+                    DrawString(bx + bw / 2 - lw / 2, by + bh / 2 - 8, label, sel ? accent : ink);
+                }
+                DrawString(px1 + 18, py1 + ph - 24, "[↑↓] えらぶ  [Enter] きめる  [Esc] とじる", sub);
+
+                if (act == 0) done = true;
+                else if (act == 1) { ResetStage(); done = true; }
+                else if (act == 2) { currentScene = STAGE_SELECT; SoundManager::Get().StopBgm(); done = true; }
+                else if (act == 3) { page = 1; }
+                else if (act == 4) {
+                    // 終了は取り返しがつかないので、2回押して確定する（別の項目へ動かすと取り消し）
+                    if (confirmQuit) { sysQuit = true; done = true; }
+                    else { confirmQuit = true; SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                }
+            }
+
+            // ゲーム内カーソル（実物のカーソルを隠している設定のときだけ自前で描く）
+            {
+                bool useOwnCursor = !isDedicatedEditorMode && cursorHandle >= 0;
+                SetMouseDispFlag(useOwnCursor ? FALSE : TRUE);
+                if (useOwnCursor) DrawExtendGraph(mx - 12, my - 6, mx - 12 + 40, my - 6 + 40, cursorHandle, TRUE);
+            }
+            SoundManager::Get().Update();
+            ScreenFlip();
+        }
+        DeleteGraph(snap);
+        // 選んだクリックやキーが、閉じた直後のゲーム側で「新しい入力」に見えないよう、離れるまで待つ
+        while (ProcessMessage() == 0 && ((GetMouseInput() & (MOUSE_INPUT_LEFT | MOUSE_INPUT_RIGHT | MOUSE_INPUT_MIDDLE)) != 0
+               || CheckHitKey(KEY_INPUT_ESCAPE) || CheckHitKey(KEY_INPUT_RETURN) || CheckHitKey(KEY_INPUT_F1))) {
+            WaitTimer(10);
+        }
+    };
+
+    while (ProcessMessage() == 0 && !sysQuit)
     {
         // Feature: タイトル画面・ステージセレクト画面 —
         // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
@@ -6857,7 +7054,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // edge-trigger方式にする。天井に頭をぶつけて即座にisJumpingがfalseへ戻っても、キーを押しっぱなしのままでは
         // 再発火しないため、SE連続再生や不自然な連続ジャンプを防げる。
         static bool lastJumpKey = false;
-        bool currentJumpKey = CheckHitKey(KEY_INPUT_W) != 0;
+        // 矢印キーでも動ける。時間停止中の ← → は「コマ送り」に使っているので、
+        // 動かすのは停止していないときだけ（コマ送りのたびにプレイヤーも歩いてしまわないように）。
+        const bool arrowMoveOk = !isPaused;
+        bool currentJumpKey = CheckHitKey(KEY_INPUT_W) != 0 || (arrowMoveOk && CheckHitKey(KEY_INPUT_UP) != 0);
         if (currentScene == PLAY && canPlayerAct) {
             float baseSpd = editorPlayerCaps.baseSpeed;
             float baseJmp = (float)editorPlayerCaps.baseJumpPower;
@@ -6866,8 +7066,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             bool wantDash = (isShift && editorPlayerCaps.canDash);
             float speed = wantDash ? baseSpd * 2.0f : baseSpd;
             player.vx = 0;
-            if (CheckHitKey(KEY_INPUT_A)) { player.vx = -speed; player.direction = 1; }
-            if (CheckHitKey(KEY_INPUT_D)) { player.vx = speed; player.direction = 0; }
+            if (CheckHitKey(KEY_INPUT_A) || (arrowMoveOk && CheckHitKey(KEY_INPUT_LEFT)))  { player.vx = -speed; player.direction = 1; }
+            if (CheckHitKey(KEY_INPUT_D) || (arrowMoveOk && CheckHitKey(KEY_INPUT_RIGHT))) { player.vx = speed; player.direction = 0; }
             // ダッシュ開始音。押しっぱなしで鳴り続けないよう、走り出した瞬間だけ鳴らす
             // （ジャンプと同じエッジ検出の考え方）。
             static bool lastDashing = false;
@@ -11625,7 +11825,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]/[LEFT]: Step 1 Frame (Lift Up/Down)  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
             DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, Drag the Handles to Resize, [R]+Drag to Rotate, RightClick for Menu", GetColor(200, 200, 200));
         } else {
-            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]:Move  [W]:Jump  [SHIFT]:Dash  [ENTER]/Click Screen:Shot", GetColor(50, 255, 50));
+            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]/[<][>]:Move  [W]/[^]:Jump  [SHIFT]:Dash  [ENTER]/Click:Shot  [F1]:Help  [ESC]:Menu", GetColor(50, 255, 50));
             DrawString(10, SCREEN_HEIGHT - 22, "EDIT: [R]:Rewind  [SPACE]:Pause  [F]:FastFwd  [T]:Color  [Z]:Zoom  [X]:Dark  [C]:Bright  [M]:Mute", GetColor(120, 220, 255));
         }
 
@@ -12531,6 +12731,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (iof.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
             ImGui::UpdatePlatformWindows();
             ImGui::RenderPlatformWindowsDefault();
+        }
+
+        // Esc でシステムメニュー、F1 で操作一覧を開く。
+        // 画面を描き終えたこの位置で開くので、開いた瞬間の画面をそのまま固定表示できる。
+        // 押しっぱなしで繰り返し開かないよう、押した瞬間（エッジ）だけを見る。
+        {
+            static bool lastEscKey = true, lastF1Key = true;
+            bool escNow = CheckHitKey(KEY_INPUT_ESCAPE) != 0, f1Now = CheckHitKey(KEY_INPUT_F1) != 0;
+            bool openMenu = escNow && !lastEscKey, openHelp = f1Now && !lastF1Key;
+            lastEscKey = escNow; lastF1Key = f1Now;
+            if (openMenu || openHelp) {
+                RunSystemMenu(openHelp && !openMenu);
+                lastEscKey = true; lastF1Key = true; // 閉じるときのキーでもう一度開かない
+            }
         }
 
         ScreenFlip();
