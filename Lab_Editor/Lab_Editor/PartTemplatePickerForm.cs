@@ -185,9 +185,9 @@ public class PartTemplatePickerForm : Form
 
         Shown += (s, e) =>
         {
-            rootSplit.Panel1MinSize = 200;
-            rootSplit.SplitterDistance = 270;
-            rightSplit.SplitterDistance = Math.Max(380, (int)(rightSplit.Width * 0.48));
+            // 例外を出さずに設定する（詳しくは SplitLayout の説明）。足りないときは既定の位置のまま
+            SplitLayout.Apply(rootSplit, 200, 300, 270);
+            SplitLayout.Apply(rightSplit, 200, 200, Math.Max(380, (int)(rightSplit.Width * 0.48)));
         };
     }
 

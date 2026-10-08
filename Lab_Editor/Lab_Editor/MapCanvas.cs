@@ -257,9 +257,17 @@ public class MapCanvas : Panel
         {
             var def = Assets?.Enemies.FirstOrDefault(d => d.id == en.Id);
             string icon = AssetIcons.ForEnemy(def?.type_enum ?? -1);
-            DrawPlacedObject(g, en.X, en.Y, ObjectWorldSize(def?.width ?? 0, def?.height ?? 0, def?.scale ?? 1f, en.Scale),
+            var bodySize = ObjectWorldSize(def?.width ?? 0, def?.height ?? 0, def?.scale ?? 1f, en.Scale);
+            // パーツ（黒目・翼・砲身…）も、配置したときの大きさ・角度のとおりに描く。
+            // 以前はパーツを描いていなかったため、テンプレートで作った敵を置いてサイズや角度を変えても、
+            // ステージ編集の画面では本体しか見えず、パーツが一緒に変わるのか確かめられなかった。
+            // 動き（スクリプト）は再現しないので、パーツの「置いてある位置」の静止画になる。
+            float partScale = (def?.scale > 0 ? def.scale : 1f) * (en.Scale > 0 ? en.Scale : 1f);
+            DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: true);
+            DrawPlacedObject(g, en.X, en.Y, bodySize,
                              def?.sprite, en.Angle, icon,
                              SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50));
+            DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: false);
         }
 
         // 9. ギミック — ギミック定義は width/height を持たず、当たり判定サイズが表示サイズを兼ねている
@@ -479,6 +487,40 @@ public class MapCanvas : Panel
         }
         _assetImages[spritePath] = img; // 読めなかったことも覚えて再探索を避ける
         return img;
+    }
+
+    // 配置済みの敵のパーツを描く。ゲーム本体と同じく、パーツは本体の左上を原点とした位置（offset）を
+    // 本体の倍率ぶん拡大し、本体の中心を軸に本体と一緒に回す。zOrder が負のパーツは本体の奥（behind=true）、
+    // 0以上は手前（behind=false）に描く。
+    private void DrawPlacedParts(Graphics g, float worldX, float worldY, SizeF bodySize, float angleRad,
+                                 List<PartDef>? parts, float scale, bool behind)
+    {
+        if (parts == null || parts.Count == 0) return;
+        var body = ToScreenRect(worldX, worldY, bodySize.Width, bodySize.Height);
+        if (body.Right < -400 || body.Left > Width + 400 || body.Bottom < -400 || body.Top > Height + 400) return;
+
+        var saved = g.Save();
+        if (angleRad != 0f)
+        {
+            float cx = body.X + body.Width / 2f, cy = body.Y + body.Height / 2f;
+            g.TranslateTransform(cx, cy);
+            g.RotateTransform(angleRad * 180f / (float)Math.PI);
+            g.TranslateTransform(-cx, -cy);
+        }
+        foreach (var p in parts)
+        {
+            if ((p.zOrder < 0) != behind) continue;
+            var img = GetAssetImage(p.sprite);
+            if (img == null) continue;
+            // 幅・高さが0のパーツは、画像の原寸に倍率をかけた大きさで描かれる（ゲーム側と同じ）
+            float pw = (p.width > 0 ? p.width : img.Width) * p.scale * scale;
+            float ph = (p.height > 0 ? p.height : img.Height) * p.scale * scale;
+            var r = ToScreenRect(worldX + p.offsetX * scale, worldY + p.offsetY * scale, pw, ph);
+            if (r.Width < 2) r.Width = 2;
+            if (r.Height < 2) r.Height = 2;
+            g.DrawImage(img, r);
+        }
+        g.Restore(saved);
     }
 
     // 配置済みオブジェクトを1つ描く。

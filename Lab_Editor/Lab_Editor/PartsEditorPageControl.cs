@@ -170,13 +170,24 @@ public partial class PartsEditorPageControl : UserControl
         // SplitterDistanceはコントロールがDockされ実サイズが確定してから設定する（先に設定すると例外/無視されることがある）。
         // UserControlにはShownがないため、同じ目的で「親に配置されて実サイズが確定した後」に一度だけ
         // 発火するLoadイベントを使う。
-        Load += (s, e) =>
+        //
+        // 分割位置の設定は SplitLayout.Apply 経由で行う。以前は直接代入していたため、シェルへ組み込まれる
+        // 瞬間にウィンドウ（親）が小さいと「SplitterDistance は Panel1MinSize と Panel2MinSize の間でなければ
+        // なりません」の例外になり、パーツ編集を開けなかった。幅が足りないときは設定を見送り、
+        // 大きさが変わったとき（SizeChanged）に、設定できるまで再挑戦する。
+        bool splitsApplied = false;
+        void ApplySplits()
         {
             // 左(一覧)は狭め、右(詳細)は読みやすい幅、残りの広いところを合成プレビューに使う。
-            rootSplit.Panel1MinSize = 180;
-            rootSplit.SplitterDistance = Math.Max(210, (int)(ClientSize.Width * 0.17));
-            rightSplit.Panel2MinSize = 260;
-            rightSplit.SplitterDistance = Math.Max(300, rightSplit.Width - 340);
+            // 左右の最小幅は、プレビューが潰れない程度（一覧180・詳細260・プレビュー200）にとどめる。
+            bool a = SplitLayout.Apply(rootSplit, 180, 200 + 260 + 6, Math.Max(210, (int)(ClientSize.Width * 0.17)));
+            bool b = SplitLayout.Apply(rightSplit, 200, 260, Math.Max(300, rightSplit.Width - 340));
+            if (a && b) splitsApplied = true;
+        }
+        SizeChanged += (s, e) => { if (!splitsApplied && IsHandleCreated) ApplySplits(); };
+        Load += (s, e) =>
+        {
+            ApplySplits();
             // 最初の1回だけ、全パーツが収まる倍率・位置にする
             FitView();
             // 詳細パネルは最初の選択を反映しておく（コンストラクタの時点ではグリッドの選択イベントが届かないことがある）

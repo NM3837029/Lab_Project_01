@@ -117,3 +117,34 @@ public static class UiTheme
         form.MinimumSize = minSize;
     }
 }
+
+// SplitContainer の分割位置と最小幅を、例外を出さずに設定するための共通処理。
+//
+// 【なぜ必要か】
+// SplitterDistance / Panel1MinSize / Panel2MinSize は、コントロールが十分な大きさを持つ前に
+// 設定すると「SplitterDistance は Panel1MinSize と Panel2MinSize の間でなければなりません」という
+// InvalidOperationException になる。ページがシェルへ組み込まれる直前（Load の時点）は、
+// 親がまだ小さい／ウィンドウが小さいことがあり、パーツ編集を開いた瞬間にエラーになっていた。
+public static class SplitLayout
+{
+    // 戻り値: 設定できたか。幅（高さ）が足りないときは何もせず false を返すので、
+    //         呼び出し側は大きさが変わったときにもう一度呼べばよい。
+    public static bool Apply(SplitContainer sc, int panel1Min, int panel2Min, int distance)
+    {
+        int span = (sc.Orientation == Orientation.Vertical ? sc.Width : sc.Height) - sc.SplitterWidth;
+        if (span < panel1Min + panel2Min + 20) return false;
+        try
+        {
+            // 先に分割位置を「確実に収まる範囲」へ置き、そのあとで最小幅を上げる。
+            // 逆順だと、最小幅の設定が分割位置を範囲外へ押し出して例外になる。
+            int d = Math.Clamp(distance, panel1Min, span - panel2Min);
+            sc.SplitterDistance = Math.Clamp(d, 25, Math.Max(25, span - 25));
+            sc.Panel1MinSize = panel1Min;
+            sc.Panel2MinSize = panel2Min;
+            sc.SplitterDistance = d;
+            return true;
+        }
+        catch (InvalidOperationException) { return false; }
+        catch (ArgumentException) { return false; }
+    }
+}
