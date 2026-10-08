@@ -2178,11 +2178,26 @@ EditReaction GetGimmickEditReaction(const Gimmick& g) {
 // 敵の姿勢。敵は倍率を scale 1つでしか持たないので横縦とも同じ値になる。
 // 描画側(DrawPixel.cpp の敵本体描画)が hitboxWidth * scale を中心計算に使っているので、
 // ピボットの逆算にも同じ値を渡してズレないようにする。
+//
+// 【配置時の大きさ・角度も、パーツに効かせる】
+// EditReaction は「配置時からの差分」（scale / editBaseScale、angle - editBaseAngle）なので、
+// ステージJSONで配置ごとに指定した大きさ（scale）や角度（angle）は、差分ではなく「基準」に取り込まれる。
+// 本体はその大きさ・角度で描かれるのに、パーツは差分だけを見ていたため、
+//   ・scale 1.4 で置いた敵は、本体だけ大きくなりパーツ（黒目・翼・砲身…）が元の大きさ・位置のまま取り残される
+//   ・angle を付けて置いた敵は、本体だけ傾いてパーツは傾かない
+// という食い違いが起きていた（テンプレートで作った敵を配置時にサイズ・角度を変えて置くと目立つ）。
+// パーツには「絶対値」（本体の今の scale と angle）を渡す。パーツの座標・大きさは本体の論理サイズ
+// （hitboxWidth/Height）に対する値として作るので、基準は「scale 1・angle 0」。
+//   ・scale 1・angle 0 で置いた未編集の敵は、従来と完全に同じ結果になる（恒等）
+//   ・編集差分 r.scaleRatio に配置時の倍率 editBaseScale を掛け戻すので、通常の敵では e.scale そのものになる。
+//     ENEMY_SHRINKER の復活後だけは差分の基準が縮小率ぶん補正されているため、パーツは従来どおり縮まない
 ParentPose MakeEnemyPose(const Enemy& e, const EnemyDef* edef) {
     EditReaction r = GetEnemyEditReaction(e, edef);
+    float placedScale = (e.editBaseScale > 0.01f) ? e.editBaseScale : 1.0f;
+    float partScale = r.scaleRatio * placedScale;
     return MakeParentPose(e.x, e.y,
                           (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale,
-                          r.scaleRatio, r.heightRatio, r.tilt);
+                          partScale, partScale, r.tilt + e.editBaseAngle);
 }
 
 // ギミックの姿勢。横幅と縦幅を独立に編集できるので sx != sy になりうる。
