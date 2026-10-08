@@ -3760,6 +3760,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // ダブルクリック判定用。直前にクリックした編集対象（種別と添字）と、その時刻(ms)。
     int lastClickKind = -1, lastClickIdx = -1, lastClickMs = 0;
 
+    // ===== 編集操作のフィードバック表示 =====
+    // 「やったのに何が起きたか分からない」「できなかったのに理由が分からない」をなくすための表示用の状態。
+    //   ・トースト … 取り消し／やり直し／拒否の結果を、ゲーム画面の下寄りに短く出す
+    //   ・コスト増減 … 編集コストが一気に動いたとき（操作の消費・取り消しの返却・アイテム回復）に、
+    //                  ゲージの横へ「-8」「+8」を浮かべる
+    // どちらも見た目だけで、ゲームの進行には一切関わらない（ResetStage でも消さなくてよい）。
+    std::string editToastText;        // 表示中の文言（空なら何も出さない）
+    int   editToastKind = 0;          // 0=情報（白）／1=成功（緑）／2=拒否（赤）
+    float editToastTimer = 0.0f;      // 残りフレーム数。0になったら消える
+    float editCostSeen = -1.0f;       // 前フレームの editCost。負なら「基準を取り直す」（ステージ開始直後など）
+    float costFloatValue = 0.0f;      // 浮かべる増減量（負=消費、正=回復）
+    float costFloatTimer = 0.0f;      // 残りフレーム数
+
     // Feature 5: イベントアクション実行用の実行時ステート。ShowMessage / MoveCamera / ItemCollected条件で使用。
     bool isShowingMessage = false;
     std::string currentMessageText = "";
@@ -4027,9 +4040,53 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         wheelUndoBefore.clear();
     };
 
+    // 画面に出すトースト（短いメッセージ）を設定する。kind … 0=情報／1=成功／2=拒否
+    auto ShowEditToast = [&](const std::string& text, int kind) {
+        editToastText = text;
+        editToastKind = kind;
+        editToastTimer = 100.0f;
+    };
+    // コストが足りなくて操作できなかったとき。拒否音と、必要量・残量をまとめて出す。
+    // 以前は拒否音だけで、「なぜ通らないのか」が分からなかった。
+    auto EditDeniedCost = [&](float need) {
+        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        char b[96];
+        sprintf_s(b, sizeof(b), "コストが足りません（必要 %.0f／残り %.0f）", need, editCost);
+        ShowEditToast(b, 2);
+    };
+    // コスト以外の理由で操作できなかったとき（対象がロックされている、取り消す物が無い、など）
+    auto EditDeniedWhy = [&](const std::string& why) {
+        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        ShowEditToast(why, 2);
+    };
+    // 継続系の操作（時間停止・早送り・画面エフェクト）が使えなかったとき。
+    // 「このステージで封印されている」のか「コストが尽きた」のかを言い分ける（対処が全く違うため）。
+    auto EditDeniedToggle = [&](bool opEnabled, const char* what) {
+        if (!opEnabled) EditDeniedWhy(std::string("このステージでは") + what + "は使えません");
+        else            EditDeniedWhy("編集コストが残っていません");
+    };
+    // 取り消し／やり直しした項目の名前を並べる（「移動・大きさ」のように）
+    auto DescribeEditFields = [&](const EditUndoEntry& en) -> std::string {
+        unsigned all = 0;
+        for (unsigned f : en.fields) all |= f;
+        std::string s;
+        auto add = [&](unsigned bit, const char* name) {
+            if (all & bit) { if (!s.empty()) s += "・"; s += name; }
+        };
+        add(EF_POS, "移動");
+        add(EF_SCALE | EF_SIZE, "大きさ");
+        add(EF_ANGLE, "回転");
+        add(EF_SPEED, "速度");
+        add(EF_DIR, "反転");
+        add(EF_PAUSE, "一時停止");
+        add(EF_REWIND, "巻き戻し");
+        if (s.empty()) s = "編集";
+        return s;
+    };
+
     auto EditUndo = [&]() -> bool {
         FlushWheelUndo();
-        if (undoStack.empty()) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (undoStack.empty()) { EditDeniedWhy("取り消せる操作がありません"); return false; }
         EditUndoEntry en = undoStack.back();
         undoStack.pop_back();
         ApplySnaps(en.before, en.fields);
@@ -4038,19 +4095,31 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
         redoStack.push_back(en);
         SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        {
+            char b[96];
+            if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "取り消しました：%s（コスト +%.0f）", DescribeEditFields(en).c_str(), en.cost);
+            else                sprintf_s(b, sizeof(b), "取り消しました：%s", DescribeEditFields(en).c_str());
+            ShowEditToast(b, 1);
+        }
         return true;
     };
     auto EditRedo = [&]() -> bool {
-        if (redoStack.empty()) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (redoStack.empty()) { EditDeniedWhy("やり直せる操作がありません"); return false; }
         const EditUndoEntry& top = redoStack.back();
         // やり直しはもう一度その操作をするのと同じなので、コストが足りなければできない
-        if (editCost < top.cost) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (editCost < top.cost) { EditDeniedCost(top.cost); return false; }
         EditUndoEntry en = top;
         redoStack.pop_back();
         editCost -= en.cost;
         ApplySnaps(en.after, en.fields);
         undoStack.push_back(en);
         SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        {
+            char b[96];
+            if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "やり直しました：%s（コスト -%.0f）", DescribeEditFields(en).c_str(), en.cost);
+            else                sprintf_s(b, sizeof(b), "やり直しました：%s", DescribeEditFields(en).c_str());
+            ShowEditToast(b, 1);
+        }
         return true;
     };
 
@@ -4268,7 +4337,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
     auto EditTogglePause = [&]() -> bool {
         if (targetPaused == nullptr) return false;
-        if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
@@ -4281,7 +4350,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     };
     auto EditToggleRewind = [&]() -> bool {
         if (targetRewind == nullptr) return false;
-        if (editCost < currentEditCost.flatMenuToggle) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
@@ -4299,7 +4368,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool any = !selectedPlayers.empty();
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
-        if (!any || editCost < currentEditCost.flatSpeedChange) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (!any) { EditDeniedWhy("この相手の速度は変えられません"); return false; }
+        if (editCost < currentEditCost.flatSpeedChange) { EditDeniedCost(currentEditCost.flatSpeedChange); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatSpeedChange;
@@ -4325,7 +4395,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         bool any = !selectedPlayers.empty();
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
-        if (!any || editCost < currentEditCost.flatDirectionFlip) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (!any) { EditDeniedWhy("この相手は反転できません"); return false; }
+        if (editCost < currentEditCost.flatDirectionFlip) { EditDeniedCost(currentEditCost.flatDirectionFlip); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatDirectionFlip;
@@ -4352,7 +4423,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // リアクションの解除手段になる。
     auto EditResetAll = [&]() -> bool {
         if (selectedType == SELECT_NONE) return false;
-        if (editCost < currentEditCost.flatResetAll) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return false; }
+        if (editCost < currentEditCost.flatResetAll) { EditDeniedCost(currentEditCost.flatResetAll); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatResetAll;
@@ -4456,7 +4527,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 targetGimmick = nullptr;
                 SoundManager::Get().PlaySe(gameConfig.editSe.reset);
             } else {
-                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                EditDeniedCost(currentEditCost.flatMenuToggle);
             }
             break;
         }
@@ -4468,7 +4539,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         std::vector<RadialItem> items;
         BuildRadialItems(items);
         if (idx < 0 || idx >= (int)items.size()) return;
-        if (!items[idx].enabled) { SoundManager::Get().PlaySe(gameConfig.editSe.denied); return; }
+        if (!items[idx].enabled) {
+            // 灰色の項目を選んだとき。コスト不足か、対象がロックされているかで言い分けたいが、
+            // 項目側は有効/無効しか持たないので、コストが足りているかだけ見て理由を分ける。
+            if (editCost < currentEditCost.flatMenuToggle) EditDeniedCost(currentEditCost.flatMenuToggle);
+            else EditDeniedWhy("この操作は今の対象には使えません");
+            return;
+        }
         RunRadialItem(items[idx].id);
     };
 
@@ -4974,6 +5051,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         currentEditTools = stage.editToolFlags;
         currentEditCost = stage.editCostSettings;
         editCost = currentEditCost.maxCost;
+        // ゲージを満タンに戻すのは「操作」ではないので、増減の浮き表示に拾わせない（基準を取り直させる）
+        editCostSeen = -1.0f; costFloatTimer = 0.0f; editToastTimer = 0.0f;
         // ステージ切替でその場アクティブだった操作が、新ステージで禁止されている場合は強制解除する
         if (!currentEditTools.pauseEnabled && !unlockedEditTools.pauseEnabled) isPaused = false;
         if (!currentEditTools.fastForwardEnabled && !unlockedEditTools.fastForwardEnabled) isFastForward = false;
@@ -5740,7 +5819,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (currentMiddleClick && !lastMiddleClick) {
             if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
             else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-            else { SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+            else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastMiddleClick = currentMiddleClick;
 
@@ -5750,7 +5829,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) {
             if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
             else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-            else { SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+            else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastPauseKey = (CheckHitKey(KEY_INPUT_SPACE) != 0);
 
@@ -5765,7 +5844,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) {
             if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
             else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
-            else { SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+            else { EditDeniedToggle(fastForwardOpEnabled, "早送り"); }
         }
         lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
 
@@ -5780,8 +5859,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (!turningOff) editCost -= currentEditCost.flatColorCycle;
                 playerColorFilter = nextFilter;
                 SoundManager::Get().PlaySe(gameConfig.editSe.colorFilter);
+            } else if (!screenEffectOpEnabled) {
+                EditDeniedToggle(false, "画面エフェクト");
             } else {
-                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                EditDeniedCost(currentEditCost.flatColorCycle);
             }
         }
         lastColorKey = currentColorKey;
@@ -6143,7 +6224,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool redoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Y);
                 if (objectEditOpEnabled && !gestureActive && !isAreaSelecting && !menu.isOpen) {
                     if (undoNow && !lastUndoKey) {
-                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySe(gameConfig.editSe.denied); ShowEditToast("カットの作成を取りやめました", 0); }
                         else EditUndo();
                     }
                     if (redoNow && !lastRedoKey) EditRedo();
@@ -6157,7 +6238,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (!lastLeftClick && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
                     if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
                     else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-                    else { SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                    else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
                 }
 
                 // Feature: カット機能の復活 — 下部タイムライン帯へのCtrl+クリックでカット区間を作る。
@@ -6189,7 +6270,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 幅が無いに等しいカットは意味がない上、境界の判定が不安定になるので弾く
                             if (end - start < 0.01f) {
                                 tempCutStart = -1.0f;
-                                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                                EditDeniedWhy("カットの範囲が狭すぎます");
                             } else {
                                 editCost -= pendingCutCost;
                                 // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
@@ -6211,7 +6292,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         } else {
                             // コスト不足。始点は残さず捨てて、打ち直しさせる
                             tempCutStart = -1.0f;
-                            SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                            EditDeniedCost(pendingCutCost);
                         }
                     }
                 }
@@ -11153,6 +11234,222 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // ===== 編集の「結果プレビュー」と、ホバー（マウスを重ねた物）の表示 =====
+        //
+        // 編集は「やってみないと何が起きるか分からない」ものだった。
+        // 選んでいる敵が、今の姿勢のままだとどこへ撃つ・落ちる・突進するのかを、
+        // 確定する前に破線の矢印で見せる。つまみで回している最中もリアルタイムに動く
+        // （向きは敵の姿勢から毎フレーム求め直しているだけで、世界を進めて試しているわけではない）。
+        //
+        // 向きの求め方は、実際にAIが使う GetEnemyHeading / GetEnemyTiltOnlyHeading と同じ関数を通すので、
+        // 見えている矢印と実際の向きは食い違わない（砲台の「傾けた向きへ1発」も同じ約束）。
+        // 到達点は、実際に弾や体が止められる地形（衝突タイルと実体化した足場）までで切る。
+        if (isEditMode && currentScene == PLAY) {
+            const bool gestureNow = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate;
+
+            // 破線（ワールド座標で指定。画面へはカメラぶんだけずらして描く）
+            auto PvDashedLine = [&](float x1, float y1, float x2, float y2, int col) {
+                float dx = x2 - x1, dy = y2 - y1;
+                float len = sqrtf(dx * dx + dy * dy);
+                if (len < 1.0f) return;
+                float ux = dx / len, uy = dy / len;
+                for (float t = 0.0f; t < len; t += 12.0f) {
+                    float t2 = fminf(t + 7.0f, len);
+                    DrawLine((int)(x1 + ux * t - cameraX), (int)(y1 + uy * t - cameraY),
+                             (int)(x1 + ux * t2 - cameraX), (int)(y1 + uy * t2 - cameraY), col);
+                }
+            };
+            // 矢じり。先端(x,y)から向きの逆側へ開いた2本の線
+            auto PvArrowHead = [&](float x, float y, float ux, float uy, int col) {
+                const float L = 10.0f, W = 5.0f;
+                float bx = x - ux * L, by = y - uy * L;
+                float px = -uy * W, py = ux * W;
+                DrawTriangle((int)(x - cameraX), (int)(y - cameraY),
+                             (int)(bx + px - cameraX), (int)(by + py - cameraY),
+                             (int)(bx - px - cameraX), (int)(by - py - cameraY), col, TRUE);
+            };
+            // 文字の札。画面の外へはみ出さないよう、箱だけ内側へ寄せる（画面座標で指定）
+            auto PvChip = [&](int sx, int sy, const std::string& text, int col) {
+                int w = GetDrawStringWidth(text.c_str(), (int)text.size());
+                int x1 = sx, y1 = sy;
+                if (x1 + w + 12 > SCREEN_WIDTH) x1 = SCREEN_WIDTH - w - 12;
+                if (x1 < 2) x1 = 2;
+                if (y1 < 2) y1 = 2;
+                if (y1 + 22 > SCREEN_HEIGHT) y1 = SCREEN_HEIGHT - 22;
+                DrawBox(x1, y1, x1 + w + 10, y1 + 20, GetColor(30, 26, 24), TRUE);
+                DrawBox(x1, y1, x1 + w + 10, y1 + 20, col, FALSE);
+                DrawString(x1 + 5, y1 + 2, text.c_str(), col);
+            };
+            // 始点から向き(dx,dy)へ進めて、最初に地形へぶつかる点を探す。ぶつかったら true。
+            // 4pxごとに2x2の点が地形と重なるかを見る（SolidOverlapArea は大きさ変更のめり込み防止と同じ判定）。
+            auto PvCastRay = [&](float sx, float sy, float dx, float dy, float maxLen, float& ex, float& ey) -> bool {
+                ex = sx; ey = sy;
+                for (float t = 0.0f; t <= maxLen; t += 4.0f) {
+                    float px = sx + dx * t, py = sy + dy * t;
+                    if (SolidOverlapArea(px - 1.0f, py - 1.0f, 2.0f, 2.0f, nullptr) > 0.5f) return true;
+                    ex = px; ey = py;
+                }
+                return false;
+            };
+
+            // --- 結果プレビュー（選んでいる敵だけ）---
+            for (auto* pe : selectedEnemies) {
+                if (!pe->isActive) continue;
+                const EnemyDef* pdef = FindEnemyDef(pe->assetId);
+                EditReaction per = GetEnemyEditReaction(*pe, pdef);
+                const bool flipDirty = ((pe->editDirtyMask & EDIT_DIRTY_DIR) != 0u);
+                float ew = (float)pe->hitboxWidth * pe->scale, eh = (float)pe->hitboxHeight * pe->scale;
+                float ecx = pe->x + ew * 0.5f, ecy = pe->y + eh * 0.5f;
+
+                float hx = 0.0f, hy = 0.0f, reach = 600.0f;
+                bool have = false, edited = true, isShot = false;
+                std::string label;
+                switch (pe->type) {
+                case ENEMY_STATIONARY:
+                case ENEMY_AIMED_SHOOTER:
+                    // 傾け＝その向きへ1発、反転＝向けた側へ真横に1発。編集していない間はプレイヤーを追うので出さない。
+                    if (per.tilted) {
+                        GetEnemyTiltOnlyHeading(*pe, per, REST_UP, hx, hy);
+                        have = true;
+                    } else if (flipDirty) {
+                        hx = (pe->direction == 1) ? -1.0f : 1.0f; hy = 0.0f;
+                        have = true;
+                    }
+                    isShot = true;
+                    label = flipDirty ? "次の一発（味方の弾）" : "次の一発";
+                    break;
+                case ENEMY_FALLER:
+                    GetEnemyHeading(*pe, per, REST_DOWN, hx, hy);
+                    have = true;
+                    edited = (per.tilted || flipDirty);
+                    label = edited ? "落ちる向き" : "落下";
+                    reach = 500.0f;
+                    break;
+                case ENEMY_DASH_CHARGER:
+                    // 傾けたときだけ、向いている方向へ一直線に突進する（傾けていなければ左右でプレイヤーを追う）
+                    if (per.tilted) {
+                        GetEnemyHeading(*pe, per, REST_FORWARD, hx, hy);
+                        have = true;
+                        float dsm = pdef ? pdef->dashSpeedMult : 1.5f;
+                        float dd  = (pdef ? pdef->dashDuration : 40.0f) * per.scaleRatio;
+                        reach = DASH_SPEED * dsm * per.MassMul() * dd; // 傾き中は重力を切って直進するので、そのまま距離になる
+                        if (reach > 700.0f) reach = 700.0f;
+                        label = "突進";
+                    }
+                    break;
+                default: break;
+                }
+                if (!have) continue;
+
+                // 始点：弾なら実際に湧く砲口、体が動く型ならその向きの体の縁
+                float startR = isShot ? (sqrtf(ew * ew + eh * eh) * 0.5f + 4.0f)
+                                      : (fabsf(hx) * ew * 0.5f + fabsf(hy) * eh * 0.5f);
+                float sx0 = ecx + hx * startR, sy0 = ecy + hy * startR;
+                float ex, ey;
+                bool blocked = PvCastRay(sx0, sy0, hx, hy, reach, ex, ey);
+
+                int col = isShot ? GetColor(255, 110, 90) : GetColor(255, 200, 80);
+                if (!edited) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 110); // 編集していない（いつもの動き）は薄く
+                PvDashedLine(sx0, sy0, ex, ey, col);
+                PvArrowHead(ex, ey, hx, hy, col);
+                if (blocked) {
+                    // 行き止まり：当たる点に×を付ける
+                    int bx = (int)(ex + hx * 4.0f - cameraX), by = (int)(ey + hy * 4.0f - cameraY);
+                    DrawLine(bx - 5, by - 5, bx + 5, by + 5, GetColor(255, 255, 255));
+                    DrawLine(bx - 5, by + 5, bx + 5, by - 5, GetColor(255, 255, 255));
+                }
+                if (!edited) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                // 札は矢印の始点のそばへ置く。下へ向かう矢印のときは札が矢印に被らないよう上側へ、
+                // それ以外は下側へ（上側はつまみの数値表示や名前の札と重なりやすいため）。
+                PvChip((int)(sx0 - cameraX) + 8, (int)(sy0 - cameraY) + (hy > 0.5f ? -30 : 14), label, col);
+            }
+
+            // --- ホバー（何も操作していないとき、マウスの下にある物）---
+            const bool inMonitor = (mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT);
+            if (objectEditOpEnabled && inMonitor && !menu.isOpen && !isAreaSelecting && !gestureNow
+                && !isInspScale && !isInspAngle && !isInspSpeed && !isShowingMessage) {
+                // 選んでいる物のつまみの上なら、つまみの説明を出す
+                bool onHandle = false;
+                {
+                    EditBox hb; float hAng; bool hCanScale, hCanRotate;
+                    if (GetSingleEditHandleInfo(hb, hAng, hCanScale, hCanRotate)) {
+                        if (hCanRotate) {
+                            float kx, ky;
+                            GetEditKnob(hb, hAng, kx, ky);
+                            float ddx = gx - kx, ddy = gy - ky;
+                            if (ddx * ddx + ddy * ddy <= EDIT_KNOB_GRAB * EDIT_KNOB_GRAB) {
+                                onHandle = true;
+                                DrawCircle((int)(kx - cameraX), (int)(ky - cameraY), (int)EDIT_KNOB_RADIUS + 3, GetColor(255, 255, 255), FALSE);
+                                PvChip((int)(kx - cameraX) + 14, (int)(ky - cameraY) - 10, "回す（15度ごとに吸着）", GetColor(255, 235, 120));
+                            }
+                        }
+                        if (!onHandle && hCanScale && targetScale != nullptr) {
+                            float chx, chy;
+                            GetEditCornerHandle(hb, chx, chy);
+                            const float m = 3.0f;
+                            if (gx >= chx - m && gx <= chx + GIM_HANDLE_SIZE + m && gy >= chy - m && gy <= chy + GIM_HANDLE_SIZE + m) {
+                                onHandle = true;
+                                DrawBox((int)(chx - cameraX) - 2, (int)(chy - cameraY) - 2,
+                                        (int)(chx - cameraX) + (int)GIM_HANDLE_SIZE + 2, (int)(chy - cameraY) + (int)GIM_HANDLE_SIZE + 2,
+                                        GetColor(255, 255, 255), FALSE);
+                                PvChip((int)(chx - cameraX) + 16, (int)(chy - cameraY) + 4, "引いて拡大・縮小", GetColor(255, 235, 120));
+                            }
+                        }
+                    }
+                }
+                int hvKind = -1, hvIdx = -1;
+                if (!onHandle && FindEditObjectAt(gx, gy, hvKind, hvIdx)) {
+                    EditBox hb2 = { 0, 0, 0, 0 };
+                    std::string nm;
+                    bool already = false;     // すでに選んでいる物か
+                    std::string lockedOps;    // 変えられない操作の一覧
+                    auto addLock = [&](bool locked, const char* opName) {
+                        if (locked) { if (!lockedOps.empty()) lockedOps += "・"; lockedOps += opName; }
+                    };
+                    if (hvKind == 0) {
+                        hb2 = PlayerEditBox(player); nm = "プレイヤー";
+                        for (auto* sp : selectedPlayers) if (sp == &player) already = true;
+                    } else if (hvKind == 1) {
+                        Enemy& he = enemies[hvIdx];
+                        hb2 = EnemyEditBox(he);
+                        const EnemyDef* hd = FindEnemyDef(he.assetId);
+                        nm = (hd && !hd->name.empty()) ? hd->name : he.assetId;
+                        for (auto* se : selectedEnemies) if (se == &he) already = true;
+                        addLock(IsEnemyEditLocked(he, EDITOP_MOVE), "移動");
+                        addLock(IsEnemyEditLocked(he, EDITOP_SCALE), "大きさ");
+                        addLock(IsEnemyEditLocked(he, EDITOP_ROTATE), "回転");
+                        addLock(IsEnemyEditLocked(he, EDITOP_FLIP), "反転");
+                    } else {
+                        Gimmick& hg = gimmicks[hvIdx];
+                        hb2 = GimmickEditBox(hg);
+                        const GimmickDef* gd = FindGimmickDef(hg.assetId);
+                        nm = (gd && !gd->name.empty()) ? gd->name : hg.assetId;
+                        for (auto* sg : selectedGimmicks) if (sg == &hg) already = true;
+                        addLock(IsGimmickEditLocked(hg, EDITOP_MOVE), "移動");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_SCALE), "大きさ");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_ROTATE), "回転");
+                        addLock(IsGimmickEditLocked(hg, EDITOP_FLIP), "反転");
+                    }
+                    int hx1 = (int)(hb2.x - cameraX), hy1 = (int)(hb2.y - cameraY);
+                    int hx2 = (int)(hb2.x + hb2.w - cameraX), hy2 = (int)(hb2.y + hb2.h - cameraY);
+                    if (!already) {
+                        // 選ぶ前の候補：白い細枠（選択済みの黄色い枠と区別できる）
+                        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+                        DrawBox(hx1 - 1, hy1 - 1, hx2 + 1, hy2 + 1, GetColor(255, 255, 255), FALSE);
+                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    }
+                    // すでに選んでいる物の名前は、結果プレビューの札と重なって読みにくくなるので出さない
+                    // （ただし変更不可の項目があるときは、理由として出す）。
+                    if (!already || !lockedOps.empty()) {
+                        std::string tip = nm;
+                        if (!already) tip += "  クリックで選択";
+                        if (!lockedOps.empty()) tip += "  （変更不可：" + lockedOps + "）";
+                        PvChip(hx1, hy1 - 24, tip, lockedOps.empty() ? GetColor(235, 235, 235) : GetColor(255, 190, 120));
+                    }
+                }
+            }
+        }
+
         // 弾の描画
         for (int i = 0; i < MAX_BULLETS; i++) {
             // 新アセット移行対応 — 以前は DrawGraph で原寸描画していたため、640x640の弾画像だと
@@ -11249,6 +11546,75 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         if (SoundManager::Get().IsMuted()) {
             DrawString(206, 34, "MUTED", GetColor(200, 200, 200));
+        }
+
+        // ===== 編集操作のフィードバック表示（見た目だけ。進行には関わらない）=====
+
+        // (1) 編集コストの増減を、ゲージの横へ浮かべる。
+        // 消費は EditXxx・色フィルタ・カットなど十数箇所に散っているので、各所へ表示処理を足すのではなく、
+        // 「前フレームから1以上動いた」という結果の側を1箇所で見張る（被弾音の検出と同じ考え方）。
+        // 時間経過の自然回復や継続消費は1フレームあたり1に届かないので、拾わない。
+        if (editCostSeen >= 0.0f) {
+            float dCost = editCost - editCostSeen;
+            if (dCost >= 1.0f || dCost <= -1.0f) {
+                // 数フレーム続けて動いた場合（ホイールで連続して拡大した等）は、合計を出す
+                bool sameSign = (costFloatValue < 0.0f) == (dCost < 0.0f);
+                costFloatValue = (costFloatTimer > 30.0f && sameSign) ? costFloatValue + dCost : dCost;
+                costFloatTimer = 70.0f;
+            }
+        }
+        editCostSeen = editCost;
+        if (isEditMode && currentScene == PLAY && costFloatTimer > 0.0f) {
+            char cb[24];
+            sprintf_s(cb, sizeof(cb), "%+.0f", costFloatValue);
+            int cfx = 204;
+            int cfy = 54 - (int)((70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
+            int cfAlpha = costFloatTimer < 20.0f ? (int)(255.0f * costFloatTimer / 20.0f) : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, cfAlpha);
+            DrawBox(cfx - 4, cfy - 2, cfx + GetDrawStringWidth(cb, (int)strlen(cb)) + 4, cfy + 18, GetColor(30, 26, 24), TRUE);
+            DrawString(cfx, cfy, cb, costFloatValue < 0.0f ? GetColor(255, 130, 110) : GetColor(120, 230, 140));
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            costFloatTimer -= 1.0f;
+        }
+
+        // (2) 世界が止まっていることを、画面の縁の色と右上の札で示す。
+        // これまで「止まっている」のは左パネルの小さな PAUSED 表示と、物が動かないことでしか分からなかった。
+        //   琥珀色 … 時間停止中（SPACE で止めた状態。コストを消費し続ける）
+        //   水色   … 編集中（ドラッグやつまみをつかんでいる間だけ止まる。離せば再開。コストは減らない）
+        if (isEditMode && currentScene == PLAY && !isShowingMessage) {
+            bool gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate;
+            if (gestureFrozen || isPaused) {
+                int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
+                DrawBox(0, 0, SCREEN_WIDTH, 3, frameCol, TRUE);
+                DrawBox(0, SCREEN_HEIGHT - 3, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
+                DrawBox(0, 0, 3, SCREEN_HEIGHT, frameCol, TRUE);
+                DrawBox(SCREEN_WIDTH - 3, 0, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                const char* stateMsg = gestureFrozen ? "編集中：時間が止まっています" : "時間停止中   [SPACE]で再開";
+                int smW = GetDrawStringWidth(stateMsg, (int)strlen(stateMsg));
+                int smX2 = SCREEN_WIDTH - 10, smX1 = smX2 - smW - 20;
+                DrawBox(smX1, 10, smX2, 34, GetColor(30, 26, 24), TRUE);
+                DrawBox(smX1, 10, smX2, 34, frameCol, FALSE);
+                DrawString(smX1 + 10, 14, stateMsg, frameCol);
+            }
+        }
+
+        // (3) トースト。取り消し／やり直し／拒否の理由を、ゲーム画面の下寄りに短く出す。
+        // 下端の操作ヘルプ（2行）より上に置く。
+        if (isEditMode && editToastTimer > 0.0f && !editToastText.empty()) {
+            int tw = GetDrawStringWidth(editToastText.c_str(), (int)editToastText.size());
+            int tx1 = SCREEN_WIDTH / 2 - tw / 2 - 14, tx2 = SCREEN_WIDTH / 2 + tw / 2 + 14;
+            int ty1 = SCREEN_HEIGHT - 92, ty2 = ty1 + 28;
+            int toastCol = editToastKind == 2 ? GetColor(255, 130, 110)
+                         : editToastKind == 1 ? GetColor(130, 230, 150) : GetColor(235, 235, 235);
+            int tAlpha = editToastTimer < 20.0f ? (int)(255.0f * editToastTimer / 20.0f) : 255;
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, tAlpha);
+            DrawBox(tx1, ty1, tx2, ty2, GetColor(30, 26, 24), TRUE);
+            DrawBox(tx1, ty1, tx2, ty2, toastCol, FALSE);
+            DrawString(tx1 + 14, ty1 + 6, editToastText.c_str(), toastCol);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            editToastTimer -= 1.0f;
         }
 
         // ヘルプガイドのOSDオーバーレイ
