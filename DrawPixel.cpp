@@ -5621,6 +5621,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         isShowingMessage = false;
         currentMessageText = "";
         currentMessageSpeaker = "";
+        SoundManager::Get().StopAnimalese();
         cameraOverrideX = -1.0f;
         cameraOverrideTimer = 0.0f;
         collectedItemIds.clear();
@@ -5716,6 +5717,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             currentMessageText = p1;
             currentMessageSpeaker = p2;
             isShowingMessage = true;
+
+            // どうぶつ語（Animalese）会話音の再生
+            AnimaleseVoice voice = AnimaleseVoice::Normal();
+            if (!p2.empty()) {
+                // 話者名に応じてキャラクター固有のピッチを自動調整（0.85〜1.25倍）
+                size_t h = std::hash<std::string>{}(p2);
+                voice.pitchMultiplier = 0.85f + (h % 9) * 0.05f;
+            }
+            SoundManager::Get().PlayAnimalese(p1, voice);
+        } else if (action == "PlayAnimalese") {
+            AnimaleseVoice voice = AnimaleseVoice::Normal();
+            if (!p2.empty()) {
+                size_t h = std::hash<std::string>{}(p2);
+                voice.pitchMultiplier = 0.85f + (h % 9) * 0.05f;
+            }
+            SoundManager::Get().PlayAnimalese(p1, voice);
         } else if (action == "ChangeBgm") {
             SoundManager::Get().PlayBgm(p1);
         } else if (action == "PlaySe") {
@@ -6452,7 +6469,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature 5: ShowMessageアクションで表示中のメッセージウィンドウをEnterキーで閉じる
         static bool lastMsgKey = false;
         bool currentMsgKey = CheckHitKey(KEY_INPUT_RETURN) != 0;
-        if (isShowingMessage && currentMsgKey && !lastMsgKey) { isShowingMessage = false; }
+        if (isShowingMessage && currentMsgKey && !lastMsgKey) {
+            isShowingMessage = false;
+            SoundManager::Get().StopAnimalese();
+        }
         lastMsgKey = currentMsgKey;
 
         // Feature: 編集コストゲージ — 早送りは継続系操作。解除は常に無料
@@ -7579,10 +7599,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // フレーム数がポーズ解除後の最初のTickでいきなり反映され、Time依存の回転/振動パーツが不連続にジャンプしてしまう。
         if (!isPaused || isStepFrame) BehaviorInterpreter::scriptTimeCounter += 1.0f;
 
+        // Feature 3: サウンドマネージャーの更新
+        // （ポーズ状態に関わらず毎フレーム更新し、会話音シーケンサーの進行と再生完了ハンドルの解放を保証する）
+        SoundManager::Get().Update();
+
         // Feature 3 & 5: 各種マネージャーの更新
         if (!isPaused || isStepFrame) {
             float dt = 1.0f / 60.0f * ts;
-            SoundManager::Get().Update();
             
             // Feature 2: アニメーションの更新
             player.anim.Update(dt);

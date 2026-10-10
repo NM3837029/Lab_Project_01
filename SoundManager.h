@@ -6,6 +6,7 @@
 #include <fstream>
 #include "json.hpp"
 #include "Logger.h"
+#include "AnimaleseSynthesizer.h"
 using json = nlohmann::json;
 
 // ======================================================
@@ -44,6 +45,9 @@ public:
         // UI音（メニュー選択・決定・キャンセル等）はseMapに統合し、PlaySe(id)でそのまま再生可能にする。
         // カテゴリ分けはエディタ側の整理用の概念であり、再生側はSE/UI音を区別しない。
         LoadEntries(assetsPath + "/ui_se.json", seMap);
+
+        // 自作の50音音声ファイル（sound/50on/*.wav）を自動読み込み
+        animaleseSynth.Load50onSamples("sound/50on");
     }
 
     // 指定したIDのBGMを再生する関数。
@@ -103,28 +107,131 @@ public:
             // バックグラウンド再生（他の音と重ねて鳴らせるモード）で1回再生する。
             PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
             // 再生が終わったら後片付け（DeleteSoundMem）できるよう、一時ハンドルとして記録しておく。
-            tempHandles.push_back(dup);
+            AddTempHandle(dup);
         }
     }
 
-    // 毎フレーム呼び出して、再生が終わったSEの複製ハンドルを解放する関数。
-    // これを呼ばないと、PlaySeで複製したハンドルがメモリ上に残り続けてしまう。
-    void Update() {
-        // 後ろから走査してerase()してもインデックスがずれないようにするため、逆順にループする。
-        for (int i = (int)tempHandles.size() - 1; i >= 0; i--) {
-            // CheckSoundMemが0（再生中でない）になったハンドルは、再生完了とみなして解放する。
-            if (CheckSoundMem(tempHandles[i]) == 0) {
-                DeleteSoundMem(tempHandles[i]);
-                tempHandles.erase(tempHandles.begin() + i);
+    // どうぶつの森風の会話音（どうぶつ語）を再生する関数。
+    // utf8Text : 喋らせる日本語テキスト（UTF-8）
+    // voice    : キャラクターの声質設定（AnimaleseVoice::Normal(), High(), Low() など）
+    void PlayAnimalese(const std::string& utf8Text, const AnimaleseVoice& voice = AnimaleseVoice::Normal()) {
+        if (utf8Text.empty() || isMuted) return;
+
+        // 前の喋り声があれば停止
+        StopAnimalese();
+
+        // 1. 自作の50音音声ファイル（sound/50on）が読み込まれている場合はシーケンサーで発声
+        if (animaleseSynth.Has50onSamples()) {
+            std::vector<std::string> keys = animaleseSynth.TextToKeys(utf8Text);
+            if (keys.empty()) return;
+
+            speechVolume = voice.volume;
+            int stepWait = (int)(65.0f / (std::max)(0.2f, voice.speedMultiplier));
+            int pauseWait = (int)(130.0f / (std::max)(0.2f, voice.speedMultiplier));
+
+            for (size_t i = 0; i < keys.size(); ++i) {
+                const std::string& key = keys[i];
+                SpeechStep step;
+
+                if (key == "pause") {
+                    step.handle = -1;
+                    step.waitMs = pauseWait;
+                } else {
+                    step.handle = animaleseSynth.GetSampleHandle(key);
+                    // キーが見つからない場合は "a" にフォールバック
+                    if (step.handle < 0) step.handle = animaleseSynth.GetSampleHandle("a");
+
+                    // 微小なピッチ揺らぎ (±3%)
+                    float jitter = 1.0f + (static_cast<float>((i * 7) % 7) - 3.0f) * 0.01f;
+                    step.pitch = voice.pitchMultiplier * jitter;
+                    step.waitMs = stepWait;
+
+                    // 文末の疑問符（テキストに「？」が含まれ、最後の文字）はピッチ上昇
+                    if (i + 1 == keys.size() && (utf8Text.find('?') != std::string::npos || utf8Text.find("\xEF\xBC\x9F") != std::string::npos)) {
+                        step.pitch *= 1.28f;
+                    }
+                }
+                speechQueue.push_back(step);
+            }
+
+            speechQueueIdx = 0;
+            speechNextTimeMs = GetNowCount();
+        }
+        // 2. 音声ファイルが無い場合は、内蔵プロシージャル合成で波形を生成して再生
+        else {
+            int handle = animaleseSynth.CreateDxLibSoundHandle(utf8Text, voice);
+            if (handle >= 0) {
+                ChangeVolumeSoundMem((int)(voice.volume * 255), handle);
+                PlaySoundMem(handle, DX_PLAYTYPE_BACK, TRUE);
+                AddTempHandle(handle);
             }
         }
     }
 
-    // 読み込んだすべてのBGM・SEのハンドルを解放し、内部状態を初期化する関数。
-    // ステージ切り替え時や、アプリケーション終了時の後片付けに使う。
+    // 現在再生中のどうぶつ語会話音を停止する関数。
+    // メッセージウィンドウを閉じた際やスキップ時に呼び出す。
+    void StopAnimalese() {
+        speechQueue.clear();
+        speechQueueIdx = 0;
+    }
+
+    // どうぶつ語の会話音声を .wav ファイルとしてディスクに保存する関数。
+    // filename : 保存先パス（例: "speech.wav"）
+    // utf8Text : 日本語テキスト（UTF-8）
+    bool SaveAnimaleseWav(const std::string& filename, const std::string& utf8Text, const AnimaleseVoice& voice = AnimaleseVoice::Normal()) {
+        return animaleseSynth.SaveToWavFile(filename, utf8Text, voice);
+    }
+
+    // 毎フレーム呼び出して、再生が終わったSEの複製ハンドルを解放し、
+    // どうぶつ語の50音シーケンサーを進める関数。
+    void Update() {
+        // 1. どうぶつ語シーケンサーの更新（50音音声をテンポ良く連続発声）
+        if (speechQueueIdx < speechQueue.size()) {
+            int now = GetNowCount();
+            if (now >= speechNextTimeMs) {
+                const auto& step = speechQueue[speechQueueIdx++];
+                if (step.handle >= 0 && !isMuted) {
+                    int dup = DuplicateSoundMem(step.handle);
+                    if (dup >= 0) {
+                        ChangeVolumeSoundMem((int)(speechVolume * 255), dup);
+                        // ピッチ（周波数）を変更（標準44100Hz × pitch倍率）
+                        SetFrequencySoundMem((int)(44100 * step.pitch), dup);
+                        int playRet = PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
+                        if (playRet == 0) {
+                            AddTempHandle(dup);
+                        } else {
+                            Logger::Error("SoundManager", "Update", "PlaySoundMem failed for Animalese handle");
+                            DeleteSoundMem(dup);
+                        }
+                    } else {
+                        Logger::Error("SoundManager", "Update", "DuplicateSoundMem failed for Animalese sample");
+                    }
+                }
+                speechNextTimeMs = now + step.waitMs;
+            }
+        }
+
+        // 2. 再生が終了した一時ハンドルの解放
+        // 発音開始から一定時間（最低100ms）経過したもののみ CheckSoundMem で完了チェックを行う。
+        // DxLibの非同期再生（DX_PLAYTYPE_BACK）では、再生開始直後の極短時間に
+        // CheckSoundMem が 0（未完了/準備中）を返すことがあるため、即時解放による無音化を防ぐ。
+        int curTime = GetNowCount();
+        for (int i = (int)tempHandles.size() - 1; i >= 0; i--) {
+            if (curTime - tempHandles[i].startTimeMs >= 100) {
+                if (CheckSoundMem(tempHandles[i].handle) == 0) {
+                    DeleteSoundMem(tempHandles[i].handle);
+                    tempHandles.erase(tempHandles.begin() + i);
+                }
+            }
+        }
+    }
+
+    // 読み込んだすべてのBGM・SE・サンプルのハンドルを解放し、内部状態を初期化する関数。
     void Release() {
-        // まず再生中のBGMを止めてから解放処理に入る。
+        // 会話音とBGMを停止
+        StopAnimalese();
         StopBgm();
+
         // BGMマップに登録されているすべてのハンドルを解放する。
         for (std::map<std::string, SoundEntry>::iterator it = bgmMap.begin(); it != bgmMap.end(); ++it) {
             if (it->second.handle >= 0) { DeleteSoundMem(it->second.handle); it->second.handle = -1; }
@@ -133,9 +240,14 @@ public:
         for (std::map<std::string, SoundEntry>::iterator it = seMap.begin(); it != seMap.end(); ++it) {
             if (it->second.handle >= 0) { DeleteSoundMem(it->second.handle); it->second.handle = -1; }
         }
-        // PlaySeで複製された、再生完了待ちの一時ハンドルもすべて解放する。
+        // 50音サンプルの解放
+        animaleseSynth.ReleaseSamples();
+
+        // PlaySe/PlayAnimaleseで複製された、再生完了待ちの一時ハンドルもすべて解放する。
         for (size_t i = 0; i < tempHandles.size(); i++) {
-            DeleteSoundMem(tempHandles[i]);
+            if (tempHandles[i].handle >= 0) {
+                DeleteSoundMem(tempHandles[i].handle);
+            }
         }
         // すべてのコンテナと状態を初期状態に戻す。
         tempHandles.clear();
@@ -156,11 +268,35 @@ public:
     }
 
 private:
+    // 再生中の一時ハンドルと再生開始時刻を記録する構造体
+    struct TempSoundHandle {
+        int handle = -1;
+        int startTimeMs = 0;
+    };
+
+    void AddTempHandle(int handle) {
+        if (handle >= 0) {
+            tempHandles.push_back({handle, GetNowCount()});
+        }
+    }
+
     std::map<std::string, SoundEntry> bgmMap; // BGMのID→設定・ハンドルのマップ
     std::map<std::string, SoundEntry> seMap;  // SE（UI音含む）のID→設定・ハンドルのマップ
-    std::vector<int> tempHandles;             // PlaySeで複製した、再生完了待ちの一時ハンドル一覧
+    std::vector<TempSoundHandle> tempHandles; // PlaySe/PlayAnimaleseで複製した、再生完了待ちの一時ハンドル一覧
     std::string currentBgmId;                 // 現在再生中のBGMのID（何も再生していなければ空文字）
     bool isMuted = false;                     // SEのミュート状態（trueならPlaySeが無視される）
+    AnimaleseSynthesizer animaleseSynth;      // どうぶつ語プロシージャル音声合成エンジン
+
+    // 50音会話音シーケンサー用の状態管理
+    struct SpeechStep {
+        int handle = -1;
+        float pitch = 1.0f;
+        int waitMs = 65;
+    };
+    std::vector<SpeechStep> speechQueue;
+    size_t speechQueueIdx = 0;
+    int speechNextTimeMs = 0;
+    float speechVolume = 1.0f;
 
     // シングルトンにするため、コンストラクタ・デストラクタをprivateにし、
     // コピーコンストラクタ・代入演算子を削除して複製できないようにしている。

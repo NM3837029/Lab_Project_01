@@ -4270,7 +4270,26 @@
     ]
   ],
   "backgrounds": [],
-  "triggers": [],
+  "triggers": [
+    {
+      "id": "trigger_001",
+      "x": 43.2,
+      "y": 1774.4,
+      "width": 94.40001,
+      "height": 81.59998,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "あいうえお",
+          "param2": "",
+          "delay": 0.4
+        }
+      ]
+    }
+  ],
   "enemies": [
     {
       "id": "enemy_dossun",
@@ -4288,11 +4307,6 @@
       "id": "gim_chikuwa",
       "x": 192.0,
       "y": 1856.0
-    },
-    {
-      "id": "gim_falling_lift",
-      "x": 288.0,
-      "y": 1760.0
     },
     {
       "id": "gim_chikuwa",
@@ -4388,6 +4402,11 @@
       "id": "gim_falling_lift",
       "x": 384.0,
       "y": 192.0
+    },
+    {
+      "id": "gim_falling_lift",
+      "x": 288.0,
+      "y": 1760.0
     }
   ],
   "items": [
