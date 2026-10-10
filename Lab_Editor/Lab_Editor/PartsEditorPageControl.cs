@@ -331,6 +331,7 @@ public partial class PartsEditorPageControl : UserControl
         zOrder = p.zOrder,
         deadly = p.deadly,
         script = (JArray)p.script.DeepClone(),
+        motions = p.motions.Select(m => m.Clone()).ToList(),
     };
 
     // ==== 状態表示（メッセージボックスの代わり） ====

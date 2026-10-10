@@ -52,6 +52,82 @@ bool isDedicatedEditorMode = false;
 // 例: 開閉する扉の各パネル、ファイアバーの各火の玉、体が分かれた敵の各部位。
 // parts配列が空のままなら既存のenemies.json/gimmicks.json/items.jsonは完全に無変更で動作する。
 // ======================================================
+// ======================================================
+// パーツのモーション（パーツごとの「いつ・どんな動き」）
+// ======================================================
+//
+// パーツの動きは、これまで挙動スクリプト（JSON AST）でしか作れず、
+//   ・パーツごとに違う動きをさせるには、パーツごとにスクリプトを組む必要があった
+//   ・「敵が攻撃したとき」「ジャンプしたとき」「溜めているとき」といった敵の行動に連動して動かす手段が無かった
+// そこで、Lab_Editor の「動き」一覧（種類×トリガー×スライダー）で作れる、宣言的なモーションを足す。
+//
+// スクリプトへは変換せず、エンジンが直接計算する。結果は「見た目と当たり判定への上乗せ」だけで、
+// パーツの真の位置（localX/localY、スクリプトが決める値）は書き換えない。
+// そのため、既存のスクリプト・棒/振り子/公転ジェネレータ・ワールド座標の逆算（CapturePartsLocal）と衝突せず、
+// 併用できる。motions が空のパーツは、これまでと1ピクセルも変わらない。
+
+// いつ動くか。attack/jump/hurt は「その瞬間から duration フレームだけ」動く（イベント系）。
+// それ以外は「その状態の間ずっと」動く（状態系）。
+enum PartMotionTrigger {
+    PMT_ALWAYS = 0, // 常に
+    PMT_ATTACK,     // 敵が攻撃した（弾を撃った・突進や飛びかかりに入った・体当たりした）瞬間
+    PMT_JUMP,       // 敵がジャンプした瞬間
+    PMT_CHARGE,     // 予兆・溜め中（突進の溜め、落下前の予兆、射撃の直前など）
+    PMT_ACTIVE,     // 行動中（突進中、落下中、飛びかかりの飛行中）
+    PMT_HURT,       // 弾を受けた瞬間
+    PMT_NEAR,       // プレイヤーが triggerParam(px) 以内にいる間
+    PMT_MOVING,     // 動いている間（速さが triggerParam 以上）
+    PMT_FLIPPED,    // 向きを反転されている間（編集ツール）
+    PMT_TILTED,     // 傾けられている間（編集ツール）
+    PMT_COUNT
+};
+
+// どんな動きか
+enum PartMotionKind {
+    PMK_SWAY = 0,     // 揺れ：axis の向きへ amount(px) ぶん行き来する
+    PMK_SWING,        // 首振り：amount(度) の範囲で左右に回る
+    PMK_SPIN,         // 回転：1周期で amount(度) 回り続ける
+    PMK_ORBIT,        // 円運動：半径 amount(px) の円を描く
+    PMK_PULSE,        // ふくらみ：大きさが 1 + amount まで膨らんで戻る
+    PMK_SLIDE,        // スライド：axis の向きへ amount(px) 動いて戻る（なめらか）
+    PMK_THRUST,       // 突き：axis の向きへ素早く amount(px) 突き出して、ゆっくり戻る
+    PMK_BLINK,        // 点滅：amount(0〜1) ぶん薄くなる
+    PMK_SHAKE,        // 震え：amount(px) の幅でランダムにふるえる
+    PMK_FACE_PLAYER,  // プレイヤーを向く：プレイヤーの方向 + amount(度) へ回す
+    PMK_COUNT
+};
+
+// JSON上の名前（Lab_Editor の PartMotion と同じ。順番は上の enum と一致させること）
+static const char* const PART_MOTION_TRIGGER_NAMES[PMT_COUNT] =
+    { "always", "attack", "jump", "charge", "active", "hurt", "near", "moving", "flipped", "tilted" };
+static const char* const PART_MOTION_KIND_NAMES[PMK_COUNT] =
+    { "sway", "swing", "spin", "orbit", "pulse", "slide", "thrust", "blink", "shake", "face_player" };
+
+struct PartMotion {
+    int   trigger = PMT_ALWAYS;
+    float triggerParam = 0.0f;   // near=距離(px)、moving=速さのしきい値
+    int   kind = PMK_SWAY;
+    float amount = 8.0f;         // 大きさ（種類ごとに px / 度 / 倍率。上の enum のコメント参照）
+    float period = 60.0f;        // 1周期のフレーム数（状態系で使う）
+    float phase = 0.0f;          // 位相のずれ（0〜1 ＝ 1周期ぶん）
+    float phaseByIndex = 0.0f;   // パーツの番号ごとに足す位相（0〜1）。同じ動きを少しずつずらして並べるのに使う
+    float duration = 30.0f;      // 1回の長さ（フレーム。イベント系で使う）
+    float delay = 0.0f;          // 始まるまでの遅れ（フレーム）
+    int   easing = 0;            // 波の形：0=なめらか(sin) 1=三角(一定速度) 2=カクカク(角が丸い矩形)
+    float axis = 0.0f;           // 動く向き（度。0=右、90=下。親の向きに合わせて親と一緒に回る）
+    bool  enabled = true;
+};
+
+// モーションごとの実行時状態（パーツ1つ・モーション1つにつき1つ）
+struct PartMotionState {
+    float weight = 0.0f;     // 状態系：0〜1。始まり・終わりを急に切らないための助走
+    int   lastSeq = -1;      // イベント系：前回見たイベント回数（-1＝まだ見ていない）
+    float evClock = -1.0e9f; // イベント系：最後に発火した時刻（scriptTimeCounter）
+    bool  fired = false;     // イベント系：一度でも発火したか
+    float spinAcc = 0.0f;    // 回転：積算した回転量（度）
+    float lastClock = -1.0e9f; // 前回の評価時刻（ポーズ中に助走・回転が進まないようにする）
+};
+
 struct PartDef {
     std::string id = "";           // このパーツを識別するための名前（スクリプトから参照する際のキーにもなる）
     std::string sprite_path = "";  // パーツの見た目に使う画像ファイルのパス
@@ -74,6 +150,7 @@ struct PartDef {
     // 大半なので、危険にしたいパーツだけJSONで deadly:true を書く方式にしてある。
     bool deadly = false;
     json script = json::array(); // このパーツ専用の行動スクリプト（JSON形式のAST。未使用なら空配列のまま）
+    std::vector<PartMotion> motions; // このパーツのモーション一覧（空＝従来どおり。スクリプトとは独立に併用できる）
 };
 
 // ランタイム側のパーツ状態。PartDefへのポインタは持たず、スポーン時に値をコピーする
@@ -93,6 +170,17 @@ struct PartInstance {
     int partIndex = 0;         // 親のparts[]内インデックス（PartIndexレポーター、Start()時の再検索に使う）
     ScriptState scriptState;   // OnSpawn用
     ScriptState reactiveState; // OnDamaged/OnDeath専用（Parts-M6）
+
+    // ---- パーツのモーション ----
+    // PartDef.motions のコピーと、その実行時状態。
+    // 結果（motion*）は「見た目と当たり判定への上乗せ」で、localX/localY や x/y には混ぜない
+    // （混ぜると、スクリプトがワールド座標を直接書いたときの逆算に上乗せぶんが焼き込まれて、毎フレームずれていく）。
+    std::vector<PartMotion> motions;
+    std::vector<PartMotionState> motionStates;
+    float motionDX = 0.0f, motionDY = 0.0f; // 親のローカル空間での位置の上乗せ(px。描画時に親の倍率・傾きを掛ける)
+    float motionAngle = 0.0f;               // 回転の上乗せ（ラジアン）
+    float motionScale = 1.0f;               // 大きさの倍率（パーツの中心を保ったまま拡縮）
+    float motionAlpha = 1.0f;               // 不透明度（0〜1）
 
     // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
     // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
@@ -580,6 +668,35 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
         part.zOrder = p.value("zOrder", 0);
         part.deadly = p.value("deadly", false); // 既定false＝従来どおり無害な装飾パーツ
         if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
+        // モーション一覧。名前が分からない種類・トリガーの項目は、動かないまま黙って残すのではなく読み飛ばす
+        // （新しいエディタで作った項目を古いゲームが読んだときに、意図しない動きにならないようにするため）。
+        if (p.contains("motions") && p["motions"].is_array()) {
+            for (const auto& mj : p["motions"]) {
+                if (!mj.is_object()) continue;
+                PartMotion m;
+                std::string trig = mj.value("trigger", "always");
+                std::string kind = mj.value("kind", "sway");
+                int ti = -1, ki = -1;
+                for (int q = 0; q < PMT_COUNT; q++) if (trig == PART_MOTION_TRIGGER_NAMES[q]) ti = q;
+                for (int q = 0; q < PMK_COUNT; q++) if (kind == PART_MOTION_KIND_NAMES[q]) ki = q;
+                if (ti < 0 || ki < 0) continue;
+                m.trigger = ti; m.kind = ki;
+                m.triggerParam = mj.value("trigger_param", 0.0f);
+                m.amount = mj.value("amount", 8.0f);
+                m.period = mj.value("period", 60.0f);
+                if (m.period < 1.0f) m.period = 1.0f;
+                m.phase = mj.value("phase", 0.0f);
+                m.phaseByIndex = mj.value("phase_by_index", 0.0f);
+                m.duration = mj.value("duration", 30.0f);
+                if (m.duration < 1.0f) m.duration = 1.0f;
+                m.delay = mj.value("delay", 0.0f);
+                if (m.delay < 0.0f) m.delay = 0.0f;
+                m.easing = mj.value("easing", 0);
+                m.axis = mj.value("axis", 0.0f);
+                m.enabled = mj.value("enabled", true);
+                part.motions.push_back(m);
+            }
+        }
         // 画像パスが指定されていれば実際に読み込み、幅・高さ・当たり判定サイズが
         // JSONで未指定（0のまま）だった場合は画像の実サイズで補完する。
         if (!part.sprite_path.empty()) {
@@ -898,6 +1015,8 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         inst.zOrder = pd.zOrder;
         inst.deadly = pd.deadly;
         inst.partIndex = (int)pi;
+        inst.motions = pd.motions;
+        inst.motionStates.assign(pd.motions.size(), PartMotionState());
         result.push_back(inst);
     }
     return result;
@@ -991,12 +1110,36 @@ inline void GetPartHalfSize(const PartInstance& p, float& hx, float& hy) {
 // 「見えているのに当たらない」「見えていないのに当たる」という追跡の難しいバグになる。
 // hitboxOffset にも倍率を掛けるのが正しい（従来は生ピクセルのままだったが、
 // 現存する52パーツの hitboxOffset は全て(0,0)なので、この修正に回帰は無い）。
+//
+// モーション（PartDef.motions）の位置・大きさの上乗せも、ここで一緒に反映する。
+// 描画（DrawPartsPass）と同じ値を見るので、「見えている所に当たる」が保たれる。
+// motions の無いパーツでは motionDX/DY=0・motionScale=1 なので、結果は従来と完全に同じ。
+
+// モーションの位置の上乗せ(親のローカル空間)を、ワールド座標のずれへ直す。
+// 親の倍率を掛けてから、親の傾きぶん回す（PartLocalToWorld と同じ順序）。
+inline void GetPartMotionWorldOffset(const PartInstance& p, float& outDX, float& outDY) {
+    float vx = p.motionDX * p.parentScaleX;
+    float vy = p.motionDY * p.parentScaleY;
+    float c = cosf(p.parentTilt), s = sinf(p.parentTilt);
+    outDX = vx * c - vy * s;
+    outDY = vx * s + vy * c;
+}
+
 inline void GetPartHitRect(const PartInstance& p, float& outX, float& outY, float& outW, float& outH) {
     float m = p.scale * p.parentUniform;
-    outX = p.x + (float)p.hitboxOffsetX * m;
-    outY = p.y + (float)p.hitboxOffsetY * m;
+    float mdx = 0.0f, mdy = 0.0f;
+    if (p.motionDX != 0.0f || p.motionDY != 0.0f) GetPartMotionWorldOffset(p, mdx, mdy);
+    outX = p.x + mdx + (float)p.hitboxOffsetX * m;
+    outY = p.y + mdy + (float)p.hitboxOffsetY * m;
     outW = (float)p.hitboxWidth  * m;
     outH = (float)p.hitboxHeight * m;
+    if (p.motionScale != 1.0f) {
+        // 大きさの変化は、判定矩形の中心を保ったまま拡縮する
+        float nw = outW * p.motionScale, nh = outH * p.motionScale;
+        outX += (outW - nw) * 0.5f;
+        outY += (outH - nh) * 0.5f;
+        outW = nw; outH = nh;
+    }
 }
 
 // パーツのスクリプトを実行した「直後」に呼ぶ。
@@ -1066,6 +1209,161 @@ void FillScriptPartTransform(ScriptActor& actor, PartInstance& part, const Paren
     actor.partLocalY = &part.localY;
 }
 
+// ===== モーションの評価 =====
+
+// モーションの評価に必要な、親の「いま」。敵・ギミック・アイテムが同じ形で渡す。
+// イベント系・状態系のトリガーのうち、敵にしか意味が無いもの（攻撃・ジャンプ・被弾・溜め・行動中）は
+// ギミック・アイテムでは常に「起きていない」扱いになる（isEnemy=false）。
+struct PartMotionCtx {
+    float clock = 0.0f;           // Time レポーターと同じ時計（BehaviorInterpreter::scriptTimeCounter。ポーズ中は進まない）
+    bool  isEnemy = false;
+    int   actionPhase = 0;        // 0=待機 1=予兆・溜め 2=行動中 3=後隙
+    int   actionSeq = 0, jumpSeq = 0, hurtSeq = 0; // 攻撃・ジャンプ・被弾の回数
+    float speed = 0.0f;           // 親の速さ(px/フレーム)
+    float playerX = 0.0f, playerY = 0.0f;
+    float parentX = 0.0f, parentY = 0.0f; // 親の中心（距離の測定用）
+    bool  flipped = false, tilted = false;
+};
+
+// 波の形（-1〜1）。t は周期を単位とした時刻（1.0で1周）
+inline float PartMotionWave(float t, int easing) {
+    float f = t - floorf(t);
+    switch (easing) {
+        case 1: { // 三角波
+            float tri = (f < 0.5f) ? (f * 4.0f - 1.0f) : (3.0f - f * 4.0f);
+            return -tri; // sin と山谷の向きをそろえる（f=0.25で+1）
+        }
+        case 2: { // 角の丸い矩形波（sin を強めに潰して符号側へ寄せる）
+            float v = sinf(f * 6.2831853f) * 3.0f;
+            return v > 1.0f ? 1.0f : (v < -1.0f ? -1.0f : v);
+        }
+        default: return sinf(f * 6.2831853f);
+    }
+}
+
+// 0→1→0 の山（f=0.5で1）
+inline float PartMotionBump(float t) {
+    float f = t - floorf(t);
+    return 0.5f - 0.5f * cosf(f * 6.2831853f);
+}
+
+// 突き：素早く出て、ゆっくり戻る（0→1 を 25%、1→0 を 75%）
+inline float PartMotionThrust(float t) {
+    float f = t - floorf(t);
+    if (f < 0.25f) { float u = f / 0.25f; return 1.0f - (1.0f - u) * (1.0f - u); } // 出る：減速
+    float u = (f - 0.25f) / 0.75f;
+    return 1.0f - u * u * (3.0f - 2.0f * u);                                      // 戻る：なめらか
+}
+
+// パーツ1つぶんのモーションを評価して、motion* を書く。1フレームに1回、ポーズ中でも呼ぶ。
+// motions が空なら何もしない（motion* は既定値のまま）。
+void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ctx) {
+    for (auto& part : parts) {
+        if (part.motions.empty()) continue;
+        if (part.motionStates.size() != part.motions.size()) part.motionStates.assign(part.motions.size(), PartMotionState());
+
+        float dx = 0.0f, dy = 0.0f, dAng = 0.0f, scaleMul = 1.0f, alphaMul = 1.0f;
+        // 親のサイズのうち「パーツの中心」を使う距離・向きの計算のための、パーツ自身の中心
+        float pm = part.scale * part.parentUniform;
+        float pcx = part.x + (part.width * pm) * 0.5f, pcy = part.y + (part.height * pm) * 0.5f;
+        float dPlayer = sqrtf((ctx.playerX - ctx.parentX) * (ctx.playerX - ctx.parentX) + (ctx.playerY - ctx.parentY) * (ctx.playerY - ctx.parentY));
+
+        for (size_t k = 0; k < part.motions.size(); k++) {
+            const PartMotion& m = part.motions[k];
+            PartMotionState& st = part.motionStates[k];
+            if (!m.enabled) continue;
+            bool advanced = (ctx.clock != st.lastClock); // 時計が進んだフレームだけ、助走・回転を進める
+            st.lastClock = ctx.clock;
+            float idx = (float)part.partIndex;
+
+            bool isEvent = (m.trigger == PMT_ATTACK || m.trigger == PMT_JUMP || m.trigger == PMT_HURT);
+            float weight = 0.0f, t = 0.0f;
+            if (isEvent) {
+                int seq = (m.trigger == PMT_ATTACK) ? ctx.actionSeq : (m.trigger == PMT_JUMP ? ctx.jumpSeq : ctx.hurtSeq);
+                if (!ctx.isEnemy) seq = 0;
+                if (st.lastSeq < 0) st.lastSeq = seq;           // 最初に見た回数は「発火」とみなさない
+                if (seq != st.lastSeq) { st.lastSeq = seq; st.evClock = ctx.clock; st.fired = true; }
+                if (st.fired) {
+                    float e = ctx.clock - st.evClock - m.delay;
+                    if (e >= 0.0f && e <= m.duration) {
+                        float u = e / m.duration;
+                        // 終わりの2割で薄めて、急に切れないようにする
+                        weight = (u < 0.8f) ? 1.0f : (1.0f - u) / 0.2f;
+                        t = u + m.phase + m.phaseByIndex * idx;
+                    }
+                }
+            } else {
+                bool active = false;
+                switch (m.trigger) {
+                    case PMT_ALWAYS:  active = true; break;
+                    case PMT_CHARGE:  active = ctx.isEnemy && ctx.actionPhase == 1; break;
+                    case PMT_ACTIVE:  active = ctx.isEnemy && ctx.actionPhase == 2; break;
+                    case PMT_NEAR:    active = dPlayer <= m.triggerParam; break;
+                    case PMT_MOVING:  active = ctx.speed >= m.triggerParam; break;
+                    case PMT_FLIPPED: active = ctx.flipped; break;
+                    case PMT_TILTED:  active = ctx.tilted; break;
+                    default: break;
+                }
+                if (advanced) {
+                    st.weight += active ? 0.125f : -0.125f; // 8フレームで入り切り
+                    if (st.weight < 0.0f) st.weight = 0.0f;
+                    if (st.weight > 1.0f) st.weight = 1.0f;
+                }
+                weight = st.weight;
+                t = (ctx.clock - m.delay) / m.period + m.phase + m.phaseByIndex * idx;
+                if (ctx.clock < m.delay) weight = 0.0f;
+            }
+
+            // 回転（積算）は、weight が0でも「今の向き」を保つ必要があるので、先に積算だけ進める
+            if (m.kind == PMK_SPIN) {
+                if (advanced && weight > 0.0f) st.spinAcc += m.amount / m.period * weight;
+                dAng += st.spinAcc * 0.017453293f;
+                continue;
+            }
+            if (weight <= 0.0001f) continue;
+
+            float ax = cosf(m.axis * 0.017453293f), ay = sinf(m.axis * 0.017453293f);
+            switch (m.kind) {
+                case PMK_SWAY: { float v = m.amount * PartMotionWave(t, m.easing) * weight; dx += ax * v; dy += ay * v; break; }
+                case PMK_SWING: dAng += m.amount * 0.017453293f * PartMotionWave(t, m.easing) * weight; break;
+                case PMK_ORBIT: { float a = t * 6.2831853f; dx += cosf(a) * m.amount * weight; dy += sinf(a) * m.amount * weight; break; }
+                case PMK_PULSE: scaleMul *= 1.0f + m.amount * PartMotionBump(t) * weight; break;
+                case PMK_SLIDE: { float v = m.amount * PartMotionBump(t) * weight; dx += ax * v; dy += ay * v; break; }
+                case PMK_THRUST: { float v = m.amount * PartMotionThrust(t) * weight; dx += ax * v; dy += ay * v; break; }
+                case PMK_BLINK: {
+                    float f = t - floorf(t);
+                    if (f >= 0.5f) alphaMul *= 1.0f - m.amount * weight;
+                    break;
+                }
+                case PMK_SHAKE: {
+                    // 決定的な乱数（時計・番号・項目から作る）。巻き戻したり、エディタのプレビューと比べたりしても同じ値になる
+                    unsigned int h = (unsigned int)((int)ctx.clock * 73856093) ^ (unsigned int)((int)idx * 19349663) ^ (unsigned int)((int)k * 83492791);
+                    h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+                    float rx = ((h & 0xFFFFu) / 65535.0f) * 2.0f - 1.0f;
+                    float ry = (((h >> 16) & 0xFFFFu) / 65535.0f) * 2.0f - 1.0f;
+                    dx += rx * m.amount * weight; dy += ry * m.amount * weight;
+                    break;
+                }
+                case PMK_FACE_PLAYER: {
+                    float target = atan2f(ctx.playerY - pcy, ctx.playerX - pcx) + m.amount * 0.017453293f;
+                    float base = part.angle + part.parentTilt + dAng;
+                    float diff = target - base;
+                    while (diff > 3.14159265f) diff -= 6.2831853f;
+                    while (diff < -3.14159265f) diff += 6.2831853f;
+                    dAng += diff * weight;
+                    break;
+                }
+                default: break;
+            }
+        }
+        if (scaleMul < 0.05f) scaleMul = 0.05f;
+        if (scaleMul > 5.0f) scaleMul = 5.0f;
+        if (alphaMul < 0.0f) alphaMul = 0.0f;
+        part.motionDX = dx; part.motionDY = dy; part.motionAngle = dAng;
+        part.motionScale = scaleMul; part.motionAlpha = alphaMul;
+    }
+}
+
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
@@ -1080,13 +1378,20 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // 複合オブジェクトのパーツ追従 — 親を拡大したぶん(parentUniform)はパーツのサイズにも効くので、
         // 中心を出すときの半サイズにも同じ倍率を掛ける。掛け忘れると絵の位置が半サイズぶんずれる。
         float pm = part.scale * part.parentUniform;
-        int pcx = (int)(part.x + (part.width * pm) / 2.0f - cameraX);
-        int pcy = (int)(part.y + (part.height * pm) / 2.0f - cameraY);
+        // モーションの位置の上乗せ（親の倍率・傾きを掛けたワールドのずれ）。モーション無しなら 0
+        float mdx = 0.0f, mdy = 0.0f;
+        if (part.motionDX != 0.0f || part.motionDY != 0.0f) GetPartMotionWorldOffset(part, mdx, mdy);
+        int pcx = (int)(part.x + mdx + (part.width * pm) / 2.0f - cameraX);
+        int pcy = (int)(part.y + mdy + (part.height * pm) / 2.0f - cameraY);
         // 新アセット移行対応 — パーツ画像(640x640)をパーツ定義の width/height へ収める倍率を掛ける
         float partFit = ComputeFitScale(part.handle, (float)part.width, (float)part.height);
         // 親の傾きはパーツ自身の角度に加算する。剛体として親と一緒に回るのが既定の挙動で、
         // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
-        DrawRotaGraph(pcx, pcy, partFit * pm, part.angle + part.parentTilt, part.handle, TRUE);
+        // モーションの回転・大きさ・不透明度は、その上に重ねる（中心は動かさない）。
+        bool motionAlpha = (part.motionAlpha < 0.999f);
+        if (motionAlpha) SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255.0f * part.motionAlpha));
+        DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, part.angle + part.parentTilt + part.motionAngle, part.handle, TRUE);
+        if (motionAlpha) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
 }
 
@@ -1626,6 +1931,13 @@ struct Enemy {
     // 本体が追尾をやめる条件（反転など）を足すたびに「砲身は自分を向いているのに
     // 弾は別の方向へ飛ぶ」という食い違いが生まれていた。
     float aimAngle = 0.0f;
+
+    // パーツのモーションへ伝える「敵の行動」の回数。表示専用で、AIの判断には使わない。
+    // パーツ側は「前フレームから増えたか」で、攻撃・ジャンプ・被弾の瞬間を検出する。
+    // 履歴(EnemyState)には入れない（巻き戻しても減らさない。モーションの発火は巻き戻しの対象外）。
+    int actionSeq = 0; // 攻撃した回数（弾を撃つ・突進や飛びかかりに入る・体当たり）
+    int jumpSeq = 0;   // ジャンプした回数
+    int hurtSeq = 0;   // 弾を受けた回数
 
     // 本体の絵を傾けない型（砲台の台座など）が使う「置かれたときの姿勢」。
     //
@@ -2170,6 +2482,35 @@ EditReaction GetGimmickEditReaction(const Gimmick& g) {
     r.movedY = g.y - g.editBaseY;
     r.moved  = ((g.editDirtyMask & EDIT_DIRTY_POS) != 0u);
     return r;
+}
+
+// ---- パーツのモーション — 敵の「いまの行動の段階」----
+//
+// 0=待機 1=予兆・溜め 2=行動中 3=後隙。型ごとに意味の違う auxState / customTimer から導く純関数。
+// 履歴（巻き戻し用）に入っている値だけで決まるので、巻き戻しても自動的に正しい段階になる。
+// 段階を持たない型（歩行・追跡・浮遊など）は常に0。パーツのモーションの「溜め中」「行動中」トリガーが使う。
+int GetEnemyActionPhase(const Enemy& e, const EnemyDef* edef) {
+    switch (e.type) {
+        case ENEMY_DASH_CHARGER: // 0待機 1溜め 2突進 3クールダウン
+        case ENEMY_POUNCER:      // 0追跡 1溜め 2飛行 3着地後
+            if (e.auxState == 1) return 1;
+            if (e.auxState == 2) return 2;
+            if (e.auxState == 3) return 3;
+            return 0;
+        case ENEMY_FALLER:       // 0待機 1(溜め→落下) 2クールダウン
+            if (e.auxState == 1) return (e.customTimer > 0.0f) ? 1 : 2;
+            if (e.auxState == 2) return 3;
+            return 0;
+        case ENEMY_STATIONARY:
+        case ENEMY_PATROL_SHOOTER:
+        case ENEMY_SPREAD_SHOOTER:
+        case ENEMY_AIMED_SHOOTER: { // 撃つ直前の20フレームを「溜め」とみなす（画面のズームの予兆と同じ長さ）
+            float interval = edef ? edef->actionInterval : 120.0f;
+            float remaining = interval - e.customTimer;
+            return (remaining > 0.0f && remaining <= 20.0f) ? 1 : 0;
+        }
+        default: return 0;
+    }
 }
 
 // ---- 複合オブジェクトのパーツ追従 — 親ごとの ParentPose の作り方 ----
@@ -7772,6 +8113,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (isGrounded && enemy.customTimer >= jumpInterval) {
                                 float jumpMag = (float)(-editorPlayerCaps.baseJumpPower) * jumpPowerMult;
                                 enemy.vy = -jumpMag;
+                                enemy.jumpSeq++; // パーツのモーション用の通知
                                 if (er.tilted) {
                                     // 編集で向けられた方向へ跳ぶ。真上が基準なので、
                                     // 未編集なら従来どおりの真上ジャンプと完全に一致する。
@@ -7865,6 +8207,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
                                 // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
@@ -7959,6 +8302,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
                                     // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
                                     if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                                     for (int i = 0; i < MAX_BULLETS; i++) {
                                         if (!bullets[i].isActive) {
                                             bullets[i].isActive = true;
@@ -8076,6 +8420,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 拡大されて重くなった個体は壁を越えられない（段差で足止めできる）
                                 if (wallAhead && std::abs(enemy.vy) < 1.0f && !er.enlarged) {
                                     enemy.vy = (float)editorPlayerCaps.baseJumpPower * jumpPowerMult;
+                                    enemy.jumpSeq++; // パーツのモーション用の通知
                                 }
                             } else {
                                 enemy.vx = 0.0f;
@@ -8495,6 +8840,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float ecySp = enemy.y + (float)enemy.hitboxHeight * enemy.scale * 0.5f;
                                 // 発射音は斉射ごとに1回。弾ごとに鳴らすと拡散弾の本数だけ音が重なる
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                                 for (int a = 0; a < spreadCount; a++) {
                                     // 全方位モード：0～2πをspreadCount等分し、そこにspinを加算した向きへ撃つ。
                                     // 正面ファンモード：-spreadAngle ～ +spreadAngle を等間隔に割り振る（従来どおり）。
@@ -8622,6 +8968,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 砲台系の敵が弾を撃っても一切音が出なかった（se_shoot が死んでいた）。
                                 // 拡散弾で重ならないよう、弾ごとではなく斉射ごとに1回だけ鳴らす。
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
                                         bullets[i].isActive = true;
@@ -8783,6 +9130,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                                 // テレポート音。専用の音源がありながら一度も鳴らされていなかった。
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
 
                                 // 着地先が壁の中でないか簡易チェック。壁の中なら今回は見送り、customTimerを
                                 // リセットしないので次フレームに自動で再抽選される
@@ -8857,6 +9205,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!enemy.auxFlag && enemy.customTimer >= offDuration) {
                                 enemy.auxFlag = true; enemy.customTimer = 0.0f;
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                             }
                             else if (enemy.auxFlag && enemy.customTimer >= onDuration) {
                                 enemy.auxFlag = false; enemy.customTimer = 0.0f;
@@ -9162,7 +9511,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     }
                                     enemy.auxState = 2;
                                     enemy.customTimer = 0.0f;
+                                    enemy.jumpSeq++; // パーツのモーション用の通知（飛びかかりはジャンプでもある）
                                     if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                                 }
                             } else if (enemy.auxState == 2) {
                                 // --- 飛行中：速度には触らない。落下に転じてから接地したら着地とみなす ---
@@ -9420,6 +9771,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 headingW = candidate;
                                 enemy.auxF3 += 1.0f;
                                 if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
                             }
 
                             // 重力ぶんは読まずに毎フレーム速度を組み直すので、落下は自然に打ち消される。
@@ -9552,6 +9904,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // ドラッグで本体を掴んで動かしている最中にパーツだけ置き去りになる既存の不具合も、これで直る。
             if (!enemy.parts.empty()) {
                 ApplyPartsParentPose(enemy.parts, MakeEnemyPose(enemy, FindEnemyDef(enemy.assetId)));
+
+                // パーツのモーション（Lab_Editor の「動き」）。敵の「いま」を渡して、見た目と判定への上乗せを求める。
+                // 位置の上乗せは x/y には混ぜないので、下の胴体の追従（上書き）とも干渉しない。
+                {
+                    const EnemyDef* mdef = FindEnemyDef(enemy.assetId);
+                    EditReaction mer = GetEnemyEditReaction(enemy, mdef);
+                    PartMotionCtx mctx;
+                    mctx.clock = BehaviorInterpreter::scriptTimeCounter;
+                    mctx.isEnemy = true;
+                    mctx.actionPhase = GetEnemyActionPhase(enemy, mdef);
+                    mctx.actionSeq = enemy.actionSeq; mctx.jumpSeq = enemy.jumpSeq; mctx.hurtSeq = enemy.hurtSeq;
+                    mctx.speed = sqrtf(enemy.vx * enemy.vx + enemy.vy * enemy.vy);
+                    mctx.playerX = player.x + (player.width * player.scale) * 0.5f;
+                    mctx.playerY = player.y + (player.height * player.scale) * 0.5f;
+                    mctx.parentX = enemy.x + (enemy.hitboxWidth * enemy.scale) * 0.5f;
+                    mctx.parentY = enemy.y + (enemy.hitboxHeight * enemy.scale) * 0.5f;
+                    mctx.flipped = (enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u;
+                    mctx.tilted = mer.tilted;
+                    UpdatePartMotions(enemy.parts, mctx);
+                }
 
                 // 跳ね回る節足敵の胴体 — 頭の通った跡を一定距離ごとに辿って並ぶ。
                 //
@@ -9759,7 +10131,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
             // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
-            if (!item.parts.empty()) ApplyPartsParentPose(item.parts, MakeItemPose(item));
+            if (!item.parts.empty()) {
+                ApplyPartsParentPose(item.parts, MakeItemPose(item));
+                // パーツのモーション。アイテムには敵の行動が無いので、常時・プレイヤーが近いとき等のトリガーだけが効く
+                PartMotionCtx ictx;
+                ictx.clock = BehaviorInterpreter::scriptTimeCounter;
+                ictx.playerX = player.x + (player.width * player.scale) * 0.5f;
+                ictx.playerY = player.y + (player.height * player.scale) * 0.5f;
+                ictx.parentX = item.x + item.width * 0.5f; ictx.parentY = item.y + item.height * 0.5f;
+                UpdatePartMotions(item.parts, ictx);
+            }
         }
 
         // 3. 弾の更新（巻き戻し vs 通常物理）
@@ -10269,7 +10650,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 gim.lastDeltaY = gim.y - beforeGimY;
             }
             // 複合オブジェクトのパーツ追従 — 毎フレーム必ず通る場所でワールド座標を組み直す
-            if (!gim.parts.empty()) ApplyPartsParentPose(gim.parts, MakeGimmickPose(gim));
+            if (!gim.parts.empty()) {
+                ApplyPartsParentPose(gim.parts, MakeGimmickPose(gim));
+                // パーツのモーション。ギミックには敵の行動が無いので、常時・プレイヤーが近いとき等のトリガーだけが効く
+                PartMotionCtx gctx;
+                gctx.clock = BehaviorInterpreter::scriptTimeCounter;
+                gctx.playerX = player.x + (player.width * player.scale) * 0.5f;
+                gctx.playerY = player.y + (player.height * player.scale) * 0.5f;
+                gctx.parentX = gim.x + gim.spriteWidth * 0.5f; gctx.parentY = gim.y + gim.spriteHeight * 0.5f;
+                UpdatePartMotions(gim.parts, gctx);
+            }
         }
 
         // プレイヤーが能動的に使う画面エフェクト操作（敵/ギミックの演出より後に適用し、プレイヤーの意図を優先する）
@@ -10478,6 +10868,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             {
                                 const EnemyDef* edef = FindEnemyDef(enemy.assetId);
                                 if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
 
                                 // 攻撃するたびに胴体を消費する敵（いもむし）の処理。
                                 // 尾＝parts配列の末尾側なので、後ろから探して最初に見つかった生存パーツを落とす。
@@ -10543,6 +10934,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         break;
                                     }
                                     enemy.hp--;
+                                    enemy.hurtSeq++; // パーツのモーション用の通知
                                     const EnemyDef* edef = FindEnemyDef(enemy.assetId);
                                     // Feature: Composite Multi-Part Objects (Parts-M6) — OnDamaged/OnDeathの発火（ENEMY_CUSTOM_SCRIPTのみ。
                                     // scriptState(OnSpawn用)とは別のreactiveStateを使うため、通常挙動のForeverループは止まらない）

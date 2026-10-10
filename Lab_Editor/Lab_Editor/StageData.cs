@@ -1107,6 +1107,11 @@ public class PartDef
     // このパーツ専用のBehaviorScript（OnSpawn/OnDamaged/OnDeath）
     // このパーツだけに適用される、ビジュアルスクリプトのJSON AST（ブロック構造）。
     public JArray script { get; set; } = new JArray();
+    // このパーツのモーション一覧（「いつ・どんな動き」。PartMotion.cs 参照）。
+    // 【重要】C++側 PartDef.motions と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    public List<PartMotion> motions { get; set; } = new();
+    // 空のときは JSON に出さない（モーションを使っていない大半のパーツのJSONを膨らませないため）
+    public bool ShouldSerializemotions() => motions != null && motions.Count > 0;
 }
 
 // アセット（敵・ギミック・アイテム・タイル・サウンド・アニメーション・コモンイベント）の
