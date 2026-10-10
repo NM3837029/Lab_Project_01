@@ -38,6 +38,7 @@ public class AssetManagerPageControl : UserControl
     public event SizeEditRequestHandler? SizeEditRequested;
     public event BehaviorScriptEditRequestHandler? BehaviorScriptEditRequested;
     public event PartsEditRequestHandler? PartsEditRequested;
+    public event EnemyTuneRequestHandler? EnemyTuneRequested;
     public event CommonEventEditRequestHandler? CommonEventEditRequested;
 
     // assets.json等が置かれているアセットフォルダへのパス（コンストラクタで渡され、以後変更しない）
@@ -417,12 +418,15 @@ public class AssetManagerPageControl : UserControl
         // 機能: ブロック(パズル)組み立て式の挙動スクリプティング (M4) — ブロックエディタ画面を開くボタン
         var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
+        // 敵の動きを、日本語の項目名・単位・説明つきのスライダーと、プレビューで調整する画面を開くボタン
+        var btnEnemyTune = new Button { Text = "🎛 敵の動きを調整", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(232, 244, 255) };
+        btnEnemyTune.Click += (s, e) => BtnEnemyTune_Click();
         // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— コンボボックスの中から数字と文字が
         // 並んだ選択肢を選ぶのではなく、アイコン・名前・説明文が並んだカード一覧をクリックして
         // type_enumを選べるようにするためのボタン
         var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
-        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnTypeCardPicker });
+        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnEnemyTune, btnTypeCardPicker });
 
         pnlBottom.Controls.Add(flowBottomLeft);
         pnlBottom.Controls.Add(flowBottomRight);
@@ -1025,6 +1029,41 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // 一致させる必要がある（配列側の定義を変更した場合はここも合わせて変更しないと判定がずれる）。
     private const int CustomScriptEnemyType = 20;
     private const int CustomScriptGimmickType = 24;
+
+    // いまの編集内容を、確認ダイアログなしでアセットフォルダへ書き出す（「敵の動きを調整」の「ゲームで試す」用）。
+    // 通常の保存(BtnSave_Click)と違って、警告の確認もメッセージも出さず、画面も閉じない。失敗したら理由を返す。
+    public bool SaveAssetsQuietly(out string error)
+    {
+        error = "";
+        try
+        {
+            assets.Enemies = ReadEnemies();
+            assets.Gimmicks = ReadGimmicks();
+            assets.Items = ReadItems();
+            assets.CommonEvents = _commonEvents;
+            assets.SaveToFolder(assetsPath);
+            return true;
+        }
+        catch (Exception ex) { error = ex.Message; return false; }
+    }
+
+    // 「🎛 敵の動きを調整」。選んでいる敵の挙動パラメータを、専用の画面で調整する。
+    private void BtnEnemyTune_Click()
+    {
+        if (dgvEnemies.SelectedRows.Count == 0)
+        {
+            MessageBox.Show("調整したい敵の行を選んでから押してください。", "敵の動きを調整", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        var row = dgvEnemies.SelectedRows[0];
+        var def = GetOrCreateEnemyParams(row);
+        int typeEnum = GetSelectedTypeEnum(row);
+        EnemyTuneRequested?.Invoke($"敵: {row.Cells["id"].Value}", row.Cells["id"].Value?.ToString() ?? "", def, typeEnum, () =>
+        {
+            // 右の数値欄にも、調整した値を反映する
+            UpdateBehaviorParamsPanel(dgvEnemies, AssetKind.Enemy);
+        });
+    }
 
     private void BtnBehaviorScript_Click()
     {

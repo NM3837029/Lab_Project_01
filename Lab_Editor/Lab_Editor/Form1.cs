@@ -901,6 +901,38 @@ public partial class Form1 : Form
 
     // 指定したステージファイル名を引数としてゲーム本体(exe)を起動する共通処理。
     // 起動前にexeの存在・ステージファイル名の指定有無をチェックし、問題があればエラーメッセージを表示する。
+    // 「敵の動きを調整」の「ゲームで試す」。調整中の敵を1体だけ置いた小さなステージを作って、ゲームを起動する。
+    // 調整した値をゲームが読めるよう、先にアセット定義を保存する（確認してから）。
+    private void TestPlayEnemy(AssetManagerPageControl rootPage, string enemyId)
+    {
+        if (string.IsNullOrEmpty(enemyId)) return;
+        if (MessageBox.Show("ゲームで試すには、いまの内容でアセット定義を保存する必要があります。\n保存して、この敵を1体だけ置いたテスト用ステージで起動しますか？",
+                            "ゲームで試す", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (!rootPage.SaveAssetsQuietly(out string err))
+        { MessageBox.Show("保存できませんでした:\n" + err, "ゲームで試す", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+
+        // 地面は、衝突するタイルのうち最初のものを使う（プロジェクトごとにタイル番号が違うため）
+        int floorTile = assets.Tiles.FirstOrDefault(t => t.collidable && !t.deadly)?.id ?? 1;
+        var rows = new JArray();
+        for (int r = 0; r < 15; r++) rows.Add(new JArray(Enumerable.Repeat(r >= 13 ? floorTile : 0, 40)));
+        JArray Blank() { var a = new JArray(); for (int r = 0; r < 15; r++) a.Add(new JArray(Enumerable.Repeat(0, 40))); return a; }
+        var stage = new JObject
+        {
+            ["map_w"] = 40, ["map_h"] = 15,
+            ["player_start"] = new JObject { ["x"] = 64.0, ["y"] = 352.0 },
+            ["player_capabilities"] = new JObject { ["canDoubleJump"] = false, ["canDash"] = true, ["canShootFireball"] = true, ["canFly"] = false, ["baseJumpPower"] = -13, ["baseSpeed"] = 4.0 },
+            ["allowed_edit_tools"] = new JObject { ["rewindEnabled"] = true, ["pauseEnabled"] = true, ["fastForwardEnabled"] = true, ["screenEffectEnabled"] = true, ["objectEditEnabled"] = true, ["cutEnabled"] = true },
+            ["map"] = rows, ["deco_back"] = Blank(), ["deco_front"] = Blank(),
+            ["backgrounds"] = new JArray(), ["triggers"] = new JArray(),
+            ["enemies"] = new JArray { new JObject { ["id"] = enemyId, ["x"] = 420.0, ["y"] = 352.0, ["scale"] = 1.0 } },
+            ["gimmicks"] = new JArray(), ["items"] = new JArray(), ["platforms"] = new JArray(),
+            ["test_mode"] = true,
+        };
+        string path = Path.Combine(stagesPath, "_enemy_tune.json");
+        File.WriteAllText(path, stage.ToString(Newtonsoft.Json.Formatting.Indented));
+        LaunchGameWithFile("_enemy_tune.json");
+    }
+
     private void LaunchGameWithFile(string stageFileName)
     {
         if (!File.Exists(exePath))
@@ -1129,8 +1161,20 @@ public partial class Form1 : Form
             shell.NavigateTo(page, "コモンイベント編集", page.PrimaryActionButton, page.SecondaryActionButton);
         }
 
+        // 「敵の動きを調整」への遷移要求を処理するローカル関数。考え方は上と同じ。
+        AssetManagerPageControl? tuneRoot = null; // 「ゲームで試す」でアセットを保存するために、ルートページを覚えておく
+        void HandleEnemyTuneRequest(string label, string enemyId, EnemyDef def, int typeEnum, Action onApplied)
+        {
+            var page = new EnemyTunerPageControl(label, def, typeEnum);
+            page.TestPlayRequested += (s, ev) => TestPlayEnemy(tuneRoot!, enemyId);
+            page.Saved += (s, ev) => { onApplied(); shell.GoBack(); };
+            page.Cancelled += (s, ev) => shell.GoBack();
+            shell.NavigateTo(page, "敵の動きを調整", page.PrimaryActionButton, page.SecondaryActionButton);
+        }
+
         // ルート（最初に表示される）ページ = アセット管理画面本体。
         var rootPage = new AssetManagerPageControl(assetsPath, assets);
+        tuneRoot = rootPage;
         // ルートページで保存/キャンセルされたら、シェル全体をその結果でダイアログとして閉じる。
         rootPage.Saved += (s, ev) => { shell.DialogResult = DialogResult.OK; shell.Close(); };
         rootPage.Cancelled += (s, ev) => { shell.DialogResult = DialogResult.Cancel; shell.Close(); };
@@ -1139,6 +1183,7 @@ public partial class Form1 : Form
         rootPage.SizeEditRequested += HandleSizeRequest;
         rootPage.BehaviorScriptEditRequested += HandleBehaviorScriptRequest;
         rootPage.PartsEditRequested += HandlePartsEditRequest;
+        rootPage.EnemyTuneRequested += HandleEnemyTuneRequest;
         rootPage.CommonEventEditRequested += (ev, onSaved) => HandleCommonEventRequest(rootPage, ev, onSaved);
 
         // シェルの最初のページとしてルートページを表示する。

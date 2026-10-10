@@ -39,6 +39,7 @@ Lab_Editor/**/obj/
 /imgui.ini
 # エディタの「ここからプレイ」が書き出す一時ステージ
 /assets/stages/_test_play.json
+/assets/stages/_enemy_tune.json
 
 # ---- 配布物 ----
 /dist/

@@ -56,6 +56,16 @@ public class AssetManagerForm : Form
             using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultParts);
         };
+        // 敵の動きの調整要求 → 調整画面をモーダル表示し、OKなら呼び出し側へ知らせる（キャンセルで値は元へ戻る）。
+        page.EnemyTuneRequested += (label, enemyId, def, typeEnum, onApplied) =>
+        {
+            using var form = new Form { Text = "敵の動きを調整", Size = new Size(1180, 760), StartPosition = FormStartPosition.CenterParent };
+            var tuner = new EnemyTunerPageControl(label, def, typeEnum);
+            tuner.Saved += (s, e) => { form.DialogResult = DialogResult.OK; form.Close(); };
+            tuner.Cancelled += (s, e) => { form.DialogResult = DialogResult.Cancel; form.Close(); };
+            form.Controls.Add(tuner);
+            if (form.ShowDialog(this) == DialogResult.OK) onApplied();
+        };
         // コモンイベントの編集要求 → CommonEventEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
         page.CommonEventEditRequested += (ev, onSaved) =>
         {

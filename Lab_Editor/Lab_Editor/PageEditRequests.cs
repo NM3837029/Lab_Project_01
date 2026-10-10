@@ -50,6 +50,14 @@ public delegate void BehaviorScriptEditRequestHandler(string label, JArray initi
 // onSaved        : 編集確定時に新しいパーツ一覧を受け取るコールバック
 public delegate void PartsEditRequestHandler(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, Action<List<PartDef>> onSaved);
 
+// 敵の動きの調整要求（「敵の動きを調整」画面）
+// label    : 編集対象を示すラベル文字列
+// enemyId  : 敵のID（「ゲームで試す」でその敵を置くのに使う）
+// def      : 調整する敵の定義。画面はこの EnemyDef の数値を直接書き換える（キャンセルすると開いたときの値へ戻す）
+// typeEnum : 敵の行動タイプ（どの調整項目を出すかを決める）
+// onApplied: 「この内容にする」で閉じたときに呼ぶ（呼び出し側の表示を更新するため）
+public delegate void EnemyTuneRequestHandler(string label, string enemyId, EnemyDef def, int typeEnum, Action onApplied);
+
 // コモンイベント編集要求
 // ev      : 編集対象のコモンイベント定義
 // onSaved : 編集確定時に新しい定義を受け取るコールバック
