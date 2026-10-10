@@ -892,6 +892,20 @@ public class EnemyDef
     public float zoomAmplitude { get; set; } = -1.0f;        // ズーム演出の振幅
     public float zoomFrequency { get; set; } = -1.0f;        // ズーム演出の周期（速さ）
 
+    // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
+    // C++側 EnemyDef と対応する。すべて -1 が「従来どおり」。ここに無いと保存し直した瞬間にJSONから消える。
+    public float waveShape { get; set; } = -1.0f;           // 周期的な動きの波形（-1/0=なめらか 1=三角 2=カクカク）
+    public float maxScale { get; set; } = -1.0f;            // 大きさが変わる敵の最大スケール（-1=制限なし）
+    public float tintColorR { get; set; } = -1.0f;          // 色変化の敵が画面を寄せる色のR(0-255)。R/G/Bがそろって0以上で有効
+    public float tintColorG { get; set; } = -1.0f;
+    public float tintColorB { get; set; } = -1.0f;
+    public float counterFilter { get; set; } = -1.0f;       // 打ち消せる自分の色フィルタ（-1=自動 0=なし 1=赤 2=緑 3=青）
+    public float brightenMax { get; set; } = -1.0f;         // 暗転の敵を反転したときの最大の明るさ（従来1.7）
+    public float counterBrightness { get; set; } = -1.0f;   // 暗転を打ち消せる自分の明るさのしきい値（従来1.3）
+    public float chargeWarnFrames { get; set; } = -1.0f;    // 射撃の予兆の長さ（従来20フレーム）
+    public float chargeWarnZoom { get; set; } = -1.0f;      // 射撃の予兆のズーム量（従来0.06）
+    public float aimJitter { get; set; } = -1.0f;           // 射撃の狙いのブレ（ラジアン。-1/0=ブレなし）
+
     // ==== 敵の動き大幅改良プラン Phase 1 ====
     public float shockwaveRadius { get; set; } = -1.0f;          // 衝撃波（着地時等）の効果範囲半径
     public float fastForwardJitter { get; set; } = -1.0f;        // 早送り中に加えるランダムな揺らぎの大きさ

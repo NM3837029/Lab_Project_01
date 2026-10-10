@@ -257,6 +257,19 @@ struct EnemyDef {
     float tintStrength = -1.0f;      // COLOR_SHIFTERの色シフト強度
     float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTORのズーム振幅
     float zoomFrequency = -1.0f;     // ZOOM_DISRUPTORのズーム周波数
+    // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
+    // すべて -1 が「従来どおり」。型ごとの既定値は使う側で決めている（-1 のままなら以前と1ミリも変わらない）。
+    float waveShape = -1.0f;         // 周期的な動きの波形（FLOATER/SIZE_SHIFTER/TEMPO_WARPER/ZOOM_DISRUPTOR）。-1/0=なめらか 1=三角 2=カクカク
+    float maxScale = -1.0f;          // SIZE_SHIFTERの最大スケール（-1=制限なし）
+    float tintColorR = -1.0f;        // COLOR_SHIFTERが画面を寄せる色(0-255)。R/G/Bの3つがそろって0以上のとき有効（-1=従来：傾けで赤→緑→青）
+    float tintColorG = -1.0f;
+    float tintColorB = -1.0f;
+    float counterFilter = -1.0f;     // COLOR_SHIFTERを打ち消せる自分の色フィルタ。-1=自動（寄せる色と同じ）0=打ち消せない 1=赤 2=緑 3=青
+    float brightenMax = -1.0f;       // BRIGHTNESS_PHANTOMを反転したときの最大の明るさ（従来1.7）
+    float counterBrightness = -1.0f; // BRIGHTNESS_PHANTOMを打ち消せる自分の明るさのしきい値（従来1.3）
+    float chargeWarnFrames = -1.0f;  // STATIONARY/PATROL_SHOOTERの発射前の予兆の長さ(フレーム。従来20)
+    float chargeWarnZoom = -1.0f;    // その予兆で画面をズームインさせる量（従来0.06）
+    float aimJitter = -1.0f;         // STATIONARY/AIMED_SHOOTERの狙いのブレ（ラジアン。-1/0=ブレなし）
 
     // ==== 敵の動き大幅改良プラン Phase 1 ====
     float shockwaveRadius = -1.0f;       // FALLERの着地ショックウェイブ半径(px)
@@ -818,6 +831,17 @@ void LoadAssetDefinitions() {
                     def.tintStrength = e.value("tintStrength", -1.0f);
                     def.zoomAmplitude = e.value("zoomAmplitude", -1.0f);
                     def.zoomFrequency = e.value("zoomFrequency", -1.0f);
+                    def.waveShape = e.value("waveShape", -1.0f);
+                    def.maxScale = e.value("maxScale", -1.0f);
+                    def.tintColorR = e.value("tintColorR", -1.0f);
+                    def.tintColorG = e.value("tintColorG", -1.0f);
+                    def.tintColorB = e.value("tintColorB", -1.0f);
+                    def.counterFilter = e.value("counterFilter", -1.0f);
+                    def.brightenMax = e.value("brightenMax", -1.0f);
+                    def.counterBrightness = e.value("counterBrightness", -1.0f);
+                    def.chargeWarnFrames = e.value("chargeWarnFrames", -1.0f);
+                    def.chargeWarnZoom = e.value("chargeWarnZoom", -1.0f);
+                    def.aimJitter = e.value("aimJitter", -1.0f);
                     def.shockwaveRadius = e.value("shockwaveRadius", -1.0f);
                     def.fastForwardJitter = e.value("fastForwardJitter", -1.0f);
                     def.fastForwardAttackMult = e.value("fastForwardAttackMult", -1.0f);
@@ -2484,6 +2508,14 @@ EditReaction GetGimmickEditReaction(const Gimmick& g) {
     return r;
 }
 
+// 周期的な動きの波形（-1〜1）。x はラジアン。shape: -1/0=なめらか(sin) 1=三角 2=カクカク（角の丸い矩形）。
+// shape が 0 以下（未設定を含む）のときは sinf(x) そのものを返すので、従来の値と1ビットも変わらない。
+inline float EnemyWave(float x, float shapeParam) {
+    int shape = (shapeParam > 0.5f) ? (int)(shapeParam + 0.5f) : 0;
+    if (shape == 0) return sinf(x);
+    return PartMotionWave(x / 6.2831853f, shape);
+}
+
 // ---- パーツのモーション — 敵の「いまの行動の段階」----
 //
 // 0=待機 1=予兆・溜め 2=行動中 3=後隙。型ごとに意味の違う auxState / customTimer から導く純関数。
@@ -2507,7 +2539,8 @@ int GetEnemyActionPhase(const Enemy& e, const EnemyDef* edef) {
         case ENEMY_AIMED_SHOOTER: { // 撃つ直前の20フレームを「溜め」とみなす（画面のズームの予兆と同じ長さ）
             float interval = edef ? edef->actionInterval : 120.0f;
             float remaining = interval - e.customTimer;
-            return (remaining > 0.0f && remaining <= 20.0f) ? 1 : 0;
+            float warn = (edef && edef->chargeWarnFrames > 0.0f) ? edef->chargeWarnFrames : 20.0f;
+            return (remaining > 0.0f && remaining <= warn) ? 1 : 0;
         }
         default: return 0;
     }
@@ -8208,15 +8241,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 発射直前（残り20フレーム以内）は溜めエフェクトとして画面をわずかにズームインさせる
                             float remainingS = shootInterval - enemy.customTimer;
                             float distToPlayerS = sqrtf((pCenterXs - eCenterXs) * (pCenterXs - eCenterXs) + (pCenterYs - eCenterYs) * (pCenterYs - eCenterYs));
-                            if (remainingS <= 20.0f && remainingS > 0.0f && distToPlayerS < 500.0f) {
-                                float chargeTs = 1.0f - (remainingS / 20.0f);
-                                Screen_SetZoom(1.0f + chargeTs * 0.06f);
+                            // 予兆の長さとズーム量（従来 20フレーム・0.06。Lab_Editor で変えられる）
+                            float warnFramesS = (edef && edef->chargeWarnFrames > 0.0f) ? edef->chargeWarnFrames : 20.0f;
+                            float warnZoomS = (edef && edef->chargeWarnZoom >= 0.0f) ? edef->chargeWarnZoom : 0.06f;
+                            if (remainingS <= warnFramesS && remainingS > 0.0f && distToPlayerS < 500.0f) {
+                                float chargeTs = 1.0f - (remainingS / warnFramesS);
+                                Screen_SetZoom(1.0f + chargeTs * warnZoomS);
                             }
 
                             if (enemy.customTimer >= shootInterval) {
                                 // 狙いは毎フレーム上で決めてある。ここではその向きへ撃つだけ。
-                                float dirXs = cosf(enemy.aimAngle);
-                                float dirYs = sinf(enemy.aimAngle);
+                                float shotAngleS = enemy.aimAngle;
+                                // 狙いのブレ（Lab_Editor で指定。撃った一発にだけ乗せる＝砲身は震えない）
+                                if (edef && edef->aimJitter > 0.0f) shotAngleS += ((float)(rand() % 201 - 100) / 100.0f) * edef->aimJitter;
+                                float dirXs = cosf(shotAngleS);
+                                float dirYs = sinf(shotAngleS);
                                 // 弾を体の外へ出してから撃つ（砲口の位置）。
                                 //
                                 // 従来は自分の中心にそのまま湧かせていた。敵の弾はプレイヤーにしか当たらないので
@@ -8311,9 +8350,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (enemy.customTimer > 0) enemy.customTimer -= 1.0f * ets * (isFastForward ? ffAtkMultP : 1.0f);
 
                                 // 発射直前（残り20フレーム以内）は溜めエフェクトとして画面をわずかにズームインさせる
-                                if (enemy.customTimer <= 20.0f && enemy.customTimer > 0.0f && distX < 500.0f && distY < 500.0f) {
-                                    float chargeTp = 1.0f - (enemy.customTimer / 20.0f);
-                                    Screen_SetZoom(1.0f + chargeTp * 0.06f);
+                                float warnFramesP = (edef && edef->chargeWarnFrames > 0.0f) ? edef->chargeWarnFrames : 20.0f;
+                                float warnZoomP = (edef && edef->chargeWarnZoom >= 0.0f) ? edef->chargeWarnZoom : 0.06f;
+                                if (enemy.customTimer <= warnFramesP && enemy.customTimer > 0.0f && distX < 500.0f && distY < 500.0f) {
+                                    float chargeTp = 1.0f - (enemy.customTimer / warnFramesP);
+                                    Screen_SetZoom(1.0f + chargeTp * warnZoomP);
                                 }
 
                                 if (enemy.customTimer <= 0) {
@@ -8982,6 +9023,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     dirXa = cosf(shaken);
                                     dirYa = sinf(shaken);
                                 }
+                                // 狙いのブレ（Lab_Editor で指定。暗転のブレとは別に、いつでも乗る）
+                                if (edef && edef->aimJitter > 0.0f) {
+                                    float shakeJ = ((float)(rand() % 201 - 100) / 100.0f) * edef->aimJitter;
+                                    float baseJ = atan2f(dirYa, dirXa) + shakeJ;
+                                    dirXa = cosf(baseJ);
+                                    dirYa = sinf(baseJ);
+                                }
 
                                 // 弾を体の外（砲口の位置）から撃つ。理由はSTATIONARY側の同じ処理のコメント参照。
                                 // 反転させた砲台の弾は他の敵に当たるようになるので、自分にも当たってしまう。
@@ -9074,7 +9122,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
 
                             // 傾けられていると浮遊の軸そのものが倒れ、縦揺れが斜め・横揺れに変わる
-                            float swing = sinf(enemy.customTimer * frequency) * amplitude;
+                            float swing = EnemyWave(enemy.customTimer * frequency, edef ? edef->waveShape : -1.0f) * amplitude;
                             float swingX = 0.0f;
                             float swingY = swing;
                             if (er.tilted) {
@@ -9317,8 +9365,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float phase = enemy.customTimer * frequency + er.tilt;
                                 if (erFlipEdited) phase = -phase; // 向き反転で膨張と収縮が入れ替わる
                                 if (er.tilted) erTiltHandled = true;
-                                enemy.scale = 1.0f + sinf(phase) * amplitude;
+                                enemy.scale = 1.0f + EnemyWave(phase, edef ? edef->waveShape : -1.0f) * amplitude;
                                 if (enemy.scale < minSc) enemy.scale = minSc;
+                                // 最大の大きさ（Lab_Editor の「敵の動きを調整」で設定。-1なら制限なし＝従来どおり）
+                                if (edef && edef->maxScale > 0.0f && enemy.scale > edef->maxScale) enemy.scale = edef->maxScale;
                             }
                             break;
                         }
@@ -9346,7 +9396,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!(enemy.editDirtyMask & EDIT_DIRTY_SPEED)) {
                                 if (er.tilted) erTiltHandled = true;
                                 enemy.speedScale = tempoMin + (tempoMax - tempoMin)
-                                                 * (0.5f + 0.5f * sinf(enemy.customTimer * frequency + er.tilt));
+                                                 * (0.5f + 0.5f * EnemyWave(enemy.customTimer * frequency + er.tilt, edef ? edef->waveShape : -1.0f));
                             }
                             float speed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.4f) * erMass;
                             if (std::abs(player.x - enemy.x) < triggerRangeTw) {
@@ -9386,12 +9436,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distB = std::abs(player.x - enemy.x);
                             // プレイヤーが明転(C)を使っている間は打ち消される。
                             // cHeldThisFrameは後段で判定されるため、1フレーム前の結果であるfxCurBrightを見る。
-                            bool counteredBp = (fxCurBright > 1.3f);
+                            // 打ち消せる明るさのしきい値（従来1.3。Lab_Editor で変えられる）と、反転時の明るさの増分（従来 +0.7）
+                            float counterBr = (edef && edef->counterBrightness > 0.0f) ? edef->counterBrightness : 1.3f;
+                            float brightenGain = (edef && edef->brightenMax > 1.0f) ? (edef->brightenMax - 1.0f) : 0.7f;
+                            bool counteredBp = (fxCurBright > counterBr);
                             if (distB < range && !counteredBp) {
                                 float t = 1.0f - (distB / range);
                                 if (erFlipEdited) {
                                     // 反転すると暗転ではなく明転させてくる
-                                    Screen_SetBrightness(1.0f + t * 0.7f);
+                                    Screen_SetBrightness(1.0f + t * brightenGain);
                                 } else {
                                     Screen_SetBrightness(1.0f - t * (1.0f - brightnessMin));
                                 }
@@ -9422,17 +9475,38 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distCol = std::abs(player.x - enemy.x);
                             // 傾けると押し付けてくる色が変わる（1=赤 / 2=緑 / 3=青）
                             int shiftColor = 1 + (((er.tiltSteps % 3) + 3) % 3);
-                            if (er.tilted) erTiltHandled = true;
+                            // 寄せる色を数値で指定されているとき（Lab_Editor の「敵の動きを調整」）。
+                            // 指定が無ければ従来どおり、傾けで赤→緑→青と切り替わる。
+                            bool customTint = edef && edef->tintColorR >= 0.0f && edef->tintColorG >= 0.0f && edef->tintColorB >= 0.0f;
+                            float tcR = 1.0f, tcG = 0.0f, tcB = 0.0f; // 寄せる色(0〜1)。赤のとき従来の式と同じ結果になる
+                            if (customTint) {
+                                tcR = edef->tintColorR / 255.0f; tcG = edef->tintColorG / 255.0f; tcB = edef->tintColorB / 255.0f;
+                                // 打ち消せるフィルタは、既定では「いちばん強い成分の色」（赤っぽければ赤フィルタ）
+                                shiftColor = (tcR >= tcG && tcR >= tcB) ? 1 : (tcG >= tcB ? 2 : 3);
+                            } else if (er.tilted) {
+                                erTiltHandled = true;
+                            }
+                            // 打ち消せる色フィルタ。-1=自動（寄せる色と同じ）0=打ち消せない 1=赤 2=緑 3=青
+                            int counterF = (edef && edef->counterFilter >= 0.0f) ? (int)(edef->counterFilter + 0.5f) : shiftColor;
                             // 同じ色を自分でも掛けていれば打ち消せる
-                            bool counteredCs = (playerColorFilter == shiftColor);
+                            bool counteredCs = (counterF != 0) && (playerColorFilter == counterF);
                             if (distCol < range && !counteredCs) {
                                 float t = 1.0f - (distCol / range);
-                                float dim = 1.0f - t * tintStrength;
-                                float keep = 1.0f;
-                                if (erFlipEdited) { float tmp = dim; dim = keep; keep = tmp; } // 反転で補色になる
-                                if (shiftColor == 1)      Screen_SetTint(keep, dim, dim);
-                                else if (shiftColor == 2) Screen_SetTint(dim, keep, dim);
-                                else                      Screen_SetTint(dim, dim, keep);
+                                if (customTint) {
+                                    // 各色成分を 1.0 から「寄せる色」へ向けて、強さ×距離ぶんだけ近づける。
+                                    // 赤(1,0,0)なら 緑・青 が dim、赤が 1.0 のままで、従来の式と一致する。
+                                    if (erFlipEdited) { tcR = 1.0f - tcR; tcG = 1.0f - tcG; tcB = 1.0f - tcB; } // 反転で補色になる
+                                    Screen_SetTint(1.0f - t * tintStrength * (1.0f - tcR),
+                                                   1.0f - t * tintStrength * (1.0f - tcG),
+                                                   1.0f - t * tintStrength * (1.0f - tcB));
+                                } else {
+                                    float dim = 1.0f - t * tintStrength;
+                                    float keep = 1.0f;
+                                    if (erFlipEdited) { float tmp = dim; dim = keep; keep = tmp; } // 反転で補色になる
+                                    if (shiftColor == 1)      Screen_SetTint(keep, dim, dim);
+                                    else if (shiftColor == 2) Screen_SetTint(dim, keep, dim);
+                                    else                      Screen_SetTint(dim, dim, keep);
+                                }
                             }
                             break;
                         }
@@ -9453,7 +9527,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             float distZ = std::abs(player.x - enemy.x);
                             if (distZ < range) {
                                 if (er.tilted) erTiltHandled = true;
-                                float wave = sinf(enemy.customTimer * frequency + er.tilt) * amplitude;
+                                float wave = EnemyWave(enemy.customTimer * frequency + er.tilt, edef ? edef->waveShape : -1.0f) * amplitude;
                                 if (er.flipped) wave = -wave; // 反転でズームアウト側へ歪む
                                 Screen_SetZoom(1.0f + wave);
                             }
