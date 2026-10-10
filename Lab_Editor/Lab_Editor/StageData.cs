@@ -906,6 +906,14 @@ public class EnemyDef
     public float chargeWarnZoom { get; set; } = -1.0f;      // 射撃の予兆のズーム量（従来0.06）
     public float aimJitter { get; set; } = -1.0f;           // 射撃の狙いのブレ（ラジアン。-1/0=ブレなし）
 
+    // 多彩行動（type 23）：行動のリストと、その選び方（"sequence"=順番 / "random"=ランダム / "weighted"=重み付き）。
+    // C++側 EnemyDef.actions / actionMode と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    public List<EnemyAction> actions { get; set; } = new();
+    public string actionMode { get; set; } = "sequence";
+    // 使っていない敵のJSONを膨らませないため、空・既定のときは出さない
+    public bool ShouldSerializeactions() => actions != null && actions.Count > 0;
+    public bool ShouldSerializeactionMode() => actionMode != "sequence";
+
     // ==== 敵の動き大幅改良プラン Phase 1 ====
     public float shockwaveRadius { get; set; } = -1.0f;          // 衝撃波（着地時等）の効果範囲半径
     public float fastForwardJitter { get; set; } = -1.0f;        // 早送り中に加えるランダムな揺らぎの大きさ

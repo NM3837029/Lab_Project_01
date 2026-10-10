@@ -199,6 +199,51 @@ struct PartInstance {
     float parentUniform = 1.0f;                      // パーツ自身の表示倍率・判定サイズに掛ける一様倍率
 };
 
+// ======================================================
+// 多彩行動（ENEMY_MULTI_ACTION）の「行動」1つぶん
+// ======================================================
+//
+// 型ごとの固定の動きしか持てなかった敵に、「何種類の行動をするか」を自由に決められる型を足す。
+// 敵は actions（行動のリスト）を、順番・ランダム・重み付きのどれかで切り替えながら繰り返す。
+// 1つの行動は「予兆(warn) → 行動中(duration) → 後隙(recover)」の3段階で、
+// この段階がそのままパーツのモーションの「溜めているとき」「行動中」トリガーに繋がる
+// （GetEnemyActionPhase）。
+enum EnemyActionKind {
+    EAK_WAIT = 0,   // 待機：その場で動かない
+    EAK_WALK,       // 歩く：プレイヤーへ近づく／離れる／向いている向きへ
+    EAK_JUMP,       // ジャンプ：跳んで、着地まで
+    EAK_DASH,       // 突進：構えてから一直線に走る
+    EAK_SHOOT,      // 弾：本数・扇・連射・狙い方を指定して撃つ
+    EAK_TELEPORT,   // 瞬間移動：プレイヤーの近くへ
+    EAK_DARKEN,     // 暗転：範囲内のプレイヤーの画面を暗くする
+    EAK_TINT,       // 色変化：範囲内のプレイヤーの画面を指定の色へ寄せる
+    EAK_ZOOM,       // ズーム：範囲内のプレイヤーの画面を拡大縮小で揺さぶる
+    EAK_COUNT
+};
+// JSON上の名前（Lab_Editor の EnemyAction と同じ。順番は上の enum と一致させること）
+static const char* const ENEMY_ACTION_KIND_NAMES[EAK_COUNT] =
+    { "wait", "walk", "jump", "dash", "shoot", "teleport", "darken", "tint", "zoom" };
+
+struct EnemyAction {
+    int   kind = EAK_WAIT;
+    float warn = 0.0f;        // 予兆の長さ（フレーム）。この間は構えるだけ
+    float duration = 30.0f;   // 行動中の長さ（フレーム。ジャンプは「空中にいられる上限」）
+    float recover = 0.0f;     // 後隙の長さ（フレーム）。行動のあとの休み
+    float speed = 1.0f;       // 歩く・突進・ジャンプの前進の速さ／弾の速さ（倍率）
+    float power = 1.0f;       // ジャンプ力（倍率）
+    int   count = 1;          // 弾の本数（1回の斉射）
+    float angle = 0.35f;      // 弾の扇の半分の広がり（ラジアン）
+    float interval = 8.0f;    // 連射の間隔（フレーム）
+    int   bursts = 1;         // 連射の回数
+    float range = 300.0f;     // 画面効果の届く距離／瞬間移動の最長距離（px）
+    float rangeMin = 120.0f;  // 瞬間移動の最短距離（px）
+    float level = 0.5f;       // 暗転：いちばん暗いときの明るさ／色変化：色の強さ／ズーム：揺れの大きさ
+    float colorR = 255.0f, colorG = 0.0f, colorB = 0.0f; // 色変化：寄せる色(0-255)
+    float weight = 1.0f;      // 重み付きの選び方のときの、選ばれやすさ
+    int   dir = 0;            // 動く向き：0=プレイヤーへ 1=離れる 2=いま向いている向き
+    bool  aimed = true;       // 弾：プレイヤーを狙うか（false=いま向いている向きへ撃つ）
+};
+
 // 敵1種類分の「定義データ」。enemies.jsonから読み込まれる、いわば敵の設計図。
 // 実際にステージへ配置された1体1体の状態はPlacedEnemy／実行時のEnemyクラス側が持ち、
 // このEnemyDefはあくまで「この種類の敵は何ができるか」を表す共通データとして参照される。
@@ -270,6 +315,10 @@ struct EnemyDef {
     float chargeWarnFrames = -1.0f;  // STATIONARY/PATROL_SHOOTERの発射前の予兆の長さ(フレーム。従来20)
     float chargeWarnZoom = -1.0f;    // その予兆で画面をズームインさせる量（従来0.06）
     float aimJitter = -1.0f;         // STATIONARY/AIMED_SHOOTERの狙いのブレ（ラジアン。-1/0=ブレなし）
+
+    // 多彩行動(23)：行動のリストと、その選び方（0=順番 1=ランダム 2=重み付き）
+    std::vector<EnemyAction> actions;
+    int actionMode = 0;
 
     // ==== 敵の動き大幅改良プラン Phase 1 ====
     float shockwaveRadius = -1.0f;       // FALLERの着地ショックウェイブ半径(px)
@@ -842,6 +891,39 @@ void LoadAssetDefinitions() {
                     def.chargeWarnFrames = e.value("chargeWarnFrames", -1.0f);
                     def.chargeWarnZoom = e.value("chargeWarnZoom", -1.0f);
                     def.aimJitter = e.value("aimJitter", -1.0f);
+                    // 多彩行動(23)の行動リスト。名前が分からない種類の項目は、動かないまま黙って残さず読み飛ばす
+                    {
+                        std::string am = e.value("actionMode", "sequence");
+                        def.actionMode = (am == "random") ? 1 : (am == "weighted" ? 2 : 0);
+                        if (e.contains("actions") && e["actions"].is_array()) {
+                            for (const auto& aj : e["actions"]) {
+                                if (!aj.is_object()) continue;
+                                EnemyAction a;
+                                std::string kn = aj.value("kind", "wait");
+                                int ki = -1;
+                                for (int q = 0; q < EAK_COUNT; q++) if (kn == ENEMY_ACTION_KIND_NAMES[q]) ki = q;
+                                if (ki < 0) continue;
+                                a.kind = ki;
+                                a.warn = aj.value("warn", 0.0f);         if (a.warn < 0.0f) a.warn = 0.0f;
+                                a.duration = aj.value("duration", 30.0f); if (a.duration < 1.0f) a.duration = 1.0f;
+                                a.recover = aj.value("recover", 0.0f);   if (a.recover < 0.0f) a.recover = 0.0f;
+                                a.speed = aj.value("speed", 1.0f);
+                                a.power = aj.value("power", 1.0f);
+                                a.count = aj.value("count", 1);           if (a.count < 1) a.count = 1;
+                                a.angle = aj.value("angle", 0.35f);
+                                a.interval = aj.value("interval", 8.0f);  if (a.interval < 1.0f) a.interval = 1.0f;
+                                a.bursts = aj.value("bursts", 1);         if (a.bursts < 1) a.bursts = 1;
+                                a.range = aj.value("range", 300.0f);
+                                a.rangeMin = aj.value("rangeMin", 120.0f);
+                                a.level = aj.value("level", 0.5f);
+                                a.colorR = aj.value("colorR", 255.0f); a.colorG = aj.value("colorG", 0.0f); a.colorB = aj.value("colorB", 0.0f);
+                                a.weight = aj.value("weight", 1.0f);
+                                a.dir = aj.value("dir", 0);
+                                a.aimed = aj.value("aimed", true);
+                                def.actions.push_back(a);
+                            }
+                        }
+                    }
                     def.shockwaveRadius = e.value("shockwaveRadius", -1.0f);
                     def.fastForwardJitter = e.value("fastForwardJitter", -1.0f);
                     def.fastForwardAttackMult = e.value("fastForwardAttackMult", -1.0f);
@@ -1714,6 +1796,7 @@ enum EnemyType {
     ENEMY_CUSTOM_SCRIPT,      // Feature: Puzzle-like Behavior Scripting (M2) — EnemyDef.scriptのJSONブロックで挙動を自作する
     ENEMY_POUNCER,            // 飛びかかり：普段は高速で地上を追い、射程に入ると溜めてから放物線ジャンプで飛びかかる
     ENEMY_BOUNCING_WORM,      // 跳ね回る節足敵：重力を受けず直進し、壁・床に当たるとランダムな角度で跳ね返る。胴体のパーツが頭の軌跡を辿って連なる
+    ENEMY_MULTI_ACTION,       // 多彩行動(23)：EnemyDef.actions の行動リスト（待機・歩く・ジャンプ・突進・弾・瞬間移動・暗転・色変化・ズーム）を、順番／ランダム／重み付きで切り替える
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
@@ -2296,6 +2379,7 @@ const char* EnemyTypeName(EnemyType t) {
         case ENEMY_CUSTOM_SCRIPT:      return "CUSTOM_SCRIPT";
         case ENEMY_POUNCER:            return "POUNCER";
         case ENEMY_BOUNCING_WORM:      return "BOUNCING_WORM";
+        case ENEMY_MULTI_ACTION:       return "MULTI_ACTION";
         default:                       return "UNKNOWN";
     }
 }
@@ -2533,6 +2617,14 @@ int GetEnemyActionPhase(const Enemy& e, const EnemyDef* edef) {
             if (e.auxState == 1) return (e.customTimer > 0.0f) ? 1 : 2;
             if (e.auxState == 2) return 3;
             return 0;
+        case ENEMY_MULTI_ACTION: { // 0予兆 1行動中 2後隙。待機は段階を持たない（常に0）
+            if (!edef || edef->actions.empty()) return 0;
+            int ai = (e.aiState >= 0 && e.aiState < (int)edef->actions.size()) ? e.aiState : 0;
+            const EnemyAction& a = edef->actions[ai];
+            if (a.kind == EAK_WAIT) return 0;
+            if (e.auxState == 0) return (a.warn > 0.0f) ? 1 : 0;
+            return (e.auxState == 1) ? 2 : 3;
+        }
         case ENEMY_STATIONARY:
         case ENEMY_PATROL_SHOOTER:
         case ENEMY_SPREAD_SHOOTER:
@@ -9530,6 +9622,194 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float wave = EnemyWave(enemy.customTimer * frequency + er.tilt, edef ? edef->waveShape : -1.0f) * amplitude;
                                 if (er.flipped) wave = -wave; // 反転でズームアウト側へ歪む
                                 Screen_SetZoom(1.0f + wave);
+                            }
+                            break;
+                        }
+                        case ENEMY_MULTI_ACTION: {
+                            // 多彩行動：行動のリスト（EnemyDef.actions）を、順番／ランダム／重み付きで切り替える。
+                            //
+                            // 1つの行動は 予兆(warn) → 行動中(duration) → 後隙(recover) の3段階。
+                            //   aiState    = いま何番目の行動か
+                            //   auxState   = 段階（0=予兆 1=行動中 2=後隙）
+                            //   customTimer= その段階の経過フレーム
+                            //   auxF1      = 連射の発射済み回数 / auxF2 = 突進などの向き（-1か+1）
+                            // どれも巻き戻し用の履歴(EnemyState)に入っている値なので、巻き戻すと行動も戻る。
+                            //
+                            // 編集リアクション：他の型と同じ共通の前処理（拡大＝重く遅く、速度、一時停止など）は効く。
+                            // 反転すると弾が味方のものになる（他の射撃型と同じ）。
+                            enemy.vx = 0.0f;
+                            if (!edef || edef->actions.empty()) break;
+                            const int nAct = (int)edef->actions.size();
+                            if (enemy.aiState < 0 || enemy.aiState >= nAct) enemy.aiState = 0;
+                            const EnemyAction& act = edef->actions[enemy.aiState];
+
+                            float pcxM = player.x + (player.width * player.scale) * 0.5f, pcyM = player.y + (player.height * player.scale) * 0.5f;
+                            float ecxM = enemy.x + (enemy.hitboxWidth * enemy.scale) * 0.5f, ecyM = enemy.y + (enemy.hitboxHeight * enemy.scale) * 0.5f;
+                            float dxM = pcxM - ecxM, dyM = pcyM - ecyM;
+                            float distM = sqrtf(dxM * dxM + dyM * dyM);
+                            float towardM = (dxM < 0.0f) ? -1.0f : 1.0f;
+                            auto actDirM = [&]() -> float {
+                                if (act.dir == 1) return -towardM;
+                                if (act.dir == 2) return (enemy.direction == 1) ? -1.0f : 1.0f;
+                                return towardM;
+                            };
+                            // 接地（ジャンプ敵と同じ判定：1px下にタイル／足場があり、縦の動きが小さい）
+                            bool groundedM = false;
+                            {
+                                // 関数が座標を参照渡しで書き換えるので、本体の値を汚さないようコピーを渡す
+                                float gtX = enemy.x, gtY = enemy.y + 2.0f, gtVY = 1.0f;
+                                bool tileGround = CheckGridCollisionY(gtX, gtY, gtVY, enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
+                                    stages[currentStageIdx].map, tileDefs);
+                                float gpX = enemy.x, gpY = enemy.y + 2.0f, gpVY = 1.0f;
+                                bool platGround = CheckPlatformCollision(gpX, gpY, gpVY, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                groundedM = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
+                            }
+                            enemy.customTimer += ets;
+
+                            // 次の行動を選ぶ（段階を予兆へ戻す）
+                            auto pickNextM = [&]() {
+                                int next = enemy.aiState;
+                                if (nAct > 1) {
+                                    if (edef->actionMode == 1) {
+                                        do { next = rand() % nAct; } while (next == enemy.aiState); // 同じ行動の連続は避ける
+                                    } else if (edef->actionMode == 2) {
+                                        float total = 0.0f;
+                                        for (const auto& a : edef->actions) total += (a.weight > 0.0f ? a.weight : 0.0f);
+                                        if (total > 0.0f) {
+                                            float r = ((float)(rand() % 10000) / 10000.0f) * total, acc = 0.0f;
+                                            next = nAct - 1;
+                                            for (int q = 0; q < nAct; q++) { acc += (edef->actions[q].weight > 0.0f ? edef->actions[q].weight : 0.0f); if (r < acc) { next = q; break; } }
+                                        } else next = (enemy.aiState + 1) % nAct;
+                                    } else {
+                                        next = (enemy.aiState + 1) % nAct;
+                                    }
+                                }
+                                enemy.aiState = next; enemy.auxState = 0; enemy.customTimer = 0.0f; enemy.auxF1 = 0.0f;
+                            };
+                            // 弾を1斉射ぶん撃つ
+                            auto fireVolleyM = [&]() {
+                                int cnt = act.count < 1 ? 1 : act.count;
+                                float baseA = act.aimed ? atan2f(dyM, dxM) : ((enemy.direction == 1) ? 3.14159265f : 0.0f);
+                                float muzzle = sqrtf((float)enemy.hitboxWidth * enemy.scale * (float)enemy.hitboxWidth * enemy.scale
+                                                   + (float)enemy.hitboxHeight * enemy.scale * (float)enemy.hitboxHeight * enemy.scale) * 0.5f + 4.0f;
+                                for (int k = 0; k < cnt; k++) {
+                                    float a = baseA + (cnt == 1 ? 0.0f : (-act.angle + 2.0f * act.angle * (float)k / (float)(cnt - 1)));
+                                    for (int i = 0; i < MAX_BULLETS; i++) {
+                                        if (!bullets[i].isActive) {
+                                            bullets[i].isActive = true;
+                                            bullets[i].x = ecxM + cosf(a) * muzzle; bullets[i].y = ecyM + sinf(a) * muzzle;
+                                            float spd = BULLET_SPEED * act.speed * erMass;
+                                            bullets[i].vx = cosf(a) * spd; bullets[i].vy = sinf(a) * spd;
+                                            bullets[i].scale = er.scaleRatio;
+                                            bullets[i].isPlayerOwned = erFlipEdited; // 反転で味方撃ち（他の射撃型と同じ）
+                                            bullets[i].isRewinding = false;
+                                            bullets[i].history.clear();
+                                            break;
+                                        }
+                                    }
+                                }
+                                enemy.direction = (cosf(baseA) < 0.0f) ? 1 : 0;
+                                if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++; // パーツのモーション用の通知
+                            };
+
+                            if (enemy.auxState == 0) {
+                                // ---- 予兆：構える。プレイヤーのほうを向く（待機・画面効果・瞬間移動は向きが要らない）----
+                                if (act.kind == EAK_WALK || act.kind == EAK_JUMP || act.kind == EAK_DASH || (act.kind == EAK_SHOOT && act.aimed))
+                                    enemy.direction = (towardM < 0.0f) ? 1 : 0;
+                                if (enemy.customTimer >= act.warn) {
+                                    enemy.auxState = 1; enemy.customTimer = 0.0f; enemy.auxF1 = 0.0f;
+                                    enemy.auxF2 = actDirM(); // 突進・ジャンプの向きは、行動に入る瞬間に決める
+                                    if (act.kind == EAK_JUMP && groundedM) {
+                                        enemy.vy = (float)editorPlayerCaps.baseJumpPower * act.power * er.scaleRatio;
+                                        enemy.jumpSeq++;     // パーツのモーション用の通知
+                                    } else if (act.kind == EAK_DASH) {
+                                        enemy.direction = (enemy.auxF2 < 0.0f) ? 1 : 0;
+                                        enemy.actionSeq++;
+                                    } else if (act.kind == EAK_TELEPORT) {
+                                        float rMax = act.range * er.scaleRatio, rMin = act.rangeMin * er.scaleRatio;
+                                        float span = (rMax > rMin) ? (rMax - rMin) : 0.0f;
+                                        float sideX = (rand() % 2 == 0) ? 1.0f : -1.0f;
+                                        float offX = rMin + (float)(rand() % (int)std::max<float>(1.0f, span));
+                                        float offY = (float)(rand() % (int)std::max<float>(1.0f, span * 0.5f)) * ((rand() % 2 == 0) ? 1.0f : -1.0f);
+                                        float destX = player.x + sideX * offX, destY = player.y + offY;
+                                        if (destX < 0.0f) destX = 0.0f;
+                                        if (destY < 0.0f) destY = 0.0f;
+                                        // 着地先が壁の中なら、今回は動かない（行動は成立したことにして次へ）
+                                        auto& mpM = stages[currentStageIdx].map;
+                                        int tCol = (int)((destX + (float)enemy.hitboxWidth * enemy.scale * 0.5f) / TILE_SIZE);
+                                        int tRow = (int)((destY + (float)enemy.hitboxHeight * enemy.scale * 0.5f) / TILE_SIZE);
+                                        bool solid = false;
+                                        if (!mpM.empty() && tRow >= 0 && tRow < (int)mpM.size() && tCol >= 0 && tCol < (int)mpM[0].size()) {
+                                            int tid = mpM[tRow][tCol];
+                                            solid = (tid >= 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable);
+                                        }
+                                        if (!solid) { enemy.x = destX; enemy.y = destY; }
+                                        if (edef) SoundManager::Get().PlaySe(edef->seAttack);
+                                        enemy.actionSeq++;
+                                    }
+                                }
+                            } else if (enemy.auxState == 1) {
+                                // ---- 行動中 ----
+                                float dur = act.duration < 1.0f ? 1.0f : act.duration;
+                                bool done = false;
+                                switch (act.kind) {
+                                    case EAK_WALK: {
+                                        float dirW = actDirM();
+                                        enemy.direction = (dirW < 0.0f) ? 1 : 0;
+                                        enemy.vx = dirW * editorPlayerCaps.baseSpeed * ets * act.speed * erMass;
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    case EAK_JUMP: {
+                                        // 前へ進みながら飛ぶ。着地したら（跳び出してから少し経っていれば）行動を終える
+                                        enemy.vx = enemy.auxF2 * editorPlayerCaps.baseSpeed * ets * act.speed * erMass;
+                                        done = (enemy.customTimer >= 8.0f && groundedM) || (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    case EAK_DASH: {
+                                        enemy.vx = enemy.auxF2 * DASH_SPEED * ets * act.speed * erMass;
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    case EAK_SHOOT: {
+                                        // 連射：行動に入ってから interval フレームごとに1斉射。撃ち終えたら終わり
+                                        while (enemy.auxF1 < (float)act.bursts && enemy.customTimer >= enemy.auxF1 * act.interval) {
+                                            fireVolleyM();
+                                            enemy.auxF1 += 1.0f;
+                                        }
+                                        done = (enemy.auxF1 >= (float)act.bursts);
+                                        break;
+                                    }
+                                    case EAK_TELEPORT: done = (enemy.customTimer >= 1.0f); break;
+                                    case EAK_DARKEN: {
+                                        if (distM < act.range) {
+                                            float t = 1.0f - distM / act.range;
+                                            Screen_SetBrightness(1.0f - t * (1.0f - act.level));
+                                        }
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    case EAK_TINT: {
+                                        if (distM < act.range) {
+                                            float t = 1.0f - distM / act.range;
+                                            float cr = act.colorR / 255.0f, cg = act.colorG / 255.0f, cb = act.colorB / 255.0f;
+                                            Screen_SetTint(1.0f - t * act.level * (1.0f - cr), 1.0f - t * act.level * (1.0f - cg), 1.0f - t * act.level * (1.0f - cb));
+                                        }
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    case EAK_ZOOM: {
+                                        if (distM < act.range) Screen_SetZoom(1.0f + sinf(enemy.customTimer * 0.08f * act.speed) * act.level);
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
+                                    default: done = (enemy.customTimer >= dur); break; // 待機
+                                }
+                                if (done) { enemy.auxState = 2; enemy.customTimer = 0.0f; }
+                            } else {
+                                // ---- 後隙：休む。終わったら次の行動へ ----
+                                if (enemy.customTimer >= act.recover) pickNextM();
                             }
                             break;
                         }

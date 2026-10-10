@@ -19,6 +19,8 @@ public sealed class EnemyTuneCanvas : Panel
     // 実際の値（既定を使うものは既定値に置き換え済み）を返す関数。色が未指定のときは -1
     public Func<string, float> Eff = _ => 0f;
     public TuneType? TypeDef;
+    // 多彩行動のとき、行動のリストを読むための敵の定義
+    public EnemyDef? Def;
     // プレイヤーまでの距離（px）。ドラッグで変える
     public float PlayerDist = 180f;
 
@@ -76,6 +78,7 @@ public sealed class EnemyTuneCanvas : Panel
             case TunePreview.Tint: DrawTint(g); break;
             case TunePreview.Shot: DrawShot(g); break;
             case TunePreview.Timeline: DrawTimeline(g); break;
+            case TunePreview.Actions: DrawActions(g); break;
             case TunePreview.Script: DrawMessage(g, "この敵は、ブロックのスクリプトで動きを作ります。\n調整する数値はありません。\n（アセット管理の「挙動スクリプトを編集」から編集できます）"); break;
             default: DrawRange(g); break;
         }
@@ -356,6 +359,65 @@ public sealed class EnemyTuneCanvas : Panel
             float t = (_time % interval) / interval;
             using (var cb = new SolidBrush(Color.FromArgb(120, 230, 140))) g.FillRectangle(cb, bx + bw * t - 2, by - 3, 4, 22);
             Text(g, $"撃つ間隔 {interval:0} フレーム（約 {interval / 60f:0.0} 秒）" + (warn > 0 && TypeDef.Groups.SelectMany(gr => gr.Params).Any(p => p.Key == "chargeWarnFrames") ? $"　黄色＝撃つ前の予兆 {warn:0} フレーム" : ""), 12, by + 20, Color.FromArgb(190, 190, 200), FSmall);
+        }
+    }
+
+    // ---- 多彩行動：行動のリスト全体の時間配分 ----
+    private void DrawActions(Graphics g)
+    {
+        Title(g, "行動の流れ（時間の配分）", "上の行動から順に、予兆（黄）→行動中（色）→後隙（灰青）を繰り返します。緑の線が「いま」。");
+        var acts = Def?.actions ?? new List<EnemyAction>();
+        if (acts.Count == 0) { DrawMessage(g, "右の「＋ 行動を追加」から、行動を並べてください。"); return; }
+        string mode = Def!.actionMode;
+        // 各行動の長さ（フレーム）
+        var segs = new List<(EnemyAction a, float warn, float act, float rec)>();
+        foreach (var a in acts)
+        {
+            float actLen = a.kind switch
+            {
+                "shoot" => Math.Max(1f, (a.bursts - 1) * a.interval + 1f),
+                "teleport" => 1f,
+                _ => Math.Max(1f, a.duration),
+            };
+            segs.Add((a, a.warn, actLen, a.recover));
+        }
+        float total = Math.Max(1f, segs.Sum(s => s.warn + s.act + s.rec));
+        float x0 = 16, w = Width - 32, y0 = 86, h = 46;
+        float x = x0;
+        int idx = 0;
+        foreach (var sg in segs)
+        {
+            var kind = EnemyActionInfo.Get(sg.a.kind);
+            float[] lens = { sg.warn, sg.act, sg.rec };
+            Color[] cols = { Color.FromArgb(230, 190, 60), kind.Color, Color.FromArgb(80, 96, 130) };
+            float segStart = x;
+            for (int k = 0; k < 3; k++)
+            {
+                float sw = w * lens[k] / total;
+                if (sw <= 0.01f) continue;
+                using (var br = new SolidBrush(cols[k])) g.FillRectangle(br, x, y0, sw, h);
+                x += sw;
+            }
+            using (var pen = new Pen(Color.FromArgb(34, 36, 42), 2)) g.DrawRectangle(pen, segStart, y0, Math.Max(x - segStart, 1), h);
+            float segW = x - segStart;
+            Text(g, (idx + 1).ToString(), segStart + segW / 2, y0 + 3, Color.Black, FBold, true);
+            if (segW > 56) Text(g, kind.Label.Split('（')[0], segStart + segW / 2, y0 + 24, Color.FromArgb(30, 30, 30), FSmall, true);
+            idx++;
+        }
+        if (mode == "sequence")
+        {
+            float now = x0 + w * ((_time % total) / total);
+            using var cb = new SolidBrush(Color.FromArgb(120, 230, 140)); g.FillRectangle(cb, now - 2, y0 - 8, 4, h + 16);
+        }
+        string modeText = mode switch { "random" => "ランダム：どの行動が来るかは毎回変わります（この図は一例）", "weighted" => "重み付き：選ばれやすさに応じて、毎回選びます（この図は上から順に並べた一例）", _ => "順番どおり：上から下へ、最後までいったら最初へ戻ります" };
+        Text(g, $"1周（全部の行動を1回ずつ）： {total:0} フレーム（約 {total / 60f:0.0} 秒）", 16, y0 + h + 14, Color.White, FNormal);
+        Text(g, modeText, 16, y0 + h + 36, Color.FromArgb(190, 190, 200), FSmall);
+        int yy = (int)(y0 + h + 66);
+        for (int i = 0; i < segs.Count && yy < Height - 20; i++)
+        {
+            var sg = segs[i];
+            Text(g, $"{i + 1}. {EnemyActionInfo.Get(sg.a.kind).Label.Split('（')[0]}　予兆 {sg.warn:0} ＋ 行動 {sg.act:0} ＋ 休み {sg.rec:0} ＝ {sg.warn + sg.act + sg.rec:0}f", 16, yy, Color.FromArgb(190, 190, 200), FSmall);
+            yy += 17;
         }
     }
 

@@ -28,6 +28,9 @@ public class EnemyTunerPageControl : UserControl
     private readonly Dictionary<string, PropertyInfo> _props = new();
     private readonly Dictionary<string, TuneParam> _byKey = new();
     private readonly Dictionary<string, float> _snapshot = new();
+    // 多彩行動(23)の、開いたときの行動リストと選び方（キャンセルで戻すため）
+    private readonly List<EnemyAction> _actionsSnapshot = new();
+    private readonly string _modeSnapshot;
     private readonly List<Action> _refreshers = new();   // 画面の表示を、いまの値へ合わせ直す処理
     private readonly EnemyTuneCanvas _canvas;
     private Button _btnOk = null!, _btnCancel = null!;
@@ -51,7 +54,9 @@ public class EnemyTunerPageControl : UserControl
                 foreach (var k in new[] { p.Key, p.Key2, p.Key3 }) if (!string.IsNullOrEmpty(k) && _props.ContainsKey(k)) _snapshot[k] = Get(k);
             }
 
-        _canvas = new EnemyTuneCanvas { Dock = DockStyle.Fill, TypeDef = _type, Eff = Eff };
+        _actionsSnapshot = def.actions.Select(a => a.Clone()).ToList();
+        _modeSnapshot = def.actionMode;
+        _canvas = new EnemyTuneCanvas { Dock = DockStyle.Fill, TypeDef = _type, Eff = Eff, Def = def };
 
         _split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, FixedPanel = FixedPanel.Panel2 };
         _split.Panel1.Controls.Add(_canvas);
@@ -114,6 +119,8 @@ public class EnemyTunerPageControl : UserControl
     private void Restore()
     {
         foreach (var kv in _snapshot) Set(kv.Key, kv.Value);
+        _def.actions = _actionsSnapshot.Select(a => a.Clone()).ToList();
+        _def.actionMode = _modeSnapshot;
     }
 
     private void ResetAll()
@@ -157,7 +164,15 @@ public class EnemyTunerPageControl : UserControl
         };
         flow.Controls.Add(btnReset);
 
-        if (_type.Groups.Count == 0)
+        if (_type.Type == 23)
+        {
+            // 多彩行動：行動のリストを編集する欄
+            flow.Controls.Add(new Label { Text = "行動のリスト", Font = UiTheme.Bold, ForeColor = Color.FromArgb(40, 80, 140), AutoSize = true, Margin = new Padding(0, 6, 0, 2) });
+            var actionEditor = new EnemyActionEditorControl(_def);
+            actionEditor.Changed += () => _canvas.Invalidate();
+            flow.Controls.Add(actionEditor);
+        }
+        else if (_type.Groups.Count == 0)
             flow.Controls.Add(new Label { Text = "この型には、数値で調整する項目はありません。", AutoSize = true, ForeColor = Color.Gray, Margin = new Padding(0, 4, 0, 8) });
 
         foreach (var gr in groups)

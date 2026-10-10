@@ -47,6 +47,7 @@ public enum TunePreview
     Tint,        // 色変化：寄せる色と、距離ごとの色味
     Shot,        // 射撃：弾の向き・本数・ブレ・予兆
     Timeline,    // 溜め→行動→後隙 の時間配分
+    Actions,     // 多彩行動：行動のリスト全体の時間配分
     Script,      // スクリプトで動く（調整項目なし）
 }
 
@@ -251,6 +252,7 @@ public static class EnemyTuneSchema
                 N("bounceRandomness", "跳ね返りの乱れ", "度", 0, 90, 1, 0, 25, "跳ね返るたびに、角度がこの範囲でランダムにずれます。")),
             G("胴体", null,
                 N("segmentGap", "節と節の間隔", "px", 4, 80, 1, 0, 22, "胴体の節の間隔。大きいほど長く伸びます。")));
+        T(23, "多彩行動", "好きな行動を好きな数だけ並べて、切り替えながら繰り返します。", TunePreview.Actions);
         return list;
     }
 }
