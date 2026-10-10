@@ -184,6 +184,23 @@ public partial class PartsEditorPageControl
         tip.SetToolTip(btnFit, "全パーツと本体が収まる大きさにします（Home / F キーでも）");
         flowPlayback.Controls.AddRange(new Control[] { _btnPlayToggle, btnResetTime, sep1, btnFit, btnZoomOut, btnZoomIn, _lblZoom, sep2, _chkGrid, _chkSnap, _chkHitbox, _chkIds });
 
+        // 「状況を試す」— パーツの動き（モーション）のトリガー（攻撃した・溜めている・プレイヤーが近い…）を、
+        // 実際の敵なしで再現して、動きを確かめる。状態系は選んだ間ずっと、イベント系は「攻撃!」などのボタンで1回起こす。
+        var sep3 = new Label { Text = "│", AutoSize = true, ForeColor = Color.Silver, Margin = new Padding(2, 6, 2, 0) };
+        var lblSim = new Label { Text = "状況を試す:", AutoSize = true, Margin = new Padding(2, 7, 2, 0) };
+        _cboSim = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140, Margin = new Padding(2, 3, 2, 0) };
+        _cboSim.Items.AddRange(new object[] { "いつもの状態", "溜めている", "行動中（突進・落下）", "プレイヤーが近い", "動いている", "向きを反転された", "傾けられた" });
+        _cboSim.SelectedIndex = 0;
+        _cboSim.SelectedIndexChanged += (s, e) => { ApplySimState(); pnlComposer.Invalidate(); };
+        var btnAtk = Small("攻撃!"); btnAtk.Click += (s, e) => FireSimEvent("attack");
+        var btnJump = Small("ジャンプ!"); btnJump.Click += (s, e) => FireSimEvent("jump");
+        var btnHurt = Small("被弾!"); btnHurt.Click += (s, e) => FireSimEvent("hurt");
+        tip.SetToolTip(_cboSim, "パーツの「動き」のトリガーを再現します。選んだ状況の間、その状況で動くモーションが動きます。");
+        tip.SetToolTip(btnAtk, "敵が攻撃した瞬間を1回起こします（「攻撃したとき」の動き）");
+        tip.SetToolTip(btnJump, "敵がジャンプした瞬間を1回起こします（「ジャンプしたとき」の動き）");
+        tip.SetToolTip(btnHurt, "弾を受けた瞬間を1回起こします（「弾を受けたとき」の動き）");
+        flowPlayback.Controls.AddRange(new Control[] { sep3, lblSim, _cboSim, btnAtk, btnJump, btnHurt });
+
         // 合成プレビューを実際に描画するキャンバス。背景をダークグレーにして、明るい色のパーツ画像が見やすいようにしている。
         pnlComposer = new CanvasPanel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(44, 46, 52) };
         pnlComposer.Paint += PnlComposer_Paint;
@@ -238,6 +255,32 @@ public partial class PartsEditorPageControl
             _btnPlayToggle.Text = "▶ 再生";
             _previewTimer?.Stop();
         }
+        pnlComposer.Invalidate();
+    }
+
+    // 「状況を試す」の選択を、評価に渡す状態へ写す
+    private bool _simPlayerNear;
+    private void ApplySimState()
+    {
+        _sim.Active.Clear();
+        _simPlayerNear = false;
+        switch (_cboSim.SelectedIndex)
+        {
+            case 1: _sim.Active.Add("charge"); break;
+            case 2: _sim.Active.Add("active"); break;
+            case 3: _simPlayerNear = true; break;
+            case 4: _sim.Active.Add("moving"); break;
+            case 5: _sim.Active.Add("flipped"); break;
+            case 6: _sim.Active.Add("tilted"); break;
+        }
+        if (!_isPlaying) TogglePreviewPlayback(); // 動きは再生中にしか見えないので、状況を選んだら再生を始める
+    }
+
+    // イベント系トリガー（攻撃・ジャンプ・被弾）を、いまの時刻で1回起こす
+    private void FireSimEvent(string name)
+    {
+        if (!_isPlaying) TogglePreviewPlayback();
+        _sim.EventClock[name] = _previewTime;
         pnlComposer.Invalidate();
     }
 
@@ -321,8 +364,28 @@ public partial class PartsEditorPageControl
                 if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
                 if (pose.HasAngle) angleRad = pose.Angle;
             }
+            // パーツのモーション（「動き」の一覧）。スクリプトの結果の上に、位置・角度・大きさ・不透明度を重ねる。
+            // ゲームと同じ式（PartMotionEvaluator ＝ DrawPixel.cpp の UpdatePartMotions）で評価する。
+            float motionScale = 1f, motionAlpha = 1f;
+            if (_isPlaying && p.motions.Count > 0)
+            {
+                var (bodyW, bodyH) = BodySize();
+                _sim.ParentCenter = new PointF(bodyW / 2f, bodyH / 2f);
+                _sim.PlayerPos = new PointF(_sim.ParentCenter.X + (_simPlayerNear ? 60f : 500f), _sim.ParentCenter.Y + 20f);
+                var es = EffectivePartSize(p);
+                var res = PartMotionEvaluator.Evaluate(p.motions, i, _previewTime, _sim, new PointF(ox + es.w / 2f, oy + es.h / 2f), angleRad);
+                ox += res.DX; oy += res.DY; angleRad += res.Angle;
+                motionScale = res.Scale; motionAlpha = res.Alpha;
+            }
             poses[i] = (ox, oy, angleRad);
             var rect = PartScreenRect(p, ox, oy);
+            if (motionScale != 1f)
+            {
+                // 大きさの変化は、パーツの中心を保ったまま拡縮する（ゲームと同じ）
+                float ncx = rect.X + rect.Width / 2f, ncy = rect.Y + rect.Height / 2f;
+                float nw = rect.Width * motionScale, nh = rect.Height * motionScale;
+                rect = new RectangleF(ncx - nw / 2f, ncy - nh / 2f, nw, nh);
+            }
             var thumb = GetPartThumb(p);
 
             // 回転角度がある場合は、パーツの中心を軸に回転描画するため一時的に座標系を
@@ -337,10 +400,24 @@ public partial class PartsEditorPageControl
                 g.TranslateTransform(-pivotX, -pivotY);
             }
             // サムネイル画像があればそれを描画し、なければ「画像未設定」を表すオレンジ色の丸で代替表示する。
-            if (thumb != null) g.DrawImage(thumb, rect);
+            if (thumb != null)
+            {
+                if (motionAlpha < 0.999f)
+                {
+                    // 不透明度のあるモーション（点滅）。色の行列でアルファだけ掛ける
+                    using var ia = new ImageAttributes();
+                    ia.SetColorMatrix(new ColorMatrix(new[]
+                    {
+                        new[] { 1f, 0f, 0f, 0f, 0f }, new[] { 0f, 1f, 0f, 0f, 0f }, new[] { 0f, 0f, 1f, 0f, 0f },
+                        new[] { 0f, 0f, 0f, motionAlpha, 0f }, new[] { 0f, 0f, 0f, 0f, 1f },
+                    }));
+                    g.DrawImage(thumb, Rectangle.Round(rect), 0, 0, thumb.Width, thumb.Height, GraphicsUnit.Pixel, ia);
+                }
+                else g.DrawImage(thumb, rect);
+            }
             else
             {
-                using var b = new SolidBrush(Color.FromArgb(160, 255, 140, 0));
+                using var b = new SolidBrush(Color.FromArgb((int)(160 * motionAlpha), 255, 140, 0));
                 g.FillEllipse(b, rect);
             }
             if (savedState != null) g.Restore(savedState);

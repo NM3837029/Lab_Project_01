@@ -83,6 +83,10 @@ public partial class PartsEditorPageControl : UserControl
     // 再生中かどうか（true=再生中。ドラッグでの位置調整は再生中は無効にする）
     private bool _isPlaying = false;
     private Button _btnPlayToggle = null!;
+    // パーツのモーション（PartDef.motions）の編集欄と、プレビューで「いま起きていること」の模擬
+    private PartMotionEditorControl _motionEditor = null!;
+    private readonly PartMotionEvaluator.SimState _sim = new();
+    private ComboBox _cboSim = null!;
 
     // Feature: UI改善（提案書 CUT-1）— パーツ編集画面自体のUndo/Redo（マップ編集限定だった仕組みの拡張）
     // パーツ一覧のスナップショットを積み重ねて保持する履歴管理オブジェクト
@@ -770,6 +774,21 @@ public partial class PartsEditorPageControl : UserControl
         return id;
     }
 
+    // 主に選んでいるパーツの動き（モーション）の一覧を、同時に選んでいる他のパーツへコピーする。
+    // 「パーツ番号ごとのずれ」を使っておけば、コピーした同じ動きが少しずつずれて動く。
+    private void CopyMotionsToOthers()
+    {
+        if (selectedIndex < 0 || selectedIndex >= parts.Count) return;
+        var others = _selected.Where(i => i != selectedIndex).ToList();
+        if (others.Count == 0) { Toast("コピー先がありません。Ctrl＋クリックで、コピーしたいパーツも一緒に選んでください。", warn: true); return; }
+        var src = parts[selectedIndex].motions;
+        foreach (int i in others) parts[i].motions = src.Select(m => m.Clone()).ToList();
+        PushHistory("motion-copy");
+        RefreshListCells();
+        pnlComposer.Invalidate();
+        Toast($"動き（{src.Count}個）を、他の{others.Count}個のパーツへコピーしました。");
+    }
+
     // Feature: UI改善（提案書 PT-2）— 選択中パーツ（複数なら全部）を左右反転して複製する。棘やツノなど左右対称の装飾を
     // 片側だけ作ってワンクリックでもう片方を得られるようにする。静的なoffsetXだけでなく、
     // 挙動スクリプト内のSetLocalOffset(dx)/SetLocalOffsetPolar(angle)も再帰的に反転させるため、
@@ -802,6 +821,13 @@ public partial class PartsEditorPageControl : UserControl
             // 再帰的に反転させる。これにより回転する棒/振り子/公転のいずれで生成したパーツでも、
             // 動きまで含めて正しく鏡写しになる。
             MirrorScriptHorizontalInPlace(copy.script);
+            // モーションも鏡写しにする。動く向きは左右を入れ替え、首振り・回転は向きを逆にする
+            // （円運動・プレイヤーを向く、は左右対称に作ってあるのでそのまま）。
+            foreach (var mo in copy.motions)
+            {
+                mo.axis = 180f - mo.axis;
+                if (mo.kind is "swing" or "spin") mo.amount = -mo.amount;
+            }
             parts.Insert(i + 1, copy);
         }
         for (int k = 0; k < orig.Count; k++) newIdx.Add(orig[k] + 1 + k);
@@ -1039,6 +1065,23 @@ public partial class PartsEditorPageControl : UserControl
         btnHitbox.Click += (s, e) => EditHitboxForSelected();
         flow.Controls.Add(btnHitbox);
 
+        // ── 動き（モーション）──
+        // 「いつ」「どんな動き」を一覧とスライダーで作る。スクリプトとは独立で、併用できる。
+        // プレビューの「状況を試す」で、攻撃した・溜めている等の状況を作って確かめられる。
+        flow.Controls.Add(Heading("動き（モーション）"));
+        _motionEditor = new PartMotionEditorControl();
+        _motionEditor.Changed += key =>
+        {
+            if (_suppressEvents) return;
+            UpdateSelectionInfo();
+            pnlComposer.Invalidate();
+            PushHistory(key);
+            // 動きを作ったら、すぐ確かめられるよう再生を始める（止めたままだと変化が見えない）
+            if (!_isPlaying && selectedIndex >= 0 && parts[selectedIndex].motions.Count > 0) TogglePreviewPlayback();
+        };
+        _motionEditor.CopyToOthersRequested += CopyMotionsToOthers;
+        flow.Controls.Add(_motionEditor);
+
         pnl.Controls.Add(flow);
         return pnl;
     }
@@ -1115,6 +1158,8 @@ public partial class PartsEditorPageControl : UserControl
                 lblScriptInfo.Text = "";
                 lblHitboxInfo.Text = "";
             }
+            // 動き（モーション）の編集欄を、選んでいるパーツの一覧へ向ける
+            _motionEditor?.Bind(hasSel ? parts[selectedIndex].motions : null);
             // 未選択の間は編集しても意味がないため、全ての入力コントロールを無効化してユーザーに
             // 「まずパーツを選んでください」という状態を視覚的に伝える。
             foreach (Control c in new Control[] { txtId, nudOffsetX, nudOffsetY, nudWidth, nudHeight, nudScale, nudHp, nudZOrder, chkDeadly }) c.Enabled = hasSel;

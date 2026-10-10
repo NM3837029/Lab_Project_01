@@ -248,6 +248,9 @@ public static class BlockCatalog
         new BlockDef("ParentY", "親(本体)のY座標", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("ParentDirection", "親(本体)の向き(右=1/左=-1)", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("PartIndex", "自分のパーツ番号(0始まり)", BlockCategory.Sensing, BlockShape.Reporter),
+        // 砲台系の本体が「今狙っている向き」（ワールド角, rad）。砲身パーツが読む。
+        // 以前は BlockDef に無く、砲身パーツのスクリプトをブロックエディタで開いて保存すると、このブロックだけが消えていた。
+        new BlockDef("ParentAim", "親(本体)が狙っている向き(rad)", BlockCategory.Sensing, BlockShape.Reporter),
 
         // 複合オブジェクトのパーツ追従 — 親に加えられた編集をパーツ側から読むレポーター。
         // エンジンはパーツを親と一体の剛体として回す／伸ばすので、
