@@ -1014,6 +1014,18 @@ public class GimmickDef
     public float zoomLevel { get; set; } = -1.0f;                 // ズーム演出の倍率
     public float warpOffsetPx { get; set; } = -1.0f;              // ワープ（瞬間移動）させる距離（ピクセル）
 
+    // ==== カラー補正と連動するギミック（type_enum=26 補正スイッチ / 27 補正ロック足場）と、色調ゾーン(19)の補正 ====
+    // 【重要】C++側 DrawPixel.cpp の GimmickDef と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    // 見る値：0=明るさ 1=コントラスト 2=彩度 3=色相 4=色温度 5=色フィルタ(1赤/2緑/3青)。-1は明るさ扱い
+    public float gradeChannel { get; set; } = -1.0f;
+    // 成立する範囲（下限〜上限）。両方とも未指定(-999/999)なら、見る値ごとの既定（暗い／コントラスト高／白黒／…）になる
+    public float gradeMin { get; set; } = -999.0f;
+    public float gradeMax { get; set; } = 999.0f;
+    // 色調ゾーン(19)の中で重ねる補正。既定は「何も変えない」値（彩度1・色相0・コントラスト0）
+    public float zoneSat { get; set; } = 1.0f;
+    public float zoneHue { get; set; } = 0.0f;
+    public float zoneContrast { get; set; } = 0.0f;
+
     // ==== 壊せるブロック(type_enum=3)の破壊条件 ====
     // 「誰が壊せるか」をブロック側の設定にすることで、
     // 「ドッスンの落下衝撃でしか壊れない壁」のような場をエディタだけで作れるようにする。

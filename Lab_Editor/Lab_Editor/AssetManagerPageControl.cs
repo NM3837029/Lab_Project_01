@@ -166,9 +166,15 @@ public class AssetManagerPageControl : UserControl
         [14] = new[] { ("travelDistance", "可動距離(px)", 0), ("oscillationSpeed", "往復の速さ", 3) }, // type_enum=14: 動く足場(Moving Platform)
         [17] = new[] { ("travelDistance", "可動距離(px)", 0), ("stepIncrement", "1回あたりの移動割合", 2) }, // type_enum=17: コマ送りリフト(Framestep Lift)
         [18] = new[] { ("brightLevel", "明転時の輝度", 2), ("darkLevel", "暗転時の輝度", 2) }, // type_enum=18: 明暗ゾーン(Brightness Zone)
-        [19] = new[] { ("tintR", "色調R", 2), ("tintG", "色調G", 2), ("tintB", "色調B", 2) }, // type_enum=19: 色調ゾーン(Color Zone)
+        // type_enum=19: 色調ゾーン(Color Zone)。色の乗算(R/G/B)に加えて、彩度・色相・コントラストも重ねられる
+        [19] = new[] { ("tintR", "色調R", 2), ("tintG", "色調G", 2), ("tintB", "色調B", 2),
+                       ("zoneSat", "彩度の倍率 (1=そのまま 0=白黒)", 2), ("zoneHue", "色相の回転(度)", 0), ("zoneContrast", "コントラスト (-1〜1)", 2) },
         [20] = new[] { ("zoomLevel", "ズーム倍率", 2) }, // type_enum=20: ズームレンズ(Zoom Lens)
         [21] = new[] { ("zoomLevel", "ズーム倍率", 2), ("brightLevel", "明るさ倍率", 2) }, // type_enum=21: スローフィールド(Slowmo Field)
+        // type_enum=26/27: 補正スイッチ・補正ロック足場。「どの値が・どの範囲のとき」成立するかを決める。
+        // 見る値(gradeChannel)は専用の選択欄で描く（UpdateBehaviorParamsPanel）。下限・上限は -999 / 999 で「未指定」。
+        [26] = new[] { ("gradeChannel", "見る値", 0), ("gradeMin", "成立する下限 (-999=未指定)", 2), ("gradeMax", "成立する上限 (999=未指定)", 2) },
+        [27] = new[] { ("gradeChannel", "見る値", 0), ("gradeMin", "成立する下限 (-999=未指定)", 2), ("gradeMax", "成立する上限 (999=未指定)", 2) },
     };
 
     // 敵のtype_enum(タイプ番号)ごとの説明一覧。
@@ -238,6 +244,8 @@ public class AssetManagerPageControl : UserControl
         (23, "23 = 明暗ロック足場 (Brightness Lock Platform)", "paramで指定した明暗状態(Xキー)とプレイヤーの現在の状態が一致している間だけ実体化する足場です。"),
         (24, "24 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
         (25, "25 = チェックポイント (Checkpoint)", "プレイヤーが触れるとその地点が復帰地点として記録されます。ゲームオーバーや落下死からのリトライは、記録済みならステージ開始位置ではなくこの地点から再開します。1ステージに複数置くと直近で触れたものが有効になります。"),
+        (26, "26 = 補正スイッチ (Grade Switch)", "カラー補正パネルの値（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）が、指定した範囲に入っている間だけ「押された」状態になるスイッチです。同じparam値のゲート扉を、重量スイッチと同じ仕組みで開けます。「暗いと開く扉」「白黒にすると開く扉」「赤フィルタで開く扉」などが作れます。"),
+        (27, "27 = 補正ロック足場 (Grade Lock Platform)", "カラー補正パネルの値が、指定した範囲に入っている間だけ実体化する足場です（色ロック・明暗ロックを、コントラスト・彩度・色相・色温度にも広げたもの）。足場の上には条件が文字で出ます。"),
     };
     // アイテムのtype_enum(タイプ番号)ごとの説明一覧。敵・ギミックと同じ (番号, 表示名, 詳細説明) の形式
     private static readonly (int type, string desc, string detail)[] ItemTypes =
@@ -1319,6 +1327,24 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             }
 
             var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
+
+            // 補正スイッチ・補正ロック足場の「見る値」は、番号を覚えさせずに名前で選ばせる
+            if (field == "gradeChannel")
+            {
+                var cbo = new ComboBox { Location = new Point(4, y + 18), Size = new Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Meiryo UI", 8.5f) };
+                cbo.Items.AddRange(new object[] { "0 = 明るさ", "1 = コントラスト", "2 = 彩度", "3 = 色相", "4 = 色温度", "5 = 色フィルタ (1赤/2緑/3青)" });
+                int cur = (int)Math.Round(Convert.ToSingle(prop.GetValue(paramsObj)));
+                cbo.SelectedIndex = cur < 0 || cur > 5 ? 0 : cur;
+                cbo.SelectedIndexChanged += (s, e) =>
+                {
+                    if (_isUpdatingBehaviorPanel) return;
+                    prop.SetValue(paramsObj, (float)cbo.SelectedIndex);
+                };
+                pnlBehaviorParams.Controls.Add(lbl);
+                pnlBehaviorParams.Controls.Add(cbo);
+                y += 42;
+                continue;
+            }
             var nud = new NumericUpDown
             {
                 Location = new Point(4, y + 18),

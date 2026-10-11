@@ -1,4 +1,4 @@
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // 多彩行動（type 23）の「行動」1つぶん。
 //
@@ -20,7 +20,9 @@ public class EnemyAction
     public int bursts { get; set; } = 1;         // 連射の回数
     public float range { get; set; } = 300f;     // 画面効果の届く距離／瞬間移動の最長距離（px）
     public float rangeMin { get; set; } = 120f;  // 瞬間移動の最短距離（px）
-    public float level { get; set; } = 0.5f;     // 暗転：いちばん暗いときの明るさ／色変化：色の強さ／ズーム：揺れの大きさ
+    public float level { get; set; } = 0.5f;     // 暗転：いちばん暗いときの明るさ／色変化：色の強さ／ズーム：揺れの大きさ／色補正：いちばん強いときの彩度
+    public float hue { get; set; } = 0f;         // 色補正：いちばん強いときの色相の回転（度）
+    public float contrast { get; set; } = 0f;    // 色補正：いちばん強いときのコントラスト（-1〜1）
     public float colorR { get; set; } = 255f;    // 色変化：寄せる色
     public float colorG { get; set; } = 0f;
     public float colorB { get; set; } = 0f;
@@ -94,6 +96,12 @@ public static class EnemyActionInfo
         new() { Name = "zoom", Label = "ズーム", Hint = "範囲内にいるあいだ、プレイヤーの画面を拡大・縮小で揺さぶります。", Color = Color.FromArgb(120, 190, 230),
             Fields = { Warn("揺れ始める前の合図。"), Num("range", "効果が届く距離(px)", 20, 1000, 10, 0), Num("level", "揺れの大きさ", 0, 1, 0.01f, 2, "0.25なら±25％。"),
                        Num("speed", "揺れの速さ(倍)", 0.1f, 4, 0.1f, 1), Num("duration", "続く長さ(フレーム)", 1, 600, 5, 0), Recover() } },
+        new() { Name = "grade", Label = "色補正（彩度・色相・コントラスト）", Hint = "範囲内にいるあいだ、プレイヤーの画面の彩度・色相・コントラストを変えます（近いほど強く）。カラー補正パネルと同じ項目です。", Color = Color.FromArgb(240, 130, 200),
+            Fields = { Warn("色が変わり始める前の合図。"), Num("range", "効果が届く距離(px)", 20, 1000, 10, 0),
+                       Num("level", "いちばん強いときの彩度", 0, 2, 0.05f, 2, "1ならそのまま、0なら白黒、2なら倍の鮮やかさ。"),
+                       Num("hue", "色相の回転(度)", -180, 180, 5, 0, "色が虹色の輪をどれだけ回るか。180で反対の色。"),
+                       Num("contrast", "コントラスト", -1, 1, 0.05f, 2, "プラスで明暗がくっきり、マイナスでぼんやり。"),
+                       Num("duration", "続く長さ(フレーム)", 1, 600, 5, 0), Recover() } },
     };
 
     public static Kind Get(string name) => Kinds.FirstOrDefault(k => k.Name == name) ?? Kinds[0];
@@ -113,6 +121,7 @@ public static class EnemyActionInfo
             case "darken": a.warn = 10; a.duration = 120; a.range = 320; a.level = 0.35f; a.recover = 30; break;
             case "tint": a.warn = 10; a.duration = 120; a.range = 320; a.level = 0.6f; a.recover = 30; break;
             case "zoom": a.warn = 10; a.duration = 120; a.range = 280; a.level = 0.25f; a.speed = 1f; a.recover = 30; break;
+            case "grade": a.warn = 10; a.duration = 120; a.range = 320; a.level = 0.2f; a.hue = 0f; a.contrast = 0.25f; a.recover = 30; break;
         }
         return a;
     }

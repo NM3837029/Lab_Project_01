@@ -218,11 +218,12 @@ enum EnemyActionKind {
     EAK_DARKEN,     // 暗転：範囲内のプレイヤーの画面を暗くする
     EAK_TINT,       // 色変化：範囲内のプレイヤーの画面を指定の色へ寄せる
     EAK_ZOOM,       // ズーム：範囲内のプレイヤーの画面を拡大縮小で揺さぶる
+    EAK_GRADE,      // 色補正：範囲内のプレイヤーの画面の彩度・色相・コントラストを変える（カラー補正パネルと同じ項目）
     EAK_COUNT
 };
 // JSON上の名前（Lab_Editor の EnemyAction と同じ。順番は上の enum と一致させること）
 static const char* const ENEMY_ACTION_KIND_NAMES[EAK_COUNT] =
-    { "wait", "walk", "jump", "dash", "shoot", "teleport", "darken", "tint", "zoom" };
+    { "wait", "walk", "jump", "dash", "shoot", "teleport", "darken", "tint", "zoom", "grade" };
 
 struct EnemyAction {
     int   kind = EAK_WAIT;
@@ -237,7 +238,9 @@ struct EnemyAction {
     int   bursts = 1;         // 連射の回数
     float range = 300.0f;     // 画面効果の届く距離／瞬間移動の最長距離（px）
     float rangeMin = 120.0f;  // 瞬間移動の最短距離（px）
-    float level = 0.5f;       // 暗転：いちばん暗いときの明るさ／色変化：色の強さ／ズーム：揺れの大きさ
+    float level = 0.5f;       // 暗転：いちばん暗いときの明るさ／色変化：色の強さ／ズーム：揺れの大きさ／色補正：いちばん強いときの彩度(1=そのまま,0=白黒)
+    float hue = 0.0f;         // 色補正：いちばん強いときの色相の回転（度）
+    float contrast = 0.0f;    // 色補正：いちばん強いときのコントラスト（-1〜1）
     float colorR = 255.0f, colorG = 0.0f, colorB = 0.0f; // 色変化：寄せる色(0-255)
     float weight = 1.0f;      // 重み付きの選び方のときの、選ばれやすさ
     int   dir = 0;            // 動く向き：0=プレイヤーへ 1=離れる 2=いま向いている向き
@@ -427,6 +430,14 @@ struct GimmickDef {
     float tintR = -1.0f, tintG = -1.0f, tintB = -1.0f; // COLOR_ZONE: 色調(RGB倍率)
     float zoomLevel = -1.0f;            // ZOOM_LENS/SLOWMO_FIELD: ズーム倍率
     float warpOffsetPx = -1.0f;         // CUT_PORTAL: ワープ後に押し出す位置オフセット(px)
+
+    // ==== カラー補正と連動するギミック（GRADE_SWITCH / GRADE_LOCK_PLATFORM）と、色調ゾーンの補正 ====
+    float gradeChannel = -1.0f; // 見る値。0=明るさ 1=コントラスト 2=彩度 3=色相 4=色温度 5=色フィルタ(1赤/2緑/3青)。-1=明るさ
+    float gradeMin = -999.0f;   // 成立する範囲の下限（この値以上）。-999=未指定
+    float gradeMax = 999.0f;    // 成立する範囲の上限（この値以下）。999=未指定。両方とも未指定なら、見る値ごとの既定の範囲になる
+    float zoneSat = 1.0f;       // COLOR_ZONE: ゾーンの中で重ねる彩度の倍率（1=変えない、0=白黒）
+    float zoneHue = 0.0f;       // COLOR_ZONE: ゾーンの中で足す色相の回転(度)
+    float zoneContrast = 0.0f;  // COLOR_ZONE: ゾーンの中で足すコントラスト(-1〜1)
 
     // ==== 壊せるブロックの破壊条件（BREAKABLE_BLOCK）====
     //
@@ -916,6 +927,8 @@ void LoadAssetDefinitions() {
                                 a.range = aj.value("range", 300.0f);
                                 a.rangeMin = aj.value("rangeMin", 120.0f);
                                 a.level = aj.value("level", 0.5f);
+                                a.hue = aj.value("hue", 0.0f);
+                                a.contrast = aj.value("contrast", 0.0f);
                                 a.colorR = aj.value("colorR", 255.0f); a.colorG = aj.value("colorG", 0.0f); a.colorB = aj.value("colorB", 0.0f);
                                 a.weight = aj.value("weight", 1.0f);
                                 a.dir = aj.value("dir", 0);
@@ -1035,6 +1048,12 @@ void LoadAssetDefinitions() {
                     def.tintB = g.value("tintB", -1.0f);
                     def.zoomLevel = g.value("zoomLevel", -1.0f);
                     def.warpOffsetPx = g.value("warpOffsetPx", -1.0f);
+                    def.gradeChannel = g.value("gradeChannel", -1.0f);
+                    def.gradeMin = g.value("gradeMin", -999.0f);
+                    def.gradeMax = g.value("gradeMax", 999.0f);
+                    def.zoneSat = g.value("zoneSat", 1.0f);
+                    def.zoneHue = g.value("zoneHue", 0.0f);
+                    def.zoneContrast = g.value("zoneContrast", 0.0f);
                     // 壊せるブロックの破壊条件（詳細は GimmickDef の同名フィールドのコメント参照）
                     def.breakBySlam = g.value("breakBySlam", true);
                     // このアセットで禁止する編集操作（未指定なら全て許可）
@@ -1879,8 +1898,13 @@ enum GimmickType {
     GIMMICK_BRIGHTNESS_LOCK_PLATFORM,// 明暗ロック足場：param("dark"/"bright")と現在の画面の明るさが一致する時だけ実体化する
     GIMMICK_CUSTOM_SCRIPT,           // Feature: Puzzle-like Behavior Scripting (M2) — GimmickDef.scriptのJSONブロックで挙動を自作する
 
-    GIMMICK_CHECKPOINT               // Feature: チェックポイント — 触れると復帰地点として記録され、ゲームオーバー/落下死からの
+    GIMMICK_CHECKPOINT,              // Feature: チェックポイント — 触れると復帰地点として記録され、ゲームオーバー/落下死からの
                                       // リトライがステージ開始位置ではなくこの地点から再開するようになる（val1>0.5=このチェックポイントが現在の復帰地点）
+
+    // ===== カラー補正パネル（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）と連動するギミック =====
+    // どちらも GimmickDef の gradeChannel / gradeMin / gradeMax で「どの値が、どの範囲のとき成立するか」を決める。
+    GIMMICK_GRADE_SWITCH,            // 補正スイッチ：条件が成立している間だけ「押された」状態になり、同じparamのゲート扉を開ける
+    GIMMICK_GRADE_LOCK_PLATFORM      // 補正ロック足場：条件が成立している間だけ実体化する足場（色ロック/明暗ロックの一般化）
 };
 
 // 巻き戻し機能のために毎フレーム記録する、ギミック1個・1フレーム分のスナップショット。
@@ -2997,12 +3021,115 @@ struct ScreenFxSnapshot {
     float saturation  = 1.0f; // 彩度。1.0が通常、0で白黒（カラー補正パネル・色補正ゾーン・敵の演出の合成結果）
     float contrast    = 0.0f; // コントラスト。0が通常
     float hue         = 0.0f; // 色相の回転（度）。0が通常
+    float temperature = 0.0f; // 色温度（カラー補正パネルの値）。-1=寒色〜+1=暖色
 };
 ScreenFxSnapshot g_screenFx;
 
 // カラー補正パネル（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）の計算・描画。
 // Ui* 関数と ScreenFxSnapshot が上で定義済みになったこの位置で読み込む。
 #include "ColorGrade.h"
+
+// ===== カラー補正と連動するギミック（GRADE_SWITCH / GRADE_LOCK_PLATFORM）の条件判定 =====
+// 見る値は「画面に実際に出ている値」(g_screenFx)。パネルだけでなく、色調ゾーンや敵の演出で動いた値にも反応する。
+inline int GradeChannelOf(const GimmickDef* d) {
+    int ch = d ? (int)(d->gradeChannel + 0.5f) : 0;
+    return (ch < 0 || ch > 5) ? 0 : ch;
+}
+inline float GradeChannelValue(int ch) {
+    switch (ch) {
+        case 0: return g_screenFx.brightness;
+        case 1: return g_screenFx.contrast;
+        case 2: return g_screenFx.saturation;
+        case 3: return g_screenFx.hue;
+        case 4: return g_screenFx.temperature;
+        default: return (float)g_screenFx.colorFilter;
+    }
+}
+// 成立する範囲。下限・上限とも未指定なら、見る値ごとの既定（暗い／コントラスト高／ほぼ白黒／色相が正／暖色／赤）
+inline void GradeRange(const GimmickDef* d, int ch, float& lo, float& hi) {
+    lo = d ? d->gradeMin : -999.0f;
+    hi = d ? d->gradeMax : 999.0f;
+    if (lo <= -998.0f && hi >= 998.0f) {
+        static const float L[6] = { -999.0f, 0.3f, -999.0f, 30.0f, 0.3f, 1.0f };
+        static const float H[6] = { 0.6f, 999.0f, 0.2f, 180.0f, 999.0f, 1.0f };
+        lo = L[ch]; hi = H[ch];
+    }
+}
+// 条件が成立しているか。flipped（向き反転の編集）なら成立と不成立を入れ替える
+inline bool GradeConditionMet(const GimmickDef* d, bool flipped) {
+    int ch = GradeChannelOf(d);
+    float lo, hi;
+    GradeRange(d, ch, lo, hi);
+    float v = GradeChannelValue(ch);
+    bool met = (ch == 5) ? (v >= lo - 0.01f && v <= hi + 0.01f) : (v >= lo && v <= hi);
+    return flipped ? !met : met;
+}
+// 条件を短い日本語にしたもの（ゲーム内のラベルに出す）
+inline std::string GradeConditionLabel(const GimmickDef* d) {
+    int ch = GradeChannelOf(d);
+    float lo, hi;
+    GradeRange(d, ch, lo, hi);
+    char b[64];
+    bool noLo = lo <= -998.0f, noHi = hi >= 998.0f;
+    switch (ch) {
+        case 0:
+            if (noLo && hi <= 0.7f) return "暗いとき";
+            if (noHi && lo >= 1.2f) return "明るいとき";
+            if (noLo) sprintf_s(b, sizeof(b), "明るさ %d%%以下", (int)(hi * 100.0f + 0.5f));
+            else if (noHi) sprintf_s(b, sizeof(b), "明るさ %d%%以上", (int)(lo * 100.0f + 0.5f));
+            else sprintf_s(b, sizeof(b), "明るさ %d〜%d%%", (int)(lo * 100.0f + 0.5f), (int)(hi * 100.0f + 0.5f));
+            return b;
+        case 1:
+            if (noHi) sprintf_s(b, sizeof(b), "コントラスト %+d以上", (int)(lo * 100.0f + (lo < 0 ? -0.5f : 0.5f)));
+            else if (noLo) sprintf_s(b, sizeof(b), "コントラスト %+d以下", (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
+            else sprintf_s(b, sizeof(b), "コントラスト %+d〜%+d", (int)(lo * 100.0f + (lo < 0 ? -0.5f : 0.5f)), (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
+            return b;
+        case 2:
+            if (noLo && hi <= 0.3f) return "白黒のとき";
+            if (noHi && lo >= 1.2f) return "あざやかなとき";
+            if (noLo) sprintf_s(b, sizeof(b), "彩度 %d%%以下", (int)(hi * 100.0f + 0.5f));
+            else if (noHi) sprintf_s(b, sizeof(b), "彩度 %d%%以上", (int)(lo * 100.0f + 0.5f));
+            else sprintf_s(b, sizeof(b), "彩度 %d〜%d%%", (int)(lo * 100.0f + 0.5f), (int)(hi * 100.0f + 0.5f));
+            return b;
+        case 3:
+            if (noHi) sprintf_s(b, sizeof(b), "色相 %+d度以上", (int)(lo + (lo < 0 ? -0.5f : 0.5f)));
+            else if (noLo) sprintf_s(b, sizeof(b), "色相 %+d度以下", (int)(hi + (hi < 0 ? -0.5f : 0.5f)));
+            else sprintf_s(b, sizeof(b), "色相 %+d〜%+d度", (int)(lo + (lo < 0 ? -0.5f : 0.5f)), (int)(hi + (hi < 0 ? -0.5f : 0.5f)));
+            return b;
+        case 4:
+            if (noHi && lo > 0.0f) return "暖色にしたとき";
+            if (noLo && hi < 0.0f) return "寒色にしたとき";
+            if (noHi) sprintf_s(b, sizeof(b), "色温度 %+d以上", (int)(lo * 100.0f + (lo < 0 ? -0.5f : 0.5f)));
+            else if (noLo) sprintf_s(b, sizeof(b), "色温度 %+d以下", (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
+            else sprintf_s(b, sizeof(b), "色温度 %+d〜%+d", (int)(lo * 100.0f + (lo < 0 ? -0.5f : 0.5f)), (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
+            return b;
+        default: {
+            static const char* names[4] = { "フィルタなし", "赤フィルタ", "緑フィルタ", "青フィルタ" };
+            int l = (int)(lo + 0.5f), h = (int)(hi + 0.5f);
+            if (l < 0) l = 0; if (h > 3) h = 3;
+            if (l == h) return names[l];
+            sprintf_s(b, sizeof(b), "%s〜%s", names[l], names[h]);
+            return b;
+        }
+    }
+}
+// 補正ロック足場・補正スイッチを描くときの色（見る値と範囲から決める）
+inline int GradeConditionColor(const GimmickDef* d) {
+    int ch = GradeChannelOf(d);
+    float lo, hi;
+    GradeRange(d, ch, lo, hi);
+    switch (ch) {
+        case 0: return (hi <= 0.7f && lo <= -998.0f) ? GetColor(60, 60, 110) : GetColor(255, 240, 150);
+        case 1: return GetColor(210, 210, 220);
+        case 2: return (hi <= 0.3f && lo <= -998.0f) ? GetColor(150, 150, 150) : GetColor(255, 90, 170);
+        case 3: return GetColor(170, 120, 255);
+        case 4: return (lo > 0.0f) ? GetColor(255, 170, 70) : GetColor(90, 150, 255);
+        default: {
+            int c = (int)(lo + 0.5f);
+            return c == 2 ? GetColor(80, 220, 80) : c == 3 ? GetColor(80, 140, 255) : GetColor(255, 90, 90);
+        }
+    }
+}
 
 // この敵の「弱点色」。色フィルタがこれと一致している間、実体化したり弱ったりする。
 // type_enumから機械的に決めているので、今後追加される敵タイプにも自動で割り当たる。
@@ -3371,6 +3498,7 @@ bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height
         else if (gim.type == GIMMICK_BREAKABLE_BLOCK || gim.type == GIMMICK_FALLING_LIFT || gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_GATE_DOOR
                  || gim.type == GIMMICK_MOVING_PLATFORM || gim.type == GIMMICK_FRAMESTEP_LIFT || gim.type == GIMMICK_PUSHABLE_ROCK
                  || gim.type == GIMMICK_COLOR_LOCK_PLATFORM || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM
+                 || gim.type == GIMMICK_GRADE_LOCK_PLATFORM
                  || gim.type == GIMMICK_SPIKES  // Feature: 編集リアクション — 45度以上倒したトゲは無害な足場になる
                  || (gim.type == GIMMICK_CHIKUWA_BLOCK && gim.angle == 0.0f)) {
             // 倒したトゲは「刺さらない床」としてだけ足場になる。立っているトゲは触れれば即死のままなので
@@ -7780,6 +7908,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         g_screenFx.saturation  = fxCurSat;
         g_screenFx.contrast    = fxCurContrast;
         g_screenFx.hue         = fxCurHue;
+        g_screenFx.temperature = cgState.temperature;
         Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
         BehaviorInterpreter::globalOpsThisFrame = 0; // Feature: Puzzle-like Behavior Scripting (M2) — 全スクリプト実行体の命令数予算を毎フレームリセット
         BehaviorInterpreter::globalFrameCounter += 1.0f; // Feature: Composite Multi-Part Objects (Parts-M2) — TIME_FIELD演出用（ポーズ中も止めずに加算し続ける必要があるためこのままにする）
@@ -8048,6 +8177,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     switchGim.customTimer = active ? 1.0f : 0.0f;
 
                     switchStates.push_back({ &switchGim, active });
+                }
+
+                // 補正スイッチ（カラー補正パネルの値で入るスイッチ）。重量スイッチと同じ switchStates へ入れるので、
+                // 同じ param を持つゲート扉が、重量スイッチと同じ仕組みで開閉する。
+                //   向き反転の編集 … 条件が裏返る（「暗いと入る」→「暗くないと入る」）
+                for (auto& gsw : gimmicks) {
+                    if (gsw.type != GIMMICK_GRADE_SWITCH) continue;
+                    const GimmickDef* gswDef = FindGimmickDef(gsw.assetId);
+                    EditReaction gsr = GetGimmickEditReaction(gsw);
+                    bool gactive = GradeConditionMet(gswDef, gsr.flipped);
+                    bool gwasPressed = (gsw.customTimer > 0.5f);
+                    if (gactive && !gwasPressed && gswDef) SoundManager::Get().PlaySe(gswDef->seActivate); // 入った瞬間だけ鳴らす
+                    gsw.customTimer = gactive ? 1.0f : 0.0f; // 押されている状態（描画側が読む）
+                    switchStates.push_back({ &gsw, gactive });
                 }
 
                 // スイッチの状態をゲートドアのロックに適用
@@ -9867,6 +10010,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         done = (enemy.customTimer >= dur);
                                         break;
                                     }
+                                    case EAK_GRADE: {
+                                        // 近いほど強く、彩度は1→level、色相とコントラストは0→指定値へ寄せる
+                                        if (distM < act.range) {
+                                            float t = 1.0f - distM / act.range;
+                                            Screen_MixGrade(1.0f - t * (1.0f - act.level), t * act.hue, t * act.contrast);
+                                        }
+                                        done = (enemy.customTimer >= dur);
+                                        break;
+                                    }
                                     default: done = (enemy.customTimer >= dur); break; // 待機
                                 }
                                 if (done) { enemy.auxState = 2; enemy.customTimer = 0.0f; }
@@ -10944,6 +11096,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 Screen_SetTint(1.0f + (r - 1.0f) * fxStr,
                                                1.0f + (g - 1.0f) * fxStr,
                                                1.0f + (b - 1.0f) * fxStr);
+                                // 色の乗算に加えて、彩度・色相・コントラストも重ねられる（モノクロ・セピア・ネガ色相などの色調ゾーン）。
+                                // 向き反転では逆向きの補正（彩度は 2-値、色相とコントラストは符号反転）になる。
+                                float zs = gdef ? gdef->zoneSat : 1.0f, zh = gdef ? gdef->zoneHue : 0.0f, zc = gdef ? gdef->zoneContrast : 0.0f;
+                                if (gr.flipped) { zs = 2.0f - zs; zh = -zh; zc = -zc; }
+                                if (zs != 1.0f || zh != 0.0f || zc != 0.0f)
+                                    Screen_MixGrade(1.0f + (zs - 1.0f) * fxStr, zh * fxStr, zc * fxStr);
                             } else if (gim.type == GIMMICK_ZOOM_LENS) {
                                 float z = gdef ? gdef->zoomLevel : 1.6f;
                                 if (gr.flipped) z = (z > 0.01f) ? (1.0f / z) : 1.0f; // 反転でズームアウトになる
@@ -10967,6 +11125,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         requiredColor = ((((requiredColor - 1 + gr.tiltSteps) % 3) + 3) % 3) + 1;
                         bool colorMatch = (requiredColor == playerColorFilter);
                         gim.isActive = gr.flipped ? !colorMatch : colorMatch;
+                    }
+                    else if (gim.type == GIMMICK_GRADE_LOCK_PLATFORM) {
+                        // 補正ロック足場：gradeChannel の値が gradeMin〜gradeMax の間にあるときだけ実体化する。
+                        // 向き反転の編集で条件が裏返る（色ロック・明暗ロックと同じ約束）。
+                        gim.isActive = GradeConditionMet(FindGimmickDef(gim.assetId), gr.flipped);
                     }
                     else if (gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
                         // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する。
@@ -11670,7 +11833,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // ここで一律に弾いていたためその分岐へ到達できず、条件が合うまで完全に消えていた。
             // どこに足場が現れるのかが画面に無いと、色や明るさを切り替える手掛かりが一切無くなる。
             bool drawsGhostWhenInactive = (gim.type == GIMMICK_COLOR_LOCK_PLATFORM
-                                        || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM);
+                                        || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM
+                                        || gim.type == GIMMICK_GRADE_LOCK_PLATFORM);
             if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
@@ -11990,6 +12154,50 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawBox(bx1, by1, bx2, by2, lockColor, TRUE);
                     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 }
+            }
+            else if (gim.type == GIMMICK_GRADE_LOCK_PLATFORM) {
+                // 補正ロック足場：実体化中は不透明、不成立の間は半透明のゴーストで位置だけ示す。
+                // 「何のときに現れるのか」が分からないと切り替える手掛かりが無いので、条件を足場の上に文字で出す。
+                const GimmickDef* glDef = FindGimmickDef(gim.assetId);
+                int lockColor = GradeConditionColor(glDef);
+                int gx1 = (int)(gim.x - cameraX);
+                int gy1 = (int)(gim.y - cameraY);
+                int gx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int gy2 = (int)(gim.y + gim.spriteHeight - cameraY);
+                if (gim.isActive) {
+                    DrawBox(gx1, gy1, gx2, gy2, lockColor, TRUE);
+                    DrawBox(gx1, gy1, gx2, gy2, GetColor(255, 255, 255), FALSE);
+                } else {
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
+                    DrawBox(gx1, gy1, gx2, gy2, lockColor, TRUE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                }
+                std::string glLabel = GradeConditionLabel(glDef);
+                DrawString(gx1, gy1 - 18, glLabel.c_str(), gim.isActive ? GetColor(255, 255, 255) : GetColor(200, 200, 200));
+            }
+            else if (gim.type == GIMMICK_GRADE_SWITCH) {
+                // 補正スイッチ：条件が成立している間は「押された」絵（spriteAlt）か緑の板になる。
+                // 条件は上に文字で出す（成立中は緑、不成立は橙）。
+                const GimmickDef* gsDef = FindGimmickDef(gim.assetId);
+                bool gsPressed = (gim.customTimer > 0.5f);
+                int sx1 = (int)(gim.x - cameraX);
+                int sy1 = (int)(gim.y - cameraY);
+                int sx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int sy2 = (int)(gim.y + gim.spriteHeight - cameraY);
+                int sHandle = gim.handle;
+                if (gsPressed && gsDef != nullptr && gsDef->graphHandleAlt >= 0) sHandle = gsDef->graphHandleAlt;
+                if (sHandle >= 0) {
+                    if (gsPressed && !(gsDef != nullptr && gsDef->graphHandleAlt >= 0)) SetDrawBright(100, 255, 100);
+                    DrawExtendGraph(sx1, sy1, sx2, sy2, sHandle, TRUE);
+                    SetDrawBright(255, 255, 255);
+                } else {
+                    DrawBox(sx1, sy1, sx2, sy2, gsPressed ? GetColor(110, 220, 120) : GetColor(120, 120, 130), TRUE);
+                    DrawBox(sx1, sy1, sx2, sy2, GetColor(255, 255, 255), FALSE);
+                }
+                // 条件の色の小さな印（スイッチの隅）
+                DrawBox(sx1 + 2, sy1 + 2, sx1 + 8, sy1 + 8, GradeConditionColor(gsDef), TRUE);
+                std::string gsLabel = GradeConditionLabel(gsDef);
+                DrawString(sx1, sy1 - 20, gsLabel.c_str(), gsPressed ? GetColor(120, 230, 120) : GetColor(255, 190, 90));
             }
             else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
                      || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
