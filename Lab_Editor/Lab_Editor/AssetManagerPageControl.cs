@@ -435,7 +435,12 @@ public class AssetManagerPageControl : UserControl
         // type_enumを選べるようにするためのボタン
         var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
         btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
-        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnAddGimmick, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnEnemyTune, btnTypeCardPicker });
+        // 色・明るさに関わる敵・ギミックを、設定済みの完成形から作るボタン
+        var btnEnemyPreset = new Button { Text = "🎨 色・明るさの敵プリセット", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 236, 244) };
+        btnEnemyPreset.Click += (s, e) => BtnNewEnemyFromPreset_Click();
+        var btnGimmickPreset = new Button { Text = "🎨 色・明るさのギミックプリセット", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 236, 244) };
+        btnGimmickPreset.Click += (s, e) => BtnNewGimmickFromPreset_Click();
+        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnEnemyPreset, btnAddGimmick, btnGimmickPreset, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnEnemyTune, btnTypeCardPicker });
 
         pnlBottom.Controls.Add(flowBottomLeft);
         pnlBottom.Controls.Add(flowBottomRight);
@@ -1151,6 +1156,99 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         def.consumePartOnAttack = sg.ConsumePartOnAttack;
         if (sg.EnemyScript != null) def.script = (Newtonsoft.Json.Linq.JArray)sg.EnemyScript.DeepClone();
         return row;
+    }
+
+    // 「🎨 色・明るさの敵プリセット」。色を寄せる敵・画面を暗くする敵・行動を切り替える敵などを、
+    // タイプ・範囲・色・打ち消せる条件・行動リスト・飾りのパーツまで設定済みの状態で1体追加する。
+    private void BtnNewEnemyFromPreset_Click()
+    {
+        var infos = EnemyPresets.All.Cast<PresetInfo>().ToList();
+        using var dlg = new PresetPickerForm("🎨 色・明るさの敵プリセットから作る",
+            "色や明るさに関わる敵の完成形です。選ぶと、タイプ・数値・飾りのパーツが入った敵が1体追加されます。追加したあとも、各項目や「🎛 敵の動きを調整」で自由に直せます。",
+            infos, "本体の画像（あとから変えられます）", "", projectRoot);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK || dlg.SelectedIndex < 0) return;
+        CreateEnemyFromPreset(EnemyPresets.All[dlg.SelectedIndex], dlg.SpritePath);
+    }
+
+    // プリセットから敵の行を1つ作る（ダイアログを使わずに呼べるよう、処理を分けてある）。戻り値は追加した行。
+    private DataGridViewRow CreateEnemyFromPreset(EnemyPreset p, string bodySprite)
+    {
+        AddRow(dgvEnemies, GetDefaultEnemyRow());
+        var row = dgvEnemies.Rows[dgvEnemies.Rows.Count - 1];
+        var t = EnemyTypes.FirstOrDefault(x => x.type == p.TypeEnum);
+        if (t.desc != null) row.Cells["type_enum"].Value = t.desc;
+        row.Cells["name"].Value = p.BaseName;
+        row.Cells["hp"].Value = p.Hp;
+        row.Cells["width"].Value = p.Width;
+        row.Cells["height"].Value = p.Height;
+        row.Cells["hitboxOffsetX"].Value = 0;
+        row.Cells["hitboxOffsetY"].Value = 0;
+        row.Cells["hitboxWidth"].Value = p.Width;
+        row.Cells["hitboxHeight"].Value = p.Height;
+        row.Cells["scale"].Value = 1f;
+        row.Cells["sprite"].Value = bodySprite;
+        var def = GetOrCreateEnemyParams(row);
+        p.Apply(def);
+        // 飾りのパーツ（色・明るさの型を、プリセットが指定した数値で作る）
+        if (!string.IsNullOrEmpty(p.TemplateId))
+        {
+            var tpl = PartTemplates.All.FirstOrDefault(x => x.Id == p.TemplateId);
+            if (tpl != null)
+            {
+                string partSprite = tpl.UsesBodySprite ? bodySprite
+                    : (!string.IsNullOrEmpty(tpl.DefaultSprite) && File.Exists(Path.Combine(projectRoot, tpl.DefaultSprite.Replace('/', Path.DirectorySeparatorChar))) ? tpl.DefaultSprite : bodySprite);
+                var v = tpl.NewValues(p.Width, p.Height, partSprite);
+                foreach (var kv in p.TemplateParams) v.V[kv.Key] = kv.Value;
+                def.parts = tpl.Build(v);
+            }
+        }
+        // 行の値と定義の値をそろえて、右側のパラメータ欄も作り直す
+        UpdateBehaviorParamsPanel(dgvEnemies, AssetKind.Enemy);
+        RefreshIconCell(dgvEnemies, row.Index, isEnemy: true, isGimmick: false);
+        return row;
+    }
+
+    // 「🎨 色・明るさのギミックプリセット」。補正スイッチ＋ゲート扉のセット、補正ロック足場、色調ゾーンなどを、
+    // 見る値・範囲まで設定済みの状態で追加する（セットのものは、複数の行がまとめて追加される）。
+    private void BtnNewGimmickFromPreset_Click()
+    {
+        var infos = GimmickPresets.All.Cast<PresetInfo>().ToList();
+        using var dlg = new PresetPickerForm("🎨 色・明るさのギミックプリセットから作る",
+            "カラー補正パネルの値（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）で動くギミックの完成形です。選ぶと、ギミックの行が1〜2個追加されます。",
+            infos, "ゲート扉の画像（スイッチ・足場・ゾーンは画像なしで描かれます）", GimmickPresets.FindGateSprite(projectRoot), projectRoot);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK || dlg.SelectedIndex < 0) return;
+        CreateGimmicksFromPreset(GimmickPresets.All[dlg.SelectedIndex], dlg.SpritePath);
+    }
+
+    // プリセットから、ギミックの行を（セットなら複数）作る。戻り値は追加した行（作った順）。
+    private List<DataGridViewRow> CreateGimmicksFromPreset(GimmickPreset p, string gateSprite)
+    {
+        var made = new List<DataGridViewRow>();
+        foreach (var spec in p.Rows)
+        {
+            AddRow(dgvGimmicks, GetDefaultGimmickRow());
+            var row = dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1];
+            row.Cells["id"].Value = MakeUniqueSequentialId(dgvGimmicks, spec.IdPrefix);
+            row.Cells["name"].Value = spec.Name;
+            var t = GimmickTypes.FirstOrDefault(x => x.type == spec.Type);
+            if (t.desc != null) row.Cells["type_enum"].Value = t.desc;
+            row.Cells["hitboxOffsetX"].Value = 0;
+            row.Cells["hitboxOffsetY"].Value = 0;
+            row.Cells["hitboxWidth"].Value = spec.Width;
+            row.Cells["hitboxHeight"].Value = spec.Height;
+            row.Cells["sprite"].Value = spec.UsesUserSprite ? gateSprite : "";
+            var def = GetOrCreateGimmickParams(row);
+            spec.Apply(def);
+            RefreshIconCell(dgvGimmicks, row.Index, isEnemy: false, isGimmick: true);
+            made.Add(row);
+        }
+        if (made.Count > 0)
+        {
+            dgvGimmicks.ClearSelection();
+            made[0].Selected = true;
+            UpdateBehaviorParamsPanel(dgvGimmicks, AssetKind.Gimmick);
+        }
+        return made;
     }
 
     private void BtnPartsEditor_Click()
