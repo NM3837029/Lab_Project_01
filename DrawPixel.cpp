@@ -45,6 +45,7 @@ bool isDedicatedEditorMode = false;
 #include "EventManager.h"
 #include "AnimationController.h"
 #include "BehaviorScript.h"
+#include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
 
 // ======================================================
 // Feature: Composite Multi-Part Objects (Parts-M1)
@@ -94,6 +95,8 @@ enum PartMotionKind {
     PMK_BLINK,        // 点滅：amount(0〜1) ぶん薄くなる
     PMK_SHAKE,        // 震え：amount(px) の幅でランダムにふるえる
     PMK_FACE_PLAYER,  // プレイヤーを向く：プレイヤーの方向 + amount(度) へ回す
+    PMK_BRIGHTNESS,   // 明るさ：色が 1 + amount(-1〜1) 倍まで明るく(暗く)なって戻る。1を超えた分は加算合成で光る
+    PMK_HUE_CYCLE,    // 色相が回る：色が虹色に1周期で1周する。amount(0〜1) は色のつき方の強さ
     PMK_COUNT
 };
 
@@ -101,7 +104,7 @@ enum PartMotionKind {
 static const char* const PART_MOTION_TRIGGER_NAMES[PMT_COUNT] =
     { "always", "attack", "jump", "charge", "active", "hurt", "near", "moving", "flipped", "tilted" };
 static const char* const PART_MOTION_KIND_NAMES[PMK_COUNT] =
-    { "sway", "swing", "spin", "orbit", "pulse", "slide", "thrust", "blink", "shake", "face_player" };
+    { "sway", "swing", "spin", "orbit", "pulse", "slide", "thrust", "blink", "shake", "face_player", "brightness", "hue_cycle" };
 
 struct PartMotion {
     int   trigger = PMT_ALWAYS;
@@ -151,6 +154,11 @@ struct PartDef {
     bool deadly = false;
     json script = json::array(); // このパーツ専用の行動スクリプト（JSON形式のAST。未使用なら空配列のまま）
     std::vector<PartMotion> motions; // このパーツのモーション一覧（空＝従来どおり。スクリプトとは独立に併用できる）
+    // パーツの色（絵に掛ける乗算。1=そのまま）と、加算合成で描くか。
+    // 同じ絵を赤・緑・青の3つの光に塗り分ける、光る球をぼんやり重ねる、といった色・明るさの表現のための項目。
+    // 既定は「何も変えない」値なので、これらを持たない既存のパーツは1ピクセルも変わらない。
+    float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
+    bool additive = false;
 };
 
 // ランタイム側のパーツ状態。PartDefへのポインタは持たず、スポーン時に値をコピーする
@@ -181,6 +189,10 @@ struct PartInstance {
     float motionAngle = 0.0f;               // 回転の上乗せ（ラジアン）
     float motionScale = 1.0f;               // 大きさの倍率（パーツの中心を保ったまま拡縮）
     float motionAlpha = 1.0f;               // 不透明度（0〜1）
+    float motionTintR = 1.0f, motionTintG = 1.0f, motionTintB = 1.0f; // 色の倍率（明るさ・色相のモーション。1を超えてもよい）
+    // パーツ自身の色（PartDef からコピー）
+    float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
+    bool additive = false;
 
     // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
     // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
@@ -740,6 +752,19 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
         part.hp = p.value("hp", 0);
         part.zOrder = p.value("zOrder", 0);
         part.deadly = p.value("deadly", false); // 既定false＝従来どおり無害な装飾パーツ
+        // 色（"#RRGGBB"）と合成方法（"add"=加算合成）。未指定なら絵のまま
+        {
+            std::string col = p.value("color", "");
+            if (col.size() == 7 && col[0] == '#') {
+                unsigned int rgb = 0;
+                if (sscanf_s(col.c_str() + 1, "%x", &rgb) == 1) {
+                    part.tintR = ((rgb >> 16) & 0xFF) / 255.0f;
+                    part.tintG = ((rgb >> 8) & 0xFF) / 255.0f;
+                    part.tintB = (rgb & 0xFF) / 255.0f;
+                }
+            }
+            part.additive = (p.value("blend", "") == "add");
+        }
         if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
         // モーション一覧。名前が分からない種類・トリガーの項目は、動かないまま黙って残すのではなく読み飛ばす
         // （新しいエディタで作った項目を古いゲームが読んだときに、意図しない動きにならないようにするため）。
@@ -1140,6 +1165,8 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         inst.zOrder = pd.zOrder;
         inst.deadly = pd.deadly;
         inst.partIndex = (int)pi;
+        inst.tintR = pd.tintR; inst.tintG = pd.tintG; inst.tintB = pd.tintB;
+        inst.additive = pd.additive;
         inst.motions = pd.motions;
         inst.motionStates.assign(pd.motions.size(), PartMotionState());
         result.push_back(inst);
@@ -1388,6 +1415,7 @@ void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ct
         if (part.motionStates.size() != part.motions.size()) part.motionStates.assign(part.motions.size(), PartMotionState());
 
         float dx = 0.0f, dy = 0.0f, dAng = 0.0f, scaleMul = 1.0f, alphaMul = 1.0f;
+        float tintMulR = 1.0f, tintMulG = 1.0f, tintMulB = 1.0f; // 明るさ・色相のモーションが掛ける色の倍率
         // 親のサイズのうち「パーツの中心」を使う距離・向きの計算のための、パーツ自身の中心
         float pm = part.scale * part.parentUniform;
         float pcx = part.x + (part.width * pm) * 0.5f, pcy = part.y + (part.height * pm) * 0.5f;
@@ -1478,9 +1506,26 @@ void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ct
                     dAng += diff * weight;
                     break;
                 }
+                case PMK_BRIGHTNESS: {
+                    // 明るさ：1 → 1+amount → 1 の山。amount がプラスなら光り、マイナスなら暗くなる
+                    float f = 1.0f + m.amount * PartMotionBump(t) * weight;
+                    if (f < 0.0f) f = 0.0f;
+                    tintMulR *= f; tintMulG *= f; tintMulB *= f;
+                    break;
+                }
+                case PMK_HUE_CYCLE: {
+                    // 色相が回る：色相を t(周期) で1周させ、白からその色までを amount で混ぜる
+                    float cr, cg, cb; // 色の計算は ColorGrade.h の HsvToRgb を借りる
+                    ColorGrade::HsvToRgb((t - floorf(t)) * 360.0f, 1.0f, 1.0f, cr, cg, cb);
+                    float a = m.amount * weight;
+                    if (a > 1.0f) a = 1.0f;
+                    tintMulR *= 1.0f - a * (1.0f - cr); tintMulG *= 1.0f - a * (1.0f - cg); tintMulB *= 1.0f - a * (1.0f - cb);
+                    break;
+                }
                 default: break;
             }
         }
+        part.motionTintR = tintMulR; part.motionTintG = tintMulG; part.motionTintB = tintMulB;
         if (scaleMul < 0.05f) scaleMul = 0.05f;
         if (scaleMul > 5.0f) scaleMul = 5.0f;
         if (alphaMul < 0.0f) alphaMul = 0.0f;
@@ -1514,9 +1559,23 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
         // モーションの回転・大きさ・不透明度は、その上に重ねる（中心は動かさない）。
         bool motionAlpha = (part.motionAlpha < 0.999f);
-        if (motionAlpha) SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255.0f * part.motionAlpha));
+        // 色：パーツ自身の色 × モーションの色の倍率。255を超える分（光る）は、加算合成の2回目で足す
+        // （SetDrawBright は255が上限のため。カラー補正パネルの明るさと同じ手当て）。
+        float mulR = part.tintR * part.motionTintR, mulG = part.tintG * part.motionTintG, mulB = part.tintB * part.motionTintB;
+        bool hasTint = (mulR != 1.0f || mulG != 1.0f || mulB != 1.0f);
+        bool needBlend = motionAlpha || part.additive;
+        int alphaI = (int)(255.0f * part.motionAlpha);
+        auto b255 = [](float v) { return (int)(v < 0.0f ? 0.0f : (v > 1.0f ? 255.0f : v * 255.0f)); };
+        if (needBlend) SetDrawBlendMode(part.additive ? DX_BLENDMODE_ADD : DX_BLENDMODE_ALPHA, alphaI);
+        if (hasTint) SetDrawBright(b255(mulR), b255(mulG), b255(mulB));
         DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, part.angle + part.parentTilt + part.motionAngle, part.handle, TRUE);
-        if (motionAlpha) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        if (mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) {
+            SetDrawBlendMode(DX_BLENDMODE_ADD, alphaI);
+            SetDrawBright(b255(mulR - 1.0f), b255(mulG - 1.0f), b255(mulB - 1.0f));
+            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, part.angle + part.parentTilt + part.motionAngle, part.handle, TRUE);
+        }
+        if (hasTint) SetDrawBright(255, 255, 255);
+        if (needBlend || mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
 }
 
@@ -3025,9 +3084,6 @@ struct ScreenFxSnapshot {
 };
 ScreenFxSnapshot g_screenFx;
 
-// カラー補正パネル（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）の計算・描画。
-// Ui* 関数と ScreenFxSnapshot が上で定義済みになったこの位置で読み込む。
-#include "ColorGrade.h"
 
 // ===== カラー補正と連動するギミック（GRADE_SWITCH / GRADE_LOCK_PLATFORM）の条件判定 =====
 // 見る値は「画面に実際に出ている値」(g_screenFx)。パネルだけでなく、色調ゾーンや敵の演出で動いた値にも反応する。
