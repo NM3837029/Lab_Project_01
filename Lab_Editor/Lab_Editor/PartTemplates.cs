@@ -16,6 +16,8 @@ namespace Lab_Editor;
 //   ・既存の敵から取り出した型 …… 5つ。いまゲームに入っている敵のパーツ構成を、数値で調整できる形にした。
 //                                  初期値は元の敵と同じ動きになる。
 //   ・新しい型 ……………………… 6つ。羽ばたく翼・ふりふり尻尾・2連装砲身・開閉するはさみ・鉄球つきの鎖・周回する盾。
+//   ・色・明るさの型 ……………… 9つ（PartTemplatesColor.cs）。光る電球・3原色の光球・色相環・回転灯・月の満ち欠け・
+//                                  露出メーター・フラッシュ・色ずれ・カラーバー。色（color）と加算合成、明るさ・色相のモーションで作る。
 //
 // 【作り方の約束】
 //   ・位置は「本体の左上を原点」「パーツの左上」で指定する（ゲームの解釈と同じ）。
@@ -69,6 +71,11 @@ public class PartTemplate
     public string Id = "", Name = "", Category = "", Description = "", Origin = "";
     // 型を選んだ直後のプレビューで、動きの再生が当てにならないとき（プレイヤーとの位置関係で動く型など）の注意書き
     public string PreviewNote = "";
+    // 型の標準のパーツ画像（img/ からの相対パス）。ユーザーがパーツの画像を自分で選ぶまで、これで作る。
+    // 色・明るさの型は、色を掛けて使うための白い無地の絵（光の円・白い円・白い四角）を標準にしてある。
+    public string DefaultSprite = "";
+    // 本体の絵を、そのままパーツの絵にする型（色ずれ：本体と同じ絵を3枚重ねる）
+    public bool UsesBodySprite;
     public List<TemplateParam> Params = new();
     public string DefaultIdPrefix = "part";
     public Func<TemplateValues, EnemySuggestion> Suggest = _ => new EnemySuggestion();
@@ -83,7 +90,7 @@ public class PartTemplate
     }
 }
 
-public static class PartTemplates
+public static partial class PartTemplates
 {
     public const string CategoryExisting = "既存の敵から取り出した型";
     public const string CategoryNew = "新しい型";
@@ -141,13 +148,13 @@ public static class PartTemplates
         => new TemplateParam { Key = key, Label = label, IsBool = true, Default = def ? 1m : 0m, Hint = hint };
 
     // ==== 型の一覧 ====
-    private static List<PartTemplate> BuildAll() => new()
+    private static List<PartTemplate> BuildAll() => new List<PartTemplate>
     {
         // ───────────── 既存の敵から取り出した型 ─────────────
         SegmentedBody(), SpringChain(), AimBarrel(), WatchingEyes(), TongueChain(),
         // ───────────── 新しい型 ─────────────
         Wings(), TailWag(), TwinBarrels(), Claws(), MorningStar(), ShieldOrbiter(),
-    };
+    }.Concat(ColorTemplates()).ToList(); // ───────────── 色・明るさの型（PartTemplatesColor.cs）─────────────
 
     // ── 1. 多節体（敵: enemy_imomushi） ──
     // 体節が本体の後ろに連なり、各節が自分の番号ぶんずれた波を描いてくねる。

@@ -518,7 +518,11 @@ public class MapCanvas : Panel
             var r = ToScreenRect(worldX + p.offsetX * scale, worldY + p.offsetY * scale, pw, ph);
             if (r.Width < 2) r.Width = 2;
             if (r.Height < 2) r.Height = 2;
-            g.DrawImage(img, r);
+            // パーツの色と加算合成（色を付けたパーツが、ステージ上でも色付きで見える）
+            PartColor.TryParse(p.color, out float pcr, out float pcg, out float pcb);
+            using var pia = PartColor.MakeAttributes(pcr, pcg, pcb, p.blend == "add" ? 0.8f : 1f);
+            if (pia != null) g.DrawImage(img, Rectangle.Round(r), 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, pia);
+            else g.DrawImage(img, r);
         }
         g.Restore(saved);
     }

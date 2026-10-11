@@ -46,11 +46,14 @@ public class PartTemplatePickerForm : Form
     private System.Windows.Forms.Timer _timer = null!;
     private bool _playing;
     private float _time;
+    // プレビューで「攻撃・溜め」などの状況を作るための入れ物（240フレームで1周：待つ→溜める→攻撃→ふたたび待つ）
+    private readonly PartMotionEvaluator.SimState _sim = new();
 
     private PartTemplate? _tpl;
     private TemplateValues _values = new();
     private List<PartDef> _preview = new();
     private string _bodySprite = "", _partSprite = "";
+    private bool _partSpritePicked;   // ユーザーがパーツの画像を自分で選んだか（選ぶまでは、型の標準の画像で作る）
     private readonly Dictionary<string, Image?> _imgCache = new();
     private bool _building;                 // 入力欄を作っている最中（変更イベントを無視する）
     private string? _buildError;
@@ -124,9 +127,10 @@ public class PartTemplatePickerForm : Form
         _list.Columns.Add("型", 260);
         var gExisting = new ListViewGroup(PartTemplates.CategoryExisting, HorizontalAlignment.Left);
         var gNew = new ListViewGroup(PartTemplates.CategoryNew, HorizontalAlignment.Left);
-        _list.Groups.AddRange(new[] { gExisting, gNew });
+        var gColor = new ListViewGroup(PartTemplates.CategoryColor, HorizontalAlignment.Left);
+        _list.Groups.AddRange(new[] { gExisting, gNew, gColor });
         foreach (var t in PartTemplates.All)
-            _list.Items.Add(new ListViewItem(t.Name) { Tag = t, Group = t.Category == PartTemplates.CategoryExisting ? gExisting : gNew });
+            _list.Items.Add(new ListViewItem(t.Name) { Tag = t, Group = t.Category == PartTemplates.CategoryExisting ? gExisting : t.Category == PartTemplates.CategoryColor ? gColor : gNew });
         _list.SelectedIndexChanged += (s, e) => { if (_list.SelectedItems.Count > 0) SelectTemplate((PartTemplate)_list.SelectedItems[0].Tag); };
         pnlLeft.Controls.Add(_list);
         pnlLeft.Controls.Add(lblList);
@@ -217,10 +221,10 @@ public class PartTemplatePickerForm : Form
     {
         _tpl = t;
         // 敵を新しく作るときは、型が勧める本体の大きさでプレビューする
-        var firstValues = t.NewValues(_paramBodyW, _paramBodyH, _partSprite);
+        var firstValues = t.NewValues(_paramBodyW, _paramBodyH, EffectiveSprite(t));
         float bw = _paramBodyW, bh = _paramBodyH;
         if (_createEnemyMode) { var sg = t.Suggest(firstValues); bw = sg.Width; bh = sg.Height; }
-        _values = t.NewValues(bw, bh, _partSprite);
+        _values = t.NewValues(bw, bh, EffectiveSprite(t));
 
         _building = true;
         _lblName.Text = t.Name;
@@ -301,21 +305,34 @@ public class PartTemplatePickerForm : Form
         if (ofd.ShowDialog(this) != DialogResult.OK) return;
         // プロジェクト外のファイルを直接参照すると、あとで場所を移されたときに壊れるため、必ず img/ へコピーしてから使う。
         string rel = ImageImportHelper.CopyIntoImgFolder(_projectRoot, ofd.FileName);
-        if (isBody) _bodySprite = rel;
-        else { _partSprite = rel; _values.Sprite = rel; }
+        if (isBody) { _bodySprite = rel; if (_tpl != null) _values.Sprite = EffectiveSprite(_tpl); }
+        else { _partSprite = rel; _partSpritePicked = true; _values.Sprite = rel; }
         UpdateSpriteViews();
         RebuildPreview();
     }
 
     private void UpdateSpriteViews()
     {
-        _picPart.Image = LoadImage(_partSprite);
-        _lblPartPath.Text = string.IsNullOrEmpty(_partSprite) ? "(画像なし：オレンジの印で表示)" : _partSprite;
+        string eff = EffectiveSprite(_tpl);
+        _picPart.Image = LoadImage(eff);
+        _lblPartPath.Text = string.IsNullOrEmpty(eff) ? "(画像なし：オレンジの印で表示)" : (_partSpritePicked ? eff : eff + (string.Equals(eff, _partSprite) ? "" : "（この型の標準の画像）"));
         if (_createEnemyMode)
         {
             _picBody.Image = LoadImage(_bodySprite);
             _lblBodyPath.Text = string.IsNullOrEmpty(_bodySprite) ? "(画像なし)" : _bodySprite;
         }
+    }
+
+    // いま使うパーツの画像。自分で選んだ画像があればそれ、無ければ型の標準（本体の絵／白い無地の絵）、最後は初期値。
+    private string EffectiveSprite(PartTemplate? t)
+    {
+        if (_partSpritePicked) return _partSprite;
+        if (t != null)
+        {
+            if (t.UsesBodySprite) { if (!string.IsNullOrEmpty(_bodySprite)) return _bodySprite; if (!string.IsNullOrEmpty(_partSprite)) return _partSprite; }
+            if (!string.IsNullOrEmpty(t.DefaultSprite) && File.Exists(Path.Combine(_projectRoot, t.DefaultSprite.Replace('/', Path.DirectorySeparatorChar)))) return t.DefaultSprite;
+        }
+        return _partSprite;
     }
 
     private Image? LoadImage(string rel)
@@ -369,6 +386,10 @@ public class PartTemplatePickerForm : Form
             float w = (p.width > 0 ? p.width : 24) * p.scale, h = (p.height > 0 ? p.height : 24) * p.scale;
             void Take(float x, float y) { minX = Math.Min(minX, x); minY = Math.Min(minY, y); maxX = Math.Max(maxX, x + w); maxY = Math.Max(maxY, y + h); }
             Take(p.offsetX, p.offsetY);
+            // モーションで動く幅も範囲に含める（回る・揺れる・突くパーツが、再生を始めても画面から出ないように）
+            float ext = 0f;
+            foreach (var mo in p.motions) if (mo.kind is "sway" or "slide" or "thrust" or "orbit" or "shake") ext = Math.Max(ext, Math.Abs(mo.amount));
+            if (ext > 0f) { Take(p.offsetX - ext, p.offsetY - ext); Take(p.offsetX + ext, p.offsetY + ext); }
             // 動く型は、いくつかの時刻の姿勢も範囲に含める（再生を始めても画面から出ないように）
             foreach (float t in new[] { 0f, 40f, 80f, 120f, 160f, 200f, 240f })
             {
@@ -415,13 +436,32 @@ public class PartTemplatePickerForm : Form
         {
             var p = _preview[i];
             float ox = p.offsetX, oy = p.offsetY, ang = 0f;
+            float mScale = 1f, mAlpha = 1f, mTR = 1f, mTG = 1f, mTB = 1f;
             if (_playing)
             {
                 var pose = ScriptPreviewEvaluator.Evaluate(p.script, _time, i);
                 if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
                 if (pose.HasAngle) ang = pose.Angle;
+                // パーツのモーション。攻撃・溜めといった状況は、240フレームで1周する疑似の状況で再現する。
+                if (p.motions.Count > 0)
+                {
+                    float cyc = _time % 240f, cycStart = _time - cyc;
+                    _sim.Active.Clear();
+                    if (cyc >= 100f && cyc < 140f) _sim.Active.Add("charge");
+                    if (cyc >= 140f && cyc < 200f) _sim.Active.Add("active");
+                    _sim.EventClock.Clear();
+                    _sim.EventClock["attack"] = cyc >= 140f ? cycStart + 140f : cycStart - 100f;
+                    _sim.EventClock["jump"] = cyc >= 140f ? cycStart + 140f : cycStart - 100f;
+                    _sim.ParentCenter = new PointF(bw / 2f, bh / 2f);
+                    _sim.PlayerPos = new PointF(bw / 2f + 400f, bh / 2f);
+                    float pw0 = (p.width > 0 ? p.width : 24) * p.scale, ph0 = (p.height > 0 ? p.height : 24) * p.scale;
+                    var res = PartMotionEvaluator.Evaluate(p.motions, i, _time, _sim, new PointF(ox + pw0 / 2f, oy + ph0 / 2f), ang);
+                    ox += res.DX; oy += res.DY; ang += res.Angle;
+                    mScale = res.Scale; mAlpha = res.Alpha; mTR = res.TintR; mTG = res.TintG; mTB = res.TintB;
+                }
             }
-            float w = (p.width > 0 ? p.width : 24) * p.scale, h = (p.height > 0 ? p.height : 24) * p.scale;
+            float w = (p.width > 0 ? p.width : 24) * p.scale * mScale, h = (p.height > 0 ? p.height : 24) * p.scale * mScale;
+            if (mScale != 1f) { ox -= (w - (p.width > 0 ? p.width : 24) * p.scale) / 2f; oy -= (h - (p.height > 0 ? p.height : 24) * p.scale) / 2f; }
             var s0 = W(ox, oy);
             var rect = new RectangleF(s0.X, s0.Y, Math.Max(w * zoom, 4f), Math.Max(h * zoom, 4f));
             var st = ang != 0f ? g.Save() : null;
@@ -431,8 +471,22 @@ public class PartTemplatePickerForm : Form
                 g.TranslateTransform(px, py); g.RotateTransform(ang * 180f / MathF.PI); g.TranslateTransform(-px, -py);
             }
             var img = LoadImage(p.sprite);
-            if (img != null) g.DrawImage(img, rect);
-            else { using var b = new SolidBrush(Palette[i % Palette.Length]); g.FillRectangle(b, rect); }
+            // 色（パーツ自身の色 × モーションの色の倍率）と不透明度。加算合成は少し薄くして重ねる近似
+            PartColor.TryParse(p.color, out float cr0, out float cg0, out float cb0);
+            using var cia = PartColor.MakeAttributes(cr0 * mTR, cg0 * mTG, cb0 * mTB, mAlpha * (p.blend == "add" ? 0.8f : 1f));
+            if (img != null)
+            {
+                if (cia != null) g.DrawImage(img, Rectangle.Round(rect), 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, cia);
+                else g.DrawImage(img, rect);
+            }
+            else
+            {
+                // 画像が無いときの印。色が指定されていれば、その色で塗る
+                Color pal = Palette[i % Palette.Length];
+                var pcol = PartColor.ToColor(p.color);
+                if (!pcol.IsEmpty) pal = Color.FromArgb(Math.Clamp((int)(200 * mAlpha), 0, 255), Math.Clamp((int)(pcol.R * mTR), 0, 255), Math.Clamp((int)(pcol.G * mTG), 0, 255), Math.Clamp((int)(pcol.B * mTB), 0, 255));
+                using var b = new SolidBrush(pal); g.FillRectangle(b, rect);
+            }
             if (st != null) g.Restore(st);
             // 枠：壊せるパーツは緑、触れるとダメージは赤、そのほかは白
             Color frame = p.hp > 0 ? Color.LimeGreen : (p.deadly ? Color.FromArgb(230, 255, 90, 90) : Color.FromArgb(150, 255, 255, 255));
@@ -461,7 +515,7 @@ public class PartTemplatePickerForm : Form
         ResultTemplateName = _tpl.Name;
         ReplaceExisting = _chkReplace.Visible && _chkReplace.Checked;
         BodySpritePath = _bodySprite;
-        PartSpritePath = _partSprite;
+        PartSpritePath = EffectiveSprite(_tpl);
         ResultNote = string.IsNullOrEmpty(Suggestion.TypeNote) ? "" : $"（おすすめの敵タイプ：{Suggestion.TypeNote}）";
         DialogResult = DialogResult.OK;
         Close();

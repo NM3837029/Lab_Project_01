@@ -120,6 +120,9 @@ public partial class PartsEditorPageControl : UserControl
     private Label lblSpriteValue = null!;
     private NumericUpDown nudOffsetX = null!, nudOffsetY = null!, nudWidth = null!, nudHeight = null!, nudScale = null!, nudHp = null!, nudZOrder = null!;
     private CheckBox chkDeadly = null!;
+    private Button btnPartColor = null!;      // パーツの色（絵に掛ける）。押すと色を選ぶ
+    private CheckBox chkAdditive = null!;     // 加算合成（光るパーツ）
+    private CheckBox chkStretch = null!;      // 縦横を別々に伸ばして描く（細長いパーツ）
     private Label lblHpHint = null!, lblSelectionInfo = null!, lblScriptInfo = null!, lblHitboxInfo = null!;
     // 複数選択のとき共通の項目だけを編集できることを伝える見出し
     private Label lblMultiNote = null!;
@@ -336,6 +339,9 @@ public partial class PartsEditorPageControl : UserControl
         deadly = p.deadly,
         script = (JArray)p.script.DeepClone(),
         motions = p.motions.Select(m => m.Clone()).ToList(),
+        color = p.color,
+        blend = p.blend,
+        stretch = p.stretch,
     };
 
     // ==== 状態表示（メッセージボックスの代わり） ====
@@ -1043,6 +1049,26 @@ public partial class PartsEditorPageControl : UserControl
         chkDeadly = new CheckBox { Text = "触れるとダメージ", AutoSize = true };
         chkDeadly.CheckedChanged += (s, e) => EditSelected("deadly", p => p.deadly = chkDeadly.Checked);
         AddRow(tProp, "接触", chkDeadly);
+        // 色と合成方法。同じ絵を赤・緑・青に塗り分けたり、光る球を重ねたりするための項目。
+        btnPartColor = new Button { Text = "なし（絵のまま）", AutoSize = true, Padding = new Padding(6, 2, 6, 2), FlatStyle = FlatStyle.Standard };
+        btnPartColor.Click += (s, e) => PickPartColor();
+        var btnPartColorClear = new Button { Text = "色を消す", AutoSize = true, Padding = new Padding(4, 2, 4, 2) };
+        btnPartColorClear.Click += (s, e) => EditSelected("color", p => p.color = "");
+        btnPartColorClear.Click += (s, e) => { if (!_suppressEvents) LoadDetailFromSelection(); };
+        var flowColor = new FlowLayoutPanel { AutoSize = true, WrapContents = true, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(0) };
+        flowColor.Controls.Add(btnPartColor);
+        flowColor.Controls.Add(btnPartColorClear);
+        AddRow(tProp, "色", flowColor);
+        chkAdditive = new CheckBox { Text = "加算合成（光る）", AutoSize = true };
+        chkAdditive.CheckedChanged += (s, e) => EditSelected("blend", p => p.blend = chkAdditive.Checked ? "add" : "");
+        AddRow(tProp, "合成", chkAdditive);
+        var lblBlendHint = new Label { Text = "加算合成＝下の絵に明るさを足します（ゲームで光って見えます。この画面のプレビューは近似です）", AutoSize = true, ForeColor = Color.Gray, Font = new Font(Font.FontFamily, 7.5f), MaximumSize = new Size(190, 0) };
+        AddRow(tProp, "", lblBlendHint);
+        chkStretch = new CheckBox { Text = "縦横を別々に伸ばして描く", AutoSize = true };
+        chkStretch.CheckedChanged += (s, e) => EditSelected("stretch", p => p.stretch = chkStretch.Checked);
+        AddRow(tProp, "伸縮", chkStretch);
+        var lblStretchHint = new Label { Text = "細長い光の帯や針に。OFFのときは、幅・高さの小さいほうに合わせた縦横比のまま描きます（ゲーム）", AutoSize = true, ForeColor = Color.Gray, Font = new Font(Font.FontFamily, 7.5f), MaximumSize = new Size(190, 0) };
+        AddRow(tProp, "", lblStretchHint);
         nudZOrder = MakeNumeric(-100, 100, 0);
         nudZOrder.ValueChanged += (s, e) => EditSelected("zOrder", p => p.zOrder = (int)nudZOrder.Value);
         AddRow(tProp, "重なり (zOrder)", nudZOrder);
@@ -1104,6 +1130,17 @@ public partial class PartsEditorPageControl : UserControl
 
     // 詳細パネルの入力から、選んだパーツ全部を書き換える（HP・zOrder・スケール・接触ダメージ）。
     // 複数選択のとき、同じ値をまとめて設定できる。
+    // パーツの色を選ぶ。選択中の全パーツに同じ色を付ける。
+    private void PickPartColor()
+    {
+        if (selectedIndex < 0 || selectedIndex >= parts.Count) return;
+        using var dlg = new ColorDialog { FullOpen = true, Color = PartColor.ToColor(parts[selectedIndex].color) is { IsEmpty: false } c0 ? c0 : Color.White };
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        string hex = PartColor.ToHex(dlg.Color);
+        EditSelected("color", p => p.color = hex);
+        LoadDetailFromSelection();
+    }
+
     private void EditSelected(string key, Action<PartDef> apply)
     {
         if (_suppressEvents || _selected.Count == 0) return;
@@ -1142,6 +1179,18 @@ public partial class PartsEditorPageControl : UserControl
                 nudHp.Value = Math.Clamp(p.hp, (int)nudHp.Minimum, (int)nudHp.Maximum);
                 nudZOrder.Value = Math.Clamp(p.zOrder, (int)nudZOrder.Minimum, (int)nudZOrder.Maximum);
                 chkDeadly.Checked = p.deadly;
+                chkAdditive.Checked = p.blend == "add";
+                chkStretch.Checked = p.stretch;
+                {
+                    var pc = PartColor.ToColor(p.color);
+                    if (pc.IsEmpty) { btnPartColor.Text = "なし（絵のまま）"; btnPartColor.BackColor = SystemColors.Control; btnPartColor.ForeColor = SystemColors.ControlText; }
+                    else
+                    {
+                        btnPartColor.Text = p.color;
+                        btnPartColor.BackColor = pc;
+                        btnPartColor.ForeColor = (pc.R * 299 + pc.G * 587 + pc.B * 114) / 1000 > 140 ? Color.Black : Color.White;
+                    }
+                }
                 UpdateHpHint();
                 lblScriptInfo.Text = ScriptSummary(p);
                 lblHitboxInfo.Text = $"当たり判定：位置({p.hitboxOffsetX}, {p.hitboxOffsetY})　大きさ {p.hitboxWidth}×{p.hitboxHeight}";
@@ -1154,6 +1203,9 @@ public partial class PartsEditorPageControl : UserControl
                 picSprite.Image = null;
                 nudOffsetX.Value = 0; nudOffsetY.Value = 0; nudWidth.Value = 0; nudHeight.Value = 0; nudScale.Value = 1; nudHp.Value = 0; nudZOrder.Value = 0;
                 chkDeadly.Checked = false;
+                chkAdditive.Checked = false;
+                chkStretch.Checked = false;
+                btnPartColor.Text = "なし（絵のまま）"; btnPartColor.BackColor = SystemColors.Control; btnPartColor.ForeColor = SystemColors.ControlText;
                 lblHpHint.Text = "";
                 lblScriptInfo.Text = "";
                 lblHitboxInfo.Text = "";
@@ -1162,7 +1214,7 @@ public partial class PartsEditorPageControl : UserControl
             _motionEditor?.Bind(hasSel ? parts[selectedIndex].motions : null);
             // 未選択の間は編集しても意味がないため、全ての入力コントロールを無効化してユーザーに
             // 「まずパーツを選んでください」という状態を視覚的に伝える。
-            foreach (Control c in new Control[] { txtId, nudOffsetX, nudOffsetY, nudWidth, nudHeight, nudScale, nudHp, nudZOrder, chkDeadly }) c.Enabled = hasSel;
+            foreach (Control c in new Control[] { txtId, nudOffsetX, nudOffsetY, nudWidth, nudHeight, nudScale, nudHp, nudZOrder, chkDeadly, btnPartColor, chkAdditive, chkStretch }) c.Enabled = hasSel;
             // 位置・大きさ・IDは主選択だけに効く。複数選択のときは、そのことを見出しで伝える。
             bool multi = _selected.Count >= 2;
             lblMultiNote.Visible = multi;

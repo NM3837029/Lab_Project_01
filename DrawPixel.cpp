@@ -159,6 +159,9 @@ struct PartDef {
     // 既定は「何も変えない」値なので、これらを持たない既存のパーツは1ピクセルも変わらない。
     float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
     bool additive = false;
+    // 縦横を別々の倍率で伸ばして描くか（細長い光の帯・メーターの針など）。
+    // 既定は「縦横比を保って枠に収める」ので、細長いパーツは正方形の絵だと短いほうの辺の正方形になってしまう。
+    bool stretch = false;
 };
 
 // ランタイム側のパーツ状態。PartDefへのポインタは持たず、スポーン時に値をコピーする
@@ -193,6 +196,7 @@ struct PartInstance {
     // パーツ自身の色（PartDef からコピー）
     float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
     bool additive = false;
+    bool stretch = false;
 
     // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
     // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
@@ -765,6 +769,7 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
             }
             part.additive = (p.value("blend", "") == "add");
         }
+        part.stretch = p.value("stretch", false);
         if (p.contains("script") && p["script"].is_array()) part.script = p["script"];
         // モーション一覧。名前が分からない種類・トリガーの項目は、動かないまま黙って残すのではなく読み飛ばす
         // （新しいエディタで作った項目を古いゲームが読んだときに、意図しない動きにならないようにするため）。
@@ -1167,6 +1172,7 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         inst.partIndex = (int)pi;
         inst.tintR = pd.tintR; inst.tintG = pd.tintG; inst.tintB = pd.tintB;
         inst.additive = pd.additive;
+        inst.stretch = pd.stretch;
         inst.motions = pd.motions;
         inst.motionStates.assign(pd.motions.size(), PartMotionState());
         result.push_back(inst);
@@ -1566,13 +1572,27 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         bool needBlend = motionAlpha || part.additive;
         int alphaI = (int)(255.0f * part.motionAlpha);
         auto b255 = [](float v) { return (int)(v < 0.0f ? 0.0f : (v > 1.0f ? 255.0f : v * 255.0f)); };
+        // 描画本体。stretch のパーツは、幅・高さをそれぞれ別の倍率で伸ばす（縦横比を保たない）
+        auto drawBody = [&]() {
+            double ang = part.angle + part.parentTilt + part.motionAngle;
+            if (part.stretch && part.width > 0 && part.height > 0) {
+                int iw = 0, ih = 0;
+                GetGraphSize(part.handle, &iw, &ih);
+                if (iw > 0 && ih > 0) {
+                    double ex = (double)part.width / iw * pm * part.motionScale, ey = (double)part.height / ih * pm * part.motionScale;
+                    DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, ex, ey, ang, part.handle, TRUE, FALSE);
+                    return;
+                }
+            }
+            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, ang, part.handle, TRUE);
+        };
         if (needBlend) SetDrawBlendMode(part.additive ? DX_BLENDMODE_ADD : DX_BLENDMODE_ALPHA, alphaI);
         if (hasTint) SetDrawBright(b255(mulR), b255(mulG), b255(mulB));
-        DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, part.angle + part.parentTilt + part.motionAngle, part.handle, TRUE);
+        drawBody();
         if (mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) {
             SetDrawBlendMode(DX_BLENDMODE_ADD, alphaI);
             SetDrawBright(b255(mulR - 1.0f), b255(mulG - 1.0f), b255(mulB - 1.0f));
-            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, part.angle + part.parentTilt + part.motionAngle, part.handle, TRUE);
+            drawBody();
         }
         if (hasTint) SetDrawBright(255, 255, 255);
         if (needBlend || mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);

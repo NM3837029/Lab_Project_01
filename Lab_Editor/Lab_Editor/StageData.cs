@@ -1146,6 +1146,18 @@ public class PartDef
     public List<PartMotion> motions { get; set; } = new();
     // 空のときは JSON に出さない（モーションを使っていない大半のパーツのJSONを膨らませないため）
     public bool ShouldSerializemotions() => motions != null && motions.Count > 0;
+    // パーツの色（"#RRGGBB"。絵に掛ける乗算。空なら絵のまま）と、合成方法（"add"=加算合成。空なら通常）。
+    // 同じ絵を赤・緑・青に塗り分けたり、光る球を重ねたりするための項目。
+    // 【重要】C++側 DrawPixel.cpp の PartDef.tintR/G/B・additive（JSONキーは color / blend）と対応する。
+    // ここに無いと、保存し直した瞬間にJSONから消える。使っていないパーツのJSONを膨らませないよう、空のときは出さない。
+    public string color { get; set; } = "";
+    public bool ShouldSerializecolor() => !string.IsNullOrEmpty(color);
+    public string blend { get; set; } = "";
+    public bool ShouldSerializeblend() => !string.IsNullOrEmpty(blend);
+    // 縦横を別々に伸ばして描くか（細長い光の帯など）。既定は縦横比を保って枠に収める。
+    // 【重要】C++側 DrawPixel.cpp の PartDef.stretch と対応する。
+    public bool stretch { get; set; } = false;
+    public bool ShouldSerializestretch() => stretch;
 }
 
 // アセット（敵・ギミック・アイテム・タイル・サウンド・アニメーション・コモンイベント）の

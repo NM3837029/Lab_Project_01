@@ -321,6 +321,15 @@ public class PartMotionEditorControl : UserControl
         yield return ("ジャンプしたとき、跳ねる", () => new PartMotion { trigger = "jump", kind = "slide", amount = -8, axis = 90, duration = 24 });
         yield return ("動いている間、首を振る", () => new PartMotion { trigger = "moving", trigger_param = 0.3f, kind = "swing", amount = 15, period = 24 });
         yield return ("プレイヤーのほうを向く", () => new PartMotion { trigger = "always", kind = "face_player", amount = 0 });
+        // 色・明るさの動き
+        yield return ("ずっと、ゆっくり明るく明滅する（呼吸）", () => new PartMotion { trigger = "always", kind = "brightness", amount = 0.6f, period = 120 });
+        yield return ("ずっと、虹色に色が変わる", () => new PartMotion { trigger = "always", kind = "hue_cycle", amount = 1f, period = 180 });
+        yield return ("攻撃したとき、一瞬ぱっと光る（フラッシュ）", () => new PartMotion { trigger = "attack", kind = "brightness", amount = 1.5f, duration = 18 });
+        yield return ("溜めている間、だんだん明るくなる", () => new PartMotion { trigger = "charge", kind = "brightness", amount = 1f, period = 40 });
+        yield return ("弾を受けたとき、ぱっと光る", () => new PartMotion { trigger = "hurt", kind = "brightness", amount = 1.2f, duration = 14 });
+        yield return ("プレイヤーが近いと、明るく光る", () => new PartMotion { trigger = "near", trigger_param = 160, kind = "brightness", amount = 0.9f, period = 30 });
+        yield return ("番号ごとに色が少しずつずれた虹色（並べたパーツ用）", () => new PartMotion { trigger = "always", kind = "hue_cycle", amount = 1f, period = 150, phase_by_index = 0.12f });
+        yield return ("番号ごとに少しずつ遅れて明滅する（波のように）", () => new PartMotion { trigger = "always", kind = "brightness", amount = 0.9f, period = 90, phase_by_index = 0.15f });
     }
 
     private void AddMotion(PartMotion m)

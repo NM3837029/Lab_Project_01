@@ -366,7 +366,7 @@ public partial class PartsEditorPageControl
             }
             // パーツのモーション（「動き」の一覧）。スクリプトの結果の上に、位置・角度・大きさ・不透明度を重ねる。
             // ゲームと同じ式（PartMotionEvaluator ＝ DrawPixel.cpp の UpdatePartMotions）で評価する。
-            float motionScale = 1f, motionAlpha = 1f;
+            float motionScale = 1f, motionAlpha = 1f, motionTR = 1f, motionTG = 1f, motionTB = 1f;
             if (_isPlaying && p.motions.Count > 0)
             {
                 var (bodyW, bodyH) = BodySize();
@@ -376,6 +376,7 @@ public partial class PartsEditorPageControl
                 var res = PartMotionEvaluator.Evaluate(p.motions, i, _previewTime, _sim, new PointF(ox + es.w / 2f, oy + es.h / 2f), angleRad);
                 ox += res.DX; oy += res.DY; angleRad += res.Angle;
                 motionScale = res.Scale; motionAlpha = res.Alpha;
+                motionTR = res.TintR; motionTG = res.TintG; motionTB = res.TintB;
             }
             poses[i] = (ox, oy, angleRad);
             var rect = PartScreenRect(p, ox, oy);
@@ -402,17 +403,11 @@ public partial class PartsEditorPageControl
             // サムネイル画像があればそれを描画し、なければ「画像未設定」を表すオレンジ色の丸で代替表示する。
             if (thumb != null)
             {
-                if (motionAlpha < 0.999f)
-                {
-                    // 不透明度のあるモーション（点滅）。色の行列でアルファだけ掛ける
-                    using var ia = new ImageAttributes();
-                    ia.SetColorMatrix(new ColorMatrix(new[]
-                    {
-                        new[] { 1f, 0f, 0f, 0f, 0f }, new[] { 0f, 1f, 0f, 0f, 0f }, new[] { 0f, 0f, 1f, 0f, 0f },
-                        new[] { 0f, 0f, 0f, motionAlpha, 0f }, new[] { 0f, 0f, 0f, 0f, 1f },
-                    }));
-                    g.DrawImage(thumb, Rectangle.Round(rect), 0, 0, thumb.Width, thumb.Height, GraphicsUnit.Pixel, ia);
-                }
+                // 色（パーツ自身の色 × モーションの色の倍率）と不透明度（点滅）。加算合成は GDI+ では再現できないので、少し薄くして重ねる近似にする
+                PartColor.TryParse(p.color, out float sr, out float sg, out float sb);
+                float alphaMul = motionAlpha * (p.blend == "add" ? 0.8f : 1f);
+                using var ia = PartColor.MakeAttributes(sr * motionTR, sg * motionTG, sb * motionTB, alphaMul);
+                if (ia != null) g.DrawImage(thumb, Rectangle.Round(rect), 0, 0, thumb.Width, thumb.Height, GraphicsUnit.Pixel, ia);
                 else g.DrawImage(thumb, rect);
             }
             else

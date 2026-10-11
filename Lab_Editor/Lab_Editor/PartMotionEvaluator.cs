@@ -1,4 +1,4 @@
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // パーツのモーションを評価する（編集画面のプレビュー用）。
 //
@@ -27,7 +27,8 @@ public static class PartMotionEvaluator
         public float Angle;      // 回転の上乗せ（ラジアン）
         public float Scale;      // 大きさの倍率
         public float Alpha;      // 不透明度
-        public static Result Identity => new() { Scale = 1f, Alpha = 1f };
+        public float TintR, TintG, TintB; // 色の倍率（明るさ・色相のモーション。1を超えてもよい）
+        public static Result Identity => new() { Scale = 1f, Alpha = 1f, TintR = 1f, TintG = 1f, TintB = 1f };
     }
 
     private const float Deg2Rad = 0.017453293f;
@@ -125,6 +126,20 @@ public static class PartMotionEvaluator
                         float ry = (((h >> 16) & 0xFFFFu) / 65535f) * 2f - 1f;
                         r.DX += rx * m.amount * weight; r.DY += ry * m.amount * weight;
                     }
+                    break;
+                }
+                case "brightness":
+                {
+                    float f = 1f + m.amount * Bump(t) * weight;
+                    if (f < 0f) f = 0f;
+                    r.TintR *= f; r.TintG *= f; r.TintB *= f;
+                    break;
+                }
+                case "hue_cycle":
+                {
+                    PartColor.HsvToRgb((t - MathF.Floor(t)) * 360f, 1f, 1f, out float cr, out float cg, out float cb);
+                    float a = Math.Min(1f, m.amount * weight);
+                    r.TintR *= 1f - a * (1f - cr); r.TintG *= 1f - a * (1f - cg); r.TintB *= 1f - a * (1f - cb);
                     break;
                 }
                 case "face_player":

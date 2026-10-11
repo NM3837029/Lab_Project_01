@@ -1,4 +1,4 @@
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace Lab_Editor;
@@ -107,6 +107,10 @@ public static class PartMotionInfo
                 AmountLabel = "ふるえ幅(px)", AmountMin = 0, AmountMax = 60, AmountDefault = 2, AmountStep = 0.5f, AmountDecimals = 1, UsesPeriod = false },
         new() { Name = "face_player", Label = "プレイヤーを向く", Hint = "パーツがプレイヤーのほうを向きます。絵が右向きに描かれているなら、補正は0度です。",
                 AmountLabel = "向きの補正(度)", AmountMin = -180, AmountMax = 180, AmountDefault = 0, AmountStep = 5, AmountDecimals = 0, UsesPeriod = false },
+        new() { Name = "brightness", Label = "明るさ（明滅・発光）", Hint = "色が明るく（または暗く）なって戻ります。プラスは光り（白く飛ぶほど明るくなります）、マイナスは暗くなります。加算合成のパーツと組み合わせると光って見えます。",
+                AmountLabel = "明るさの変化(-1〜+8)", AmountMin = -1, AmountMax = 8, AmountDefault = 0.8f, AmountStep = 0.05f, AmountDecimals = 2 },
+        new() { Name = "hue_cycle", Label = "色相が回る（虹色）", Hint = "色が虹色に1周期で1周します。パーツの番号ごとの位相のずれを付けると、並べたパーツが虹色になります。",
+                AmountLabel = "色のつき方(0〜1)", AmountMin = 0, AmountMax = 1, AmountDefault = 1, AmountStep = 0.05f, AmountDecimals = 2 },
     };
 
     public static TriggerInfo Trigger(string name) => Triggers.FirstOrDefault(t => t.Name == name) ?? Triggers[0];
@@ -122,6 +126,8 @@ public static class PartMotionInfo
         if (ki.Name == "thrust" || ki.Name == "slide") { m.trigger = "attack"; m.duration = 30; }
         else if (ki.Name == "spin") m.period = 90;
         else if (ki.Name == "face_player") m.trigger = "near";
+        else if (ki.Name == "brightness") m.period = 60;
+        else if (ki.Name == "hue_cycle") m.period = 120;
         if (m.trigger == "near") { m.trigger_param = Trigger("near").ParamDefault; }
         return m;
     }
