@@ -2994,8 +2994,15 @@ struct ScreenFxSnapshot {
     float zoom       = 1.0f;
     int   colorFilter = 0;    // 0=なし, 1=赤, 2=緑, 3=青
     bool  fastForward = false;
+    float saturation  = 1.0f; // 彩度。1.0が通常、0で白黒（カラー補正パネル・色補正ゾーン・敵の演出の合成結果）
+    float contrast    = 0.0f; // コントラスト。0が通常
+    float hue         = 0.0f; // 色相の回転（度）。0が通常
 };
 ScreenFxSnapshot g_screenFx;
+
+// カラー補正パネル（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）の計算・描画。
+// Ui* 関数と ScreenFxSnapshot が上で定義済みになったこの位置で読み込む。
+#include "ColorGrade.h"
 
 // この敵の「弱点色」。色フィルタがこれと一致している間、実体化したり弱ったりする。
 // type_enumから機械的に決めているので、今後追加される敵タイプにも自動で割り当たる。
@@ -3255,6 +3262,9 @@ void FillScriptEditContext(ScriptActor& actor, const EditReaction& r) {
     actor.screenColorFilter = g_screenFx.colorFilter;
     actor.screenBrightness  = g_screenFx.brightness;
     actor.screenZoom        = g_screenFx.zoom;
+    actor.screenSaturation  = g_screenFx.saturation;
+    actor.screenContrast    = g_screenFx.contrast;
+    actor.screenHue         = g_screenFx.hue;
     actor.isFastForwardNow  = g_screenFx.fastForward;
 }
 
@@ -3695,6 +3705,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // ゲーム内部解像度(SCREEN_WIDTH x SCREEN_HEIGHT)で描画するための仮想スクリーンを作成する。
     // 実際のウィンドウサイズ(WINDOW_WIDTH x WINDOW_HEIGHT)へは、この仮想スクリーンを拡大して転送する。
     int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
+    // カラー補正パネルが使う画像（色の輪・テストチャート）と、コントラスト・彩度・色相を掛けるための作業用画面
+    ColorGrade::Resources cgRes;
+    ColorGrade::CreateResources(cgRes, SCREEN_WIDTH, SCREEN_HEIGHT);
     LoadAssetDefinitions(); // 敵/アイテム/ギミックの定義データ(enemies.json等)を読み込む
 
     // ゲーム全体の設定（タイトル画面の内容・ステージ一覧・テーマ色など）を読み込む。
@@ -4236,10 +4249,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     float fxTargetTintR = 1.0f, fxTargetTintG = 1.0f, fxTargetTintB = 1.0f;
     float fxCurTintR = 1.0f, fxCurTintG = 1.0f, fxCurTintB = 1.0f;
     float fxTargetZoom = 1.0f, fxCurZoom = 1.0f;
+    // 彩度・色相・コントラスト。カラー補正パネル、色補正ゾーン、敵の演出のどれもが Screen_MixGrade で重ねる
+    // （彩度は掛け算、色相とコントラストは足し算で合成するので、複数の発生源が同時に効いても破綻しない）。
+    float fxTargetSat = 1.0f, fxCurSat = 1.0f;
+    float fxTargetHue = 0.0f, fxCurHue = 0.0f;
+    float fxTargetContrast = 0.0f, fxCurContrast = 0.0f;
+    // カラー補正パネルをつかんでいる間 true。目標へ滑らかに追わず、その場で反映する（指に付いてくる手応えのため）
+    bool fxSnap = false;
+    // カラー補正パネルの状態（スライダーの値・色の輪）と、ドラッグ中かどうか
+    ColorGrade::PanelState cgState;
+    ColorGrade::PanelUi cgUi;
+    bool isColorDrag = false;
 
     auto Screen_SetBrightness = [&](float b) { fxTargetBright = b; };
     auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
     auto Screen_SetZoom = [&](float z) { fxTargetZoom = z; };
+    auto Screen_MixGrade = [&](float sat, float hue, float contrast) {
+        fxTargetSat *= sat; fxTargetHue += hue; fxTargetContrast += contrast;
+    };
 
     // ===== Feature: 編集コストゲージ（ステージ単位設定・実行時状態）=====
     EditToolFlags currentEditTools;   // 現在のステージの許可設定（ResetStageで反映）
@@ -4250,23 +4277,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxTargetBright = 1.0f;
         fxTargetTintR = fxTargetTintG = fxTargetTintB = 1.0f;
         fxTargetZoom = 1.0f;
+        fxTargetSat = 1.0f; fxTargetHue = 0.0f; fxTargetContrast = 0.0f;
+        fxSnap = false;
     };
     auto Screen_UpdateFrame = [&](float dts) {
-        float lerp = std::min<float>(1.0f, 0.08f * dts);
+        // パネルをつかんでいる間は lerp=1（目標値をそのまま反映）。ふだんはゆっくり追従して演出になじませる
+        float lerp = fxSnap ? 1.0f : std::min<float>(1.0f, 0.08f * dts);
         fxCurBright += (fxTargetBright - fxCurBright) * lerp;
         fxCurTintR  += (fxTargetTintR  - fxCurTintR)  * lerp;
         fxCurTintG  += (fxTargetTintG  - fxCurTintG)  * lerp;
         fxCurTintB  += (fxTargetTintB  - fxCurTintB)  * lerp;
         fxCurZoom   += (fxTargetZoom   - fxCurZoom)   * lerp;
+        fxCurSat      += (fxTargetSat      - fxCurSat)      * lerp;
+        fxCurHue      += (fxTargetHue      - fxCurHue)      * lerp;
+        fxCurContrast += (fxTargetContrast - fxCurContrast) * lerp;
     };
     // gameScreen（オフスクリーン合成済みバッファ）を明るさ・色調・ズームを適用して転送する共通ヘルパー。
     // モニタープレビュー・フルスクリーン再生の両方の最終ブリット地点から呼ばれる、この機能の唯一の統合ポイント。
     auto Screen_DrawComposited = [&](int destX, int destY, int destW, int destH, int screenHandle) {
-        int br = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintR * fxCurBright * 255.0f));
-        int bg = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintG * fxCurBright * 255.0f));
-        int bb = (int)std::max<float>(0.0f, std::min<float>(255.0f, fxCurTintB * fxCurBright * 255.0f));
-        SetDrawBright(br, bg, bb);
-
         float zoom = fxCurZoom < 0.1f ? 0.1f : fxCurZoom;
         int srcW = (int)(SCREEN_WIDTH / zoom);
         int srcH = (int)(SCREEN_HEIGHT / zoom);
@@ -4274,9 +4302,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (srcH > SCREEN_HEIGHT) srcH = SCREEN_HEIGHT;
         int srcX = (SCREEN_WIDTH - srcW) / 2;
         int srcY = (SCREEN_HEIGHT - srcH) / 2;
-        DrawRectExtendGraph(destX, destY, destX + destW, destY + destH, srcX, srcY, srcX + srcW, srcY + srcH, screenHandle, TRUE);
 
-        SetDrawBright(255, 255, 255);
+        // 彩度・色相・コントラストは、先に画面全体へフィルタとして掛ける（失敗しても補正なしで描くだけ）
+        int srcHandle = screenHandle;
+        if (ColorGrade::NeedsFilter(fxCurSat, fxCurHue, fxCurContrast)
+            && ColorGrade::ApplyFilters(cgRes, screenHandle, cgRes.workScreen, fxCurSat, fxCurHue, fxCurContrast)) {
+            srcHandle = cgRes.workScreen;
+        }
+        // 明るさ・色フィルタ・色温度は描くときの乗算。明るさが1.0を超えた分は、加算合成の2回目で足す
+        // （SetDrawBright は255が上限なので、以前は「明転」がまったく明るく見えていなかった）。
+        ColorGrade::DrawGraded(destX, destY, destX + destW, destY + destH, srcX, srcY, srcX + srcW, srcY + srcH, srcHandle,
+                               fxCurTintR * fxCurBright, fxCurTintG * fxCurBright, fxCurTintB * fxCurBright);
     };
     std::vector<Bullet> bullets(MAX_BULLETS);
     for (int i = 0; i < MAX_BULLETS; i++) { 
@@ -5599,7 +5635,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ステージ切替でその場アクティブだった操作が、新ステージで禁止されている場合は強制解除する
         if (!currentEditTools.pauseEnabled && !unlockedEditTools.pauseEnabled) isPaused = false;
         if (!currentEditTools.fastForwardEnabled && !unlockedEditTools.fastForwardEnabled) isFastForward = false;
-        if (!currentEditTools.screenEffectEnabled && !unlockedEditTools.screenEffectEnabled) playerColorFilter = 0;
+        if (!currentEditTools.screenEffectEnabled && !unlockedEditTools.screenEffectEnabled) { playerColorFilter = 0; ColorGrade::Reset(cgState); }
         if (!currentEditTools.rewindEnabled && !unlockedEditTools.rewindEnabled) player.isRewinding = false;
         if (!currentEditTools.objectEditEnabled && !unlockedEditTools.objectEditEnabled) { selectedType = SELECT_NONE; menu.isOpen = false; }
 
@@ -6396,6 +6432,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "R", "巻き戻し" },
             { "F", "早送り" },
             { "T / Z / X / C", "色・ズーム・暗転・明転" },
+            { "右下のパネル", "明るさ・色を細かく調整" },
             { "M", "効果音のミュート" },
             { "Esc / F1", "メニュー / この一覧" },
         };
@@ -6618,6 +6655,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             bool turningOff = (playerColorFilter != 0 && nextFilter == 0);
             if (turningOff || (screenEffectOpEnabled && editCost >= currentEditCost.flatColorCycle)) {
                 if (!turningOff) editCost -= currentEditCost.flatColorCycle;
+                // 色の輪を「赤・緑・青・なし」のどれかへ合わせる（判定の色フィルタは、輪の状態から毎フレーム求め直す）
+                ColorGrade::SetQuickFilter(cgState, nextFilter);
                 playerColorFilter = nextFilter;
                 SoundManager::Get().PlaySe(gameConfig.editSe.colorFilter);
             } else if (!screenEffectOpEnabled) {
@@ -6663,6 +6702,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 使う使わないに関わらず毎フレーム必ず読み捨てる（溜めておいて、あとでまとめて効くのを防ぐ）。
         int wheelRot = GetMouseWheelRotVol();
         bool editCtrlHeld = (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL));
+
+        // ===== カラー補正パネル（右パネルの下半分）の入力 =====
+        // パネルの上でのクリックとホイールは、ここで使い切って背後の編集操作（物の選択・ホイール拡縮・射撃）へ回さない。
+        // 「押した瞬間」は、この関数が書き換える前の本物のマウス状態から自前で求める
+        // （currentLeftClick を false にすると lastLeftClick も false になり、押しっぱなしが毎フレーム"押した瞬間"に見えてしまうため）。
+        {
+            static bool cgLastRawLeft = false;
+            bool cgRawLeft = currentLeftClick;
+            ColorGrade::PanelInput cgIn;
+            cgIn.mx = mx; cgIn.my = my; cgIn.down = cgRawLeft;
+            cgIn.pressed = cgRawLeft && !cgLastRawLeft;
+            cgIn.wheel = wheelRot;
+            cgLastRawLeft = cgRawLeft;
+            bool cgLocked = !screenEffectOpEnabled;
+            if (cgLocked) ColorGrade::Reset(cgState); // 画面エフェクトが封印されているステージでは、値も残さない
+            ColorGrade::PanelResult cgRes2 = ColorGrade::Update(cgState, cgUi, cgIn, cgLocked, WINDOW_WIDTH);
+            isColorDrag = cgRes2.dragging;
+            if (cgRes2.consumed) { currentLeftClick = false; wheelRot = 0; }
+            // ゲームの判定に使う色フィルタ（0=なし 1=赤 2=緑 3=青）は、色の輪の位置から求める
+            playerColorFilter = ColorGrade::JudgeFilter(cgState);
+        }
 
         globalTimeScale = isFastForward ? 2.0f : 1.0f;
         float finalTimeScale = globalTimeScale;
@@ -7563,7 +7623,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // そもそもここへ来ないが、条件を曖昧にしておくと将来シーンを足したときに
             // 意図しない場所が止まる/動くという事故につながる。
             if (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY
-                || isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isShowingMessage) return false;
+                || isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag || isShowingMessage) return false;
             if (!isPaused && !isObjPaused && !isInspScale && !isInspAngle && !isInspSpeed) return true;
             if (isStepFrame) return true;
             if (ignoresPause) return true;
@@ -7717,6 +7777,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         g_screenFx.zoom        = fxCurZoom;
         g_screenFx.colorFilter = playerColorFilter;
         g_screenFx.fastForward = isFastForward;
+        g_screenFx.saturation  = fxCurSat;
+        g_screenFx.contrast    = fxCurContrast;
+        g_screenFx.hue         = fxCurHue;
         Screen_BeginFrame(); // 敵/ギミックがこのフレームで上書きしなければニュートラルへ戻る
         BehaviorInterpreter::globalOpsThisFrame = 0; // Feature: Puzzle-like Behavior Scripting (M2) — 全スクリプト実行体の命令数予算を毎フレームリセット
         BehaviorInterpreter::globalFrameCounter += 1.0f; // Feature: Composite Multi-Part Objects (Parts-M2) — TIME_FIELD演出用（ポーズ中も止めずに加算し続ける必要があるためこのままにする）
@@ -11043,6 +11106,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Z:ズーム保持, X:暗転保持, C:明転保持, T(上で処理済み)の色フィルタを継続適用
         // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
         bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
+
+        // カラー補正パネルの値を画面へ反映する（X/C長押しの固定値より先に置き、長押しが優先される）。
+        // 時間停止中・ドラッグ中でも反映するため、canPlayerAct の外に置く。
+        // 明るさ・色フィルタ（＝ゲームの判定に関わるもの）だけが編集コストの対象で、
+        // コントラスト・彩度・色相・色温度は見た目だけなので、画面エフェクトが使えるステージなら無料。
+        if (currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f) {
+            if (ColorGrade::BrightActive(cgState)) Screen_SetBrightness(cgState.bright);
+            if (ColorGrade::TintActive(cgState) || fabsf(cgState.temperature) > 0.01f) {
+                float cgTR, cgTG, cgTB;
+                ColorGrade::TintMultiplier(cgState, cgTR, cgTG, cgTB);
+                Screen_SetTint(cgTR, cgTG, cgTB);
+            }
+            if (ColorGrade::NeedsFilter(cgState.saturation, cgState.hue, cgState.contrast))
+                Screen_MixGrade(cgState.saturation, cgState.hue, cgState.contrast);
+            if (isColorDrag) fxSnap = true;
+        }
         if (currentScene == PLAY && canPlayerAct) {
             // Ctrl+Z は取り消しなので、ズームの Z としては数えない（コストを使ってしまう）
             zHeldThisFrame = (CheckHitKey(KEY_INPUT_Z) != 0) && !editCtrlHeld;
@@ -11052,10 +11131,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (zHeldThisFrame && canUseScreenFx) Screen_SetZoom(1.6f);
             if (xHeldThisFrame && canUseScreenFx) Screen_SetBrightness(0.3f);
             if (cHeldThisFrame && canUseScreenFx) Screen_SetBrightness(1.7f);
-
-            if (playerColorFilter == 1) Screen_SetTint(1.0f, 0.4f, 0.4f);
-            else if (playerColorFilter == 2) Screen_SetTint(0.4f, 1.0f, 0.4f);
-            else if (playerColorFilter == 3) Screen_SetTint(0.4f, 0.4f, 1.0f);
+            // 色フィルタの画面への掛け方は、上のパネル反映（色の輪→TintMultiplier）に一本化した
+            // （赤は従来どおり (1.0, 0.4, 0.4)）。
         }
 
         // ===== Feature: 編集コストゲージ：継続系ドレイン／自然回復／ゼロ到達時の強制解除 =====
@@ -11067,7 +11144,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (isAnyRewindActive)                drainPerSec += currentEditCost.drainRewindPerSec;
             if (isPaused)                         drainPerSec += currentEditCost.drainPausePerSec;
             if (isFastForward)                    drainPerSec += currentEditCost.drainFastForwardPerSec;
-            if (zHeldThisFrame || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0)
+            if (zHeldThisFrame || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0 || ColorGrade::CostlyActive(cgState))
                                                    drainPerSec += currentEditCost.drainScreenEffectPerSec;
 
             if (drainPerSec > 0.0f) editCost -= drainPerSec * perFrame;
@@ -11079,6 +11156,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (isPaused) isPaused = false;
                 if (isFastForward) isFastForward = false;
                 if (playerColorFilter != 0) playerColorFilter = 0;
+                ColorGrade::Reset(cgState); // コストが尽きたら、パネルの補正もすべて外れる
                 if (player.isRewinding) player.isRewinding = false;
                 for (auto& e : enemies)  e.isRewinding = false;
                 for (auto& g : gimmicks) g.isRewinding = false;
@@ -12594,8 +12672,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             int filterColor = playerColorFilter == 1 ? GetColor(255, 90, 90) : playerColorFilter == 2 ? GetColor(90, 220, 90) : GetColor(90, 150, 255);
             DrawFormatString(206, 16, filterColor, "FILTER: %s", filterName);
         }
+        // 明るさをパネルやX/Cで動かしているときは、ゲームがどう判定しているか（暗い／明るい）を出す
+        if (fabsf(fxCurBright - 1.0f) > 0.05f) {
+            int jb = ColorGrade::JudgeBright(fxCurBright);
+            DrawFormatString(206, 34, jb < 0 ? GetColor(140, 170, 255) : jb > 0 ? GetColor(255, 220, 120) : GetColor(230, 230, 230),
+                             "BRIGHT: %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? " (DARK)" : jb > 0 ? " (LIGHT)" : "");
+        }
         if (SoundManager::Get().IsMuted()) {
-            DrawString(206, 34, "MUTED", GetColor(200, 200, 200));
+            DrawString(206, 52, "MUTED", GetColor(200, 200, 200));
         }
 
         // ===== 編集操作のフィードバック表示（見た目だけ。進行には関わらない）=====
@@ -12632,7 +12716,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         //   琥珀色 … 時間停止中（SPACE で止めた状態。コストを消費し続ける）
         //   水色   … 編集中（ドラッグやつまみをつかんでいる間だけ止まる。離せば再開。コストは減らない）
         if (isEditMode && currentScene == PLAY && !isShowingMessage) {
-            bool gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate;
+            bool gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag;
             if (gestureFrozen || isPaused) {
                 int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
@@ -13117,6 +13201,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 DrawString(WINDOW_WIDTH - 240, 215, "(Drag values / click to toggle)", UiInkSub());
             }
+
+            // 右パネルの下半分：カラー補正パネル（動画編集ソフトのカラー補正に近い操作。ColorGrade.h）
+            ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH,
+                             UiInk(), UiInkSub(), UiInkAccent(), UiGaugeBack(), UiInkOk(), UiInkWarn());
 
             // 下部一時停止ボタン。
             // UI素材化 — ボタンの下地を UIウィンドウ.png にし、

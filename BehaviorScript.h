@@ -176,6 +176,9 @@ struct ScriptActor {
     int   screenColorFilter = 0;    // 0=なし, 1=赤, 2=緑, 3=青
     float screenBrightness  = 1.0f; // 1.0が通常
     float screenZoom        = 1.0f; // 1.0が通常
+    float screenSaturation  = 1.0f; // 彩度。1.0が通常、0で白黒
+    float screenContrast    = 0.0f; // コントラスト。0が通常
+    float screenHue         = 0.0f; // 色相の回転（度）。0が通常
     bool  isFastForwardNow  = false;
 
     // 環境依存のグローバル呼び出し（弾生成・SE再生・画面演出）はコールバックとして注入する
@@ -432,6 +435,9 @@ private:
         if (op == "ScreenColorFilter") return (float)actor.screenColorFilter;      // 色フィルタ番号
         if (op == "ScreenBrightness")  return actor.screenBrightness;              // 画面の明るさ
         if (op == "ScreenZoom")        return actor.screenZoom;                    // 画面のズーム倍率
+        if (op == "ScreenSaturation")  return actor.screenSaturation;             // 画面の彩度（1.0が通常）
+        if (op == "ScreenContrast")    return actor.screenContrast;                // 画面のコントラスト（0が通常）
+        if (op == "ScreenHue")         return actor.screenHue;                     // 画面の色相の回転(度)
 
         return 0.0f; // 未知のop（将来の拡張やタイプミス）は0.0fを返す
     }

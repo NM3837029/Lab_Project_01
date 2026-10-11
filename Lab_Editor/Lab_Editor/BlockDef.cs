@@ -273,6 +273,9 @@ public static class BlockCatalog
         new BlockDef("ScreenColorFilter", "画面: 色フィルタ番号", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("ScreenBrightness", "画面: 明るさ", BlockCategory.Sensing, BlockShape.Reporter),
         new BlockDef("ScreenZoom", "画面: ズーム倍率", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenSaturation", "画面: 彩度(1が通常, 0で白黒)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenContrast", "画面: コントラスト(0が通常)", BlockCategory.Sensing, BlockShape.Reporter),
+        new BlockDef("ScreenHue", "画面: 色相の回転(度)", BlockCategory.Sensing, BlockShape.Reporter),
 
         // ── Sensing: booleans (真偽値) ───────────────────────
         new BlockDef("IsGrounded", "地面に接地している", BlockCategory.Sensing, BlockShape.Boolean),
