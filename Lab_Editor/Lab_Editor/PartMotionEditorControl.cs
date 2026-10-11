@@ -298,6 +298,15 @@ public class PartMotionEditorControl : UserControl
             sub.DropDownItems.Add(item);
         }
         menu.Items.Add(sub);
+        // 複数の動きをまとめて追加するセット（光る・色が変わる・フラッシュなど、組み合わせで見せる動き）
+        var subSet = new ToolStripMenuItem("セット（複数の動きをまとめて追加）");
+        foreach (var (label, make) in MotionSets())
+        {
+            var item = new ToolStripMenuItem(label);
+            item.Click += (s, e) => AddMotions(make());
+            subSet.DropDownItems.Add(item);
+        }
+        menu.Items.Add(subSet);
         menu.Items.Add(new ToolStripSeparator());
         foreach (var k in PartMotionInfo.Kinds)
         {
@@ -330,6 +339,58 @@ public class PartMotionEditorControl : UserControl
         yield return ("プレイヤーが近いと、明るく光る", () => new PartMotion { trigger = "near", trigger_param = 160, kind = "brightness", amount = 0.9f, period = 30 });
         yield return ("番号ごとに色が少しずつずれた虹色（並べたパーツ用）", () => new PartMotion { trigger = "always", kind = "hue_cycle", amount = 1f, period = 150, phase_by_index = 0.12f });
         yield return ("番号ごとに少しずつ遅れて明滅する（波のように）", () => new PartMotion { trigger = "always", kind = "brightness", amount = 0.9f, period = 90, phase_by_index = 0.15f });
+    }
+
+    // 「セット」。名前と、まとめて追加する動きの一覧を作る関数。
+    // 色・明るさの動きは1つだけでは地味なので、組み合わせて使う定番を用意する。
+    public static IEnumerable<(string label, Func<PartMotion[]> make)> MotionSets()
+    {
+        yield return ("🔔 警報灯（回りながら明滅）", () => new[]
+        {
+            new PartMotion { trigger = "always", kind = "spin", amount = 360, period = 90 },
+            new PartMotion { trigger = "always", kind = "brightness", amount = 0.8f, period = 45 },
+        });
+        yield return ("💡 呼吸する光（ふくらみながら明滅）", () => new[]
+        {
+            new PartMotion { trigger = "always", kind = "brightness", amount = 0.7f, period = 120 },
+            new PartMotion { trigger = "always", kind = "pulse", amount = 0.12f, period = 120 },
+        });
+        yield return ("🌈 虹のきらめき（色が回って、明るさも揺れる）", () => new[]
+        {
+            new PartMotion { trigger = "always", kind = "hue_cycle", amount = 1f, period = 150 },
+            new PartMotion { trigger = "always", kind = "brightness", amount = 0.5f, period = 60 },
+        });
+        yield return ("📸 フラッシュ（溜めると光り、撃つと閃光）", () => new[]
+        {
+            new PartMotion { trigger = "charge", kind = "brightness", amount = 1.2f, period = 24 },
+            new PartMotion { trigger = "attack", kind = "brightness", amount = 4f, duration = 18 },
+            new PartMotion { trigger = "attack", kind = "pulse", amount = 0.3f, duration = 18 },
+        });
+        yield return ("😲 被弾リアクション（ぱっと光って震える）", () => new[]
+        {
+            new PartMotion { trigger = "hurt", kind = "brightness", amount = 1.5f, duration = 14 },
+            new PartMotion { trigger = "hurt", kind = "shake", amount = 3, duration = 20 },
+        });
+        yield return ("👀 気づく（プレイヤーが近いと光って向く）", () => new[]
+        {
+            new PartMotion { trigger = "near", trigger_param = 180, kind = "brightness", amount = 0.9f, period = 30 },
+            new PartMotion { trigger = "near", trigger_param = 180, kind = "face_player", amount = 0 },
+        });
+        yield return ("⚡ 攻撃の見せ場（溜めてふくらみ、突いて光る）", () => new[]
+        {
+            new PartMotion { trigger = "charge", kind = "pulse", amount = 0.3f, period = 24 },
+            new PartMotion { trigger = "attack", kind = "thrust", amount = 16, axis = 0, duration = 24 },
+            new PartMotion { trigger = "attack", kind = "brightness", amount = 2f, duration = 20 },
+        });
+    }
+
+    // 複数の動きをまとめて追加する（取り消しは1回で、まとめて戻せる）
+    private void AddMotions(PartMotion[] ms)
+    {
+        if (_motions == null || ms.Length == 0) return;
+        foreach (var m in ms) _motions.Add(m);
+        RefreshList(_motions.Count - 1);
+        Changed?.Invoke("motion-add");
     }
 
     private void AddMotion(PartMotion m)
