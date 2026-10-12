@@ -10,6 +10,7 @@
 #include "Logger.h"
 #include "GamePaths.h"
 #include "GameConfig.h"
+#include "DisplayMode.h" // ウィンドウの拡大・フルスクリーン・マウス座標の補正
 #include <exception>
 
 #include "imgui.h"
@@ -31,6 +32,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 LRESULT CALLBACK CustomWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam))
         return true;
+    // ウィンドウの縁をつかんで大きさを変えるときは、縦横比 16:9 を保つ（画面全体を拡大して見せるため、比が崩れると歪む）
+    if (msg == WM_SIZING && !DisplayMode::g_fullscreen) {
+        DisplayMode::KeepAspect(hwnd, wParam, (RECT*)lParam);
+        return TRUE;
+    }
     return 0;
 }
 
@@ -46,6 +52,8 @@ bool isDedicatedEditorMode = false;
 #include "AnimationController.h"
 #include "BehaviorScript.h"
 #include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
+// マウス座標は、ウィンドウを拡大していても画面（1280x720）の座標で受け取る
+#define GetMousePoint(a, b) DisplayMode::GetMousePointFixed(a, b)
 
 // ======================================================
 // Feature: Composite Multi-Part Objects (Parts-M1)
@@ -3860,6 +3868,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     ChangeWindowMode(TRUE); // ウィンドウモードで起動する（フルスクリーンにしない）
     SetGraphMode(WINDOW_WIDTH, WINDOW_HEIGHT, 32); // ウィンドウの解像度とカラービット数を設定
+    // ウィンドウの縁をつかんで大きさを変えられるようにし、画面全体をウィンドウの大きさへ拡大して見せる。
+    // 大きなディスプレイでキャラ・ブロック・ギミックなどが小さく見える問題への対応（DisplayMode.h）。
+    SetWindowSizeChangeEnableFlag(TRUE, TRUE);
     if (DxLib_Init() == -1) return -1; // DxLibの初期化に失敗したら即座に終了する
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
     // コマンドライン引数でステージファイル名が渡されていれば、起動時に読み込むステージを上書きする
@@ -3882,6 +3893,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     HWND hwnd = GetMainWindowHandle();
     SetHookWinProc(CustomWndProc); // 先ほど定義した独自ウィンドウプロシージャをDxLibに登録する
+    DisplayMode::InitWindowSize(hwnd); // 起動時のウィンドウを、デスクトップに収まる最大（最大1.5倍）にする
 
     // ---- ImGui（デバッグ/エディタ用UIライブラリ）の初期化 ----
     IMGUI_CHECKVERSION();
@@ -4515,8 +4527,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         // 明るさ・色フィルタ・色温度は描くときの乗算。明るさが1.0を超えた分は、加算合成の2回目で足す
         // （SetDrawBright は255が上限なので、以前は「明転」がまったく明るく見えていなかった）。
+        // 倍率が整数でないと、最近点では絵のドットの太さがまちまちになるので、拡大するときはバイリニアで滑らかにする
+        SetDrawMode((destW != SCREEN_WIDTH || destH != SCREEN_HEIGHT) ? DX_DRAWMODE_BILINEAR : DX_DRAWMODE_NEAREST);
         ColorGrade::DrawGraded(destX, destY, destX + destW, destY + destH, srcX, srcY, srcX + srcW, srcY + srcH, srcHandle,
                                fxCurTintR * fxCurBright, fxCurTintG * fxCurBright, fxCurTintB * fxCurBright);
+        SetDrawMode(DX_DRAWMODE_NEAREST);
     };
     std::vector<Bullet> bullets(MAX_BULLETS);
     for (int i = 0; i < MAX_BULLETS; i++) { 
@@ -5383,8 +5398,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return false;
     };
 
-    int monitorX = (WINDOW_WIDTH - SCREEN_WIDTH) / 2;
-    int monitorY = (WINDOW_HEIGHT - SCREEN_HEIGHT) / 2 - 40;
+    // ゲーム画面（モニター）の表示位置・大きさ・倍率。
+    // 以前は 640x480 を等倍で置いていたため、ゲームの中身（キャラ・ブロック・ギミック）が小さく見えていた。
+    //   ふつうの表示 … 左右・下の編集パネルのすき間いっぱいに 1.2 倍（768x576）
+    //   拡大表示(F10) … 編集パネルを隠して 1.5 倍（960x720。ウィンドウの高さいっぱい）
+    // 見える範囲（640x480 ぶんの世界）はどちらも同じなので、ステージの難しさは変わらない。
+    // マウス座標からゲーム内の座標へ戻すときは、必ず viewScale で割る。
+    bool bigView = false;
+    float viewScale = 1.2f;
+    int monitorX = 0, monitorY = 0, monitorW = 0, monitorH = 0;
+    auto UpdateMonitorLayout = [&]() {
+        if (bigView) {
+            viewScale = 1.5f;
+            monitorW = (int)(SCREEN_WIDTH * viewScale); monitorH = (int)(SCREEN_HEIGHT * viewScale);
+            monitorX = (WINDOW_WIDTH - monitorW) / 2; monitorY = (WINDOW_HEIGHT - monitorH) / 2;
+        } else {
+            viewScale = 1.2f;
+            monitorW = (int)(SCREEN_WIDTH * viewScale); monitorH = (int)(SCREEN_HEIGHT * viewScale);
+            const int gapL = 250, gapR = WINDOW_WIDTH - 250, gapT = 0, gapB = WINDOW_HEIGHT - 100; // 左右・下の編集パネルを除いた領域
+            monitorX = gapL + ((gapR - gapL) - monitorW) / 2; monitorY = gapT + ((gapB - gapT) - monitorH) / 2;
+        }
+    };
+    UpdateMonitorLayout();
 
     GameScene currentScene = PLAY;
     // 前フレームのシーン。「PLAY からクリアへ移った瞬間」を検出してセーブするために持つ。
@@ -6616,7 +6651,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // 画面の中心（編集画面ではゲーム画面の中心）。ゲーム画面の外の編集パネルは暗く沈める
         const int ox = isEditMode ? monitorX : 0, oy = isEditMode ? monitorY : 0;
-        const int cx = ox + SCREEN_WIDTH / 2, cy = oy + SCREEN_HEIGHT / 2;
+        const int cx = ox + (isEditMode ? monitorW : SCREEN_WIDTH) / 2, cy = oy + (isEditMode ? monitorH : SCREEN_HEIGHT) / 2;
         // 色はウィンドウの設定（theme）から引く。枠も他のウィンドウと同じ素材で描くので、
         // 「UIデザイン」で枠や色を変えると、このメニューも一緒に変わる。
         const int accent = UiInkAccent(), ink = UiInk(), sub = UiInkSub();
@@ -6638,6 +6673,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "T / Z / X / C", "色・ズーム・暗転・明転" },
             { "右下のパネル", "明るさ・色を細かく調整" },
             { "M", "効果音のミュート" },
+            { "F10 / F11", "拡大表示 / フルスクリーン" },
             { "Esc / F1", "メニュー / この一覧" },
         };
         const HelpRow rightCol[] = {
@@ -6658,6 +6694,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         };
 
         while (!done && ProcessMessage() == 0) {
+            DisplayMode::PollKeys(); // メニューを開いたままでもF11でフルスクリーンを切り替えられる
             int mx, my; GetMousePoint(&mx, &my);
             bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
             bool kUp = CheckHitKey(KEY_INPUT_UP) != 0 || CheckHitKey(KEY_INPUT_W) != 0;
@@ -6774,6 +6811,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     while (ProcessMessage() == 0 && !sysQuit)
     {
+        DisplayMode::PollKeys(); // F11：フルスクリーンの切り替え（タイトル・セレクトでも効く）
         // Feature: タイトル画面・ステージセレクト画面 —
         // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
         //
@@ -6790,6 +6828,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             continue;
         }
 
+        // F10：拡大表示（編集パネルを隠して、ゲーム画面を 1.5 倍で見せる）の切り替え。
+        // 画面が小さくて見えにくいときの、いちばん大きな見せ方。パネルが無い間は、パネルの操作（インスペクター・
+        // カラー補正パネル・タイムラインのカット・一時停止ボタン）が使えない。キーとマウスでの編集は使える。
+        {
+            static bool lastF10 = false;
+            bool f10 = CheckHitKey(KEY_INPUT_F10) != 0;
+            if (f10 && !lastF10 && currentScene == PLAY) {
+                bigView = !bigView;
+                isAreaSelecting = false;
+                cgUi.drag = -1;
+                editToastText = bigView ? "拡大表示（F10でパネルを戻す）" : "ふつうの表示";
+                editToastKind = 0; editToastTimer = 90.0f;
+            }
+            lastF10 = f10;
+            UpdateMonitorLayout();
+        }
+
         // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
             STAGE_WIDTH = (float)stages[currentStageIdx].map[0].size() * TILE_SIZE;
@@ -6803,7 +6858,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         int mx, my;
         GetMousePoint(&mx, &my);
         float gx = (float)mx, gy = (float)my;
-        if (isEditMode) { gx = (float)(mx - monitorX) + cameraX; gy = (float)(my - monitorY) + cameraY; }
+        if (isEditMode) { gx = (float)(mx - monitorX) / viewScale + cameraX; gy = (float)(my - monitorY) / viewScale + cameraY; }
 
         // Feature: 編集コストゲージ — 各操作の「ステージ許可 or アイテム解禁」判定（このフレームの全キー処理の前に確定させる）
         bool rewindOpEnabled = IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled);
@@ -6921,7 +6976,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             cgLastRawLeft = cgRawLeft;
             bool cgLocked = !screenEffectOpEnabled;
             if (cgLocked) ColorGrade::Reset(cgState); // 画面エフェクトが封印されているステージでは、値も残さない
-            ColorGrade::PanelResult cgRes2 = ColorGrade::Update(cgState, cgUi, cgIn, cgLocked, WINDOW_WIDTH);
+            // 拡大表示のあいだはパネルが無いので、操作も受け付けない
+            ColorGrade::PanelResult cgRes2 = bigView ? ColorGrade::PanelResult() : ColorGrade::Update(cgState, cgUi, cgIn, cgLocked, WINDOW_WIDTH);
             isColorDrag = cgRes2.dragging;
             if (cgRes2.consumed) { currentLeftClick = false; wheelRot = 0; }
             // ゲームの判定に使う色フィルタ（0=なし 1=赤 2=緑 3=青）は、色の輪の位置から求める
@@ -7081,7 +7137,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                         // Feature: カット機能の復活 — タイムライン帯の上で右クリックした場合は、
                         // その位置に重なっているカットを選択する（選択後、コンテキストメニューから削除できる）。
-                        if (!gimSelected && cutOpEnabled && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                        if (!gimSelected && cutOpEnabled && !bigView && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
                             float ct = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
                             for (auto& gim : gimmicks) {
                                 if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive || !gim.isTimelineCut) continue;
@@ -7170,10 +7226,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!currentLeftClick && lastLeftClick && isAreaSelecting) {
                 isAreaSelecting = false;
                 
-                float selX1 = (float)(min(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
-                float selX2 = (float)(max(areaSelectStartX, areaSelectEndX) - monitorX) + cameraX;
-                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY) + cameraY;
-                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY) + cameraY;
+                float selX1 = (float)(min(areaSelectStartX, areaSelectEndX) - monitorX) / viewScale + cameraX;
+                float selX2 = (float)(max(areaSelectStartX, areaSelectEndX) - monitorX) / viewScale + cameraX;
+                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY) / viewScale + cameraY;
+                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY) / viewScale + cameraY;
 
                 selectedPlayers.clear();
                 selectedEnemies.clear();
@@ -7217,7 +7273,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 編集中もプレイヤーが走り出してしまうため。
             // 世界は止めない（つまみのドラッグと違い、1ノッチごとの瞬間的な操作なので）。
             if (wheelRot != 0 && objectEditOpEnabled && !menu.isOpen && selectedType != SELECT_NONE
-                && mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT
+                && mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH
                 && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate
                 && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting) {
                 // 取り消し用：0.4秒以内に続いたホイールは、同じ対象に対する1手としてまとめる。
@@ -7260,7 +7316,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // エディタUI / ドラッグ操作
             if (currentLeftClick && !menu.isOpen && !menuClickConsumed) {
                 // 一時停止ボタンのチェック
-                if (!lastLeftClick && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
+                if (!lastLeftClick && !bigView && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
                     if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
                     else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
                     else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
@@ -7273,7 +7329,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 編集コストゲージの管理下に置くため、コストが足りなければ生成せずに拒否音を鳴らす。
                 // なお、この処理を含むブロック全体が objectEditOpEnabled で囲われているので、
                 // 「オブジェクト編集」が封印されているステージではカットも作れない（＝ステージ側で制御できる）。
-                if (!lastLeftClick && cutOpEnabled && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
+                if (!lastLeftClick && cutOpEnabled && !bigView && my >= WINDOW_HEIGHT - 60 && my <= WINDOW_HEIGHT - 20) {
                     if (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL)) {
                         // クリックX座標をタイムライン帯(左右50px余白)上の比率0.0〜1.0へ変換する
                         float ct = (float)(mx - 50) / (float)(WINDOW_WIDTH - 100);
@@ -7323,7 +7379,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 // インスペクターのドラッグと切り替え（選択されたすべてに適用）
-                if (!lastLeftClick && objectEditOpEnabled && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
+                if (!lastLeftClick && objectEditOpEnabled && !bigView && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
                     // 各行の target 系ポインタは「その対象では意味を持たない項目」の場合にnullptrになる
                     // （インスペクタ表示側は既にN/A表示で分岐している）。タイムラインカットのように
                     // 全項目がnullptrになる選択対象があるため、ドラッグ開始時も必ずnullチェックしてから参照する。
@@ -7385,7 +7441,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
                 if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
-                    mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT) {
+                    mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH) {
                     
                     // 選択中のギミックの「つまみ」をつかんだかどうかを最初に見る。
                     // ここで拾えなかった場合だけ、従来どおりブロック叩き・移動・選択へ進む。
@@ -7699,8 +7755,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 巻き戻すのは位置・速度・生死だけ、編集した形はそのまま維持される、に統一する。
                 // 履歴は最大600件だがドラッグ中のフレームだけの処理なのでコストは無視できる。
                 if (isDragging && selectedType != SELECT_NONE) {
-                    float prevGx = (float)(lastMouseX - monitorX) + cameraX;
-                    float prevGy = (float)(lastMouseY - monitorY) + cameraY;
+                    float prevGx = (float)(lastMouseX - monitorX) / viewScale + cameraX;
+                    float prevGy = (float)(lastMouseY - monitorY) / viewScale + cameraY;
                     float dx = gx - prevGx;
                     float dy = gy - prevGy;
 
@@ -7730,13 +7786,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
                     // 実際の変形は共通入口 ApplyScaleDelta（つまみ・ホイール・INSPECTOR と共用）。
                     float ds = (float)(lastMouseY - my) * 0.01f;
-                    float dw = (float)(mx - lastMouseX) * 1.0f;
+                    float dw = (float)(mx - lastMouseX) / viewScale; // 画面の1pxではなくゲーム内の1px（拡大表示でも指と幅が合う）
                     ApplyScaleDelta(ds, dw);
                     lastMouseY = my;
                     lastMouseX = mx;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
-                    float dh = (float)(lastMouseY - my) * 1.0f;
+                    float dh = (float)(lastMouseY - my) / viewScale; // ゲーム内のpx
                     for (auto* g : selectedGimmicks) {
                         if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
@@ -7854,7 +7910,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // 射撃（通常モードまたはEnterキー）
         static bool lastShot = false;
-        bool isClickInScreen = (mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT);
+        bool isClickInScreen = (mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH);
         bool currentShot = (CheckHitKey(KEY_INPUT_RETURN) != 0) || (currentLeftClick && isClickInScreen && selectedType == SELECT_NONE);
         if (currentShot && !lastShot && canPlayerAct) {
             for (int i = 0; i < MAX_BULLETS; i++) {
@@ -12774,7 +12830,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // --- ホバー（何も操作していないとき、マウスの下にある物）---
-            const bool inMonitor = (mx >= monitorX && mx <= monitorX + SCREEN_WIDTH && my >= monitorY && my <= monitorY + SCREEN_HEIGHT);
+            const bool inMonitor = (mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH);
             if (objectEditOpEnabled && inMonitor && !menu.isOpen && !isAreaSelecting && !gestureNow
                 && !isInspScale && !isInspAngle && !isInspSpeed && !isShowingMessage) {
                 // 選んでいる物のつまみの上なら、つまみの説明を出す
@@ -13169,10 +13225,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             int btnX = SCREEN_WIDTH / 2 - RESULT_BTN_W / 2;
             int btnTop = SCREEN_HEIGHT / 2 + 6;
 
-            // ゲーム画面は等倍で monitorX/monitorY の位置へ転送されるので、
+            // ゲーム画面は viewScale 倍で monitorX/monitorY の位置へ転送されるので、
             // ウィンドウ座標のマウスを内部解像度側へ寄せてから判定する。
-            int relX = isEditMode ? (mx - monitorX) : mx;
-            int relY = isEditMode ? (my - monitorY) : my;
+            int relX = isEditMode ? (int)((mx - monitorX) / viewScale) : mx;
+            int relY = isEditMode ? (int)((my - monitorY) / viewScale) : my;
 
             // 見出し
             SetFontSize(40);
@@ -13227,6 +13283,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         ClearDrawScreen();
         if (isEditMode) {
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
+            if (!bigView) { // ← 拡大表示のあいだは、左・右・下の編集パネルを描かない（閉じるのは「モニタープレビューウィンドウ」の直前）
             // UI素材化 — 左パネルを UIウィンドウ.png の9スライス枠で描く。
             // 素材が明るいクリーム色なので、この中に載せる文字は全て暗いインク色(UiInk系)に統一する。
             DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL);
@@ -13286,9 +13343,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL); // 右パネル（インスペクター）
             DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle, GameCfg::UIK_PANEL);        // 下部パネル（タイムライン）
 
+            } // ← 編集パネル（左・右・下の枠と左パネルの中身）ここまで
+
             // モニタープレビューウィンドウ
-            DrawBox(monitorX - 2, monitorY - 2, monitorX + SCREEN_WIDTH + 2, monitorY + SCREEN_HEIGHT + 2, GetColor(100, 100, 100), FALSE);
-            Screen_DrawComposited(monitorX, monitorY, SCREEN_WIDTH, SCREEN_HEIGHT, gameScreen);
+            DrawBox(monitorX - 2, monitorY - 2, monitorX + monitorW + 2, monitorY + monitorH + 2, GetColor(100, 100, 100), FALSE);
+            Screen_DrawComposited(monitorX, monitorY, monitorW, monitorH, gameScreen);
 
             // 範囲選択矩形の描画
             if (isAreaSelecting) {
@@ -13303,6 +13362,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(x1, y1, x2, y2, GetColor(100, 150, 255), FALSE); // 不透明の青い輪郭線
             }
 
+            if (!bigView) { // ← タイムライン・インスペクター・カラー補正パネル・一時停止ボタン（拡大表示では隠す。閉じるのは円形メニューの直前）
             // Feature: カット機能の復活 — 下部パネルのタイムライン表示。
             // 帯の左端がステージ左端、右端がステージ右端に対応し、赤い縦棒が現在のプレイヤー位置（再生ヘッド）。
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
@@ -13507,6 +13567,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawUiIcon((PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2, (PAUSE_BUTTON_Y1 + PAUSE_BUTTON_Y2) / 2,
                            20, isPaused ? uiPlayHandle : uiPauseHandle);
             }
+
+            } // ← 拡大表示で隠すパネルここまで
 
             // 右クリックの円形メニュー。中心から見て、マウスが向いている項目を強調する。
             if (menu.isOpen) {
@@ -13876,7 +13938,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool pointing = false;
                 {
                     // 1) 一時停止／再開ボタン（常に押せる。コスト不足なら拒否音が鳴るが押せることに変わりはない）
-                    if (cmx >= PAUSE_BUTTON_X1 && cmx <= PAUSE_BUTTON_X2 &&
+                    if (!bigView && cmx >= PAUSE_BUTTON_X1 && cmx <= PAUSE_BUTTON_X2 &&
                         cmy >= PAUSE_BUTTON_Y1 && cmy <= PAUSE_BUTTON_Y2) {
                         pointing = true;
                     }
@@ -13887,7 +13949,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 3) インスペクタの操作行。
                     // 対象ポインタがnullptrの行は「その対象では意味を持たない」＝押しても何も起きないので、
                     // クリック処理と同じくnullチェックを通ったものだけを押せる扱いにする。
-                    else if (objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - 240 &&
+                    else if (!bigView && objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - 240 &&
                              ((cmy >= 80  && cmy <= 95  && targetScale != nullptr) ||
                               (cmy >= 100 && cmy <= 115 && targetAngle != nullptr) ||
                               (cmy >= 120 && cmy <= 135 && targetSpeedScale != nullptr) ||
@@ -13897,17 +13959,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         pointing = true;
                     }
                     // 4) 下部のタイムライン帯（カットの作成・選択ができるとき）
-                    else if (cutOpEnabled && cmy >= WINDOW_HEIGHT - 60 && cmy <= WINDOW_HEIGHT - 20) {
+                    else if (!bigView && cutOpEnabled && cmy >= WINDOW_HEIGHT - 60 && cmy <= WINDOW_HEIGHT - 20) {
                         pointing = true;
                     }
                     // 5) モニター内の、編集対象にできるオブジェクト。
                     // 右クリックでの選択判定と同じ矩形を見る（プレイヤーは表示サイズ、
                     // 敵は当たり判定×倍率、ギミックはスプライトサイズ）。
                     else if (isEditMode && objectEditOpEnabled &&
-                             cmx >= monitorX && cmx <= monitorX + SCREEN_WIDTH &&
-                             cmy >= monitorY && cmy <= monitorY + SCREEN_HEIGHT) {
-                        float wx = (float)(cmx - monitorX) + cameraX;
-                        float wy = (float)(cmy - monitorY) + cameraY;
+                             cmx >= monitorX && cmx <= monitorX + monitorW &&
+                             cmy >= monitorY && cmy <= monitorY + monitorH) {
+                        float wx = (float)(cmx - monitorX) / viewScale + cameraX;
+                        float wy = (float)(cmy - monitorY) / viewScale + cameraY;
                         if (wx >= player.x && wx <= player.x + player.width * player.scale &&
                             wy >= player.y && wy <= player.y + player.height * player.scale) {
                             pointing = true;
