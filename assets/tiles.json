@@ -430,5 +430,41 @@
     "breakByPlayer": false,
     "breakMinScale": 0.0,
     "breakSe": ""
+  },
+  {
+    "id": 24,
+    "name": "新タイル24",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "../../../Desktop/109_20261011215355.png",
+    "srcX": 0,
+    "srcY": 0,
+    "srcW": 0,
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
+  },
+  {
+    "id": 25,
+    "name": "新タイル25",
+    "color": "#888888",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "../../../Desktop/112_20261012211610.png",
+    "srcX": 0,
+    "srcY": 0,
+    "srcW": 0,
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 0.0,
+    "breakSe": ""
   }
 ]

@@ -24,6 +24,124 @@
       228
     ]
   },
+  "ui_style": {
+    "frame_image": "img/95_20261004211326.png",
+    "src_pad": 16,
+    "src_slice": 60,
+    "dest_slice": 14,
+    "fallback_fill": [
+      252,
+      246,
+      236
+    ],
+    "fallback_edge": [
+      20,
+      84,
+      132
+    ],
+    "ink_warn": [
+      196,
+      52,
+      52
+    ],
+    "ink_ok": [
+      28,
+      122,
+      68
+    ],
+    "gauge_fill": [
+      0,
+      170,
+      225
+    ],
+    "gauge_low": [
+      255,
+      80,
+      80
+    ],
+    "gauge_back": [
+      56,
+      52,
+      48
+    ],
+    "message": {
+      "margin_x": 20,
+      "margin_bottom": 20,
+      "height": 90
+    },
+    "windows": {
+      "osd": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "message": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "button": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "radial": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "panel": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "menu": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      },
+      "cell": {
+        "image": "",
+        "tint": [
+          255,
+          255,
+          255
+        ],
+        "opacity": 100,
+        "dest_slice": -1
+      }
+    }
+  },
   "title_screen": {
     "background_image": "img/薄橙色の背景.png",
     "bgm_id": "bgm_editing_09",
