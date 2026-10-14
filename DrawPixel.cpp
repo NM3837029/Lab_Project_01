@@ -6258,6 +6258,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (fh < 0) return GetDrawStringWidth(str, (int)strlen(str));
         return GetDrawStringWidthToHandle(str, (int)strlen(str), fh);
     };
+    // 縁なしの文字。明るいクリーム色の枠の上など、地が一様なところで使う（縁があるとかえって太って見える）。
+    std::map<int, int> hudPlainCache;
+    auto HudFontPlain = [&](int px) -> int {
+        auto it = hudPlainCache.find(px);
+        if (it != hudPlainCache.end()) return it->second;
+        int fh = CreateFontToHandle("メイリオ", px, 3, DX_FONTTYPE_ANTIALIASING, -1);
+        hudPlainCache[px] = fh;
+        return fh;
+    };
+    auto DrawTextPlain = [&](int x, int y, const char* str, unsigned int color, int px = 16) {
+        int fh = HudFontPlain(px);
+        if (fh < 0) { DrawString(x, y, str, color); return; }
+        DrawStringToHandle(x, y, str, color, fh);
+    };
     // ワールド上の短い札（物の頭上の「停止中」など）。縁付きで、背景の色に負けない。
     auto WorldLabel = [&](int x, int y, const char* str, unsigned int color) { DrawTextEdge(x, y, str, color, 16); };
 
@@ -13009,63 +13023,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!isPaused) g_breakSizeHint.timer -= 1.0f; // 一時停止中は減らさず、読む時間を作る
         }
 
-        // OSD：コイン枚数と編集コストゲージ（正しくプレビューされるようにgameScreen内に描画）
-        // UI素材化 — 単色のDrawBox2枚だったものを UIウィンドウ.png の9スライス枠1枚にまとめ、
-        // 「何のカウンタか」を英字ラベルではなくアイコンの絵（コイン.png / エネルギー.png）で示す。
-        int collectedCoins = 0;
-        for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
-        {
-            const int panelX1 = 8, panelY1 = 8, panelX2 = 196, panelY2 = 84;
-            DrawUiWindow(panelX1, panelY1, panelX2, panelY2, uiWindowHandle, GameCfg::UIK_OSD);
+        // ===== プレイ中HUDの状態更新（描画は DrawHudLayer。ここでは数値の更新だけを行う）=====
+        //
+        // 以前はコイン・編集コスト・状態札・トースト・操作ヘルプをすべてこの位置（gameScreen の中）へ描いていた。
+        // gameScreen は後で色補正・ズーム・ぼかしを掛けてモニターへ転送するので、
+        //   ・X長押し（暗転）でHUDまで暗くなる／Z長押し（ズーム）で画面外へ切れて消える
+        //   ・640x480 で描いたものを 1.2〜1.5 倍に引き伸ばすので、文字がにじむ
+        // という問題があった。そこで描画だけを「モニターの上に重ねる層」（DrawHudLayer）へ移し、
+        // ここには数値の更新（コスト増減の検出・各タイマーの減算）だけを残している。
 
-            // --- 1段目：コインの取得枚数 ---
-            DrawUiIcon(34, 30, 34, coinHandle);
-            char coinStr[32];
-            sprintf_s(coinStr, sizeof(coinStr), "%d / %d", collectedCoins, (int)items.size());
-            DrawString(56, 23, coinStr, UiInk());
-
-            // --- 2段目：編集コストゲージ ---
-            float ratio = editCost / currentEditCost.maxCost;
-            if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
-            bool isLow = ratio < 0.2f;
-            bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-            // 点滅の暗いほうは、明るいほうの色を暗くして作る（設定で色を変えても、点滅が成り立つように）
-            int barColor = isLow ? (blinkOn ? UiGaugeLow()
-                                            : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
-                                 : UiGaugeFill();
-
-            DrawUiIcon(34, 60, 38, energyHandle);
-            // ゲージの器は暗い溝にしておく。こうしておけば残量が減ってバーが後退しても、
-            // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
-            const int gx1 = 54, gy1 = 50, gx2 = 186, gy2 = 70;
-            DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
-            DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
-            DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
-            char editCostStr[32];
-            sprintf_s(editCostStr, sizeof(editCostStr), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
-            DrawString(gx1 + 6, gy1 + 3, editCostStr, GetColor(255, 255, 255));
-        }
-
-        // 編集ツールの状態インジケータ（色フィルタ・ミュート）。
-        // 上のOSDパネルが横196pxまで伸びたので、重ならない位置へずらしてある。
-        if (playerColorFilter != 0) {
-            const char* filterName = playerColorFilter == 1 ? "RED" : playerColorFilter == 2 ? "GREEN" : "BLUE";
-            int filterColor = playerColorFilter == 1 ? GetColor(255, 90, 90) : playerColorFilter == 2 ? GetColor(90, 220, 90) : GetColor(90, 150, 255);
-            DrawFormatString(206, 16, filterColor, "FILTER: %s", filterName);
-        }
-        // 明るさをパネルやX/Cで動かしているときは、ゲームがどう判定しているか（暗い／明るい）を出す
-        if (fabsf(fxCurBright - 1.0f) > 0.05f) {
-            int jb = ColorGrade::JudgeBright(fxCurBright);
-            DrawFormatString(206, 34, jb < 0 ? GetColor(140, 170, 255) : jb > 0 ? GetColor(255, 220, 120) : GetColor(230, 230, 230),
-                             "BRIGHT: %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? " (DARK)" : jb > 0 ? " (LIGHT)" : "");
-        }
-        if (SoundManager::Get().IsMuted()) {
-            DrawString(206, 52, "MUTED", GetColor(200, 200, 200));
-        }
-
-        // ===== 編集操作のフィードバック表示（見た目だけ。進行には関わらない）=====
-
-        // (1) 編集コストの増減を、ゲージの横へ浮かべる。
+        // (1) 編集コストの増減の検出。
         // 消費は EditXxx・色フィルタ・カットなど十数箇所に散っているので、各所へ表示処理を足すのではなく、
         // 「前フレームから1以上動いた」という結果の側を1箇所で見張る（被弾音の検出と同じ考え方）。
         // 時間経過の自然回復や継続消費は1フレームあたり1に届かないので、拾わない。
@@ -13079,70 +13046,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
         editCostSeen = editCost;
-        if (isEditMode && currentScene == PLAY && costFloatTimer > 0.0f) {
-            char cb[24];
-            sprintf_s(cb, sizeof(cb), "%+.0f", costFloatValue);
-            int cfx = 204;
-            int cfy = 54 - (int)((70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
-            int cfAlpha = costFloatTimer < 20.0f ? (int)(255.0f * costFloatTimer / 20.0f) : 255;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, cfAlpha);
-            DrawBox(cfx - 4, cfy - 2, cfx + GetDrawStringWidth(cb, (int)strlen(cb)) + 4, cfy + 18, GetColor(30, 26, 24), TRUE);
-            DrawString(cfx, cfy, cb, costFloatValue < 0.0f ? GetColor(255, 130, 110) : GetColor(120, 230, 140));
-            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-            costFloatTimer -= 1.0f;
-        }
-
-        // (2) 世界が止まっていることを、画面の縁の色と右上の札で示す。
-        // これまで「止まっている」のは左パネルの小さな PAUSED 表示と、物が動かないことでしか分からなかった。
-        //   琥珀色 … 時間停止中（SPACE で止めた状態。コストを消費し続ける）
-        //   水色   … 編集中（ドラッグやつまみをつかんでいる間だけ止まる。離せば再開。コストは減らない）
-        if (isEditMode && currentScene == PLAY && !isShowingMessage) {
-            bool gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag;
-            if (gestureFrozen || isPaused) {
-                int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
-                DrawBox(0, 0, SCREEN_WIDTH, 3, frameCol, TRUE);
-                DrawBox(0, SCREEN_HEIGHT - 3, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
-                DrawBox(0, 0, 3, SCREEN_HEIGHT, frameCol, TRUE);
-                DrawBox(SCREEN_WIDTH - 3, 0, SCREEN_WIDTH, SCREEN_HEIGHT, frameCol, TRUE);
-                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                const char* stateMsg = gestureFrozen ? "編集中：時間が止まっています" : "時間停止中   [SPACE]で再開";
-                int smW = GetDrawStringWidth(stateMsg, (int)strlen(stateMsg));
-                int smX2 = SCREEN_WIDTH - 10, smX1 = smX2 - smW - 20;
-                DrawBox(smX1, 10, smX2, 34, GetColor(30, 26, 24), TRUE);
-                DrawBox(smX1, 10, smX2, 34, frameCol, FALSE);
-                DrawString(smX1 + 10, 14, stateMsg, frameCol);
-            }
-        }
-
-        // (3) トースト。取り消し／やり直し／拒否の理由を、ゲーム画面の下寄りに短く出す。
-        // 下端の操作ヘルプ（2行）より上に置く。
-        if (isEditMode && editToastTimer > 0.0f && !editToastText.empty()) {
-            int tw = GetDrawStringWidth(editToastText.c_str(), (int)editToastText.size());
-            int tx1 = SCREEN_WIDTH / 2 - tw / 2 - 14, tx2 = SCREEN_WIDTH / 2 + tw / 2 + 14;
-            int ty1 = SCREEN_HEIGHT - 92, ty2 = ty1 + 28;
-            int toastCol = editToastKind == 2 ? GetColor(255, 130, 110)
-                         : editToastKind == 1 ? GetColor(130, 230, 150) : GetColor(235, 235, 235);
-            int tAlpha = editToastTimer < 20.0f ? (int)(255.0f * editToastTimer / 20.0f) : 255;
-            SetDrawBlendMode(DX_BLENDMODE_ALPHA, tAlpha);
-            DrawBox(tx1, ty1, tx2, ty2, GetColor(30, 26, 24), TRUE);
-            DrawBox(tx1, ty1, tx2, ty2, toastCol, FALSE);
-            DrawString(tx1 + 14, ty1 + 6, editToastText.c_str(), toastCol);
-            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-            editToastTimer -= 1.0f;
-        }
-
-        // ヘルプガイドのOSDオーバーレイ
-        // 実際のキー割り当てに合わせた表記にしてある（ジャンプは[W]、[SPACE]は一時停止、
-        // 一時停止中の[→]がコマ送り）。ここが実装とズレていると、編集ツール前提のステージが
-        // 「操作が分からないから詰む」だけの理不尽なものになってしまうため、必ず同期させること。
-        if (isPaused) {
-            DrawString(10, SCREEN_HEIGHT - 38, "PAUSED: [RIGHT]/[LEFT]: Step 1 Frame (Lift Up/Down)  [SPACE]/[MiddleClick]: Resume", GetColor(255, 255, 120));
-            DrawString(10, SCREEN_HEIGHT - 22, "EDITING: Drag to Move, Drag the Handles to Resize, [R]+Drag to Rotate, RightClick for Menu", GetColor(200, 200, 200));
-        } else {
-            DrawString(10, SCREEN_HEIGHT - 38, "PLAYING: [A][D]/[<][>]:Move  [W]/[^]:Jump  [SHIFT]:Dash  [ENTER]/Click:Shot  [F1]:Help  [ESC]:Menu", GetColor(50, 255, 50));
-            DrawString(10, SCREEN_HEIGHT - 22, "EDIT: [R]:Rewind  [SPACE]:Pause  [F]:FastFwd  [T]:Color  [Z]:Zoom  [X]:Dark  [C]:Bright  [M]:Mute", GetColor(120, 220, 255));
-        }
+        // (2) 浮き表示とトーストの残り時間を減らす（描画側は残り時間を見て透明度を決めるだけ）
+        if (isEditMode && currentScene == PLAY && costFloatTimer > 0.0f) costFloatTimer -= 1.0f;
+        if (isEditMode && editToastTimer > 0.0f && !editToastText.empty()) editToastTimer -= 1.0f;
 
         // Feature 5: ShowMessageアクションによるメッセージウィンドウ
         if (isShowingMessage) {
@@ -13186,7 +13092,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(boxX + 18, lineY, line.c_str(), UiInk());
                 lineY += MSG_LINE_H;
             }
-            DrawString(boxX + boxW - 118, boxY + boxH - 26, "[ENTER] to close", UiInkSub());
+            DrawString(boxX + boxW - 130, boxY + boxH - 26, "[ENTER] 閉じる", UiInkSub());
         }
 
         // Feature: 進行状況のセーブ — PLAY からクリアへ移った瞬間だけ記録する。
@@ -13319,6 +13225,205 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // ===== プレイ中HUD層 =====
+        // モニターへ転送した「あと」に、ウィンドウ座標で描く。
+        //   ・色補正（X/C/T）・ズーム（Z）・ぼかしの影響を受けない（暗転中でもコストが読める）
+        //   ・文字はネイティブ解像度のメイリオで描くので、F10 の拡大表示でもにじまない
+        // 引数 ox,oy,ow,oh は、ゲーム画面（640x480）を転送した矩形。内部座標は X()/Y() で変換する。
+        auto DrawHudLayer = [&](int ox, int oy, int ow, int oh) {
+            if (currentScene != PLAY) return;
+            const float sx = (float)ow / (float)SCREEN_WIDTH, sy = (float)oh / (float)SCREEN_HEIGHT;
+            const float sc = sx < sy ? sx : sy; // 文字・丸の大きさ用（縦横の倍率が違うときは小さいほう）
+            auto X = [&](float gx) { return ox + (int)(gx * sx + 0.5f); };
+            auto Y = [&](float gy) { return oy + (int)(gy * sy + 0.5f); };
+            auto Px = [&](float base) { int p = (int)(base * sc + 0.5f); return p < 12 ? 12 : p; };
+            const int fs = Px(16);   // 本文
+            const int fsm = Px(14);  // 小さめ（ヒントバー・バッジ）
+            // 文字の縦位置は「行の中心」で指定したいので、フォントの高さ（約1.3倍）の半分を引いて左上へ直す
+            auto TopFor = [&](int cy, int px) { return cy - (int)(px * 0.65f); };
+
+            // --- 画面の縁の色：世界が止まっていることを示す ---
+            //   琥珀色 … 時間停止中（Space で止めた状態。コストを消費し続ける）
+            //   水色   … 編集中（ドラッグやつまみをつかんでいる間だけ止まる。離せば再開。コストは減らない）
+            bool gestureFrozen = false, worldStopped = false;
+            if (isEditMode && !isShowingMessage) {
+                gestureFrozen = isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag;
+                worldStopped = gestureFrozen || isPaused;
+            }
+            if (worldStopped) {
+                int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
+                int th = (int)(3.0f * sc + 0.5f); if (th < 2) th = 2;
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
+                DrawBox(ox, oy, ox + ow, oy + th, frameCol, TRUE);
+                DrawBox(ox, oy + oh - th, ox + ow, oy + oh, frameCol, TRUE);
+                DrawBox(ox, oy, ox + th, oy + oh, frameCol, TRUE);
+                DrawBox(ox + ow - th, oy, ox + ow, oy + oh, frameCol, TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            }
+
+            // --- 左上：コイン・体力・編集コスト ---
+            // 「何のカウンタか」は、コインとエネルギーの絵のアイコンと、文字のラベルの両方で示す。
+            int collectedCoins = 0;
+            for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
+            const int osdX1 = 8, osdY1 = 8, osdX2 = 232, osdY2 = 114; // 枠の縁（9スライスの角）が約14px食うので、中身はその内側へ置く
+            DrawUiWindow(X(osdX1), Y(osdY1), X(osdX2), Y(osdY2), uiWindowHandle, GameCfg::UIK_OSD);
+            {
+                // 1段目：コインの取得枚数
+                DrawUiIcon(X(34), Y(34), (int)(28.0f * sc), coinHandle);
+                char coinStr[48];
+                sprintf_s(coinStr, sizeof(coinStr), "コイン  %d / %d", collectedCoins, (int)items.size());
+                DrawTextPlain(X(54), TopFor(Y(34), fs), coinStr, UiInk(), fs);
+
+                // 2段目：体力。数字だけでなく、ハートの並びで残りを見せる（失った分は灰色）
+                {
+                    const int heartY = Y(61);
+                    const int r = (int)(8.0f * sc + 0.5f);
+                    DrawTextPlain(X(24), TopFor(heartY, fs), "HP", UiInkSub(), fs);
+                    auto Heart = [&](int cx, int cy, int rr, unsigned int col) {
+                        int c = rr / 2;
+                        DrawCircle(cx - c, cy - rr / 4, c + 1, col, TRUE);
+                        DrawCircle(cx + c, cy - rr / 4, c + 1, col, TRUE);
+                        DrawTriangle(cx - rr, cy - rr / 6, cx + rr, cy - rr / 6, cx, cy + rr, col, TRUE);
+                    };
+                    int hpNow = player.hp < 0 ? 0 : player.hp;
+                    int slots = hpNow > 6 ? 1 : (hpNow > 3 ? hpNow : 3); // 初期値の3つは常に枠を見せる
+                    for (int hi = 0; hi < slots; hi++) {
+                        int hcx = X(60.0f + hi * 22.0f);
+                        bool full = hi < hpNow;
+                        Heart(hcx, heartY, r + 1, GetColor(70, 40, 40));
+                        Heart(hcx, heartY, r, full ? GetColor(235, 70, 80) : GetColor(170, 160, 150));
+                    }
+                    if (hpNow > 6) {
+                        char hb[16]; sprintf_s(hb, sizeof(hb), "× %d", hpNow);
+                        DrawTextPlain(X(60.0f + 18.0f), TopFor(heartY, fs), hb, UiInk(), fs);
+                    }
+                }
+
+                // 3段目：編集コストゲージ
+                float ratio = editCost / currentEditCost.maxCost;
+                if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
+                bool isLow = ratio < 0.2f;
+                bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
+                // 点滅の暗いほうは、明るいほうの色を暗くして作る（設定で色を変えても、点滅が成り立つように）
+                int barColor = isLow ? (blinkOn ? UiGaugeLow()
+                                                : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
+                                     : UiGaugeFill();
+                DrawUiIcon(X(34), Y(89), (int)(30.0f * sc), energyHandle);
+                // ゲージの器は暗い溝にしておく。残量が減ってバーが後退しても、
+                // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
+                const int gx1 = X(54), gx2 = X(218), gy1 = Y(79), gy2 = Y(99);
+                DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
+                DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
+                DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
+                char editCostStr[48];
+                sprintf_s(editCostStr, sizeof(editCostStr), "コスト %d / %d", (int)editCost, (int)currentEditCost.maxCost);
+                DrawTextEdge(gx1 + (int)(6.0f * sc), TopFor((gy1 + gy2) / 2, fsm), editCostStr, GetColor(255, 255, 255), fsm);
+            }
+
+            // --- 編集コストの増減（ゲージの右隣に浮かべる）---
+            if (isEditMode && costFloatTimer > 0.0f) {
+                char cb[24];
+                sprintf_s(cb, sizeof(cb), "%+.0f", costFloatValue);
+                int cfx = X(240);
+                int cfy = Y(86.0f - (70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
+                int cfAlpha = costFloatTimer < 20.0f ? (int)(255.0f * costFloatTimer / 20.0f) : 255;
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, cfAlpha);
+                DrawTextEdge(cfx, TopFor(cfy, Px(20)), cb, costFloatValue < 0.0f ? GetColor(255, 130, 110) : GetColor(120, 230, 140), Px(20));
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            }
+
+            // --- 右上：状態バッジ（縦に積む。重ならない）---
+            {
+                struct Badge { std::string text; unsigned int col; };
+                std::vector<Badge> badges;
+                if (worldStopped) {
+                    badges.push_back(gestureFrozen ? Badge{ "編集中：時間が止まっています", (unsigned int)GetColor(120, 190, 255) }
+                                                   : Badge{ "時間停止中　[Space]で再開", (unsigned int)GetColor(255, 200, 80) });
+                }
+                if (playerColorFilter != 0) {
+                    const char* filterName = playerColorFilter == 1 ? "赤" : playerColorFilter == 2 ? "緑" : "青";
+                    unsigned int filterColor = playerColorFilter == 1 ? GetColor(255, 110, 110) : playerColorFilter == 2 ? GetColor(110, 230, 110) : GetColor(120, 165, 255);
+                    badges.push_back({ std::string("色フィルタ：") + filterName + "だけ通す", filterColor });
+                }
+                // 明るさをパネルやX/Cで動かしているときは、ゲームがどう判定しているか（暗い／明るい）を出す
+                if (fabsf(fxCurBright - 1.0f) > 0.05f) {
+                    int jb = ColorGrade::JudgeBright(fxCurBright);
+                    char bb[64];
+                    sprintf_s(bb, sizeof(bb), "明るさ %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? "（暗い判定）" : jb > 0 ? "（明るい判定）" : "");
+                    badges.push_back({ bb, jb < 0 ? (unsigned int)GetColor(140, 170, 255) : jb > 0 ? (unsigned int)GetColor(255, 220, 120) : (unsigned int)GetColor(230, 230, 230) });
+                }
+                if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", (unsigned int)GetColor(210, 210, 210) });
+                if (isEditMode && bigView) badges.push_back({ "拡大表示中　[F10]でパネルを戻す", (unsigned int)GetColor(210, 210, 210) });
+
+                int by = Y(10);
+                const int bh = (int)(26.0f * sy + 0.5f), bpitch = (int)(31.0f * sy + 0.5f);
+                for (const auto& b : badges) {
+                    int tw = TextEdgeWidth(b.text.c_str(), fsm);
+                    int bx2 = X(SCREEN_WIDTH - 10), bx1 = bx2 - tw - (int)(20.0f * sc);
+                    DrawBox(bx1, by, bx2, by + bh, GetColor(30, 26, 24), TRUE);
+                    DrawBox(bx1, by, bx2, by + bh, b.col, FALSE);
+                    DrawTextEdge(bx1 + (int)(10.0f * sc), TopFor(by + bh / 2, fsm), b.text.c_str(), b.col, fsm);
+                    by += bpitch;
+                }
+            }
+
+            // --- 下寄り中央：トースト（取り消し／やり直し／拒否の理由）---
+            // 色だけに頼らず、頭の記号（○ 成功／× 拒否／！ 情報）でも種別を区別する。
+            if (isEditMode && editToastTimer > 0.0f && !editToastText.empty() && !isShowingMessage) {
+                std::string tt = std::string(editToastKind == 2 ? "× " : editToastKind == 1 ? "○ " : "！ ") + editToastText;
+                int tw = TextEdgeWidth(tt.c_str(), fs);
+                int cxm = ox + ow / 2;
+                int tx1 = cxm - tw / 2 - (int)(14.0f * sc), tx2 = cxm + tw / 2 + (int)(14.0f * sc);
+                int ty1 = Y(SCREEN_HEIGHT - 76), ty2 = ty1 + (int)(30.0f * sy);
+                unsigned int toastCol = editToastKind == 2 ? GetColor(255, 130, 110)
+                                      : editToastKind == 1 ? GetColor(130, 230, 150) : GetColor(235, 235, 235);
+                int tAlpha = editToastTimer < 20.0f ? (int)(255.0f * editToastTimer / 20.0f) : 255;
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, tAlpha);
+                DrawBox(tx1, ty1, tx2, ty2, GetColor(30, 26, 24), TRUE);
+                DrawBox(tx1, ty1, tx2, ty2, toastCol, FALSE);
+                DrawTextEdge(tx1 + (int)(14.0f * sc), TopFor((ty1 + ty2) / 2, fs), tt.c_str(), toastCol, fs);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+            }
+
+            // --- 下端：いまの状況に合わせた操作のヒント（1行）---
+            // 状況ごとに「いま使えるもの」だけを出す。幅に収まらないときは後ろの項目から落とすが、
+            // 末尾の「F1 操作一覧」「Esc メニュー」は必ず残す（全部の操作を教える入口なので）。
+            // メッセージ窓が出ている間は、同じ場所に窓があるので出さない。
+            if (!isShowingMessage) {
+                std::vector<std::string> mid;
+                if (isEditMode && isPaused) {
+                    mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
+                    if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
+                } else if (isEditMode && objectEditOpEnabled && selectedType != SELECT_NONE) {
+                    mid = { "ドラッグ 移動", "つまみ 変形", "ホイール 拡縮", "Ctrl+ホイール 回転", "右クリック メニュー", "Ctrl+Z 取り消し" };
+                } else {
+                    mid = { "A/D 移動", "W ジャンプ" };
+                    if (isEditMode) {
+                        mid.push_back("Space 時間停止");
+                        if (objectEditOpEnabled) mid.push_back("右クリック 物を選ぶ");
+                        else mid.push_back("このステージでは物の編集は使えません");
+                    }
+                    // 優先度の低い順（幅が足りないときは後ろから落ちる）。ダッシュと弾は F1 の一覧にも載っている
+                    mid.push_back("Shift ダッシュ"); mid.push_back("Enter 弾");
+                }
+                const std::string tail = "F1 操作一覧　Esc メニュー";
+                auto Join = [&](const std::vector<std::string>& v) {
+                    std::string r;
+                    for (const auto& t : v) { r += t; r += "　"; }
+                    return r + tail;
+                };
+                const int margin = (int)(12.0f * sc);
+                while (mid.size() > 1 && TextEdgeWidth(Join(mid).c_str(), fsm) > ow - margin * 2) mid.pop_back();
+                std::string line = Join(mid);
+                int barH = (int)(26.0f * sy + 0.5f);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 185);
+                DrawBox(ox, oy + oh - barH, ox + ow, oy + oh, GetColor(24, 22, 20), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawTextEdge(ox + margin, TopFor(oy + oh - barH / 2, fsm), line.c_str(),
+                             isPaused ? GetColor(255, 235, 140) : GetColor(235, 235, 235), fsm);
+            }
+        };
+
         // --- 最終ワークスペースレイアウト出力 ---
         SetDrawScreen(DX_SCREEN_BACK);
         ClearDrawScreen();
@@ -13389,6 +13494,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // モニタープレビューウィンドウ
             DrawBox(monitorX - 2, monitorY - 2, monitorX + monitorW + 2, monitorY + monitorH + 2, GetColor(100, 100, 100), FALSE);
             Screen_DrawComposited(monitorX, monitorY, monitorW, monitorH, gameScreen);
+            DrawHudLayer(monitorX, monitorY, monitorW, monitorH); // HUDはモニターの上に重ねる（色補正・ズームの影響を受けない）
 
             // 範囲選択矩形の描画
             if (isAreaSelecting) {
@@ -13657,6 +13763,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         } else {
             // 非エディタ表示（ゲーム画面のみをウィンドウ全体へ拡大表示するモード）
             Screen_DrawComposited(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, gameScreen);
+            DrawHudLayer(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
             if (isPaused) {
                 // UI素材化 — 「PAUSED」の文字だけだったものを、
                 // UIウィンドウ.pngの枠と一時停止アイコンを合わせた表示に差し替える。
@@ -13664,7 +13771,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 const int puX2 = WINDOW_WIDTH / 2 + 110, puY2 = WINDOW_HEIGHT / 2 + 34;
                 DrawUiWindow(puX1, puY1, puX2, puY2, uiWindowHandle, GameCfg::UIK_MENU);
                 DrawUiIcon(puX1 + 44, (puY1 + puY2) / 2, 36, uiPauseHandle);
-                DrawString(puX1 + 78, (puY1 + puY2) / 2 - 8, "PAUSED", UiInk());
+                DrawString(puX1 + 78, (puY1 + puY2) / 2 - 8, "一時停止中", UiInk());
             }
         }
         // ImGuiのフレーム開始
