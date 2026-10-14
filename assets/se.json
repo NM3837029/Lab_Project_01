@@ -1,77 +1,98 @@
 [
   {
+    "id": "se_jump",
+    "name": "プレイヤー:ジャンプ",
+    "file": "se/jump01.wav",
+    "isLoop": false,
+    "volume": 0.8
+  },
+  {
     "id": "se_hit",
     "name": "プレイヤー:被弾",
-    "file": "se/error.wav",
+    "file": "se/Hit.wav",
+    "isLoop": false,
+    "volume": 0.85
+  },
+  {
+    "id": "se_hit_spike",
+    "name": "プレイヤー:やられた（棘・ミス）",
+    "file": "se/HitSpike.wav",
+    "isLoop": false,
+    "volume": 0.85
+  },
+  {
+    "id": "se_shoot",
+    "name": "プレイヤー:射撃",
+    "file": "se/Shooting01.wav",
     "isLoop": false,
     "volume": 0.7
   },
   {
-    "id": "se_shoot",
-    "name": "射撃",
-    "file": "se/Attack_electric.wav",
-    "isLoop": false,
-    "volume": 0.5
-  },
-  {
     "id": "se_shoot_alt",
     "name": "射撃(サブ)",
+    "file": "se/shooting.wav",
+    "isLoop": false,
+    "volume": 0.7
+  },
+  {
+    "id": "se_enemy_shoot",
+    "name": "敵:射撃",
     "file": "se/Attack_electric.wav",
     "isLoop": false,
-    "volume": 0.5
+    "volume": 0.6
   },
   {
     "id": "se_enemy_damage",
     "name": "敵:被弾",
-    "file": "se/Click.wav",
+    "file": "se/Spliting01.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_enemy_death",
     "name": "敵:撃破",
-    "file": "se/Attack_electric.wav",
+    "file": "se/Spliting02.wav",
     "isLoop": false,
-    "volume": 0.7
+    "volume": 0.8
   },
   {
     "id": "se_enemy_pounce",
     "name": "敵:飛びかかり",
-    "file": "se/Throw.wav",
+    "file": "se/SplitingEnemyAttack.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_shield_crack",
     "name": "敵:シールド破壊",
-    "file": "se/error.wav",
+    "file": "se/shieldCrack.wav",
     "isLoop": false,
-    "volume": 0.6
+    "volume": 0.8
   },
   {
     "id": "se_size_change",
     "name": "敵:サイズ変化",
-    "file": "se/Gear.wav",
+    "file": "se/SizeChangingEnemy.wav",
     "isLoop": false,
-    "volume": 0.7
+    "volume": 0.8
   },
   {
     "id": "se_teleport",
     "name": "敵:テレポート",
-    "file": "se/Scroll.wav",
+    "file": "se/EnemyTeleport.wav",
     "isLoop": false,
-    "volume": 0.7
+    "volume": 0.8
   },
   {
     "id": "se_dossun",
     "name": "ドッスン:着地の衝撃",
-    "file": "se/Gear.wav",
+    "file": "se/dossun.wav",
     "isLoop": false,
     "volume": 0.9
   },
   {
     "id": "se_alert",
-    "name": "敵:警告（予兆）",
+    "name": "敵:警告（予兆・寄せ始め）",
     "file": "se/alert.wav",
     "isLoop": false,
     "volume": 0.6
@@ -84,37 +105,44 @@
     "volume": 0.8
   },
   {
+    "id": "se_gear",
+    "name": "ギミック:作動（スイッチ・扉）",
+    "file": "se/Gear.wav",
+    "isLoop": false,
+    "volume": 0.7
+  },
+  {
     "id": "se_item_coin",
     "name": "アイテム:コイン",
-    "file": "se/Click.wav",
+    "file": "se/ItemCoin.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_item_dash",
     "name": "アイテム:ダッシュ",
-    "file": "se/Click.wav",
+    "file": "se/ItemDash.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_item_jump",
     "name": "アイテム:ジャンプ",
-    "file": "se/Click.wav",
+    "file": "se/ItemDoubleJump.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_item_power",
     "name": "アイテム:能力解放",
-    "file": "se/Gear.wav",
+    "file": "se/ItemFireFlower.wav",
     "isLoop": false,
     "volume": 0.8
   },
   {
     "id": "se_coin",
     "name": "コイン",
-    "file": "se/Click.wav",
+    "file": "se/coin.wav",
     "isLoop": false,
     "volume": 0.8
   },

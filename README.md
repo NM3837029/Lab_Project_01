@@ -1068,18 +1068,21 @@ Lab_Editor のメッセージ編集画面のプレビューで、はみ出す行
 
 ### 効果音
 
-新しい9本（`Click` / `error` / `alert` / `Attack_electric` / `Gear` / `Scroll` / `Throw` / `Win` / `Lose`）に割り当て直しました。割り当て先のない効果音（ジャンプ・着地・死亡など）は無音です。
+効果音30本を、場面に合わせて割り当てています（Lab_Editor の「効果音の割り当て」で変えられます）。割り当て先のない場面（着地・ダッシュ）は無音です。
 
-| 効果音 | 使い道 |
+| 場面 | 効果音 |
 |---|---|
-| Click | カーソル・決定・編集の確定・コイン・敵の被弾 |
-| error | 操作できない・プレイヤーの被弾・シールド破壊 |
-| alert | 範囲サイズ調整の敵の予兆（投げる前） |
-| Attack_electric | 射撃・敵の撃破 |
-| Gear | 一時停止・ドッスンの着地・能力解放・サイズ変化 |
-| Scroll | 早送り・巻き戻し・テレポート |
-| Throw | 範囲サイズ調整の敵が投げる・飛びかかり |
-| Win / Lose | クリア / ゲームオーバー |
+| プレイヤー：ジャンプ／被弾／やられた／射撃 | jump01 ／ Hit ／ HitSpike ／ Shooting01 |
+| 敵：被弾／撃破／射撃 | Spliting01 ／ Spliting02 ／ Attack_electric |
+| 敵：飛びかかり／テレポート／サイズ変化／シールド破壊 | SplitingEnemyAttack ／ EnemyTeleport ／ SizeChangingEnemy ／ shieldCrack |
+| ドッスン・壊せるブロックの衝撃 | dossun |
+| 範囲サイズ調整の敵：予兆（alert）／投げる（Throw）、ズーム固定の敵：寄せ始め（alert） | alert ／ Throw |
+| ギミックの作動（重量スイッチ・ゲート扉） | Gear |
+| アイテム：コイン／ダッシュ／ジャンプ／能力解放／コイン（共通） | ItemCoin ／ ItemDash ／ ItemDoubleJump ／ ItemFireFlower ／ coin |
+| クリア／ゲームオーバー | Win ／ Lose |
+| 編集：一時停止／早送り／色フィルタ／巻き戻し | Paused ／ FastFoward ／ ColorChange ／ Rewind |
+| 編集：適用／カット確定／操作できない | Gear ／ Scroll ／ error |
+| メニュー：カーソル・コマ送り／決定・戻る | Scroll ／ Click |
 
 ### Lab_Editor の型（テンプレート）
 
