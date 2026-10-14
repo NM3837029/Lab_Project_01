@@ -24,7 +24,7 @@ public static partial class PartTemplates
 
     private static List<PartTemplate> ScreenTemplates() => new()
     {
-        ZoomArrows(), PivotSpinner(), ThrowCross(),
+        ZoomArrows(), PivotSpinner(), MountedEyes(), ThrowCross(),
     };
 
     // ── 1. 脈打つ矢印（ズーム操作の敵） ──
@@ -91,6 +91,44 @@ public static partial class PartTemplates
             JToken lx = Add(V(cx), Sub(V(vx), Sub(Mul(V(vx), Cos(phi)), Mul(V(vy), Sin(phi)))));
             JToken ly = Add(V(cy), Sub(V(vy), Add(Mul(V(vx), Sin(phi)), Mul(V(vy), Cos(phi)))));
             var p = Part(v.IdPrefix, v.Sprite, cx, cy, s, s, 0, 1, false, Loop(SetAngle(phi), SetOffset(lx, ly)));
+            p.hitboxWidth = 2; p.hitboxHeight = 2; p.hitboxOffsetX = (p.width - 2) / 2; p.hitboxOffsetY = (p.height - 2) / 2;
+            return new List<PartDef> { p };
+        },
+    };
+
+    // ── 2b. 回る部品に載った黒目 ──
+    private static PartTemplate MountedEyes() => new()
+    {
+        Id = "mounted_eyes", Name = "👁 回る頭に載った黒目（プレイヤーを見ながら一緒に回る）", Category = CategoryScreen,
+        Origin = "enemy_kaiten（回転させる敵の黒目）",
+        Description = "「軸まわりで回る部品」（回る頭など）の目の穴に載った黒目です。頭と同じ軸・同じ速さで一緒に回りながら、プレイヤーのいる向きへ少しずれます。頭だけが回って、黒目が穴から取り残されるのを防ぎます。軸・速さ・ずれは、載せる部品の値と同じにしてください。",
+        DefaultIdPrefix = "pupils",
+        DefaultSprite = "img/回転させる敵目.png",
+        Params =
+        {
+            Num("size", "黒目の絵の大きさ", 12, 160, 46, 1, 0, "載せる部品（頭）と同じ大きさにすると、絵がぴったり重なります"),
+            Num("speed", "回る速さ（度/秒）", -720, 720, 140, 10, 0, "載せる部品の速さと同じにする"),
+            Num("pivotX", "軸の位置・横（％）", 0, 100, 52, 1, 0, "載せる部品の軸と同じにする"),
+            Num("pivotY", "軸の位置・縦（％）", 0, 100, 34, 1, 0, "載せる部品の軸と同じにする"),
+            Num("offsetX", "本体の中心からのずれ・横", -60, 60, 0), Num("offsetY", "本体の中心からのずれ・縦", -60, 60, 0),
+            Num("reach", "プレイヤーのほうへずれる幅（px）", 0, 14, 3, 0.5m, 1),
+        },
+        PreviewNote = "プレイヤーのいる向きは、プレビューでは左右に振って見せています。",
+        Suggest = v => new EnemySuggestion
+        {
+            TypeEnum = 24, TypeNote = "「回転させる」。近くにいるプレイヤー・ほかの敵・ギミック・アイテムを、ゆっくり回し続けます。",
+            Hp = 3, Width = 46, Height = 46, BaseName = "回転させる敵",
+        },
+        Build = v =>
+        {
+            double s = v.D("size");
+            double cx = v.BodyW / 2.0 + v.D("offsetX") - s / 2.0, cy = v.BodyH / 2.0 + v.D("offsetY") - s / 2.0;
+            double vx = (v.D("pivotX") - 50.0) / 100.0 * s, vy = (v.D("pivotY") - 50.0) / 100.0 * s;
+            JToken phi = Mul(TimeOp(), V(v.D("speed") * D2R / 60.0));
+            JToken a = Sub(ToPlayer(), Tilt()); // 親が傾いていても、プレイヤーの方向を向く
+            JToken lx = Add(Add(V(cx), Sub(V(vx), Sub(Mul(V(vx), Cos(phi)), Mul(V(vy), Sin(phi))))), Mul(Cos(a), V(v.D("reach"))));
+            JToken ly = Add(Add(V(cy), Sub(V(vy), Add(Mul(V(vx), Sin(phi)), Mul(V(vy), Cos(phi))))), Mul(Sin(a), V(v.D("reach"))));
+            var p = Part(v.IdPrefix, v.Sprite, cx, cy, s, s, 0, 2, false, Loop(SetAngle(phi), SetOffset(lx, ly)));
             p.hitboxWidth = 2; p.hitboxHeight = 2; p.hitboxOffsetX = (p.width - 2) / 2; p.hitboxOffsetY = (p.height - 2) / 2;
             return new List<PartDef> { p };
         },

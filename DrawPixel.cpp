@@ -11087,6 +11087,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     for (auto& seg : enemy.parts) {
                         if (!seg.isActive) continue;
+                        // 胴体の節になるのは、親より奥（zOrder<0）のパーツだけ。手前（zOrder>=0）のパーツ（目など）は、
+                        // 頭に貼り付いたまま（スクリプトで動く）にする。以前は全パーツを節として軌跡に並べたため、
+                        // 目が尻尾の先端へ飛んでいた。
+                        if (seg.zOrder >= 0) continue;
                         bool placed = false;
                         while (hIdx > 0) {
                             const EnemyState& hs = enemy.history[--hIdx];
@@ -13856,6 +13860,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     badges.push_back({ zb, playerZoomFlash > 0 ? (unsigned int)GetColor(255, 240, 150) : (unsigned int)GetColor(190, 225, 255) });
                 } else if (zHeldThisFrame && screenEffectOpEnabled && editCost <= 0.0f) {
                     badges.push_back({ "ズーム：編集コストが足りません", (unsigned int)GetColor(255, 130, 110) });
+                } else if (zHeldThisFrame && !screenEffectOpEnabled) {
+                    // 押しても何も起きない理由を伝える（ステージで画面エフェクトが封印されている。アイテムで解禁できる）
+                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", (unsigned int)GetColor(255, 130, 110) });
                 }
                 // ズーム固定の敵に捕まっている間。解く方法（原因の敵を倒す）も一緒に伝える
                 if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", (unsigned int)GetColor(255, 170, 120) });
