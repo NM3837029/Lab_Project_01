@@ -411,6 +411,10 @@ inline PanelResult Update(PanelState& st, PanelUi& ui, const PanelInput& in, boo
                 return res;
             }
             ui.lastPress[i] = ui.frame;
+            // ラベルの行（上段）を押しても値は飛ばさない。以前は行全体が当たり判定で、
+            // 項目名を押しただけで値が動いていた。値を動かすのは溝（バー）の高さから。
+            // ダブルクリックでの初期値戻しは、ラベルの上でも効く（上の分岐）。
+            if (in.my < ry + 14) return res;
             ui.drag = i;
             SliderValue(st, i) = SliderFromX(i, in.mx, px);
             res.changed = true; res.dragging = true;
@@ -465,8 +469,8 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
     }
 
     // テストチャート：上＝補正前、下＝いまの補正をかけたもの
-    DrawString(px, kChartY, "元", inkSub);
-    DrawString(px, kChartY + 18, "後", inkSub);
+    DrawString(px, kChartY, "前", inkSub);        // 補正前（上の帯）
+    DrawString(px, kChartY + 18, "後", inkSub);   // 補正後（下の帯）
     const int chx = px + 26;
     if (res.chartSrc >= 0) {
         DrawGraph(chx, kChartY, res.chartSrc, TRUE);
@@ -538,7 +542,7 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         // 赤・緑・青の「判定が効く範囲」を輪の外側に太線で示す
         const float centers[3] = { 0.0f, 120.0f, 240.0f };
         const unsigned int cols[3] = { GetColor(230, 60, 60), GetColor(60, 190, 60), GetColor(70, 110, 240) };
-        const char* names[3] = { "R", "G", "B" };
+        const char* names[3] = { "赤", "緑", "青" };
         for (int c = 0; c < 3; c++) {
             for (float a = centers[c] - kFilterZoneDeg; a < centers[c] + kFilterZoneDeg; a += 4.0f) {
                 float a2 = (std::min)(a + 4.0f, centers[c] + kFilterZoneDeg);
@@ -547,7 +551,7 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
                            wcx + cosf(a2 * kPi / 180.0f) * r0, kWheelCY - sinf(a2 * kPi / 180.0f) * r0, cols[c], 3.0f);
             }
             float lr = (float)kWheelR + 15.0f;
-            DrawString(wcx + (int)(cosf(centers[c] * kPi / 180.0f) * lr) - 4, kWheelCY - (int)(sinf(centers[c] * kPi / 180.0f) * lr) - 8, names[c], cols[c]);
+            DrawString(wcx + (int)(cosf(centers[c] * kPi / 180.0f) * lr) - 8, kWheelCY - (int)(sinf(centers[c] * kPi / 180.0f) * lr) - 8, names[c], cols[c]);
         }
         // 現在の位置
         float r1 = st.tintAmount * (float)kWheelR;
@@ -578,8 +582,8 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
     }
 
     // 注意書き
-    DrawString(px + 4, 584, "ダブルクリック＝初期値", inkSub);
-    DrawString(px + 4, 602, "コスト：明るさ・色のみ", inkSub);
+    DrawString(px + 4, 578, "ダブルクリック＝初期値", inkSub); // 枠の下端（618）に食い込まない高さ
+    DrawString(px + 4, 596, "コスト：明るさ・色のみ", inkSub);
 
     // 封印されているステージ
     if (locked) {
