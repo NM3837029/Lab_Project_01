@@ -8201,11 +8201,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (currentShot && !lastShot && canPlayerAct) {
             for (int i = 0; i < MAX_BULLETS; i++) {
                 if (!bullets[i].isActive) {
+                    // 弾は「プレイヤーが向いている方向」へ飛ばす。左右（direction）だけでなく、回転の敵や編集操作で
+                    // 傾いた角度（player.angle）にも従う。絵は左向きに描かれ、右を向くとき（direction==0）に左右反転してから
+                    // angle だけ回して描かれるので、前方向きのベクトルは
+                    //   右向き: ( cos a,  sin a)    左向き: (-cos a, -sin a)
+                    // になる。angle=0 なら従来どおり真横へ飛ぶ。
+                    const float shotSign = (player.direction == 0) ? 1.0f : -1.0f;
+                    const float fwdX = shotSign * cosf(player.angle);
+                    const float fwdY = shotSign * sinf(player.angle);
+                    // 発射位置：体の中心から見て、前へ「体の半分の幅＋少し」、上へ「高さの1/4」ずれた点を、体と同じ角度 a で回した位置。
+                    // （従来の、右向き＝体の右端／左向き＝体の左端、上から1/4の高さと同じ点。弾の当たり判定は16x16で x,y が左上）
+                    // 画面座標（y が下）での回転は (x,y) → (x cos a - y sin a, x sin a + y cos a)。左右反転は x だけなので上は常に上。
+                    const float pcx = player.x + (float)player.width * player.scale / 2.0f;
+                    const float pcy = player.y + (float)player.height * player.scale / 2.0f;
+                    const float lx = shotSign * ((float)player.width * player.scale / 2.0f + 5.0f);
+                    const float ly = -(float)player.height * player.scale / 4.0f;
+                    const float shotCx = pcx + lx * cosf(player.angle) - ly * sinf(player.angle);
+                    const float shotCy = pcy + lx * sinf(player.angle) + ly * cosf(player.angle);
                     bullets[i].isActive = true;
-                    bullets[i].x = player.x + (player.direction == 0 ? (float)player.width * player.scale : -10.0f);
-                    bullets[i].y = player.y + (float)player.height * player.scale / 4.0f;
-                    bullets[i].vx = (player.direction == 0 ? BULLET_SPEED : -BULLET_SPEED);
-                    bullets[i].vy = 0.0f; // Y方向速度は0で初期化（プレイヤーの弾は常に水平方向にのみ飛ぶため）
+                    bullets[i].x = shotCx - 8.0f;
+                    bullets[i].y = shotCy - 8.0f;
+                    bullets[i].vx = fwdX * BULLET_SPEED;
+                    bullets[i].vy = fwdY * BULLET_SPEED; // 傾いているときは斜めにも飛ぶ（角度0なら0）
                     bullets[i].isPlayerOwned = true; // プレイヤーの弾
                     bullets[i].isRewinding = false;
                     bullets[i].history.clear();
