@@ -892,6 +892,7 @@ public class EnemyDef
     public float zoomAmplitude { get; set; } = -1.0f;        // ズーム演出の振幅
     public float zoomFrequency { get; set; } = -1.0f;        // ズーム演出の周期（速さ）。ズーム固定の敵では使わない（JSONの互換のため残す）
     // 【重要】以下は C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。片方だけだと、保存した瞬間にキーが消える。
+    public float revealBrightness { get; set; } = -1.0f;     // 幽霊：画面の明るさがこれ未満の間だけ姿を現す（既定0.6）
     public float zoomLockFrames { get; set; } = -1.0f;       // ズーム固定の敵：寄りきるまでのフレーム数（長いほど、じわじわ寄る）
     public float rotateSpeed { get; set; } = -1.0f;          // 回転させる敵：回す速さ（度/秒）。負なら逆回り
     public bool rotatePlayer { get; set; } = true;           // 回転させる敵：プレイヤーを回すか

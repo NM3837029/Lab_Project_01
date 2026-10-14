@@ -116,11 +116,11 @@ public class AssetManagerPageControl : UserControl
         [11] = new[] { ("actionInterval", "テレポート間隔(フレーム)", 0), ("teleportRangeMin", "オフセット最小(px)", 0), ("teleportRangeMax", "オフセット最大(px)", 0) }, // type_enum=11: テレポーター(Teleporter)
         [12] = new[] { ("moveSpeed", "通常時速度係数", 2), ("enragedMoveSpeed", "覚醒後速度係数", 2), ("shrinkFactor", "縮小率", 2) }, // type_enum=12: 分裂もどき(Shrinker)
         [13] = new[] { ("moveSpeed", "移動速度係数", 2), ("shieldOffDuration", "無敵解除継続(フレーム)", 0), ("shieldOnDuration", "無敵継続(フレーム)", 0) }, // type_enum=13: シールド(Shield)
-        [14] = new[] { ("mimicDelayFrames", "遅延フレーム数", 0) }, // type_enum=14: 幽霊敵(Mimic Ghost)
         [15] = new[] { ("moveSpeed", "移動速度係数", 2), ("sizeAmplitude", "スケール振幅", 2), ("sizeFrequency", "スケール周波数", 3), ("minScale", "最小スケール", 2) }, // type_enum=15: 大きさが変わる敵(Size Shifter)
         [16] = new[] { ("moveSpeed", "基準速度係数", 2), ("tempoFrequency", "周波数", 3), ("tempoMin", "speedScale最小", 2), ("tempoMax", "speedScale最大", 2) }, // type_enum=16: 速さ操作敵(Tempo Warper)
         [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // type_enum=17: 明るさ操作敵(Brightness Phantom)
         [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // type_enum=18: 色調整敵(Color Shifter)
+        [14] = new[] { ("revealBrightness", "姿を現す明るさ(これ未満で現れる)", 2), ("moveSpeed", "近づく速さ係数", 2), ("triggerRange", "近づき始める距離(px)", 0), ("floatAmplitude", "浮く幅(px)", 0), ("floatFrequency", "浮く周波数", 3) }, // type_enum=14: 幽霊(Ghost)
         [19] = new[] { ("effectRange", "寄せ始める距離(px)", 0), ("zoomAmplitude", "寄る強さ(追加の倍率)", 2), ("zoomLockFrames", "寄りきるまで(フレーム)", 0) }, // type_enum=19: ズーム固定敵(Zoom Lock)
         [24] = new[] { ("effectRange", "回す範囲(px)", 0), ("rotateSpeed", "回す速さ(度/秒)", 0), ("rotatePlayer", "プレイヤーを回す", 0), ("rotateEnemies", "ほかの敵を回す", 0), ("rotateGimmicks", "ギミックを回す", 0), ("rotateItems", "アイテムを回す", 0) }, // type_enum=24: 回転させる敵(Rotator)
         [25] = new[] { ("triggerRange", "投げ始める距離(px)", 0), ("actionInterval", "投げる間隔(フレーム)", 0), ("chargeTime", "予兆(フレーム)", 0), ("effectRange", "範囲の半径(px)", 0), ("zoneFrames", "範囲が残る時間(フレーム)", 0), ("sizeFactor", "拡大の倍率", 2) }, // type_enum=25: 範囲サイズ変更の敵(Size Thrower)
@@ -204,7 +204,7 @@ public class AssetManagerPageControl : UserControl
         (11, "11 = テレポーター (Teleporter)", "一定間隔でプレイヤー付近へ瞬間移動します。"),
         (12, "12 = 分裂もどき (Shrinker)", "致死ダメージを受けると一度だけ縮小・高速化して復活します（2回目で死亡）。"),
         (13, "13 = シールド (Shield)", "一定間隔で無敵状態（金色に発光）になり、弾によるダメージを無効化します。"),
-        (14, "14 = 幽霊敵 (Mimic Ghost)", "プレイヤーの巻き戻し履歴を約1.5秒遅延して再生し、過去の動きをなぞります。"),
+        (14, "14 = 幽霊 (Ghost)", "画面が明るいあいだは姿を消し（触れてもダメージを受けず、弾も当たらない）、暗いあいだだけ現れます。現れているときは、浮いたままプレイヤーへ近づき、地形もギミックもすり抜けます。現れている間だけ弾が当たります。消えている間はその場で止まります。"),
         (15, "15 = 大きさが変わる敵 (Size Shifter)", "scaleが周期的に変化し、当たり判定の大きさも連動して変わります。"),
         (16, "16 = 速さ操作敵 (Tempo Warper)", "speedScaleが周期的に激しく変化し、接近速度が乱れます。"),
         (17, "17 = 明るさ操作敵 (Brightness Phantom)", "射程内で画面を暗転させます（新画面エフェクト機能と連携）。"),

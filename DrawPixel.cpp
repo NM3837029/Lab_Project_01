@@ -317,7 +317,8 @@ struct EnemyDef {
     float shrinkFactor = -1.0f;      // SHRINKERの被弾時の縮小率
     float shieldOnDuration = -1.0f;  // SHIELDの無敵状態の継続時間(フレーム)
     float shieldOffDuration = -1.0f; // SHIELDの無敵解除状態の継続時間(フレーム)
-    float mimicDelayFrames = -1.0f;  // MIMIC_GHOSTの遅延フレーム数
+    float mimicDelayFrames = -1.0f;  // （旧：MIMIC_GHOSTの遅延フレーム数。幽霊が「暗闇に現れる」型になってからは使わない。JSONの互換のため残す）
+    float revealBrightness = -1.0f;  // MIMIC_GHOST（幽霊）：画面の明るさがこれ未満の間だけ姿を現す（既定0.6＝「暗い」の判定と同じ）
     float sizeAmplitude = -1.0f;     // SIZE_SHIFTERのスケール振幅
     float sizeFrequency = -1.0f;     // SIZE_SHIFTERのスケール周波数
     float minScale = -1.0f;          // SIZE_SHIFTERの最小スケールクランプ
@@ -696,7 +697,14 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
         case 11: fill(def.actionInterval, 180.0f); fill(def.teleportRangeMin, 120.0f); fill(def.teleportRangeMax, 220.0f); break; // TELEPORTER
         case 12: fill(def.moveSpeed, 0.35f); fill(def.enragedMoveSpeed, 0.9f); fill(def.shrinkFactor, 0.6f); fill(def.triggerRange, 300.0f); break; // SHRINKER
         case 13: fill(def.moveSpeed, 0.3f); fill(def.shieldOffDuration, 150.0f); fill(def.shieldOnDuration, 90.0f); fill(def.triggerRange, 300.0f); break; // SHIELD
-        case 14: fill(def.mimicDelayFrames, 90.0f); break; // MIMIC_GHOST
+        case 14: // MIMIC_GHOST（幽霊）：明るいと消え、暗いと現れ、浮いてプレイヤーへ近づく。地形もギミックもすり抜ける
+            fill(def.mimicDelayFrames, 90.0f);
+            fill(def.revealBrightness, 0.6f);   // これ未満の明るさで姿を現す
+            fill(def.moveSpeed, 0.35f);         // 近づく速さ（プレイヤーの基本の速さに対する倍率）
+            fill(def.triggerRange, 500.0f);     // 現れているとき、この距離まで来たら近づき始める
+            fill(def.floatAmplitude, 10.0f);    // ふわふわ浮く上下の幅(px)
+            fill(def.floatFrequency, 0.05f);
+            break;
         case 15: fill(def.moveSpeed, 0.25f); fill(def.sizeAmplitude, 0.5f); fill(def.sizeFrequency, 0.04f); fill(def.minScale, 0.4f); fill(def.triggerRange, 300.0f); break; // SIZE_SHIFTER
         case 16: fill(def.moveSpeed, 0.4f); fill(def.tempoFrequency, 0.05f); fill(def.tempoMin, 0.3f); fill(def.tempoMax, 1.6f); fill(def.triggerRange, 300.0f); break; // TEMPO_WARPER
         case 17: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.brightnessMin, 0.35f); fill(def.triggerRange, 300.0f); break; // BRIGHTNESS_PHANTOM
@@ -920,6 +928,7 @@ void LoadAssetDefinitions() {
                     def.shieldOnDuration = e.value("shieldOnDuration", -1.0f);
                     def.shieldOffDuration = e.value("shieldOffDuration", -1.0f);
                     def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
+                    def.revealBrightness = e.value("revealBrightness", -1.0f);
                     // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
                     def.ignorePause = e.value("ignorePause", false);
                     def.activeOffscreen = e.value("activeOffscreen", false);
@@ -1584,7 +1593,8 @@ void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ct
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
-void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent) {
+// alphaMul は、パーツ全体にかける不透明度（幽霊の「姿の濃さ」など。1.0＝そのまま）。
+void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent, float alphaMul = 1.0f) {
     for (const auto& part : parts) {
         if (!part.isActive) continue; // 破壊済みのパーツは描画しない
         // wantBehindParent==trueのパス呼び出し時はzOrder<0（親より奥）のパーツだけ、
@@ -1605,13 +1615,13 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // 親の傾きはパーツ自身の角度に加算する。剛体として親と一緒に回るのが既定の挙動で、
         // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
         // モーションの回転・大きさ・不透明度は、その上に重ねる（中心は動かさない）。
-        bool motionAlpha = (part.motionAlpha < 0.999f);
+        bool motionAlpha = (part.motionAlpha * alphaMul < 0.999f);
         // 色：パーツ自身の色 × モーションの色の倍率。255を超える分（光る）は、加算合成の2回目で足す
         // （SetDrawBright は255が上限のため。カラー補正パネルの明るさと同じ手当て）。
         float mulR = part.tintR * part.motionTintR, mulG = part.tintG * part.motionTintG, mulB = part.tintB * part.motionTintB;
         bool hasTint = (mulR != 1.0f || mulG != 1.0f || mulB != 1.0f);
         bool needBlend = motionAlpha || part.additive;
-        int alphaI = (int)(255.0f * part.motionAlpha);
+        int alphaI = (int)(255.0f * part.motionAlpha * alphaMul);
         auto b255 = [](float v) { return (int)(v < 0.0f ? 0.0f : (v > 1.0f ? 255.0f : v * 255.0f)); };
         // 描画本体。stretch のパーツは、幅・高さをそれぞれ別の倍率で伸ばす（縦横比を保たない）
         auto drawBody = [&]() {
@@ -2550,7 +2560,7 @@ const char* EnemyTypeNameJa(EnemyType t) {
         case ENEMY_TELEPORTER:         return "テレポート";
         case ENEMY_SHRINKER:           return "縮小";
         case ENEMY_SHIELD:             return "盾";
-        case ENEMY_MIMIC_GHOST:        return "まねっこ";
+        case ENEMY_MIMIC_GHOST:        return "幽霊";
         case ENEMY_SIZE_SHIFTER:       return "大きさ変化";
         case ENEMY_TEMPO_WARPER:       return "テンポ歪み";
         case ENEMY_BRIGHTNESS_PHANTOM: return "明るさの幻";
@@ -3494,6 +3504,10 @@ bool EnemyIsStandable(const Enemy& e) {
     return false;
 }
 
+// 幽霊の「姿の濃さ」（Enemy::auxF2。0＝消えている〜1＝はっきり見える）が、これ以上なら実体がある（触れると被弾・弾が当たる）。
+// 現れかけ・消えかけの半透明のあいだは、濃さが半分を超えたところで実体が切り替わる。
+static const float GHOST_SOLID_ALPHA = 0.5f;
+
 // この敵が今「触れてもダメージを与えない」状態かどうか。
 // 足場になる相手に乗った瞬間に被弾しては成立しないので、EnemyIsStandableと足並みを揃える。
 bool EnemyIsHarmless(const Enemy& e) {
@@ -3508,9 +3522,8 @@ bool EnemyIsHarmless(const Enemy& e) {
         }
     }
 
-    // まぼろしは光に弱い。画面を明るくしている間は掻き消えて何もできなくなる
-    // （時間を止めても効かない相手に対する、画面エフェクト側からの解答）。
-    if (e.type == ENEMY_MIMIC_GHOST && g_screenFx.brightness > 1.3f) return true;
+    // 幽霊は、姿を消している間（auxF2＝姿の濃さが薄い間）は実体が無く、触れてもダメージを与えない。
+    if (e.type == ENEMY_MIMIC_GHOST && e.auxF2 < GHOST_SOLID_ALPHA) return true;
 
     return EnemyIsStandable(e);
 }
@@ -3520,8 +3533,9 @@ bool EnemyIsHarmless(const Enemy& e) {
 // まぼろしは普段は実体を持たず弾が素通りする。色フィルタ(Tキー)を弱点色に合わせている間だけ
 // 実体化して撃てるようになる、という「画面エフェクトで見えないものを掴む」関係にしてある。
 bool EnemyIsBulletProof(const Enemy& e) {
+    // 幽霊は、姿を消している間は弾が素通りする。暗くして姿を現させたあいだだけ、弾が当たる。
     if (e.type == ENEMY_MIMIC_GHOST) {
-        return g_screenFx.colorFilter != EnemyWeakColor(e.type);
+        return e.auxF2 < GHOST_SOLID_ALPHA;
     }
 
     // アセット側のJSON宣言（edit_reactions）による無敵／無敵解除
@@ -9957,45 +9971,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_MIMIC_GHOST: {
-                            // 幽霊敵：プレイヤーの巻き戻し履歴を遅延再生して過去の動きをなぞる。
+                            // 幽霊：画面が明るいあいだは姿を消し、暗いあいだだけ現れる。現れているときは、浮いたまま
+                            // プレイヤーへ近づいてくる。地形もギミックもすり抜ける（衝突判定を行わない。下の共通の移動で分岐）。
+                            // 姿を消している間は、その場で止まる（触れてもダメージは無く、弾も素通りする）。
+                            //   auxF2 : 姿の濃さ（0〜1）。目標へなめらかに近づく（約0.5秒で切り替わる）
                             //
                             // 編集リアクション：
-                            //  ・拡大     → 遅延が伸びる＝より古い過去をなぞるので、後ろへ離れていく。
-                            //  ・縮小     → 遅延が縮む＝今に近い動きをなぞるので、真後ろまで迫ってくる。
-                            //  ・傾ける   → 再生位置が左右にずれる。軌跡を横にずらして避けられる。
-                            //  ・速度     → 遅延の消化速度が変わる（速くすると追いつかれる）。
-                            //  ・向き反転 → 軌跡を左右反転して再生する（鏡像の自分が来る）。
-                            //  ・一時停止 → この型はignorePauseでグローバルの一時停止が効かないが、
-                            //               名指しの個別一時停止だけは効く（＝止めたいなら指定しろ、という差別化）。
-                            //  ・色フィルタ → 色を付けている間だけ実体化して弾が当たる（通常は無敵）。
-                            //  ・明転     → 光で消える（無害化）／暗転 → 遅延が縮んで強化される。
-                            enemy.vx = 0.0f; enemy.vy = 0.0f;
-                            // 基準の遅延フレーム数はauxF1に一度だけ入れておき、
-                            // 編集による倍率はそこから毎フレーム導出する（初期化ガードを壊さないため）。
-                            if (enemy.auxF1 <= 0.0f) enemy.auxF1 = edef ? edef->mimicDelayFrames : 90.0f;
+                            //  ・拡大／縮小 → 近づく速さが変わる（大きいほど鈍い）。
+                            //  ・向き反転   → 近づかず、逃げていく。
+                            //  ・速度0／一時停止 → 動きも、現れる・消えるも止まる。
+                            //  ・画面を暗くする（X）→ 姿を現す。明るくする → 消える（敵や画面効果の暗さにも反応する）。
+                            enemy.vx = 0.0f; enemy.vy = 0.0f; // 重力は受けない
+                            float revealBelow = edef ? edef->revealBrightness : 0.6f;
+                            float aimAlpha = (fxCurBright < revealBelow) ? 1.0f : 0.0f;
+                            float fadeStep = 0.04f * ets; // 約0.4秒で、消える・現れるが切り替わる
+                            if (enemy.auxF2 < aimAlpha) { enemy.auxF2 += fadeStep; if (enemy.auxF2 > aimAlpha) enemy.auxF2 = aimAlpha; }
+                            else if (enemy.auxF2 > aimAlpha) { enemy.auxF2 -= fadeStep; if (enemy.auxF2 < aimAlpha) enemy.auxF2 = aimAlpha; }
 
-                            float delayF = enemy.auxF1 * er.scaleRatio;        // 大きいほど古い過去をなぞる
-                            if (er.speedRatio > 0.01f) delayF /= er.speedRatio; // 速くすると今に追いついてくる
-                            if (fxCurBright < 0.6f)    delayF *= 0.6f;          // 暗いと距離を詰めてくる
-                            if (delayF < 1.0f) delayF = 1.0f;
-                            if (delayF > (float)(MAX_HISTORY_FRAMES - 1)) delayF = (float)(MAX_HISTORY_FRAMES - 1);
-
-                            size_t delay = (size_t)delayF;
-                            if (player.history.size() > delay) {
-                                const PlayerState& past = player.history[player.history.size() - 1 - delay];
-                                float gx2 = past.x;
-                                if (er.flipped) {
-                                    // 軌跡を左右反転して再生する。配置位置を鏡の面として折り返すので、
-                                    // 「自分の動きの鏡像」が反対側から迫ってくる。
-                                    gx2 = enemy.editBaseX * 2.0f - past.x;
+                            float gdx = (player.x + player.width * player.scale * 0.5f) - (enemy.x + enemy.hitboxWidth * enemy.scale * 0.5f);
+                            float gdy = (player.y + player.height * player.scale * 0.5f) - (enemy.y + enemy.hitboxHeight * enemy.scale * 0.5f);
+                            float gdist = sqrtf(gdx * gdx + gdy * gdy);
+                            enemy.direction = (gdx < 0.0f) ? 1 : 0;
+                            if (enemy.auxF2 >= GHOST_SOLID_ALPHA) {
+                                // 現れているあいだだけ、動く（ふわふわ浮きながら、プレイヤーの胴へ向かう）
+                                float gRange = (edef ? edef->triggerRange : 500.0f) * erVision;
+                                float gSpeed = editorPlayerCaps.baseSpeed * ets * (edef ? edef->moveSpeed : 0.35f) * erMass;
+                                // 反転されると、近づかず逃げていく。
+                                // 向きは毎フレーム自分で書き換える（プレイヤーのほうを向く）ので、er.flipped は使わず、
+                                // 「反転ツールを使った」という事実（ダーティビット）だけを見る。
+                                if (erFlipEdited) gSpeed = -gSpeed;
+                                if (gdist < gRange && gdist > 1.0f) {
+                                    enemy.x += gdx / gdist * gSpeed;
+                                    enemy.y += gdy / gdist * gSpeed;
                                 }
-                                if (er.tilted) {
-                                    // 傾けたぶん、再生位置を横へずらす
-                                    erTiltHandled = true;
-                                    gx2 += sinf(er.tilt) * 120.0f;
-                                }
-                                enemy.x = gx2;
-                                enemy.y = past.y;
+                                float gAmp = (edef ? edef->floatAmplitude : 10.0f);
+                                float gFreq = edef ? edef->floatFrequency : 0.05f;
+                                float tPrev = enemy.customTimer;
+                                enemy.customTimer += ets;
+                                enemy.y += (sinf(enemy.customTimer * gFreq) - sinf(tPrev * gFreq)) * gAmp;
                             }
                             break;
                         }
@@ -10885,17 +10898,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // =========================================================================
 
                     // X/Y方向の移動と衝突判定を共通化
-                    bool enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy, 
-                                                                 enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, 
+                    // 幽霊は、地形・ギミック・足場・止まった敵、どれもすり抜ける（速度を足すだけで、衝突判定は行わない）。
+                    const bool enemyPhasesThrough = (enemy.type == ENEMY_MIMIC_GHOST);
+                    bool enemyGrounded = false;
+                    if (enemyPhasesThrough) {
+                        enemy.x += enemy.vx;
+                        enemy.y += enemy.vy;
+                    } else {
+                        enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy,
+                                                                 enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale,
                                                                  stages[currentStageIdx].map, tileDefs, gimmicks);
 
-                    // 足場との着地衝突判定
-                    CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, &enemy.ridingGimmickIndex);
-                    // Feature: 編集リアクション（共通層）— 敵も止まった敵の上に乗る。
-                    // プレイヤー側だけ乗れて敵はすり抜ける、という食い違いを作らないため同じ判定を通す。
-                    // selfに自分を渡して、自分自身の上に着地してしまうのを防ぐ。
-                    CheckFrozenEnemyPlatform(enemy.x, enemy.y, enemy.vy,
-                                             enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, enemies, &enemy);
+                        // 足場との着地衝突判定
+                        CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, &enemy.ridingGimmickIndex);
+                        // Feature: 編集リアクション（共通層）— 敵も止まった敵の上に乗る。
+                        // プレイヤー側だけ乗れて敵はすり抜ける、という食い違いを作らないため同じ判定を通す。
+                        // selfに自分を渡して、自分自身の上に着地してしまうのを防ぐ。
+                        CheckFrozenEnemyPlatform(enemy.x, enemy.y, enemy.vy,
+                                                 enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, enemies, &enemy);
+                    }
 
                     // 地面との衝突によりvy=0になった場合はisJumping相当をリセット
                     if (enemyGrounded) { enemy.vy = 0.0f; }
@@ -12939,7 +12960,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                     }
                 }
-                DrawPartsPass(enemy.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5)
+                // 幽霊は「姿の濃さ」（auxF2）で半透明に描く。消えている間は、本体もパーツも描かない。
+                const float ghostDrawA = (enemy.type == ENEMY_MIMIC_GHOST) ? (enemy.auxF2 < 0.0f ? 0.0f : (enemy.auxF2 > 1.0f ? 1.0f : enemy.auxF2)) : 1.0f;
+                DrawPartsPass(enemy.parts, cameraX, cameraY, true, ghostDrawA); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
                 int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
@@ -12965,6 +12988,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     const EnemyDef* drawDef = FindEnemyDef(enemy.assetId);
                     if (drawDef != nullptr && drawDef->bodyIgnoresTilt) bodyAngle = enemy.bodyRestAngle;
                 }
+                if (ghostDrawA < 0.999f) SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255.0f * ghostDrawA));
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
@@ -12977,7 +13001,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE, TRUE);
                 }
                 SetDrawBright(255, 255, 255); // 輝度リセット
-                
+                if (ghostDrawA < 0.999f) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
                 if (isDebugDrawMode) {
                     DrawBox((int)(enemy.x - cameraX), (int)(enemy.y - cameraY), (int)(enemy.x + enemy.hitboxWidth * enemy.scale - cameraX), (int)(enemy.y + enemy.hitboxHeight * enemy.scale - cameraY), GetColor(0, 255, 0), FALSE); // 当たり判定
                     DrawBox((int)(ecx - (imgW * enemy.scale) / 2.0f), (int)(ecy - (imgH * enemy.scale) / 2.0f), (int)(ecx + (imgW * enemy.scale) / 2.0f), (int)(ecy + (imgH * enemy.scale) / 2.0f), GetColor(255, 0, 0), FALSE); // 描画枠
@@ -12990,10 +13015,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // （以前は別のループで、ウィンドウ座標にワールド座標のまま描いていたため、モニターの位置・倍率とずれていた）
                 if (isThisEnemyRew) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "巻き戻し中（すり抜け）", GetColor(255, 130, 130));
                 else if (enemy.isPaused) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "停止中（踏める）", GetColor(255, 255, 110));
-                else if (EnemyIsHarmless(enemy)) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "無害", GetColor(140, 255, 170));
+                else if (EnemyIsHarmless(enemy) && enemy.type != ENEMY_MIMIC_GHOST) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "無害", GetColor(140, 255, 170));
                 
-                // 敵HP表示
-                if (enemy.hp > 0) {
+                // 敵HP表示（姿を消している幽霊には出さない。HPで居場所が分かってしまうため）
+                if (enemy.hp > 0 && ghostDrawA >= GHOST_SOLID_ALPHA) {
                     { char hpb[16]; sprintf_s(hpb, sizeof(hpb), "HP %d", enemy.hp);
                       WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 40, hpb, GetColor(255, 130, 130)); }
                 }
@@ -13012,7 +13037,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
 
-                DrawPartsPass(enemy.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(enemy.parts, cameraX, cameraY, false, ghostDrawA); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 
