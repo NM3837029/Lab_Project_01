@@ -36,7 +36,7 @@ public static class GimmickPresets
     public static readonly List<GimmickPreset> All = BuildAll();
 
     // 扉の画像の候補（最初に見つかったものを標準にする）。無ければダイアログで選んでもらう。
-    public static readonly string[] GateSpriteCandidates = { "img/扉.png", "img/old/扉.png" };
+    public static readonly string[] GateSpriteCandidates = { "img/扉.png" }; // 旧素材（img/old）は参照しない
 
     private static GimmickRowSpec Switch(string idPrefix, string name, int channel, float lo, float hi)
         => new()

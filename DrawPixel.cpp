@@ -327,8 +327,15 @@ struct EnemyDef {
     float effectRange = -1.0f;       // BRIGHTNESS_PHANTOM/COLOR_SHIFTER/ZOOM_DISRUPTORの効果範囲(px)
     float brightnessMin = -1.0f;     // BRIGHTNESS_PHANTOMの最小輝度
     float tintStrength = -1.0f;      // COLOR_SHIFTERの色シフト強度
-    float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTORのズーム振幅
-    float zoomFrequency = -1.0f;     // ZOOM_DISRUPTORのズーム周波数
+    float zoomAmplitude = -1.0f;     // ZOOM_DISRUPTOR: 完全に固定されたときの追加ズーム（1.0なら2倍まで寄る）
+    float zoomFrequency = -1.0f;     // （旧：ズームの揺れの周波数。ロック式になってからは使わない。JSONの互換のため残す）
+    float zoomLockFrames = -1.0f;    // ZOOM_DISRUPTOR: 寄りきるまでのフレーム数（長いほど、じわじわ寄る）
+    // ROTATOR（回転させる敵）。射程は effectRange を使う
+    float rotateSpeed = -1.0f;       // 回す速さ（度/秒）。負にすると逆回り
+    bool  rotatePlayer = true, rotateEnemies = true, rotateGimmicks = true, rotateItems = true; // 回す対象（既定は全部）
+    // SIZE_THROWER（範囲サイズ調整の敵）。投げる距離は triggerRange、投げる間隔は actionInterval、予兆は chargeTime、範囲の半径は effectRange
+    float sizeFactor = -1.0f;        // 拡大するときの倍率（縮小するときは、その逆数）
+    float zoneFrames = -1.0f;        // 範囲が残るフレーム数
     // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
     // すべて -1 が「従来どおり」。型ごとの既定値は使う側で決めている（-1 のままなら以前と1ミリも変わらない）。
     float waveShape = -1.0f;         // 周期的な動きの波形（FLOATER/SIZE_SHIFTER/TEMPO_WARPER/ZOOM_DISRUPTOR）。-1/0=なめらか 1=三角 2=カクカク
@@ -690,7 +697,8 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
         case 16: fill(def.moveSpeed, 0.4f); fill(def.tempoFrequency, 0.05f); fill(def.tempoMin, 0.3f); fill(def.tempoMax, 1.6f); fill(def.triggerRange, 300.0f); break; // TEMPO_WARPER
         case 17: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.brightnessMin, 0.35f); fill(def.triggerRange, 300.0f); break; // BRIGHTNESS_PHANTOM
         case 18: fill(def.moveSpeed, 0.3f); fill(def.effectRange, 320.0f); fill(def.tintStrength, 0.6f); fill(def.triggerRange, 300.0f); break; // COLOR_SHIFTER
-        case 19: fill(def.effectRange, 280.0f); fill(def.zoomAmplitude, 0.25f); fill(def.zoomFrequency, 0.08f); fill(def.triggerRange, 300.0f); break; // ZOOM_DISRUPTOR
+        // ZOOM_DISRUPTOR（ズーム固定）：effectRange 以内に入ると、この敵を中心に画面が寄り始め、倒すまで解けない
+        case 19: fill(def.effectRange, 300.0f); fill(def.zoomAmplitude, 1.0f); fill(def.zoomLockFrames, 180.0f); fill(def.zoomFrequency, 0.08f); fill(def.triggerRange, 300.0f); break;
         case 21: // POUNCER（飛びかかり）。DASH_CHARGERと同じ項目名を使い回すが、突進ではなくジャンプに使う
             fill(def.moveSpeed, 0.7f);       // 通常時の走行速度係数（速めに追ってくる）
             fill(def.triggerRange, 200.0f);  // この距離まで詰めると飛びかかりを始める
@@ -703,6 +711,18 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.dashSpeedMult, 0.5f);   // 飛びかかりの水平速度係数
             fill(def.dashDuration, 120.0f);  // 空中に居られる上限フレーム（着地を取り逃した時の保険）
             fill(def.cooldownTime, 45.0f);   // 着地後の硬直＝反撃の窓
+            break;
+        case 24: // ROTATOR（回転させる敵）：射程の中の物を、ゆっくり回し続ける
+            fill(def.effectRange, 240.0f);
+            fill(def.rotateSpeed, 60.0f);   // 度/秒。1秒で1/6回転ぶん（ゆっくり）
+            break;
+        case 25: // SIZE_THROWER（範囲サイズ調整の敵）：投げた先の範囲の中を、拡大⇔縮小と交互に変える
+            fill(def.triggerRange, 340.0f);  // この距離にプレイヤーが入ると投げ始める
+            fill(def.actionInterval, 300.0f);// 投げる間隔（フレーム）
+            fill(def.chargeTime, 40.0f);     // 投げる前の予兆（フレーム）
+            fill(def.effectRange, 110.0f);   // 範囲の半径(px)
+            fill(def.zoneFrames, 360.0f);    // 範囲が残るフレーム数
+            fill(def.sizeFactor, 1.8f);      // 拡大の倍率（縮小は 1/この値）
             break;
         case 22: // BOUNCING_WORM（跳ね回る節足敵）
             // 速さはプレイヤーの歩行(4px/f)より少し遅い程度。これより速いと、
@@ -929,6 +949,14 @@ void LoadAssetDefinitions() {
                     def.tintStrength = e.value("tintStrength", -1.0f);
                     def.zoomAmplitude = e.value("zoomAmplitude", -1.0f);
                     def.zoomFrequency = e.value("zoomFrequency", -1.0f);
+                    def.zoomLockFrames = e.value("zoomLockFrames", -1.0f);
+                    def.rotateSpeed = e.value("rotateSpeed", -1.0f);
+                    def.rotatePlayer = e.value("rotatePlayer", true);
+                    def.rotateEnemies = e.value("rotateEnemies", true);
+                    def.rotateGimmicks = e.value("rotateGimmicks", true);
+                    def.rotateItems = e.value("rotateItems", true);
+                    def.sizeFactor = e.value("sizeFactor", -1.0f);
+                    def.zoneFrames = e.value("zoneFrames", -1.0f);
                     def.waveShape = e.value("waveShape", -1.0f);
                     def.maxScale = e.value("maxScale", -1.0f);
                     def.tintColorR = e.value("tintColorR", -1.0f);
@@ -1904,6 +1932,9 @@ enum EnemyType {
     ENEMY_BOUNCING_WORM,      // 跳ね回る節足敵：重力を受けず直進し、壁・床に当たるとランダムな角度で跳ね返る。胴体のパーツが頭の軌跡を辿って連なる
     ENEMY_MULTI_ACTION,       // 多彩行動(23)：EnemyDef.actions の行動リスト（待機・歩く・ジャンプ・突進・弾・瞬間移動・暗転・色変化・ズーム）を、順番／ランダム／重み付きで切り替える
 
+    ENEMY_ROTATOR,            // 回転させる敵(24)：射程内のプレイヤー・敵・ギミック・アイテムを、ゆっくり回し続ける（回した角度は残り、編集の「回転」で直せる）
+    ENEMY_SIZE_THROWER,       // 範囲サイズ調整の敵(25)：十字の矢印を投げ、着地点の範囲の中の物を「拡大⇔縮小」と交互に変える（変えた大きさは残る）
+
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
 
@@ -2491,6 +2522,8 @@ const char* EnemyTypeName(EnemyType t) {
         case ENEMY_POUNCER:            return "POUNCER";
         case ENEMY_BOUNCING_WORM:      return "BOUNCING_WORM";
         case ENEMY_MULTI_ACTION:       return "MULTI_ACTION";
+        case ENEMY_ROTATOR:            return "ROTATOR";
+        case ENEMY_SIZE_THROWER:       return "SIZE_THROWER";
         default:                       return "UNKNOWN";
     }
 }
@@ -2522,6 +2555,8 @@ const char* EnemyTypeNameJa(EnemyType t) {
         case ENEMY_POUNCER:            return "飛びかかり";
         case ENEMY_BOUNCING_WORM:      return "跳ねる虫";
         case ENEMY_MULTI_ACTION:       return "多彩行動";
+        case ENEMY_ROTATOR:            return "回転させる";
+        case ENEMY_SIZE_THROWER:       return "範囲サイズ変更";
         default:                       return "不明";
     }
 }
@@ -2776,6 +2811,12 @@ int GetEnemyActionPhase(const Enemy& e, const EnemyDef* edef) {
             if (e.auxState == 2) return 2;
             if (e.auxState == 3) return 3;
             return 0;
+        case ENEMY_ZOOM_DISRUPTOR: // 0まだ 2固定中（寄せているあいだ。矢印が脈打つ・光る、などの合図に使う）
+            return (e.auxState == 1) ? 2 : 0;
+        case ENEMY_SIZE_THROWER:   // 0間をおく 1予兆（投げる前。持っている十字が震える、などの合図に使う）
+            return (e.aiState == 1) ? 1 : 0;
+        case ENEMY_ROTATOR:        // 0何も回していない 2回しているあいだ
+            return (e.auxState == 1) ? 2 : 0;
         case ENEMY_FALLER:       // 0待機 1(溜め→落下) 2クールダウン
             if (e.auxState == 1) return (e.customTimer > 0.0f) ? 1 : 2;
             if (e.auxState == 2) return 3;
@@ -4018,15 +4059,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 1枚でも欠けると該当ギミックが不可視になる点に注意すること。
     int playerHandle = LoadGraph("img/プレイヤー.png");
     int bulletHandle = LoadGraph("img/弾.png");
-    int jimenHandle = LoadGraph("img/地面緑.png");
-    int tutiHandle = LoadGraph("img/地面黄.png");
-    int portalHandle = LoadGraph("img/ワープゲート.png");
-    int bridgeHandle = LoadGraph("img/床青.png");
-    int breakableBlockHandle = LoadGraph("img/地面ピンク.png");
+    // 2026-10-15 素材一新 — 旧素材（img/old へ移した地面緑・床青など）は参照しない。
+    // ここで読む絵は「定義側にスプライトが無かったときの代用」なので、新素材の近い役のものを割り当てる。
+    int jimenHandle = LoadGraph("img/草タイル.png");
+    int tutiHandle = LoadGraph("img/土タイル１.png");
+    int portalHandle = LoadGraph("img/光の円.png");
+    int bridgeHandle = LoadGraph("img/木のタイル.png");
+    int breakableBlockHandle = LoadGraph("img/土タイル２.png");
     int liftHandle = LoadGraph("img/乗ったら落ちる床.png");
-    int mirrorHandle = LoadGraph("img/床青.png");
+    int mirrorHandle = LoadGraph("img/ｓｆ風タイル１.png");
     int switchHandle = LoadGraph("img/スイッチオフ.png");
-    int boxHandle = LoadGraph("img/地面黄緑.png");
+    int boxHandle = LoadGraph("img/木のタイル.png");
     int doorHandle = LoadGraph("img/扉.png");
     int spikesHandle = LoadGraph("img/棘.png");
     int coinHandle = LoadGraph("img/コイン.png");
@@ -4054,14 +4097,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         struct { const char* label; int handle; } loadedGraphs[] = {
             { "img/プレイヤー.png",        playerHandle },
             { "img/弾.png",                bulletHandle },
-            { "img/地面緑.png",            jimenHandle },
-            { "img/地面黄.png",            tutiHandle },
-            { "img/ワープゲート.png",      portalHandle },
-            { "img/床青.png",              bridgeHandle },
-            { "img/地面ピンク.png",        breakableBlockHandle },
+            { "img/草タイル.png",          jimenHandle },
+            { "img/土タイル１.png",        tutiHandle },
+            { "img/光の円.png",            portalHandle },
+            { "img/木のタイル.png",        bridgeHandle },
+            { "img/土タイル２.png",        breakableBlockHandle },
             { "img/乗ったら落ちる床.png",  liftHandle },
+            { "img/ｓｆ風タイル１.png",    mirrorHandle },
             { "img/スイッチオフ.png",      switchHandle },
-            { "img/地面黄緑.png",          boxHandle },
+            { "img/木のタイル.png",        boxHandle },
             { "img/扉.png",                doorHandle },
             { "img/棘.png",                spikesHandle },
             { "img/コイン.png",            coinHandle },
@@ -4523,6 +4567,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     float fxTargetTintR = 1.0f, fxTargetTintG = 1.0f, fxTargetTintB = 1.0f;
     float fxCurTintR = 1.0f, fxCurTintG = 1.0f, fxCurTintB = 1.0f;
     float fxTargetZoom = 1.0f, fxCurZoom = 1.0f;
+    // ズーム操作の敵による「強制ズーム」。敵が毎フレーム Screen_SetZoomLock で、寄る倍率と、画面の中で中心にしたい点を申告する。
+    // 複数の敵が申告したときは、倍率がいちばん大きいものを採る。申告が無ければ、焦点は画面の中央へ戻る。
+    // 焦点（fxCurFocus）は、ふだんのズーム（Zキー・レンズ）の中心でもある（ふだんは画面の中央）。
+    bool  fxLockActive = false;
+    float fxLockZoom = 1.0f, fxLockFocusX = SCREEN_WIDTH / 2.0f, fxLockFocusY = SCREEN_HEIGHT / 2.0f;
+    float fxCurFocusX = SCREEN_WIDTH / 2.0f, fxCurFocusY = SCREEN_HEIGHT / 2.0f;
     // 彩度・色相・コントラスト。カラー補正パネル、色補正ゾーン、敵の演出のどれもが Screen_MixGrade で重ねる
     // （彩度は掛け算、色相とコントラストは足し算で合成するので、複数の発生源が同時に効いても破綻しない）。
     float fxTargetSat = 1.0f, fxCurSat = 1.0f;
@@ -4538,6 +4588,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     auto Screen_SetBrightness = [&](float b) { fxTargetBright = b; };
     auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
     auto Screen_SetZoom = [&](float z) { fxTargetZoom = z; };
+    auto Screen_SetZoomLock = [&](float z, float focusX, float focusY) {
+        if (!fxLockActive || z > fxLockZoom) { fxLockZoom = z; fxLockFocusX = focusX; fxLockFocusY = focusY; fxLockActive = true; }
+    };
+    // 画面（640x480）のうち、いまモニターに映している範囲（ズームと焦点から決まる）。
+    // 描画（Screen_DrawComposited）と、マウス位置→ゲーム内座標の変換が必ず同じ範囲を使うよう、1か所で求める。
+    auto Screen_ComputeView = [&](int& srcX, int& srcY, int& srcW, int& srcH) {
+        float zoom = fxCurZoom < 0.1f ? 0.1f : fxCurZoom;
+        srcW = (int)(SCREEN_WIDTH / zoom);
+        srcH = (int)(SCREEN_HEIGHT / zoom);
+        if (srcW > SCREEN_WIDTH) srcW = SCREEN_WIDTH;
+        if (srcH > SCREEN_HEIGHT) srcH = SCREEN_HEIGHT;
+        srcX = (int)(fxCurFocusX - srcW / 2.0f);
+        srcY = (int)(fxCurFocusY - srcH / 2.0f);
+        if (srcX < 0) srcX = 0;
+        if (srcY < 0) srcY = 0;
+        if (srcX > SCREEN_WIDTH - srcW) srcX = SCREEN_WIDTH - srcW;
+        if (srcY > SCREEN_HEIGHT - srcH) srcY = SCREEN_HEIGHT - srcH;
+    };
     auto Screen_MixGrade = [&](float sat, float hue, float contrast) {
         fxTargetSat *= sat; fxTargetHue += hue; fxTargetContrast += contrast;
     };
@@ -4553,6 +4621,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxTargetZoom = 1.0f;
         fxTargetSat = 1.0f; fxTargetHue = 0.0f; fxTargetContrast = 0.0f;
         fxSnap = false;
+        fxLockActive = false; fxLockZoom = 1.0f; // 強制ズームは、申告する敵がいるあいだだけ毎フレーム立て直す
     };
     auto Screen_UpdateFrame = [&](float dts) {
         // パネルをつかんでいる間は lerp=1（目標値をそのまま反映）。ふだんはゆっくり追従して演出になじませる
@@ -4561,6 +4630,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxCurTintR  += (fxTargetTintR  - fxCurTintR)  * lerp;
         fxCurTintG  += (fxTargetTintG  - fxCurTintG)  * lerp;
         fxCurTintB  += (fxTargetTintB  - fxCurTintB)  * lerp;
+        // 強制ズームが申告されていれば、プレイヤー自身のズーム（Zキー）より優先する（小さい値で打ち消せない）
+        if (fxLockActive && fxLockZoom > fxTargetZoom) fxTargetZoom = fxLockZoom;
+        float focusTX = fxLockActive ? fxLockFocusX : SCREEN_WIDTH / 2.0f;
+        float focusTY = fxLockActive ? fxLockFocusY : SCREEN_HEIGHT / 2.0f;
+        fxCurFocusX += (focusTX - fxCurFocusX) * lerp;
+        fxCurFocusY += (focusTY - fxCurFocusY) * lerp;
         fxCurZoom   += (fxTargetZoom   - fxCurZoom)   * lerp;
         fxCurSat      += (fxTargetSat      - fxCurSat)      * lerp;
         fxCurHue      += (fxTargetHue      - fxCurHue)      * lerp;
@@ -4569,13 +4644,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // gameScreen（オフスクリーン合成済みバッファ）を明るさ・色調・ズームを適用して転送する共通ヘルパー。
     // モニタープレビュー・フルスクリーン再生の両方の最終ブリット地点から呼ばれる、この機能の唯一の統合ポイント。
     auto Screen_DrawComposited = [&](int destX, int destY, int destW, int destH, int screenHandle) {
-        float zoom = fxCurZoom < 0.1f ? 0.1f : fxCurZoom;
-        int srcW = (int)(SCREEN_WIDTH / zoom);
-        int srcH = (int)(SCREEN_HEIGHT / zoom);
-        if (srcW > SCREEN_WIDTH) srcW = SCREEN_WIDTH;
-        if (srcH > SCREEN_HEIGHT) srcH = SCREEN_HEIGHT;
-        int srcX = (SCREEN_WIDTH - srcW) / 2;
-        int srcY = (SCREEN_HEIGHT - srcH) / 2;
+        int srcX = 0, srcY = 0, srcW = SCREEN_WIDTH, srcH = SCREEN_HEIGHT;
+        Screen_ComputeView(srcX, srcY, srcW, srcH);
 
         // 彩度・色相・コントラストは、先に画面全体へフィルタとして掛ける（失敗しても補正なしで描くだけ）
         int srcHandle = screenHandle;
@@ -4587,11 +4657,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // （SetDrawBright は255が上限なので、以前は「明転」がまったく明るく見えていなかった）。
         // 倍率が整数でないと、最近点では絵のドットの太さがまちまちになるので、拡大するときはバイリニアで滑らかにする
         SetDrawMode((destW != SCREEN_WIDTH || destH != SCREEN_HEIGHT) ? DX_DRAWMODE_BILINEAR : DX_DRAWMODE_NEAREST);
-        ColorGrade::DrawGraded(destX, destY, destX + destW, destY + destH, srcX, srcY, srcX + srcW, srcY + srcH, srcHandle,
+        // 【注意】DrawRectExtendGraph の元画像の指定は「左上x,y と 幅,高さ」。右下の座標ではない。
+        // 以前はここへ右下の座標（srcX+srcW）を渡していたため、ズームすると元画像の範囲が実際より大きくなり、
+        // 倍率が足りない・右下に黒い余白が出る、という崩れ方をしていた（等倍のときは srcX=0 なので偶然正しく見えていた）。
+        ColorGrade::DrawGraded(destX, destY, destX + destW, destY + destH, srcX, srcY, srcW, srcH, srcHandle,
                                fxCurTintR * fxCurBright, fxCurTintG * fxCurBright, fxCurTintB * fxCurBright);
         SetDrawMode(DX_DRAWMODE_NEAREST);
     };
     std::vector<Bullet> bullets(MAX_BULLETS);
+    // 範囲サイズ調整の敵が投げた物と、着地して残った範囲。
+    // 投げた物は、敵の位置から着地点まで弧を描いて飛ぶだけ（地形とは当たらない）。着地したら範囲に変わる。
+    // 範囲の中にいる物（プレイヤー・敵・大きさを変えられるギミック）は、投げるたびに交互に「拡大」「縮小」へ向かう。
+    struct SizeThrow { float sx, sy, tx, ty, t, T; bool grow; float radius, life, factor; };
+    struct SizeZone  { float x, y, radius, timer, life; bool grow; float factor; };
+    std::vector<SizeThrow> sizeThrows;
+    std::vector<SizeZone>  sizeZones;
+    int sizeMarkHandle = LoadGraph("img/投げた場所の特定範囲のサイズ調整を行う敵投げるもの.png"); // 範囲の目印（4方向の矢印の十字）
     for (int i = 0; i < MAX_BULLETS; i++) { 
         bullets[i].isActive = false; 
         bullets[i].handle = bulletHandle; 
@@ -5479,6 +5560,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     bool bigView = false;
     float viewScale = 1.2f;
     int monitorX = 0, monitorY = 0, monitorW = 0, monitorH = 0;
+    // ウィンドウ上のマウス位置を、ゲーム内（ワールド）の座標へ変換する。
+    // ズームで映す範囲が変わっている間も、指した場所とゲーム内の場所がずれないようにする。
+    // （以前は倍率 viewScale だけを見ていたので、Zキーやレンズでズームすると選択・ドラッグがずれた。）
+    // 変換式：モニター上の位置 → 画面(640x480)上の位置 → 映している範囲の中の位置 → カメラを足してワールド
+    auto Screen_MouseToWorld = [&](float mouseX, float mouseY, float& worldX, float& worldY) {
+        int vx = 0, vy = 0, vw = SCREEN_WIDTH, vh = SCREEN_HEIGHT;
+        Screen_ComputeView(vx, vy, vw, vh);
+        float sxp = (mouseX - (float)monitorX) / viewScale;
+        float syp = (mouseY - (float)monitorY) / viewScale;
+        worldX = cameraX + (float)vx + sxp * (float)vw / (float)SCREEN_WIDTH;
+        worldY = cameraY + (float)vy + syp * (float)vh / (float)SCREEN_HEIGHT;
+    };
     auto UpdateMonitorLayout = [&]() {
         if (bigView) {
             viewScale = 1.5f;
@@ -5917,6 +6010,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // 死亡時にステージ全体を初期化し、ゲームの整合性を保証するラムダヘルパー
     auto ResetStage = [&]() {
+        sizeThrows.clear(); sizeZones.clear(); // ステージのやり直しで、投げた物と範囲も消す
         Logger::Info("System", "ResetStage", "Begin ResetStage");
 
         // Feature: タイル破壊 — 壊れた地形を元へ戻す。
@@ -5987,8 +6081,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (matched->graphHandle >= 0) enemy.handle = matched->graphHandle;
                 if (!matched->id.empty()) enemy.assetId = matched->id;
                 enemy.hp = matched->hp;
-                enemy.width = matched->hitboxWidth;
-                enemy.height = matched->hitboxHeight;
+                // width/height は「絵を収める箱」の大きさ（ComputeFitScale の基準）。当たり判定は hitboxWidth/Height。
+                // 以前はここへ当たり判定の大きさを入れていたので、絵が当たり判定の大きさまで縮んで描かれた。
+                // 絵の周りに透明な余白がある素材（640x640の共通キャンバス）では、当たり判定を絵の見える範囲に絞りたいので、
+                // 両者を分けて持つ（絵の中心は当たり判定の中心に重ねて描く）。width/height が未指定の定義は、当たり判定と同じ大きさ。
+                enemy.width = matched->width > 0 ? matched->width : matched->hitboxWidth;
+                enemy.height = matched->height > 0 ? matched->height : matched->hitboxHeight;
                 // Feature: Composite Multi-Part Objects (Parts-M1)
                 enemy.parts = BuildPartInstances(matched->parts, enemy.x, enemy.y);
             } else {
@@ -6972,7 +7070,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         int mx, my;
         GetMousePoint(&mx, &my);
         float gx = (float)mx, gy = (float)my;
-        if (isEditMode) { gx = (float)(mx - monitorX) / viewScale + cameraX; gy = (float)(my - monitorY) / viewScale + cameraY; }
+        if (isEditMode) Screen_MouseToWorld((float)mx, (float)my, gx, gy);
 
         // Feature: 編集コストゲージ — 各操作の「ステージ許可 or アイテム解禁」判定（このフレームの全キー処理の前に確定させる）
         bool rewindOpEnabled = IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled);
@@ -7199,8 +7297,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 敵の選択状態をチェック
                     bool enemySelected = false;
                     for (auto& enemy : enemies) {
-                        if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.width * enemy.scale &&
-                            gy >= enemy.y && gy <= enemy.y + enemy.height * enemy.scale) {
+                        if (enemy.isActive && gx >= enemy.x && gx <= enemy.x + enemy.hitboxWidth * enemy.scale &&
+                            gy >= enemy.y && gy <= enemy.y + enemy.hitboxHeight * enemy.scale) {
                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                             selectedEnemies.push_back(&enemy);
                             selectedType = SELECT_ENEMY;
@@ -7340,10 +7438,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!currentLeftClick && lastLeftClick && isAreaSelecting) {
                 isAreaSelecting = false;
                 
-                float selX1 = (float)(min(areaSelectStartX, areaSelectEndX) - monitorX) / viewScale + cameraX;
-                float selX2 = (float)(max(areaSelectStartX, areaSelectEndX) - monitorX) / viewScale + cameraX;
-                float selY1 = (float)(min(areaSelectStartY, areaSelectEndY) - monitorY) / viewScale + cameraY;
-                float selY2 = (float)(max(areaSelectStartY, areaSelectEndY) - monitorY) / viewScale + cameraY;
+                float selX1 = 0.0f, selX2 = 0.0f, selY1 = 0.0f, selY2 = 0.0f;
+                Screen_MouseToWorld((float)min(areaSelectStartX, areaSelectEndX), (float)min(areaSelectStartY, areaSelectEndY), selX1, selY1);
+                Screen_MouseToWorld((float)max(areaSelectStartX, areaSelectEndX), (float)max(areaSelectStartY, areaSelectEndY), selX2, selY2);
 
                 selectedPlayers.clear();
                 selectedEnemies.clear();
@@ -7871,8 +7968,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 巻き戻すのは位置・速度・生死だけ、編集した形はそのまま維持される、に統一する。
                 // 履歴は最大600件だがドラッグ中のフレームだけの処理なのでコストは無視できる。
                 if (isDragging && selectedType != SELECT_NONE) {
-                    float prevGx = (float)(lastMouseX - monitorX) / viewScale + cameraX;
-                    float prevGy = (float)(lastMouseY - monitorY) / viewScale + cameraY;
+                    float prevGx = 0.0f, prevGy = 0.0f;
+                    Screen_MouseToWorld((float)lastMouseX, (float)lastMouseY, prevGx, prevGy);
                     float dx = gx - prevGx;
                     float dy = gy - prevGy;
 
@@ -7902,13 +7999,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
                     // 実際の変形は共通入口 ApplyScaleDelta（つまみ・ホイール・INSPECTOR と共用）。
                     float ds = (float)(lastMouseY - my) * 0.01f;
-                    float dw = (float)(mx - lastMouseX) / viewScale; // 画面の1pxではなくゲーム内の1px（拡大表示でも指と幅が合う）
+                    float dw = (float)(mx - lastMouseX) / (viewScale * (fxCurZoom < 0.1f ? 0.1f : fxCurZoom)); // 画面の1pxではなくゲーム内の1px（拡大表示・ズーム中でも指と幅が合う）
                     ApplyScaleDelta(ds, dw);
                     lastMouseY = my;
                     lastMouseX = mx;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
-                    float dh = (float)(lastMouseY - my) / viewScale; // ゲーム内のpx
+                    float dh = (float)(lastMouseY - my) / (viewScale * (fxCurZoom < 0.1f ? 0.1f : fxCurZoom)); // ゲーム内のpx
                     for (auto* g : selectedGimmicks) {
                         if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
@@ -10057,25 +10154,140 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                         case ENEMY_ZOOM_DISRUPTOR: {
-                            // ズーム撹乱敵：射程内で画面ズームを周期的に揺さぶる。
+                            // ズーム固定の敵：プレイヤーが射程(effectRange)に入ると、この敵を中心に画面が少しずつ寄り始める。
+                            // 一度寄り始めたら、離れても戻らない。この敵を倒したときだけ、滑らかに解ける。
+                            // （プレイヤー自身のズームでは打ち消せない。映す範囲は、プレイヤーが必ず見えるようにずらされる）
+                            //
+                            // ここでは「寄り具合」の進行だけを持つ。実際に画面へ掛けるのは、毎フレームの最後にある
+                            // 強制ズームの申告（時間停止中も途切れないよう、更新が止まっていても申告だけは行う）。
+                            //   auxState : 0=まだ見つけていない 1=固定中
+                            //   auxF2    : 寄り始めてからの経過フレーム
+                            //   auxF1    : 現在の倍率（1.0〜1+zoomAmplitude）
                             //
                             // 編集リアクション：
-                            //  ・速度0    → 揺さぶりのタイマーごと止まり、画面が落ち着く（最も素直な対処法）。
-                            //  ・拡大     → 揺れ幅が大きくなり、距離感が掴めなくなる。
-                            //  ・縮小     → 揺れ幅も範囲も小さくなる。
-                            //  ・傾ける   → 揺れの周期がずれる。
-                            //  ・向き反転 → ズームインではなくズームアウト方向に歪ませてくる。
-                            float range = (edef ? edef->effectRange : 280.0f) * er.scaleRatio;
-                            float amplitude = (edef ? edef->zoomAmplitude : 0.25f) * er.scaleRatio;
-                            float frequency = edef ? edef->zoomFrequency : 0.08f;
+                            //  ・速度0／一時停止 → 経過フレームが進まず、いまの倍率で止まる（固定は解けない）。
+                            //  ・拡大 → 射程が広がる。縮小 → 射程も寄る強さも小さくなる。
+                            float range = (edef ? edef->effectRange : 300.0f) * er.scaleRatio;
+                            float amplitude = (edef ? edef->zoomAmplitude : 1.0f) * er.scaleRatio;
+                            float rampFrames = (edef && edef->zoomLockFrames > 1.0f) ? edef->zoomLockFrames : 180.0f;
                             enemy.vx = 0.0f;
+                            float zdx = (player.x + player.width * player.scale * 0.5f) - (enemy.x + enemy.hitboxWidth * enemy.scale * 0.5f);
+                            float zdy = (player.y + player.height * player.scale * 0.5f) - (enemy.y + enemy.hitboxHeight * enemy.scale * 0.5f);
+                            if (enemy.auxState == 0 && sqrtf(zdx * zdx + zdy * zdy) < range) {
+                                enemy.auxState = 1;
+                                enemy.auxF2 = 0.0f;
+                                enemy.auxF1 = 1.0f;
+                                if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack); // 寄り始めの合図
+                            }
+                            if (enemy.auxState == 1) {
+                                enemy.auxF2 += ets;
+                                float zt = enemy.auxF2 / rampFrames;
+                                if (zt > 1.0f) zt = 1.0f;
+                                zt = zt * zt * (3.0f - 2.0f * zt); // なめらかに寄り始め、なめらかに止まる
+                                enemy.auxF1 = 1.0f + amplitude * zt;
+                            }
+                            break;
+                        }
+                        case ENEMY_ROTATOR: {
+                            // 回転させる敵：射程の中にいるプレイヤー・敵・ギミック・アイテムを、ゆっくり回し続ける。
+                            // 回した角度はそのまま残る（元へは戻らない）。編集の「回転」やインスペクターで直せるし、巻き戻しでも戻る。
+                            // 「この物は回転させない」と設定された物（noRotate）は回さない。
+                            //
+                            // 編集リアクション：
+                            //  ・向き反転 → 逆回りになる。
+                            //  ・速度     → 回す速さが変わる（0で止まる）。
+                            //  ・拡大／縮小 → 射程が広がる／狭まる。
+                            float rrange = (edef ? edef->effectRange : 240.0f) * er.scaleRatio;
+                            float degPerSec = edef ? edef->rotateSpeed : 60.0f;
+                            const bool rotPlayer = !edef || edef->rotatePlayer, rotEnemies = !edef || edef->rotateEnemies;
+                            const bool rotGimmicks = !edef || edef->rotateGimmicks, rotItems = !edef || edef->rotateItems;
+                            float spin = degPerSec * (3.14159265f / 180.0f) / 60.0f * ets;
+                            if (er.flipped) spin = -spin;
+                            enemy.vx = 0.0f;
+                            enemy.auxState = 0; // 何かを回している間だけ 1（パーツのモーション「行動中」の合図。履歴に入る値）
+                            float rcx = enemy.x + enemy.hitboxWidth * enemy.scale * 0.5f;
+                            float rcy = enemy.y + enemy.hitboxHeight * enemy.scale * 0.5f;
+                            auto inRotRange = [&](float cx2, float cy2) {
+                                float ddx = cx2 - rcx, ddy = cy2 - rcy;
+                                return ddx * ddx + ddy * ddy < rrange * rrange;
+                            };
+                            if (rotPlayer && inRotRange(player.x + player.width * player.scale * 0.5f, player.y + player.height * player.scale * 0.5f)) {
+                                player.angle += spin;
+                                enemy.auxState = 1;
+                            }
+                            if (rotEnemies) {
+                                for (auto& other : enemies) {
+                                    if (&other == &enemy || !other.isActive) continue;
+                                    if (IsEnemyEditLocked(other, EDITOP_ROTATE)) continue;
+                                    if (inRotRange(other.x + other.width * other.scale * 0.5f, other.y + other.height * other.scale * 0.5f)) {
+                                        other.angle += spin;
+                                        other.editDirtyMask |= EDIT_DIRTY_ANGLE;
+                                        enemy.auxState = 1;
+                                    }
+                                }
+                            }
+                            if (rotGimmicks) {
+                                for (auto& rg : gimmicks) {
+                                    if (!rg.isActive || rg.isTimelineCut) continue;
+                                    if (IsGimmickEditLocked(rg, EDITOP_ROTATE)) continue;
+                                    if (inRotRange(rg.x + rg.spriteWidth * 0.5f, rg.y + rg.spriteHeight * 0.5f)) {
+                                        rg.angle += spin;
+                                        rg.editDirtyMask |= EDIT_DIRTY_ANGLE;
+                                        enemy.auxState = 1;
+                                    }
+                                }
+                            }
+                            if (rotItems) {
+                                for (auto& ri : items) {
+                                    if (!ri.isActive || ri.isCollected) continue;
+                                    if (inRotRange(ri.x, ri.y)) { ri.angle += spin; enemy.auxState = 1; }
+                                }
+                            }
+                            break;
+                        }
+                        case ENEMY_SIZE_THROWER: {
+                            // 範囲サイズ調整の敵：プレイヤーが射程に入ると、予兆（alert）のあとに十字の矢印を投げる。
+                            // 着地点に円形の範囲ができ、中の物の大きさを変える。投げるたびに「拡大」「縮小」が交互になる。
+                            //   aiState    : 0=間をおく 1=予兆（投げる前の溜め）
+                            //   customTimer: その段階の経過フレーム
+                            //   auxFlag    : 次に投げるのが「拡大」か
+                            //
+                            // 編集リアクション：
+                            //  ・向き反転 → 次に投げる種類が入れ替わる（拡大⇔縮小）。
+                            //  ・拡大／縮小 → 範囲の半径が大きく／小さくなる。
+                            //  ・速度0／一時停止 → 投げる準備が進まない。
+                            float tRange = edef ? edef->triggerRange : 340.0f;
+                            float tInterval = edef ? edef->actionInterval : 300.0f;
+                            float tCharge = edef ? edef->chargeTime : 40.0f;
+                            enemy.vx = 0.0f;
+                            float tdx = (player.x + player.width * player.scale * 0.5f) - (enemy.x + enemy.hitboxWidth * enemy.scale * 0.5f);
+                            float tdy = (player.y + player.height * player.scale * 0.5f) - (enemy.y + enemy.hitboxHeight * enemy.scale * 0.5f);
+                            enemy.direction = (tdx < 0.0f) ? 1 : 0; // 投げる側（プレイヤーのほう）を向く
                             enemy.customTimer += ets;
-                            float distZ = std::abs(player.x - enemy.x);
-                            if (distZ < range) {
-                                if (er.tilted) erTiltHandled = true;
-                                float wave = EnemyWave(enemy.customTimer * frequency + er.tilt, edef ? edef->waveShape : -1.0f) * amplitude;
-                                if (er.flipped) wave = -wave; // 反転でズームアウト側へ歪む
-                                Screen_SetZoom(1.0f + wave);
+                            if (enemy.aiState == 0) {
+                                if (enemy.customTimer >= tInterval && sqrtf(tdx * tdx + tdy * tdy) < tRange) {
+                                    enemy.aiState = 1; enemy.customTimer = 0.0f;
+                                    SoundManager::Get().PlaySe("se_alert"); // 投げる合図
+                                    enemy.actionSeq++; // パーツのモーション（攻撃したとき）の合図
+                                }
+                            } else if (enemy.customTimer >= tCharge) {
+                                // 投げる。着地点はいまのプレイヤーの足元（そこへ弧を描いて飛ぶ）
+                                SizeThrow th;
+                                th.sx = enemy.x + enemy.hitboxWidth * enemy.scale * 0.5f;
+                                th.sy = enemy.y + enemy.hitboxHeight * enemy.scale * 0.3f;
+                                th.tx = player.x + player.width * player.scale * 0.5f;
+                                th.ty = player.y + player.height * player.scale * 0.5f;
+                                th.t = 0.0f; th.T = 50.0f;
+                                bool growNext = enemy.auxFlag;
+                                if (er.flipped) growNext = !growNext;
+                                th.grow = growNext;
+                                th.radius = (edef ? edef->effectRange : 110.0f) * er.scaleRatio;
+                                th.life = edef ? edef->zoneFrames : 360.0f;
+                                th.factor = edef ? edef->sizeFactor : 1.8f;
+                                sizeThrows.push_back(th);
+                                enemy.auxFlag = !enemy.auxFlag;
+                                enemy.aiState = 0; enemy.customTimer = 0.0f;
+                                if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack);
                             }
                             break;
                         }
@@ -11577,6 +11789,81 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // 範囲サイズ調整の敵が投げた物と、範囲の更新。時間停止中は進めない（コマ送りのフレームだけ進む）。
+        if (!isPaused || isStepFrame) {
+            // 投げた物：着地点まで弧を描いて飛び、着地したら範囲になる
+            for (size_t ti = 0; ti < sizeThrows.size(); ) {
+                SizeThrow& th = sizeThrows[ti];
+                th.t += ts;
+                if (th.t >= th.T) {
+                    sizeZones.push_back({ th.tx, th.ty, th.radius, 0.0f, th.life, th.grow, th.factor });
+                    sizeThrows.erase(sizeThrows.begin() + ti);
+                } else {
+                    ++ti;
+                }
+            }
+            // 範囲：中にいる物の大きさを、目標の倍率へ少しずつ近づける。
+            // 目標は「配置時の大きさ × 倍率」（縮小なら ÷倍率）。近づけた大きさは、範囲が消えてもそのまま残る。
+            for (size_t zi = 0; zi < sizeZones.size(); ) {
+                SizeZone& z = sizeZones[zi];
+                z.timer += ts;
+                if (z.timer >= z.life) { sizeZones.erase(sizeZones.begin() + zi); continue; }
+                float mul = z.grow ? z.factor : (z.factor > 0.01f ? 1.0f / z.factor : 1.0f);
+                float rate = 0.05f * ts;
+                auto approach = [&](float cur, float base) {
+                    float target = base * mul;
+                    if (target < 0.35f) target = 0.35f;
+                    if (target > 3.0f) target = 3.0f;
+                    return cur + (target - cur) * rate;
+                };
+                auto inside = [&](float cx2, float cy2) {
+                    float ddx = cx2 - z.x, ddy = cy2 - z.y;
+                    return ddx * ddx + ddy * ddy < z.radius * z.radius;
+                };
+                if (inside(player.x + player.width * player.scale * 0.5f, player.y + player.height * player.scale * 0.5f)) {
+                    player.scale = approach(player.scale, 1.0f);
+                }
+                for (auto& zEn : enemies) {
+                    if (!zEn.isActive || IsEnemyEditLocked(zEn, EDITOP_SCALE)) continue;
+                    if (inside(zEn.x + zEn.width * zEn.scale * 0.5f, zEn.y + zEn.height * zEn.scale * 0.5f)) {
+                        zEn.scale = approach(zEn.scale, zEn.editBaseScale > 0.01f ? zEn.editBaseScale : 1.0f);
+                        zEn.editDirtyMask |= EDIT_DIRTY_SCALE;
+                    }
+                }
+                for (auto& zg : gimmicks) {
+                    if (!zg.isActive || zg.isTimelineCut || zg.editBaseWidth <= 0.01f) continue;
+                    if (!(zg.type == GIMMICK_SCALABLE_BOX || zg.type == GIMMICK_SCALABLE_GROUND || zg.type == GIMMICK_PUSHABLE_ROCK)) continue;
+                    if (IsGimmickEditLocked(zg, EDITOP_SCALE)) continue;
+                    if (inside(zg.x + zg.spriteWidth * 0.5f, zg.y + zg.spriteHeight * 0.5f)) {
+                        SetGimmickWidth(zg, approach(zg.width, zg.editBaseWidth));
+                        if (zg.editBaseHeight > 0.01f) SetGimmickHeight(zg, approach(zg.height, zg.editBaseHeight));
+                        zg.editDirtyMask |= EDIT_DIRTY_SCALE;
+                    }
+                }
+            }
+        }
+
+        // ズーム固定の敵（固定中のもの）が、寄る倍率と中心にしたい点を申告する。
+        // 敵の更新の中ではなくここで行うのは、時間停止中や、敵だけが一時停止しているあいだも固定を保つため
+        // （更新が止まっていると申告が途切れて、画面が一気に戻ってしまう）。倒された敵（isActive=false）は申告しないので、解ける。
+        for (const auto& zEnemy : enemies) {
+            if (!zEnemy.isActive || zEnemy.type != ENEMY_ZOOM_DISRUPTOR || zEnemy.auxState != 1 || zEnemy.auxF1 <= 1.001f) continue;
+            float zoomE = zEnemy.auxF1;
+            float viewW = SCREEN_WIDTH / zoomE, viewH = SCREEN_HEIGHT / zoomE;
+            // 敵を中心にした範囲（画面座標）
+            float ex = zEnemy.x + zEnemy.hitboxWidth * zEnemy.scale * 0.5f - cameraX;
+            float ey = zEnemy.y + zEnemy.hitboxHeight * zEnemy.scale * 0.5f - cameraY;
+            float vl = ex - viewW * 0.5f, vt = ey - viewH * 0.5f;
+            // プレイヤーが範囲の外へ出てしまわないよう、範囲をずらす（映す余白 48px）
+            float pcx = player.x + player.width * player.scale * 0.5f - cameraX;
+            float pcy = player.y + player.height * player.scale * 0.5f - cameraY;
+            const float zMargin = 48.0f;
+            if (pcx < vl + zMargin) vl = pcx - zMargin;
+            if (pcx > vl + viewW - zMargin) vl = pcx - viewW + zMargin;
+            if (pcy < vt + zMargin) vt = pcy - zMargin;
+            if (pcy > vt + viewH - zMargin) vt = pcy - viewH + zMargin;
+            Screen_SetZoomLock(zoomE, vl + viewW * 0.5f, vt + viewH * 0.5f);
+        }
         Screen_UpdateFrame(ts); // 敵/ギミックがこのフレームで設定した目標値へ滑らかに追従
 
         // --- カメラスクロールシステム ---
@@ -12551,6 +12838,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature 1: 装飾レイヤー (前面) の描画
         DrawLayer(stages[currentStageIdx].decoMapFront);
 
+        // 範囲サイズ調整の敵：着地して残っている範囲（拡大は暖色、縮小は寒色）と、飛んでいる投げた物
+        for (const auto& z : sizeZones) {
+            float life01 = z.timer / (z.life > 1.0f ? z.life : 1.0f);
+            int fade = life01 > 0.85f ? (int)(255.0f * (1.0f - life01) / 0.15f) : 255; // 消える間際に薄くなる
+            int cx2 = (int)(z.x - cameraX), cy2 = (int)(z.y - cameraY);
+            unsigned int zc = z.grow ? GetColor(255, 150, 70) : GetColor(90, 170, 255);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 55 * fade / 255);
+            DrawCircle(cx2, cy2, (int)z.radius, zc, TRUE);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200 * fade / 255);
+            DrawCircle(cx2, cy2, (int)z.radius, zc, FALSE, 2);
+            // 4方向の矢印の十字。拡大は大きく脈打ち、縮小はゆっくり回る（どちらの範囲か、絵でも分かるように）
+            if (sizeMarkHandle >= 0) {
+                float pulse = z.grow ? 1.0f + 0.12f * sinf(z.timer * 0.12f) : 1.0f - 0.12f * sinf(z.timer * 0.12f);
+                float ext = (z.radius * 2.0f) / 640.0f * pulse;
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 120 * fade / 255);
+                DrawRotaGraph(cx2, cy2, ext, z.grow ? 0.0 : (double)z.timer * 0.02, sizeMarkHandle, TRUE);
+            }
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        }
+        for (const auto& th : sizeThrows) {
+            float u = th.t / (th.T > 1.0f ? th.T : 1.0f);
+            float wx2 = th.sx + (th.tx - th.sx) * u;
+            float wy2 = th.sy + (th.ty - th.sy) * u - 90.0f * 4.0f * u * (1.0f - u); // 放物線（高さ90px）
+            if (sizeMarkHandle >= 0) {
+                DrawRotaGraph((int)(wx2 - cameraX), (int)(wy2 - cameraY), 36.0f / 640.0f, (double)th.t * 0.3, sizeMarkHandle, TRUE);
+            }
+        }
+
         // 前の床の描画は完全に削除されました
 
         // アイテムの描画（assetIdごとのスプライトがあればそれを使い、無ければcoinHandleにフォールバック）
@@ -13242,8 +13557,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
             // ゲーム画面は viewScale 倍で monitorX/monitorY の位置へ転送されるので、
             // ウィンドウ座標のマウスを内部解像度側へ寄せてから判定する。
-            int relX = isEditMode ? (int)((mx - monitorX) / viewScale) : mx;
-            int relY = isEditMode ? (int)((my - monitorY) / viewScale) : my;
+            // リザルトの枠は gameScreen の中に描かれるので、ズームで映す範囲が変わっていても合うよう、映している範囲を通して求める
+            int relX = mx, relY = my;
+            if (isEditMode) {
+                float rwx = 0.0f, rwy = 0.0f;
+                Screen_MouseToWorld((float)mx, (float)my, rwx, rwy);
+                relX = (int)(rwx - cameraX); relY = (int)(rwy - cameraY);
+            }
 
             // 見出し
             SetFontSize(40);
@@ -13420,6 +13740,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     sprintf_s(bb, sizeof(bb), "明るさ %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? "（暗い判定）" : jb > 0 ? "（明るい判定）" : "");
                     badges.push_back({ bb, jb < 0 ? (unsigned int)GetColor(140, 170, 255) : jb > 0 ? (unsigned int)GetColor(255, 220, 120) : (unsigned int)GetColor(230, 230, 230) });
                 }
+                // ズーム固定の敵に捕まっている間。解く方法（原因の敵を倒す）も一緒に伝える
+                if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", (unsigned int)GetColor(255, 170, 120) });
                 if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", (unsigned int)GetColor(210, 210, 210) });
                 if (isEditMode && bigView) badges.push_back({ "拡大表示中　[F10]でパネルを戻す", (unsigned int)GetColor(210, 210, 210) });
 
@@ -14202,8 +14524,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else if (isEditMode && objectEditOpEnabled &&
                              cmx >= monitorX && cmx <= monitorX + monitorW &&
                              cmy >= monitorY && cmy <= monitorY + monitorH) {
-                        float wx = (float)(cmx - monitorX) / viewScale + cameraX;
-                        float wy = (float)(cmy - monitorY) / viewScale + cameraY;
+                        float wx = 0.0f, wy = 0.0f;
+                        Screen_MouseToWorld((float)cmx, (float)cmy, wx, wy);
                         if (wx >= player.x && wx <= player.x + player.width * player.scale &&
                             wy >= player.y && wy <= player.y + player.height * player.scale) {
                             pointing = true;

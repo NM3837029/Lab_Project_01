@@ -154,7 +154,7 @@ public static partial class PartTemplates
         SegmentedBody(), SpringChain(), AimBarrel(), WatchingEyes(), TongueChain(),
         // ───────────── 新しい型 ─────────────
         Wings(), TailWag(), TwinBarrels(), Claws(), MorningStar(), ShieldOrbiter(),
-    }.Concat(ColorTemplates()).ToList(); // ───────────── 色・明るさの型（PartTemplatesColor.cs）─────────────
+    }.Concat(ColorTemplates()).Concat(ScreenTemplates()).ToList(); // ───────────── 色・明るさの型（PartTemplatesColor.cs）／画面や物を操る敵の型（PartTemplatesScreen.cs）─────────────
 
     // ── 1. 多節体（敵: enemy_imomushi） ──
     // 体節が本体の後ろに連なり、各節が自分の番号ぶんずれた波を描いてくねる。

@@ -223,15 +223,16 @@ inline bool ApplyFilters(Resources& r, int src, int dst, float sat, float hue, f
 // src を (mr,mg,mb) 倍して描く。
 // SetDrawBright は255（＝等倍）で頭打ちなので、1.0を超える分（明るさ>1）は、
 // 同じ絵をもう一度「加算合成」で重ねて足す。チャンネルごとに別の倍率でも正確に c×m になる。
-inline void DrawGraded(int dx1, int dy1, int dx2, int dy2, int sx1, int sy1, int sx2, int sy2,
+// 元画像の範囲は「左上(sx1,sy1) と 幅・高さ(sw,sh)」で渡す（DxLib の DrawRectExtendGraph と同じ。右下の座標ではない）。
+inline void DrawGraded(int dx1, int dy1, int dx2, int dy2, int sx1, int sy1, int sw, int sh,
                        int src, float mr, float mg, float mb) {
     auto clamp255 = [](float v) { return (int)(std::max)(0.0f, (std::min)(255.0f, v * 255.0f)); };
     SetDrawBright(clamp255((std::min)(1.0f, mr)), clamp255((std::min)(1.0f, mg)), clamp255((std::min)(1.0f, mb)));
-    DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sx2, sy2, src, TRUE);
+    DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sw, sh, src, TRUE);
     if (mr > 1.0f || mg > 1.0f || mb > 1.0f) {
         SetDrawBlendMode(DX_BLENDMODE_ADD, 255);
         SetDrawBright(clamp255(mr - 1.0f), clamp255(mg - 1.0f), clamp255(mb - 1.0f));
-        DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sx2, sy2, src, TRUE);
+        DrawRectExtendGraph(dx1, dy1, dx2, dy2, sx1, sy1, sw, sh, src, TRUE);
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
     SetDrawBright(255, 255, 255);

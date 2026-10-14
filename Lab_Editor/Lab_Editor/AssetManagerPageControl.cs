@@ -121,7 +121,9 @@ public class AssetManagerPageControl : UserControl
         [16] = new[] { ("moveSpeed", "基準速度係数", 2), ("tempoFrequency", "周波数", 3), ("tempoMin", "speedScale最小", 2), ("tempoMax", "speedScale最大", 2) }, // type_enum=16: 速さ操作敵(Tempo Warper)
         [17] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("brightnessMin", "最小輝度", 2) }, // type_enum=17: 明るさ操作敵(Brightness Phantom)
         [18] = new[] { ("moveSpeed", "移動速度係数", 2), ("effectRange", "効果範囲(px)", 0), ("tintStrength", "色シフト強度", 2) }, // type_enum=18: 色調整敵(Color Shifter)
-        [19] = new[] { ("effectRange", "効果範囲(px)", 0), ("zoomAmplitude", "ズーム振幅", 2), ("zoomFrequency", "ズーム周波数", 3) }, // type_enum=19: ズーム撹乱敵(Zoom Disruptor)
+        [19] = new[] { ("effectRange", "寄せ始める距離(px)", 0), ("zoomAmplitude", "寄る強さ(追加の倍率)", 2), ("zoomLockFrames", "寄りきるまで(フレーム)", 0) }, // type_enum=19: ズーム固定敵(Zoom Lock)
+        [24] = new[] { ("effectRange", "回す範囲(px)", 0), ("rotateSpeed", "回す速さ(度/秒)", 0), ("rotatePlayer", "プレイヤーを回す", 0), ("rotateEnemies", "ほかの敵を回す", 0), ("rotateGimmicks", "ギミックを回す", 0), ("rotateItems", "アイテムを回す", 0) }, // type_enum=24: 回転させる敵(Rotator)
+        [25] = new[] { ("triggerRange", "投げ始める距離(px)", 0), ("actionInterval", "投げる間隔(フレーム)", 0), ("chargeTime", "予兆(フレーム)", 0), ("effectRange", "範囲の半径(px)", 0), ("zoneFrames", "範囲が残る時間(フレーム)", 0), ("sizeFactor", "拡大の倍率", 2) }, // type_enum=25: 範囲サイズ変更の敵(Size Thrower)
         // type_enum=21: 飛びかかり(Pouncer)。項目名は突進(Dash Charger)と共通のものを流用しているが、
         // dashSpeedMult は「突進速度」ではなく「飛びかかりの水平初速」、dashDuration は滞空時間の上限を意味する。
         [22] = new[] { ("bounceSpeed", "飛ぶ速さ(px/フレーム)", 2), ("bounceRandomness", "跳ね返り角の乱れ(度)", 0), ("segmentGap", "胴体の節の間隔(px)", 0) }, // type_enum=22: 跳ね回る節足敵(Bouncing Worm)
@@ -211,6 +213,8 @@ public class AssetManagerPageControl : UserControl
         (21, "21 = 飛びかかり (Pouncer)", "普段は高速で地上を追いかけ、射程に入ると溜めてから放物線を描いて飛びかかります。着地後の硬直が反撃の窓になります。パーツ(parts)を持たせて「命中するたび胴体を1節消費する」を有効にすると、攻撃するほど短くなり、使い切ると力尽きる相手になります。"),
         (22, "22 = 跳ね回る節足敵 (Bouncing Worm)", "重力を受けず、向いている方向へまっすぐ飛び続けます。壁・床・天井に当たるとランダムな角度で跳ね返るので、同じ軌道を繰り返しません。パーツ(parts)に胴体を並べておくと、頭が通った跡を一定間隔で辿って連なります。回転ツールで向きを変えると、そのまま進む方向が変わります。"),
         (23, "23 = 多彩行動 (Multi Action)", "待機・歩く・ジャンプ・突進・弾・瞬間移動・暗転・色変化・ズームの中から、好きな行動を好きな数だけ並べて、順番・ランダム・重み付きで切り替えながら繰り返します。「🎛 敵の動きを調整」で行動のリストを作ります。各行動の予兆・行動中・休みに合わせて、パーツを動かすこともできます。"),
+        (24, "24 = 回転させる (Rotator)", "近くにいるプレイヤー・ほかの敵・ギミック・アイテムを、ゆっくり回し続けます。回した角度は残り、編集の「回転」か巻き戻しで直せます。「回転を禁止」された物は回しません。"),
+        (25, "25 = 範囲サイズ変更 (Size Thrower)", "プレイヤーが近づくと、警告音のあと十字の矢印を投げます。着地した場所に円形の範囲ができ、中の物の大きさを、投げるたびに交互に拡大・縮小します（変わった大きさは残ります）。"),
     };
     // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— 敵タイプ(EnemyTypes)には元々あった
     // 「専門用語を使わない平易な説明文(detail)」を、ギミック/アイテムのタイプにも同じように用意した。

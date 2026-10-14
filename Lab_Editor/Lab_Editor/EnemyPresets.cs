@@ -28,6 +28,7 @@ public static class EnemyPresets
     public const string GroupTint = "画面に色をつける敵";
     public const string GroupMulti = "いろいろな行動をする敵";
     public const string GroupOther = "光る敵";
+    public const string GroupScreen = "画面や物を操る敵";
 
     public static readonly List<EnemyPreset> All = BuildAll();
 
@@ -161,6 +162,32 @@ public static class EnemyPresets
                     Act("wait", a => { a.duration = 40; }),
                 };
             },
+        },
+
+        // ───────────── 画面や物を操る敵（タイプ19・24・25）─────────────
+        new EnemyPreset
+        {
+            Id = "zoom_lock", Group = GroupScreen, Name = "🔍 ズーム固定の敵（倒すまで画面が寄ったまま）",
+            Description = "近づくと、この敵を中心に画面が少しずつ寄っていきます。離れても戻らず、この敵を倒したときだけ解けます。寄りきるまで3秒。プレイヤーが画面の外に出ないよう、映す範囲は自動でずれます。矢印が脈打つ飾りつき。",
+            Notes = "プレイヤーのZキーのズームでは打ち消せません。倒す方法を用意しておいてください（弾が撃てる能力など）。",
+            TypeEnum = 19, Hp = 4, Width = 46, Height = 46, BaseName = "ズーム固定の敵", TemplateId = "zoom_arrows",
+            Apply = d => { d.effectRange = 300f; d.zoomAmplitude = 1.0f; d.zoomLockFrames = 180f; },
+        },
+        new EnemyPreset
+        {
+            Id = "spinner", Group = GroupScreen, Name = "🌀 回転させる敵（近くの物を回し続ける）",
+            Description = "近くにいるプレイヤー・ほかの敵・ギミック・アイテムを、ゆっくり回し続けます。回った角度は残るので、編集の「回転」か巻き戻しで直します。頭の輪が、その場でぐるぐる回る飾りつき。",
+            Notes = "回す相手と速さは「🎛 敵の動きを調整」で変えられます。「回転を禁止」された物は回りません。",
+            TypeEnum = 24, Hp = 3, Width = 46, Height = 46, BaseName = "回転させる敵", TemplateId = "pivot_spinner",
+            Apply = d => { d.effectRange = 240f; d.rotateSpeed = 60f; },
+        },
+        new EnemyPreset
+        {
+            Id = "size_thrower", Group = GroupScreen, Name = "✚ 範囲サイズ調整の敵（投げた先で拡大⇔縮小）",
+            Description = "近づくと、警告音のあと4方向の矢印の十字を投げます。着地した場所に円形の範囲ができ、中の物の大きさを、投げるたびに交互に拡大・縮小します。投げる前は、持っている十字が震えます。",
+            Notes = "変わった大きさは、範囲が消えても残ります（編集の「拡大縮小」か巻き戻しで直せます）。範囲の大きさ・残る時間・倍率は「🎛 敵の動きを調整」で変えられます。",
+            TypeEnum = 25, Hp = 3, Width = 34, Height = 34, BaseName = "範囲サイズ調整の敵", TemplateId = "throw_cross",
+            Apply = d => { d.triggerRange = 340f; d.actionInterval = 300f; d.chargeTime = 40f; d.effectRange = 110f; d.zoneFrames = 360f; d.sizeFactor = 1.8f; },
         },
 
         // ───────────── 光る敵 ─────────────

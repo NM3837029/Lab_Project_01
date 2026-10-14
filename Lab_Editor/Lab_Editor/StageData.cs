@@ -890,7 +890,16 @@ public class EnemyDef
     public float brightnessMin { get; set; } = -1.0f;        // 明るさ変化の最小値
     public float tintStrength { get; set; } = -1.0f;         // 色味（ティント）を掛ける強さ
     public float zoomAmplitude { get; set; } = -1.0f;        // ズーム演出の振幅
-    public float zoomFrequency { get; set; } = -1.0f;        // ズーム演出の周期（速さ）
+    public float zoomFrequency { get; set; } = -1.0f;        // ズーム演出の周期（速さ）。ズーム固定の敵では使わない（JSONの互換のため残す）
+    // 【重要】以下は C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。片方だけだと、保存した瞬間にキーが消える。
+    public float zoomLockFrames { get; set; } = -1.0f;       // ズーム固定の敵：寄りきるまでのフレーム数（長いほど、じわじわ寄る）
+    public float rotateSpeed { get; set; } = -1.0f;          // 回転させる敵：回す速さ（度/秒）。負なら逆回り
+    public bool rotatePlayer { get; set; } = true;           // 回転させる敵：プレイヤーを回すか
+    public bool rotateEnemies { get; set; } = true;          // 回転させる敵：ほかの敵を回すか
+    public bool rotateGimmicks { get; set; } = true;         // 回転させる敵：ギミック（足場など）を回すか
+    public bool rotateItems { get; set; } = true;            // 回転させる敵：アイテムを回すか
+    public float sizeFactor { get; set; } = -1.0f;           // 範囲サイズ調整の敵：拡大するときの倍率（縮小はその逆数）
+    public float zoneFrames { get; set; } = -1.0f;           // 範囲サイズ調整の敵：範囲が残るフレーム数
 
     // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
     // C++側 EnemyDef と対応する。すべて -1 が「従来どおり」。ここに無いと保存し直した瞬間にJSONから消える。
