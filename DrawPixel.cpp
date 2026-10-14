@@ -11824,11 +11824,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 Screen_MixGrade(cgState.saturation, cgState.hue, cgState.contrast);
             if (isColorDrag) fxSnap = true;
         }
-        if (currentScene == PLAY && canPlayerAct) {
+        // ズーム（Z）は見た目だけなので、時間停止中・ドラッグ中でも使える（世界を動かさない操作のため canPlayerAct の外）。
+        // 使えないのは、メッセージ表示中（世界もメッセージ窓も止まっている）と、リザルト画面だけ。
+        if (currentScene == PLAY && !isShowingMessage) {
             // Ctrl+Z は取り消しなので、ズームの Z としては数えない（コストを使ってしまう）
             zHeldThisFrame = (CheckHitKey(KEY_INPUT_Z) != 0) && !editCtrlHeld;
-            xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
-            cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
             bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
             if (zHeldThisFrame && canUseScreenFx) {
                 Screen_SetZoom(playerZoomLevel);
@@ -11840,6 +11840,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 fxAnchorY = aY < 0.0f ? 0.0f : (aY > (float)SCREEN_HEIGHT ? (float)SCREEN_HEIGHT : aY);
                 fxAnchorActive = true; fxAnchorHeld = true;
             }
+        }
+        // 暗転(X)・明転(C)は、世界が動いているとき（canPlayerAct）だけ。従来どおり
+        if (currentScene == PLAY && canPlayerAct) {
+            xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
+            cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
+            bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
             if (xHeldThisFrame && canUseScreenFx) Screen_SetBrightness(0.3f);
             if (cHeldThisFrame && canUseScreenFx) Screen_SetBrightness(1.7f);
             // 色フィルタの画面への掛け方は、上のパネル反映（色の輪→TintMultiplier）に一本化した
@@ -14006,32 +14012,38 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             Screen_DrawComposited(monitorX, monitorY, monitorW, monitorH, gameScreen);
             DrawHudLayer(monitorX, monitorY, monitorW, monitorH); // HUDはモニターの上に重ねる（色補正・ズームの影響を受けない）
 
-            // ズームの拡大枠：「いま Z を押したら、ここが映る」範囲を、カーソルのまわりに薄く出す。
-            // 虫眼鏡なので、カーソルの下の点は動かず、枠の中がモニターいっぱいに広がる。押す前に、どこが拡大されるか分かる。
-            // 編集の邪魔にならないよう、操作中（ドラッグ・メニュー・範囲選択・メッセージ）と、ズーム中・ズーム固定中は出さない。
-            if (currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f && !playerZoomOn && !fxLockActive && fxCurZoom < 1.05f
-                && !menu.isOpen && !isAreaSelecting && !isShowingMessage
-                && !(isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag)
-                && mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH) {
-                float zf = playerZoomLevel;
-                float ax = (float)(mx - monitorX), ay = (float)(my - monitorY);       // モニター上のカーソル位置
-                float fw = (float)monitorW / zf, fh = (float)monitorH / zf;           // 枠の大きさ
-                int fx1 = monitorX + (int)(ax * (1.0f - 1.0f / zf)), fy1 = monitorY + (int)(ay * (1.0f - 1.0f / zf));
-                int fx2 = fx1 + (int)fw, fy2 = fy1 + (int)fh;
-                // 暗い縁の上に明るい線を重ねて、明るい地形・暗い地形のどちらの上でも見えるようにする
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 150);
-                DrawBox(fx1 - 1, fy1 - 1, fx2 + 1, fy2 + 1, GetColor(20, 18, 16), FALSE);
-                DrawBox(fx1, fy1, fx2, fy2, GetColor(235, 245, 255), FALSE);
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
-                const int tick = 10; // 四隅の印
-                DrawBox(fx1, fy1, fx1 + tick, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy1, fx1 + 2, fy1 + tick, GetColor(255, 240, 150), TRUE);
-                DrawBox(fx2 - tick, fy1, fx2, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy1, fx2, fy1 + tick, GetColor(255, 240, 150), TRUE);
-                DrawBox(fx1, fy2 - 2, fx1 + tick, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy2 - tick, fx1 + 2, fy2, GetColor(255, 240, 150), TRUE);
-                DrawBox(fx2 - tick, fy2 - 2, fx2, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy2 - tick, fx2, fy2, GetColor(255, 240, 150), TRUE);
-                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                char zl[32];
-                sprintf_s(zl, sizeof(zl), "Z ×%.1f", zf);
-                DrawTextEdge(fx1 + 4, fy1 + 4, zl, GetColor(255, 240, 150), 14);
+            // ズームの拡大枠：「これから映る範囲」を、必要なときだけ出す。
+            //   ・Z を押した直後：拡大が落ち着くまで、拡大されていく範囲を枠で示す（落ち着けば、枠が画面いっぱいになって消える）
+            //   ・Z を押したままホイールで倍率を上げた直後：新しい倍率で映る範囲を示す（落ち着けば消える）
+            // 普段（Z を押していない間）は出さない。枠は「いまの映り方」から見た目標の範囲なので、
+            // 目標が今の映り方より広い（倍率を下げた）ときは画面の外へ出るため、出さない（バッジの数字で分かる）。
+            if (playerZoomOn && !fxLockActive && !isShowingMessage) {
+                int cvx = 0, cvy = 0, cvw = SCREEN_WIDTH, cvh = SCREEN_HEIGHT;
+                Screen_ComputeView(cvx, cvy, cvw, cvh); // いま映している範囲（画面 640x480 の座標）
+                float zt = playerZoomLevel;
+                float tvx = fxAnchorX * (1.0f - 1.0f / zt), tvy = fxAnchorY * (1.0f - 1.0f / zt); // 目標の範囲の左上
+                float tvw = (float)SCREEN_WIDTH / zt, tvh = (float)SCREEN_HEIGHT / zt;
+                float kx = (float)monitorW / (float)cvw, ky = (float)monitorH / (float)cvh;       // 画面の1pxがモニターで何pxか
+                int fx1 = monitorX + (int)((tvx - (float)cvx) * kx), fy1 = monitorY + (int)((tvy - (float)cvy) * ky);
+                int fx2 = fx1 + (int)(tvw * kx), fy2 = fy1 + (int)(tvh * ky);
+                // 枠がモニターとほぼ同じ（拡大が落ち着いた）か、はみ出す（倍率を下げた）ときは出さない
+                bool inside = fx1 >= monitorX - 2 && fy1 >= monitorY - 2 && fx2 <= monitorX + monitorW + 2 && fy2 <= monitorY + monitorH + 2;
+                bool settled = (fx2 - fx1) > (int)(monitorW * 0.97f) && (fy2 - fy1) > (int)(monitorH * 0.97f);
+                if (inside && !settled) {
+                    SetDrawArea(monitorX, monitorY, monitorX + monitorW, monitorY + monitorH);
+                    // 暗い縁の上に明るい線を重ねて、明るい地形・暗い地形のどちらの上でも見えるようにする
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
+                    DrawBox(fx1 - 1, fy1 - 1, fx2 + 1, fy2 + 1, GetColor(20, 18, 16), FALSE);
+                    DrawBox(fx1, fy1, fx2, fy2, GetColor(235, 245, 255), FALSE);
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 220);
+                    const int tick = 10; // 四隅の印
+                    DrawBox(fx1, fy1, fx1 + tick, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy1, fx1 + 2, fy1 + tick, GetColor(255, 240, 150), TRUE);
+                    DrawBox(fx2 - tick, fy1, fx2, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy1, fx2, fy1 + tick, GetColor(255, 240, 150), TRUE);
+                    DrawBox(fx1, fy2 - 2, fx1 + tick, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy2 - tick, fx1 + 2, fy2, GetColor(255, 240, 150), TRUE);
+                    DrawBox(fx2 - tick, fy2 - 2, fx2, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy2 - tick, fx2, fy2, GetColor(255, 240, 150), TRUE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    SetDrawArea(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+                }
             }
 
             // 範囲選択矩形の描画
