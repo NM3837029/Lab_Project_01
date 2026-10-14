@@ -3872,6 +3872,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 大きなディスプレイでキャラ・ブロック・ギミックなどが小さく見える問題への対応（DisplayMode.h）。
     SetWindowSizeChangeEnableFlag(TRUE, TRUE);
     if (DxLib_Init() == -1) return -1; // DxLibの初期化に失敗したら即座に終了する
+    // 既定フォントを、DxLibの既定（ビットマップ風の等幅）から、アンチエイリアスのかかったメイリオへ変える。
+    // DrawString / DrawFormatString すべてに効くので、画面中のあらゆる文字が読みやすくなる。
+    // メイリオが無い環境では DxLib が既定のフォントのまま動く（タイトル画面の MetaFont と同じ前提）。
+    ChangeFont("メイリオ");
+    ChangeFontType(DX_FONTTYPE_ANTIALIASING);
+    SetFontSize(16);
     Logger::Info("System", "WinMain", "[Init] DxLib_Init Success");
     // コマンドライン引数でステージファイル名が渡されていれば、起動時に読み込むステージを上書きする
     // （Lab_Editorから「このステージでテストプレイ」を実行したときに使われる仕組み）
@@ -6226,6 +6232,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         metaFontCache[designSize] = fh;
         return fh;
     };
+
+    // ---- 縁取り付きの文字（プレイ画面用）----
+    // ゲーム画面の上へ直接置く文字（HP・状態表示・ヒント）は、地形や敵の色に溶けて読めなかった。
+    // 暗い縁を付けて、どんな背景の上でも読めるようにする。サイズはピクセル指定（HudFont）。
+    // 縁取りは CreateFontToHandle でしか作れないので、サイズごとにハンドルを作ってキャッシュする
+    // （SetFontSize は呼ぶたびにフォントを作り直す重い処理）。
+    std::map<int, int> hudFontCache;
+    auto HudFont = [&](int px) -> int {
+        auto it = hudFontCache.find(px);
+        if (it != hudFontCache.end()) return it->second;
+        int fh = CreateFontToHandle("メイリオ", px, 3, DX_FONTTYPE_ANTIALIASING_EDGE_4X4, -1, px >= 20 ? 2 : 1);
+        hudFontCache[px] = fh;
+        return fh;
+    };
+    // 縁取り文字を描く。フォントが作れない環境では、縁なしの既定フォントで描く。
+    auto DrawTextEdge = [&](int x, int y, const char* str, unsigned int color, int px = 16) {
+        int fh = HudFont(px);
+        if (fh < 0) { DrawString(x, y, str, color); return; }
+        DrawStringToHandle(x, y, str, color, fh, GetColor(20, 18, 16));
+    };
+    // 文字の幅（縁取りフォントでの実測）。UTF-8 なので長さはバイト数で渡す。
+    auto TextEdgeWidth = [&](const char* str, int px = 16) -> int {
+        int fh = HudFont(px);
+        if (fh < 0) return GetDrawStringWidth(str, (int)strlen(str));
+        return GetDrawStringWidthToHandle(str, (int)strlen(str), fh);
+    };
+    // ワールド上の短い札（物の頭上の「停止中」など）。縁付きで、背景の色に負けない。
+    auto WorldLabel = [&](int x, int y, const char* str, unsigned int color) { DrawTextEdge(x, y, str, color, 16); };
 
     // 画像のキャッシュ（パス → ハンドル）。毎フレーム LoadGraph するのは重い
     std::map<std::string, int> metaImageCache;
@@ -11881,7 +11915,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float goalPulse = 1.0f + sinf(BehaviorInterpreter::globalFrameCounter * 0.06f) * 0.06f;
                 int goalSize = (int)(TILE_SIZE * 1.5f * goalPulse);
                 DrawUiIcon(gx + TILE_SIZE / 2, gy + TILE_SIZE / 2, goalSize, goalHandle);
-                DrawString(gx - 4, gy - TILE_SIZE - 18, "GOAL", GetColor(255, 255, 160));
+                WorldLabel(gx - 4, gy - TILE_SIZE - 18, "ゴール", GetColor(255, 255, 160));
             }
         }
 
@@ -11909,7 +11943,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 旗は「棒の根元が配置マスの底」に来るよう、1マス分せり上げた位置を中心にして描く
             DrawUiIcon(cgx + TILE_SIZE / 2, cgy + flagBob, (int)(TILE_SIZE * 1.9f), checkpointHandle);
             SetDrawBright(255, 255, 255);
-            DrawString(cgx - 10, cgy - TILE_SIZE - 18, cpActive ? "CHECKPOINT!" : "checkpoint", cpActive ? GetColor(150, 255, 180) : GetColor(180, 180, 185));
+            WorldLabel(cgx - 10, cgy - TILE_SIZE - 18, cpActive ? "チェックポイント済" : "チェックポイント", cpActive ? GetColor(150, 255, 180) : GetColor(200, 200, 205));
         }
 
         // ===== deadly タイル判定 =====
@@ -11989,8 +12023,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawCircle((int)(gcx - cameraX), (int)(gcy - cameraY), 5, GetColor(255, 255, 255), TRUE);
 
                 // 一時停止/巻き戻し中の橋の頭上インジケータ
-                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
-                else if (gim.isRewinding) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "<< REW", GetColor(255, 100, 100));
+                if (gim.isPaused) WorldLabel((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "停止中", GetColor(255, 255, 100));
+                else if (gim.isRewinding) WorldLabel((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "巻き戻し中", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_BREAKABLE_BLOCK) {
                 // ヒビの入った石ブロック画像をスケーリングして描画（カスタムスプライト優先）。
@@ -12007,8 +12041,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
                 int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
-                if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
-                else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
+                if (gim.isPaused) WorldLabel(x1, y1 - 20, "停止中", GetColor(255, 255, 100));
+                else if (gim.isRewinding) WorldLabel(x1, y1 - 20, "巻き戻し中", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_REFLECT_MIRROR) {
                 // 反射ミラー画像を描画 (回転とスケーリング)（カスタムスプライト優先）
@@ -12022,7 +12056,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 DrawRotaGraph3((int)(gcx - cameraX), (int)(gcy - cameraY), imgW / 2, imgH / 2, extRateX, extRateY, gim.angle, useHandle, TRUE, FALSE);
                 DrawCircle((int)(gcx - cameraX), (int)(gcy - cameraY), 4, GetColor(255, 255, 0), TRUE);
-                if (gim.isPaused) DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 35, "|| PAUSE", GetColor(255, 255, 100));
+                if (gim.isPaused) WorldLabel((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 35, "停止中", GetColor(255, 255, 100));
             }
             else if (gim.type == GIMMICK_WEIGHT_SWITCH) {
                 // 重量スイッチ画像を描画（カスタムスプライト優先）
@@ -12066,7 +12100,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // こちらは必要な幅がまったく別の基準（箱の1/4）になるので、
                     // 箱向けの目安線を出すとかえって誤解させる。何で押せるのかだけを示す。
                     if (gim.param.find("enemyweight") != std::string::npos) {
-                        DrawString(x1, gy1 - 20, "ENEMY", gaugeColor);
+                        WorldLabel(x1, gy1 - 20, "敵の重さで入る", gaugeColor);
                     } else {
                         float needW = (swDef ? swDef->triggerWidthThreshold : 140.0f)
                                     * GetGimmickEditReaction(gim).MassMul();
@@ -12088,8 +12122,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
                 int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
-                if (gim.isPaused) DrawString(x1, y1 - 20, "|| PAUSE", GetColor(255, 255, 100));
-                else if (gim.isRewinding) DrawString(x1, y1 - 20, "<< REW", GetColor(255, 100, 100));
+                if (gim.isPaused) WorldLabel(x1, y1 - 20, "停止中", GetColor(255, 255, 100));
+                else if (gim.isRewinding) WorldLabel(x1, y1 - 20, "巻き戻し中", GetColor(255, 100, 100));
             }
             else if (gim.type == GIMMICK_GATE_DOOR) {
                 // ゲートドア画像を描画（カスタムスプライト優先）。
@@ -12099,7 +12133,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                    gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
                 if (GimmickIsTipped(gim)) {
                     // 倒して足場に転用中であることを明示する
-                    DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "FLOOR", UiInkOk());
+                    WorldLabel((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 20, "足場にできる", GetColor(140, 255, 170));
                 }
             }
             else if (gim.type == GIMMICK_CUT_PORTAL && !gim.isTimelineCut) {
@@ -12125,7 +12159,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                    gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
                 if (spikeSafe) {
                     SetDrawBright(255, 255, 255);
-                    DrawString((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 18, "SAFE", UiInkOk());
+                    WorldLabel((int)(gim.x - cameraX), (int)(gim.y - cameraY) - 18, "無害", GetColor(140, 255, 170));
                 }
             }
             else if (gim.type == GIMMICK_SCALABLE_GROUND) {
@@ -12222,7 +12256,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawBox(mx1, my1, mx2, my2, GetColor(180, 140, 90), TRUE);
                     DrawBox(mx1, my1, mx2, my2, GetColor(90, 60, 30), FALSE);
                 }
-                if (gim.type == GIMMICK_FRAMESTEP_LIFT) DrawString(mx1, my1 - 18, "STEP", GetColor(255, 255, 0));
+                if (gim.type == GIMMICK_FRAMESTEP_LIFT) WorldLabel(mx1, my1 - 18, "コマ送り", GetColor(255, 255, 0));
             }
             else if (gim.type == GIMMICK_PUSHABLE_ROCK) {
                 // 岩の描画（カスタムスプライト優先）。
@@ -12249,7 +12283,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (gim.handle >= 0) DrawExtendGraph(fx1, fy1, fx2, fy2, gim.handle, TRUE);
                 else DrawBox(fx1, fy1, fx2, fy2, GetColor(0, 200, 255), TRUE);
                 if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                DrawString(fx1, fy1 - 18, "FF GATE", GetColor(0, 200, 255));
+                WorldLabel(fx1, fy1 - 18, "早送りで通れる", GetColor(0, 200, 255));
             }
             else if (gim.type == GIMMICK_COLOR_LOCK_PLATFORM) {
                 // 色ロック足場：実体化中は不透明、不一致中は色付きの半透明ゴーストで位置だけ示す
@@ -12531,12 +12565,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 bool isThisEnemyRew = enemy.isRewinding || (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
-                if (isThisEnemyRew) DrawString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "<< REW", GetColor(255, 100, 100));
-                else if (enemy.isPaused) DrawString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
+                // 編集リアクション（共通層）の可視化：止めた敵は「踏み台にできる」、巻き戻し中の敵は「すり抜けられる」、
+                // 型ごとの条件で無害化した敵は「無害」。見た目が普段と同じままでは、乗ってよいのか触れたら被弾するのか
+                // 判断できないので、頭上に明示する。
+                // （以前は別のループで、ウィンドウ座標にワールド座標のまま描いていたため、モニターの位置・倍率とずれていた）
+                if (isThisEnemyRew) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "巻き戻し中（すり抜け）", GetColor(255, 130, 130));
+                else if (enemy.isPaused) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "停止中（踏める）", GetColor(255, 255, 110));
+                else if (EnemyIsHarmless(enemy)) WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 20, "無害", GetColor(140, 255, 170));
                 
                 // 敵HP表示
                 if (enemy.hp > 0) {
-                    DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 40, GetColor(255, 0, 0), "HP:%d", enemy.hp);
+                    { char hpb[16]; sprintf_s(hpb, sizeof(hpb), "HP %d", enemy.hp);
+                      WorldLabel((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - 40, hpb, GetColor(255, 130, 130)); }
                 }
 
                 // Feature: Puzzle-like Behavior Scripting (M2/M7) — スクリプト実行状態の表示
@@ -12590,12 +12630,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         (int)(cx + (pImgW > 0 ? pImgW : pImgH) * player.scale / 2.0f), (int)(drawCy + (pImgH * player.scale) / 2.0f), GetColor(255, 0, 0), FALSE);
             }
         }
-        if (isPlayerRewinding) DrawString((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "<< REW", GetColor(100, 255, 100));
-        else if (player.isPaused) DrawString((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "|| PAUSE", GetColor(255, 255, 100));
+        if (isPlayerRewinding) WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "巻き戻し中", GetColor(100, 255, 100));
+        else if (player.isPaused) WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "停止中", GetColor(255, 255, 100));
         
         // プレイヤーHP表示
         if (player.hp > 0) {
-            DrawFormatString((int)(player.x - cameraX), (int)(player.y - cameraY) - 40, GetColor(0, 255, 0), "HP:%d", player.hp);
+            { char hpb[16]; sprintf_s(hpb, sizeof(hpb), "HP %d", player.hp);
+              WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 40, hpb, GetColor(130, 255, 130)); }
         }
 
         // 選択枠の描画
@@ -12641,7 +12682,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 引っぱっている間は今の値をその場に出す（何pxまで広げたのかが分からないと止め所が無い）
                         if (isScaling || isScalingHeight) {
                             char szBuf[32];
-                            sprintf_s(szBuf, sizeof(szBuf), isScaling ? "W:%.0f" : "H:%.0f",
+                            sprintf_s(szBuf, sizeof(szBuf), isScaling ? "幅 %.0f" : "高さ %.0f",
                                       isScaling ? g->spriteWidth : g->spriteHeight);
                             int tx = (int)(g->x - cameraX);
                             int ty = (int)(g->y - cameraY) - 20;
@@ -12690,7 +12731,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if ((isHandleScale || isHandleRotate) && targetScale != nullptr) {
                     char hbuf[32];
                     if (isHandleScale) sprintf_s(hbuf, sizeof(hbuf), "x%.2f", *targetScale);
-                    else               sprintf_s(hbuf, sizeof(hbuf), "%.0f deg", WrapEditAngle(hAng) * 180.0f / EDIT_KNOB_PI);
+                    else               sprintf_s(hbuf, sizeof(hbuf), "%.0f度", WrapEditAngle(hAng) * 180.0f / EDIT_KNOB_PI);
                     int tx = (int)(hb.x - cameraX);
                     int ty = (int)(hb.y - cameraY) - 20;
                     DrawBox(tx - 3, ty - 2, tx + 78, ty + 18, GetColor(30, 26, 24), TRUE);
@@ -13602,29 +13643,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
-            // Feature: 編集リアクション（共通層）の可視化 —
-            // 一時停止した敵は「乗れる足場」に、巻き戻し中の敵は「すり抜けられる残像」になる。
-            // どちらも見た目が普段と同じままでは、乗ってよいのか触れたら死ぬのかが判断できないので、
-            // 敵の頭上に状態を明示する。
-            for (const auto& enemyHud : enemies) {
-                if (!enemyHud.isActive) continue;
-                int hx = (int)(enemyHud.x - cameraX);
-                int hy = (int)(enemyHud.y - cameraY) - 18;
-                if (enemyHud.isPaused) {
-                    DrawString(hx, hy, "|| STAND", UiInkOk());       // 止まっている＝踏み台にできる
-                } else if (enemyHud.isRewinding) {
-                    DrawString(hx, hy, "<< PHASE", UiInkAccent());   // 巻き戻し中＝すり抜けられる
-                } else if (EnemyIsHarmless(enemyHud)) {
-                    DrawString(hx, hy, "SAFE", UiInkOk());           // 型ごとの条件で無害化している
-                }
-            }
-
             // グローバル巻き戻しの視覚的フィードバックインジケータ
             if (isRKeyPressed && selectedType == SELECT_NONE) {
                 static int blinkTimer = 0;
                 blinkTimer = (blinkTimer + 1) % 30;
                 if (blinkTimer < 15) {
-                    DrawString(WINDOW_WIDTH / 2 - 80, 20, "<< GLOBAL REWINDING", GetColor(255, 100, 100));
+                    DrawTextEdge(WINDOW_WIDTH / 2 - 60, 2, "全体を巻き戻し中", GetColor(255, 130, 130), 18);
                 }
             }
 
