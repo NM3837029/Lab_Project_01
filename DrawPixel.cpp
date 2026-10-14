@@ -4046,6 +4046,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // ゲーム内部解像度(SCREEN_WIDTH x SCREEN_HEIGHT)で描画するための仮想スクリーンを作成する。
     // 実際のウィンドウサイズ(WINDOW_WIDTH x WINDOW_HEIGHT)へは、この仮想スクリーンを拡大して転送する。
     int gameScreen = MakeScreen(SCREEN_WIDTH, SCREEN_HEIGHT, TRUE);
+    // ズームアウト（Vキー）用の大きな描画先。縮小して「画面の外側」まで見せるため、ゲーム世界を上下左右に余白を付けて描く。
+    // 縮小の下限は 0.5 倍。そのとき映す範囲は幅 640/0.5=1280 で、カーソルの位置（アンカー）次第で画面の外へ最大 640px はみ出すので、
+    // 余白は画面の大きさと同じ（左右 640・上下 480）で足りる。縮小していないフレームは使わない（描画は今までと完全に同じ）。
+    const float ZOOMOUT_MIN = 0.5f, ZOOMOUT_MAX = 0.9f;
+    const int ZOOMOUT_MARGIN_X = SCREEN_WIDTH, ZOOMOUT_MARGIN_Y = SCREEN_HEIGHT;
+    int worldBigScreen = MakeScreen(SCREEN_WIDTH + ZOOMOUT_MARGIN_X * 2, SCREEN_HEIGHT + ZOOMOUT_MARGIN_Y * 2, TRUE);
     // カラー補正パネルが使う画像（色の輪・テストチャート）と、コントラスト・彩度・色相を掛けるための作業用画面
     ColorGrade::Resources cgRes;
     ColorGrade::CreateResources(cgRes, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -4608,6 +4614,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     float fxAnchorX = SCREEN_WIDTH / 2.0f, fxAnchorY = SCREEN_HEIGHT / 2.0f;
     bool  fxAnchorActive = false, fxAnchorHeld = false;
     int   playerZoomFlash = 0; // ホイールで倍率を変えた直後の、バッジの強調（残りフレーム）
+    // ズームアウト（Vキー）。ズームイン（Z）と同じ「カーソルの下の点を動かさない」虫眼鏡の逆で、広く見渡す。
+    //   fxCurZoomOut     … いまの縮小率（1.0＝等倍、0.5＝半分の大きさに縮めて 2 倍の範囲を映す）。1.0 を超えない
+    //   playerZoomOutLevel … Vを押したときの目標。Vを押したままホイールで 0.5〜0.9。次に押したときも、この倍率から始める
+    // 縮小は gameScreen へ「縮めて描き込む」ので、この後のモニター転送（ズームイン・色補正）はそのまま重なる。
+    // アンカー（fxAnchorX/Y・fxAnchorActive）は、ズームインと共用する。
+    float fxTargetZoomOut = 1.0f, fxCurZoomOut = 1.0f;
+    float playerZoomOutLevel = 0.6f;
     // 彩度・色相・コントラスト。カラー補正パネル、色補正ゾーン、敵の演出のどれもが Screen_MixGrade で重ねる
     // （彩度は掛け算、色相とコントラストは足し算で合成するので、複数の発生源が同時に効いても破綻しない）。
     float fxTargetSat = 1.0f, fxCurSat = 1.0f;
@@ -4641,6 +4654,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (srcX > SCREEN_WIDTH - srcW) srcX = SCREEN_WIDTH - srcW;
         if (srcY > SCREEN_HEIGHT - srcH) srcY = SCREEN_HEIGHT - srcH;
     };
+    // ズームアウトで映している範囲。ズームアウトを掛ける前の画面座標（カメラの左上が 0,0）で表し、画面の外（負・640超）にも出る。
+    // 縮小率 z、アンカー a のとき、範囲の左上は a×(1−1/z)、大きさは 640/z × 480/z（z=1 なら 0,0,640,480）。
+    // 画面上の点 a は z に関係なく同じ場所に映る。
+    auto Screen_ZoomOutView = [&](float& l, float& t, float& w, float& h) {
+        float z = fxCurZoomOut;
+        if (z > 1.0f) z = 1.0f;
+        if (z < ZOOMOUT_MIN) z = ZOOMOUT_MIN;
+        l = fxAnchorX * (1.0f - 1.0f / z);
+        t = fxAnchorY * (1.0f - 1.0f / z);
+        w = (float)SCREEN_WIDTH / z;
+        h = (float)SCREEN_HEIGHT / z;
+    };
     auto Screen_MixGrade = [&](float sat, float hue, float contrast) {
         fxTargetSat *= sat; fxTargetHue += hue; fxTargetContrast += contrast;
     };
@@ -4654,6 +4679,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxTargetBright = 1.0f;
         fxTargetTintR = fxTargetTintG = fxTargetTintB = 1.0f;
         fxTargetZoom = 1.0f;
+        fxTargetZoomOut = 1.0f;
         fxTargetSat = 1.0f; fxTargetHue = 0.0f; fxTargetContrast = 0.0f;
         fxSnap = false;
         fxLockActive = false; fxLockZoom = 1.0f; // 強制ズームは、申告する敵がいるあいだだけ毎フレーム立て直す
@@ -4673,6 +4699,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxCurFocusX += (focusTX - fxCurFocusX) * lerp;
         fxCurFocusY += (focusTY - fxCurFocusY) * lerp;
         fxCurZoom   += (fxTargetZoom   - fxCurZoom)   * lerp;
+        // ズームアウト：ズーム固定の敵に捕まっている間は効かせない（強制ズームの画面を、縮小で打ち消せないように）
+        if (fxLockActive) fxTargetZoomOut = 1.0f;
+        fxCurZoomOut += (fxTargetZoomOut - fxCurZoomOut) * lerp;
+        if (fxTargetZoomOut >= 1.0f && fxCurZoomOut > 0.998f) fxCurZoomOut = 1.0f; // 戻りきったら等倍へ（大きな描画先の使用もここで止まる）
         // プレイヤーのズーム：アンカー（カーソルの下の点）を動かさないよう、映す範囲の中心を「いまの倍率」から毎フレーム直接求める。
         // 範囲の左上を a×(1−1/z) にすると、画面上の点 a は倍率に関係なく同じ場所に映る。
         // 焦点は滑らかに追わせず、その場で反映する（追わせると、倍率の途中でカーソルの下の絵がずれる）。
@@ -4681,7 +4711,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             float az = fxCurZoom < 1.0f ? 1.0f : fxCurZoom;
             fxCurFocusX = fxAnchorX * (1.0f - 1.0f / az) + SCREEN_WIDTH * 0.5f / az;
             fxCurFocusY = fxAnchorY * (1.0f - 1.0f / az) + SCREEN_HEIGHT * 0.5f / az;
-            if (!fxAnchorHeld && fxCurZoom < 1.01f) fxAnchorActive = false; // 元の大きさへ戻りきったら、中央へ戻す
+            if (!fxAnchorHeld && fxCurZoom < 1.01f && fxCurZoomOut > 0.99f) fxAnchorActive = false; // 元の大きさへ戻りきったら、中央へ戻す
         }
         fxCurSat      += (fxTargetSat      - fxCurSat)      * lerp;
         fxCurHue      += (fxTargetHue      - fxCurHue)      * lerp;
@@ -5610,13 +5640,24 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // ズームで映す範囲が変わっている間も、指した場所とゲーム内の場所がずれないようにする。
     // （以前は倍率 viewScale だけを見ていたので、Zキーやレンズでズームすると選択・ドラッグがずれた。）
     // 変換式：モニター上の位置 → 画面(640x480)上の位置 → 映している範囲の中の位置 → カメラを足してワールド
-    auto Screen_MouseToWorld = [&](float mouseX, float mouseY, float& worldX, float& worldY) {
+    // ウィンドウ上のマウス位置を、gameScreen（ズームアウトを描き込んだ後の 640x480）上の位置へ。ズームイン（切り抜き）だけを通す。
+    // リザルト画面の枠のように、gameScreen の中へ直接描いたものとの当たり判定に使う。
+    auto Screen_MouseToView = [&](float mouseX, float mouseY, float& viewX, float& viewY) {
         int vx = 0, vy = 0, vw = SCREEN_WIDTH, vh = SCREEN_HEIGHT;
         Screen_ComputeView(vx, vy, vw, vh);
         float sxp = (mouseX - (float)monitorX) / viewScale;
         float syp = (mouseY - (float)monitorY) / viewScale;
-        worldX = cameraX + (float)vx + sxp * (float)vw / (float)SCREEN_WIDTH;
-        worldY = cameraY + (float)vy + syp * (float)vh / (float)SCREEN_HEIGHT;
+        viewX = (float)vx + sxp * (float)vw / (float)SCREEN_WIDTH;
+        viewY = (float)vy + syp * (float)vh / (float)SCREEN_HEIGHT;
+    };
+    // さらにズームアウトの範囲を通して、ゲーム内（ワールド）の座標へ戻す
+    auto Screen_MouseToWorld = [&](float mouseX, float mouseY, float& worldX, float& worldY) {
+        float gx = 0.0f, gy = 0.0f;
+        Screen_MouseToView(mouseX, mouseY, gx, gy);
+        float zl = 0.0f, zt = 0.0f, zw = (float)SCREEN_WIDTH, zh = (float)SCREEN_HEIGHT;
+        Screen_ZoomOutView(zl, zt, zw, zh);
+        worldX = cameraX + zl + gx * zw / (float)SCREEN_WIDTH;
+        worldY = cameraY + zt + gy * zh / (float)SCREEN_HEIGHT;
     };
     auto UpdateMonitorLayout = [&]() {
         if (bigView) {
@@ -6931,6 +6972,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "T/X/C（長押し）", "色フィルタ・暗転・明転" },
             { "Z（長押し）", "カーソルの位置を拡大" },
             { "Z（長押し）＋ホイール", "ズームの倍率（1.2〜3倍）" },
+            { "V（長押し）", "カーソルの位置を中心に縮小（広く見る）" },
+            { "V（長押し）＋ホイール", "縮小の倍率（0.5〜0.9倍）" },
             { "右下のパネル", "明るさ・色を細かく調整" },
             { "M", "効果音のミュート" },
             { "F10 / F11", "拡大表示 / フルスクリーン" },
@@ -6984,7 +7027,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (helpOnly) done = true; else page = 0;
                 }
                 // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
-                const int pw = 900, ph = 524; // 左の列が18行あるので、フッターと重ならない高さにする
+                const int pw = 900, ph = 572; // 左の列が20行あるので、フッターと重ならない高さにする
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
                 if (px1 < 8) px1 = 8;
                 DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
@@ -7252,6 +7295,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (playerZoomLevel < 1.2f) playerZoomLevel = 1.2f;
             if (playerZoomLevel > 3.0f) playerZoomLevel = 3.0f;
             playerZoomLevel = roundf(playerZoomLevel * 10.0f) / 10.0f; // 0.1刻みに揃える（浮動小数点のずれを溜めない）
+            playerZoomFlash = 45;
+            wheelRot = 0;
+        }
+        // V を押したままホイール＝ズームアウトの倍率（0.5〜0.9）。上へ回すほど等倍に近づく（Z のホイールと同じ向き）。
+        if (wheelRot != 0 && currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f
+            && CheckHitKey(KEY_INPUT_V) != 0 && CheckHitKey(KEY_INPUT_Z) == 0 && !editCtrlHeld) {
+            playerZoomOutLevel += (float)wheelRot * 0.1f;
+            if (playerZoomOutLevel < ZOOMOUT_MIN) playerZoomOutLevel = ZOOMOUT_MIN;
+            if (playerZoomOutLevel > ZOOMOUT_MAX) playerZoomOutLevel = ZOOMOUT_MAX;
+            playerZoomOutLevel = roundf(playerZoomOutLevel * 10.0f) / 10.0f;
             playerZoomFlash = 45;
             wheelRot = 0;
         }
@@ -8060,13 +8113,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 「横に広げる」操作なのに縦へ引かされるのが、この操作が伝わらない一番の原因だった。
                     // 実際の変形は共通入口 ApplyScaleDelta（つまみ・ホイール・INSPECTOR と共用）。
                     float ds = (float)(lastMouseY - my) * 0.01f;
-                    float dw = (float)(mx - lastMouseX) / (viewScale * (fxCurZoom < 0.1f ? 0.1f : fxCurZoom)); // 画面の1pxではなくゲーム内の1px（拡大表示・ズーム中でも指と幅が合う）
+                    float dw = (float)(mx - lastMouseX) / (viewScale * std::max<float>(0.1f, fxCurZoom * fxCurZoomOut)); // 画面の1pxではなくゲーム内の1px（拡大表示・ズーム中でも指と幅が合う）
                     ApplyScaleDelta(ds, dw);
                     lastMouseY = my;
                     lastMouseX = mx;
                 }
                 if (isScalingHeight && selectedType != SELECT_NONE) {
-                    float dh = (float)(lastMouseY - my) / (viewScale * (fxCurZoom < 0.1f ? 0.1f : fxCurZoom)); // ゲーム内のpx
+                    float dh = (float)(lastMouseY - my) / (viewScale * std::max<float>(0.1f, fxCurZoom * fxCurZoomOut)); // ゲーム内のpx
                     for (auto* g : selectedGimmicks) {
                         if (IsGimmickEditLocked(*g, EDITOP_SCALE)) continue;
                         g->editDirtyMask |= EDIT_DIRTY_HEIGHT;
@@ -8185,8 +8238,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // カメラの更新はこのあとなので、前フレームの値で見ることになる（1フレームの遅れは見た目に影響しない）。
         int viewSrcX = 0, viewSrcY = 0, viewSrcW = SCREEN_WIDTH, viewSrcH = SCREEN_HEIGHT;
         Screen_ComputeView(viewSrcX, viewSrcY, viewSrcW, viewSrcH);
-        const float viewL = cameraX + (float)viewSrcX, viewT = cameraY + (float)viewSrcY;
-        const float viewR = viewL + (float)viewSrcW, viewB = viewT + (float)viewSrcH;
+        // ズームアウトしているときは、gameScreen に縮めて描き込んでいるので、映している範囲はその分だけ広い（画面の外の敵も映る）
+        float zoL = 0.0f, zoT = 0.0f, zoW = (float)SCREEN_WIDTH, zoH = (float)SCREEN_HEIGHT;
+        Screen_ZoomOutView(zoL, zoT, zoW, zoH);
+        const float zoSx = zoW / (float)SCREEN_WIDTH, zoSy = zoH / (float)SCREEN_HEIGHT;
+        const float viewL = cameraX + zoL + (float)viewSrcX * zoSx, viewT = cameraY + zoT + (float)viewSrcY * zoSy;
+        const float viewR = viewL + (float)viewSrcW * zoSx, viewB = viewT + (float)viewSrcH * zoSy;
         auto EnemyOnScreen = [&](const Enemy& e) {
             float ew = (float)e.hitboxWidth * e.scale, eh = (float)e.hitboxHeight * e.scale;
             return e.x < viewR && e.x + ew > viewL && e.y < viewB && e.y + eh > viewT;
@@ -8274,6 +8331,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // --- バッファへの描画 / 物理更新 ---
         SetDrawScreen(gameScreen);
         ClearDrawScreen();
+        // ズームアウト中（または押した瞬間）は、世界を余白付きの大きな画面へ描く。描き終えたあと（プレイ中HUDの状態更新の直前）で
+        // gameScreen へ縮めて写す。drawOffX/Y は「大きな画面の中で、いつもの画面の左上が来る位置」、canvasW/H は描き先の大きさ。
+        // 押した瞬間に1フレーム遅れて黒い縁が出ないよう、キーも直接見る（縮小の可否は下の処理で決まるが、使わないなら等倍で写すだけ）。
+        const bool zoomOutBig = (currentScene == PLAY && CheckHitKey(KEY_INPUT_V) != 0) || fxCurZoomOut < 0.999f;
+        int drawOffX = 0, drawOffY = 0, canvasW = SCREEN_WIDTH, canvasH = SCREEN_HEIGHT;
+        if (zoomOutBig) {
+            SetDrawScreen(worldBigScreen);
+            ClearDrawScreen();
+            drawOffX = ZOOMOUT_MARGIN_X; drawOffY = ZOOMOUT_MARGIN_Y;
+            canvasW = SCREEN_WIDTH + ZOOMOUT_MARGIN_X * 2; canvasH = SCREEN_HEIGHT + ZOOMOUT_MARGIN_Y * 2;
+        }
 
         // 【描画順】背景はこのフェーズの一番最初に描くこと。
         //
@@ -8298,7 +8366,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 画像が無くても色が指定されていれば、その色で画面いっぱいを塗る。
                 // 画像と色の両方がある場合は、色を下地にして画像を重ねる。
                 if (bl.hasColor) {
-                    DrawBox(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, bl.colorRGB, TRUE);
+                    DrawBox(0, 0, canvasW, canvasH, bl.colorRGB, TRUE);
                 }
                 if (bl.handle < 0) continue;
                 int imgW, imgH;
@@ -8313,14 +8381,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 以前は「2枚だけ」並べていたので、画像が画面より狭いと右側に隙間ができ、
                         // offsetX をプラスにすると左側に隙間ができた（先頭が画面の内側から始まるため）。
                         float x = -fmodf(parallaxCamX, (float)imgW) + bl.offsetX;
-                        while (x > 0.0f) x -= (float)imgW; // 左端に隙間が出ない位置まで戻す
-                        for (; x < (float)SCREEN_WIDTH; x += (float)imgW) {
-                            DrawGraph((int)x, (int)drawY, bl.handle, TRUE);
+                        while (x > (float)(-drawOffX)) x -= (float)imgW; // 左端（ズームアウトの余白を含む）に隙間が出ない位置まで戻す
+                        for (; x < (float)(canvasW - drawOffX); x += (float)imgW) {
+                            DrawGraph((int)x + drawOffX, (int)drawY + drawOffY, bl.handle, TRUE);
                         }
                     } else {
                         // 繰り返さない背景：1枚だけを、スクロールに合わせて動かす（端まで行ったら画面の外へ出ていく）。
                         // 以前はループしない設定でも余りで巻き戻していたため、1枚の背景が途中で唐突に先頭へ飛んでいた。
-                        DrawGraph((int)(-parallaxCamX + bl.offsetX), (int)drawY, bl.handle, TRUE);
+                        DrawGraph((int)(-parallaxCamX + bl.offsetX) + drawOffX, (int)drawY + drawOffY, bl.handle, TRUE);
                     }
                 }
             }
@@ -11836,6 +11904,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
         bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
         bool playerZoomOn = false; // このフレーム、プレイヤーのズームが実際に効いているか（バッジ・左パネルの表示に使う）
+        bool vHeldThisFrame = false; // Vキー（ズームアウト）を押しているか
+        bool playerZoomOutOn = false; // このフレーム、ズームアウトが実際に効いているか
 
         // カラー補正パネルの値を画面へ反映する（X/C長押しの固定値より先に置き、長押しが優先される）。
         // 時間停止中・ドラッグ中でも反映するため、canPlayerAct の外に置く。
@@ -11868,6 +11938,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 fxAnchorY = aY < 0.0f ? 0.0f : (aY > (float)SCREEN_HEIGHT ? (float)SCREEN_HEIGHT : aY);
                 fxAnchorActive = true; fxAnchorHeld = true;
             }
+            // ズームアウト（V）。Z（ズームイン）を押しているときは Z を優先する。見た目だけの操作なので、Z と同じく時間停止中も使える。
+            vHeldThisFrame = (CheckHitKey(KEY_INPUT_V) != 0) && !editCtrlHeld && !zHeldThisFrame;
+            if (vHeldThisFrame && canUseScreenFx) {
+                fxTargetZoomOut = playerZoomOutLevel;
+                playerZoomOutOn = true;
+                float aX = isEditMode ? (float)(mx - monitorX) / viewScale : (float)mx * (float)SCREEN_WIDTH / (float)WINDOW_WIDTH;
+                float aY = isEditMode ? (float)(my - monitorY) / viewScale : (float)my * (float)SCREEN_HEIGHT / (float)WINDOW_HEIGHT;
+                fxAnchorX = aX < 0.0f ? 0.0f : (aX > (float)SCREEN_WIDTH ? (float)SCREEN_WIDTH : aX);
+                fxAnchorY = aY < 0.0f ? 0.0f : (aY > (float)SCREEN_HEIGHT ? (float)SCREEN_HEIGHT : aY);
+                fxAnchorActive = true; fxAnchorHeld = true;
+            }
         }
         // 暗転(X)・明転(C)は、世界が動いているとき（canPlayerAct）だけ。従来どおり
         if (currentScene == PLAY && canPlayerAct) {
@@ -11889,7 +11970,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (isAnyRewindActive)                drainPerSec += currentEditCost.drainRewindPerSec;
             if (isPaused)                         drainPerSec += currentEditCost.drainPausePerSec;
             if (isFastForward)                    drainPerSec += currentEditCost.drainFastForwardPerSec;
-            if (zHeldThisFrame || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0 || ColorGrade::CostlyActive(cgState))
+            if (zHeldThisFrame || playerZoomOutOn || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0 || ColorGrade::CostlyActive(cgState))
                                                    drainPerSec += currentEditCost.drainScreenEffectPerSec;
 
             if (drainPerSec > 0.0f) editCost -= drainPerSec * perFrame;
@@ -12388,6 +12469,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
         }
+
+        // ここから「プレイ中HUDの状態更新」の手前までが、世界の描画。ズームアウトで大きな画面へ描くときは、
+        // カメラを余白ぶんだけずらして描く（描画はすべて「ワールド座標 − カメラ」なので、これだけで全部が余白の内側に載る）。
+        // この間はカメラを判定には使わない。終わったら必ず元へ戻す（下の camXBeforeDraw）。
+        const float camXBeforeDraw = cameraX, camYBeforeDraw = cameraY;
+        cameraX -= (float)drawOffX; cameraY -= (float)drawOffY;
 
         // ===== ゴールの描画 =====
         // 新素材移行 — 以前はプリミティブ描画（棒＋三角の旗）で組み立てていたが、
@@ -12913,7 +13000,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (tileDefs[tid].handle < 0) continue;
                     int drawX = tx * TILE_SIZE - (int)cameraX;
                     int drawY = ty * TILE_SIZE - (int)cameraY;
-                    if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
+                    if (drawX >= -TILE_SIZE && drawX < canvasW && drawY >= -TILE_SIZE && drawY < canvasH) {
                         // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
                         DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
                             tileDefs[tid].srcX, tileDefs[tid].srcY, tileDefs[tid].srcW, tileDefs[tid].srcH,
@@ -12940,7 +13027,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (tileDefs[tid].handle < 0 && !tileDefs[tid].hasColor) continue;
                 int drawX = tx * TILE_SIZE - (int)cameraX;
                 int drawY = ty * TILE_SIZE - (int)cameraY;
-                if (drawX >= -TILE_SIZE && drawX < SCREEN_WIDTH && drawY >= -TILE_SIZE && drawY < SCREEN_HEIGHT) {
+                if (drawX >= -TILE_SIZE && drawX < canvasW && drawY >= -TILE_SIZE && drawY < canvasH) {
                     if (tileDefs[tid].handle >= 0) {
                         // Feature: タイル表示範囲調整機能 — タイルセット画像から指定範囲(srcX/Y/W/H)だけを切り出して描画する
                         DrawRectExtendGraph(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE,
@@ -13305,10 +13392,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             auto PvChip = [&](int sx, int sy, const std::string& text, int col) {
                 int w = GetDrawStringWidth(text.c_str(), (int)text.size());
                 int x1 = sx, y1 = sy;
-                if (x1 + w + 12 > SCREEN_WIDTH) x1 = SCREEN_WIDTH - w - 12;
+                if (x1 + w + 12 > canvasW) x1 = canvasW - w - 12;
                 if (x1 < 2) x1 = 2;
                 if (y1 < 2) y1 = 2;
-                if (y1 + 22 > SCREEN_HEIGHT) y1 = SCREEN_HEIGHT - 22;
+                if (y1 + 22 > canvasH) y1 = canvasH - 22;
                 DrawBox(x1, y1, x1 + w + 10, y1 + 20, GetColor(30, 26, 24), TRUE);
                 DrawBox(x1, y1, x1 + w + 10, y1 + 20, col, FALSE);
                 DrawString(x1 + 5, y1 + 2, text.c_str(), col);
@@ -13525,7 +13612,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 対象が画面の端にあると文字が切れて読めなくなるので、文字の箱だけ画面内へ寄せる
             // （枠は対象のマスに残したままなので、どのマスの話かは分かる）。
             int textX = hintX;
-            if (textX + hintW + 4 > SCREEN_WIDTH) textX = SCREEN_WIDTH - hintW - 4;
+            if (textX + hintW + 4 > canvasW) textX = canvasW - hintW - 4;
             if (textX < 4) textX = 4;
             int textY = hintY - 24;
             if (textY < 2) textY = hintY + TILE_SIZE + 4; // 上に出ないときはマスの下へ回す
@@ -13534,6 +13621,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // どのマスの話なのかを枠で示す（文字だけだと対象が分からない）
             DrawBox(hintX, hintY, hintX + TILE_SIZE, hintY + TILE_SIZE, GetColor(255, 210, 120), FALSE);
             if (!isPaused) g_breakSizeHint.timer -= 1.0f; // 一時停止中は減らさず、読む時間を作る
+        }
+
+        // ===== ズームアウト：大きな画面に描いた世界を、縮めて gameScreen へ写す =====
+        // 映す範囲は Screen_ZoomOutView（アンカーの下の点が動かない範囲）。余白ぶん（drawOff）を足して元画像の座標にする。
+        // これ以降の描画（メッセージ窓・リザルトなど）は、いつもどおり gameScreen の 640x480 座標へ描く。
+        cameraX = camXBeforeDraw; cameraY = camYBeforeDraw;
+        if (zoomOutBig) {
+            float zoL2 = 0.0f, zoT2 = 0.0f, zoW2 = (float)SCREEN_WIDTH, zoH2 = (float)SCREEN_HEIGHT;
+            Screen_ZoomOutView(zoL2, zoT2, zoW2, zoH2);
+            SetDrawScreen(gameScreen);
+            // 縮めるときはバイリニアで滑らかに（最近点だとドットが間引かれてちらつく）。写し終えたら既定の最近点へ戻す
+            SetDrawMode(DX_DRAWMODE_BILINEAR);
+            DrawRectExtendGraph(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
+                                (int)floorf(zoL2 + 0.5f) + drawOffX, (int)floorf(zoT2 + 0.5f) + drawOffY,
+                                (int)floorf(zoW2 + 0.5f), (int)floorf(zoH2 + 0.5f), worldBigScreen, TRUE);
+            SetDrawMode(DX_DRAWMODE_NEAREST);
         }
 
         // ===== プレイ中HUDの状態更新（描画は DrawHudLayer。ここでは数値の更新だけを行う）=====
@@ -13691,8 +13794,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             int relX = mx, relY = my;
             if (isEditMode) {
                 float rwx = 0.0f, rwy = 0.0f;
-                Screen_MouseToWorld((float)mx, (float)my, rwx, rwy);
-                relX = (int)(rwx - cameraX); relY = (int)(rwy - cameraY);
+                Screen_MouseToView((float)mx, (float)my, rwx, rwy); // gameScreen 上の位置（ズームアウトは通さない）
+                relX = (int)rwx; relY = (int)rwy;
             }
 
             // 見出し
@@ -13881,6 +13984,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 押しても何も起きない理由を伝える（ステージで画面エフェクトが封印されている。アイテムで解禁できる）
                     badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", (unsigned int)GetColor(255, 130, 110) });
                 }
+                // ズームアウト。ズームインのバッジと同じ作り
+                if (playerZoomOutOn) {
+                    char zo[64];
+                    sprintf_s(zo, sizeof(zo), "ズームアウト ×%.1f　ホイールで倍率", playerZoomOutLevel);
+                    badges.push_back({ zo, playerZoomFlash > 0 ? (unsigned int)GetColor(255, 240, 150) : (unsigned int)GetColor(190, 225, 255) });
+                } else if (vHeldThisFrame && screenEffectOpEnabled && editCost <= 0.0f) {
+                    badges.push_back({ "ズームアウト：編集コストが足りません", (unsigned int)GetColor(255, 130, 110) });
+                } else if (vHeldThisFrame && !screenEffectOpEnabled) {
+                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", (unsigned int)GetColor(255, 130, 110) });
+                }
                 // ズーム固定の敵に捕まっている間。解く方法（原因の敵を倒す）も一緒に伝える
                 if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", (unsigned int)GetColor(255, 170, 120) });
                 if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", (unsigned int)GetColor(210, 210, 210) });
@@ -13983,15 +14096,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     { "早送り [F]",         fastForwardOpEnabled },
                     { "色・明暗 [T X C]",   screenEffectOpEnabled },
                     { "ズーム [Z長押し]",   screenEffectOpEnabled },
+                    { "縮小 [V長押し]",     screenEffectOpEnabled },
                     { "物の編集 [右クリック]", objectEditOpEnabled },
                     { "カット [Ctrl]",      cutOpEnabled },
                 };
-                for (int ti = 0; ti < 7; ti++) {
-                    int rowY = 114 + ti * 19; // 7行をコストのゲージ（y=254）の上に収める
+                for (int ti = 0; ti < 8; ti++) {
+                    int rowY = 112 + ti * 17; // 8行をコストのゲージ（y=254）の上に収める
                     DrawString(24, rowY, toolRows[ti].label, toolRows[ti].on ? UiInk() : UiInkSub());
                     // ズームの行：拡大しているあいだは、倍率を出す
                     if (ti == 4 && playerZoomOn) {
                         char zv[16]; sprintf_s(zv, sizeof(zv), "×%.1f", playerZoomLevel);
+                        DrawString(158, rowY, zv, UiInkAccent());
+                    }
+                    // 縮小の行：縮めているあいだは、倍率を出す
+                    if (ti == 5 && playerZoomOutOn) {
+                        char zv[16]; sprintf_s(zv, sizeof(zv), "×%.1f", playerZoomOutLevel);
                         DrawString(158, rowY, zv, UiInkAccent());
                     }
                     // 使える＝「○」、封印されている＝「封印」。ラベルの「[右クリック]」と同じ行に収めるため、使える側は1文字にする
@@ -14022,7 +14141,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
                 DrawString(24, 414, "Ctrl+Z/Y：取り消し・戻す", gc);
                 // Z＋ホイールは、画面エフェクトの封印に従う（物の編集ではない）
-                DrawString(24, 434, "Z+ホイール：ズーム倍率", screenEffectOpEnabled ? UiInk() : UiInkSub());
+                DrawString(24, 434, "Z/V+ホイール：ズーム倍率", screenEffectOpEnabled ? UiInk() : UiInkSub());
             }
 
             // キー操作の早見表。ヒントバー（モニター下端）は状況で内容が変わるので、
