@@ -6782,9 +6782,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "時間を操る（キー）", "" },
             { "Space / 中ボタン", "時間停止（コストを消費）" },
             { "停止中の ← →", "1コマずつ進める／戻す" },
-            { "R", "巻き戻し" },
-            { "F", "早送り" },
-            { "T / Z / X / C", "色・ズーム・暗転・明転" },
+            { "R（長押し）", "巻き戻し" },
+            { "F（長押し）", "早送り" },
+            { "T/Z/X/C（長押し）", "色・ズーム・暗転・明転" },
             { "右下のパネル", "明るさ・色を細かく調整" },
             { "M", "効果音のミュート" },
             { "F10 / F11", "拡大表示 / フルスクリーン" },
@@ -6838,7 +6838,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (helpOnly) done = true; else page = 0;
                 }
                 // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
-                const int pw = 900, ph = 440;
+                const int pw = 900, ph = 480; // 左の列が16行あるので、フッターと重ならない高さにする
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
                 if (px1 < 8) px1 = 8;
                 DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
