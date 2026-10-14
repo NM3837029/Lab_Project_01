@@ -1,26 +1,26 @@
 [
   {
-    "id": "enemy_maru",
-    "name": "まるび（往復パトロール）",
-    "type_enum": 0,
+    "id": "enemy_aruku",
+    "name": "歩く敵（歩いて詰めてくる）",
+    "type_enum": 4,
     "hp": 2,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/72_20260921220222.png",
+    "width": 37,
+    "height": 37,
+    "sprite": "img/歩く敵.png",
     "seSpawn": "",
     "seAttack": "",
     "seDamage": "se_enemy_damage",
     "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
+    "hitboxOffsetX": 2,
+    "hitboxOffsetY": 2,
     "hitboxWidth": 32,
-    "hitboxHeight": 32,
+    "hitboxHeight": 34,
     "scale": 1.0,
-    "moveSpeed": 0.35,
+    "moveSpeed": 0.4,
     "enragedMoveSpeed": -1.0,
     "actionInterval": -1.0,
     "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
+    "triggerRange": 280.0,
     "detectionRangeY": -1.0,
     "projectileSpeed": -1.0,
     "chargeTime": -1.0,
@@ -86,20 +86,2114 @@
     "parts": []
   },
   {
+    "id": "enemy_oikake",
+    "name": "追っかけてくる敵（壁を跳び越えて追う）",
+    "type_enum": 5,
+    "hp": 2,
+    "width": 41,
+    "height": 41,
+    "sprite": "img/追っかけてくる敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 2,
+    "hitboxOffsetY": 2,
+    "hitboxWidth": 36,
+    "hitboxHeight": 37,
+    "scale": 1.0,
+    "moveSpeed": 0.55,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": 0.8,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
+  },
+  {
+    "id": "enemy_hikou",
+    "name": "飛行する敵（浮遊して追う）",
+    "type_enum": 10,
+    "hp": 2,
+    "width": 47,
+    "height": 47,
+    "sprite": "img/飛行する敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 6,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 35,
+    "hitboxHeight": 46,
+    "scale": 1.0,
+    "moveSpeed": 0.25,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": 40.0,
+    "floatFrequency": 0.05,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
+  },
+  {
+    "id": "enemy_teleport",
+    "name": "テレポートをする敵（近くへ瞬間移動）",
+    "type_enum": 11,
+    "hp": 2,
+    "width": 38,
+    "height": 38,
+    "sprite": "img/テレポートをする敵.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 3,
+    "hitboxOffsetY": 1,
+    "hitboxWidth": 33,
+    "hitboxHeight": 37,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": 180.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": 120.0,
+    "teleportRangeMax": 220.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
+  },
+  {
+    "id": "enemy_dossun",
+    "name": "ドッスン（落下・視線予告）",
+    "type_enum": 7,
+    "hp": 4,
+    "width": 48,
+    "height": 48,
+    "sprite": "img/ドッスンの胴体.png",
+    "seSpawn": "",
+    "seAttack": "se_dossun",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_dossun",
+    "hitboxOffsetX": 3,
+    "hitboxOffsetY": 1,
+    "hitboxWidth": 41,
+    "hitboxHeight": 46,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 30.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": 130.0,
+    "fallDelay": 26.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": 56.0,
+    "fastForwardJitter": 30.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": 2.5,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": 1.4,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "eyes",
+        "sprite": "img/ドッスンの目.png",
+        "offsetX": -3.0,
+        "offsetY": -1.0,
+        "width": 48,
+        "height": 48,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -3.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 2.5
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 2.5
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_yurei",
+    "name": "幽霊（過去追跡・停止無効）",
+    "type_enum": 14,
+    "hp": 3,
+    "width": 59,
+    "height": 59,
+    "sprite": "img/幽霊頭部.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 11,
+    "hitboxOffsetY": 5,
+    "hitboxWidth": 38,
+    "hitboxHeight": 48,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": 110.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": true,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "body",
+        "sprite": "img/幽霊胴体.png",
+        "offsetX": -11.0,
+        "offsetY": -5.0,
+        "width": 59,
+        "height": 59,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": []
+      },
+      {
+        "id": "eye",
+        "sprite": "img/幽霊目.png",
+        "offsetX": -11.0,
+        "offsetY": -5.0,
+        "width": 59,
+        "height": 59,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -11.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 5.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -5.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 5.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_taihou",
+    "name": "弾を撃つ敵（索敵して撃つ）",
+    "type_enum": 3,
+    "hp": 3,
+    "width": 42,
+    "height": 42,
+    "sprite": "img/弾を撃つ敵.png",
+    "seSpawn": "",
+    "seAttack": "se_shoot",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 3,
+    "hitboxOffsetY": 1,
+    "hitboxWidth": 36,
+    "hitboxHeight": 40,
+    "scale": 1.0,
+    "moveSpeed": 0.45,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": 0.5,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
+  },
+  {
+    "id": "enemy_houdai",
+    "name": "砲台（照準射撃・砲身可動）",
+    "type_enum": 9,
+    "hp": 3,
+    "width": 46,
+    "height": 46,
+    "sprite": "img/砲台台座.png",
+    "seSpawn": "",
+    "seAttack": "se_shoot",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 3,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 40,
+    "hitboxHeight": 46,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": 130.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": 0.55,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": true,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "barrel",
+        "sprite": "img/砲台砲身.png",
+        "offsetX": -3.0,
+        "offsetY": 0.0,
+        "width": 46,
+        "height": 46,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetAngle",
+                    "angle": {
+                      "op": "Sub",
+                      "a": {
+                        "op": "Add",
+                        "a": {
+                          "op": "ParentAim"
+                        },
+                        "b": 1.5707963
+                      },
+                      "b": {
+                        "op": "ParentTilt"
+                      }
+                    }
+                  },
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -3.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": -10.0,
+                          "b": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": -10.0,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Sub",
+                                  "a": {
+                                    "op": "Add",
+                                    "a": {
+                                      "op": "ParentAim"
+                                    },
+                                    "b": 1.5707963
+                                  },
+                                  "b": {
+                                    "op": "ParentTilt"
+                                  }
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": 180.0,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Sub",
+                                  "a": {
+                                    "op": "Add",
+                                    "a": {
+                                      "op": "ParentAim"
+                                    },
+                                    "b": 1.5707963
+                                  },
+                                  "b": {
+                                    "op": "ParentTilt"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.071875
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -0.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": 180.0,
+                          "b": {
+                            "op": "Add",
+                            "a": {
+                              "op": "Mul",
+                              "a": -10.0,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Sub",
+                                  "a": {
+                                    "op": "Add",
+                                    "a": {
+                                      "op": "ParentAim"
+                                    },
+                                    "b": 1.5707963
+                                  },
+                                  "b": {
+                                    "op": "ParentTilt"
+                                  }
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": 180.0,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Sub",
+                                  "a": {
+                                    "op": "Add",
+                                    "a": {
+                                      "op": "ParentAim"
+                                    },
+                                    "b": 1.5707963
+                                  },
+                                  "b": {
+                                    "op": "ParentTilt"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.071875
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_akarusa",
+    "name": "明るさ調整をする敵（近づくと暗くする）",
+    "type_enum": 17,
+    "hp": 3,
+    "width": 52,
+    "height": 52,
+    "sprite": "img/明るさ調整をする敵胴体（黒）.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 6,
+    "hitboxOffsetY": 1,
+    "hitboxWidth": 40,
+    "hitboxHeight": 50,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": 320.0,
+    "brightnessMin": 0.35,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "body_white",
+        "sprite": "img/明るさ調整をする敵胴体.png",
+        "offsetX": -6.0,
+        "offsetY": -1.0,
+        "width": 52,
+        "height": 52,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [],
+        "motions": [
+          {
+            "trigger": "near",
+            "trigger_param": 320.0,
+            "kind": "blink",
+            "amount": 1.0,
+            "period": 50.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 2,
+            "axis": 0.0,
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "id": "ring",
+        "sprite": "img/明るさ調整をする敵回転部分.png",
+        "offsetX": -6.0,
+        "offsetY": -1.0,
+        "width": 52,
+        "height": 52,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 2,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetAngle",
+                    "angle": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Time"
+                      },
+                      "b": 0.03
+                    }
+                  },
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": 3.0,
+                          "b": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": 3.0,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.03
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": -15.5,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.03
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.08125
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": -15.5,
+                          "b": {
+                            "op": "Add",
+                            "a": {
+                              "op": "Mul",
+                              "a": 3.0,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.03
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": -15.5,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.03
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.08125
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "pupil",
+        "sprite": "img/明るさ調整黒目.png",
+        "offsetX": -6.0,
+        "offsetY": -1.0,
+        "width": 52,
+        "height": 52,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 3,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -6.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 5.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 5.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_iro",
+    "name": "色調整をする敵（近づくと画面を染める）",
+    "type_enum": 18,
+    "hp": 3,
+    "width": 59,
+    "height": 59,
+    "sprite": "img/色調整をする敵胴体（別カラー）.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 16,
+    "hitboxOffsetY": 3,
+    "hitboxWidth": 27,
+    "hitboxHeight": 53,
+    "scale": 1.0,
+    "moveSpeed": 0.3,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": 320.0,
+    "brightnessMin": -1.0,
+    "tintStrength": 0.6,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "body_green",
+        "sprite": "img/色調整をする敵胴体.png",
+        "offsetX": -16.0,
+        "offsetY": -3.0,
+        "width": 59,
+        "height": 59,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [],
+        "motions": [
+          {
+            "trigger": "near",
+            "trigger_param": 320.0,
+            "kind": "blink",
+            "amount": 1.0,
+            "period": 50.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 2,
+            "axis": 0.0,
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "id": "eyes",
+        "sprite": "img/色調整をする敵目.png",
+        "offsetX": -16.0,
+        "offsetY": -3.0,
+        "width": 59,
+        "height": 59,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 2,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -16.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -3.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "enemy_zoom",
+    "name": "ズーム操作をしてくる敵（近づくと画面を寄せて固定）",
+    "type_enum": 19,
+    "hp": 4,
+    "width": 48,
+    "height": 48,
+    "sprite": "img/ズーム操作をしてくる敵縁部分.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 3,
+    "hitboxOffsetY": 3,
+    "hitboxWidth": 41,
+    "hitboxHeight": 42,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 300.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": 300.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": 1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "arrows",
+        "sprite": "img/ズーム操作をしてくる敵ズーム表現部分.png",
+        "offsetX": -3.0,
+        "offsetY": -3.0,
+        "width": 48,
+        "height": 48,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [],
+        "motions": [
+          {
+            "trigger": "always",
+            "trigger_param": 0.0,
+            "kind": "pulse",
+            "amount": 0.1,
+            "period": 90.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 0,
+            "axis": 0.0,
+            "enabled": true
+          },
+          {
+            "trigger": "active",
+            "trigger_param": 0.0,
+            "kind": "pulse",
+            "amount": 0.25,
+            "period": 36.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 0,
+            "axis": 0.0,
+            "enabled": true
+          }
+        ]
+      },
+      {
+        "id": "eye",
+        "sprite": "img/ズーム操作をしてくる敵目.png",
+        "offsetX": -3.0,
+        "offsetY": -3.0,
+        "width": 48,
+        "height": 48,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -3.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -3.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "zoomLockFrames": 180.0
+  },
+  {
+    "id": "enemy_kaiten",
+    "name": "回転させる敵（近くの物を回し続ける）",
+    "type_enum": 24,
+    "hp": 3,
+    "width": 49,
+    "height": 49,
+    "sprite": "img/回転させる敵胴体.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 4,
+    "hitboxOffsetY": 1,
+    "hitboxWidth": 42,
+    "hitboxHeight": 47,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": 240.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "head",
+        "sprite": "img/回転させる敵回転する頭部.png",
+        "offsetX": -4.0,
+        "offsetY": -1.0,
+        "width": 49,
+        "height": 49,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetAngle",
+                    "angle": {
+                      "op": "Mul",
+                      "a": {
+                        "op": "Time"
+                      },
+                      "b": 0.04
+                    }
+                  },
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -4.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": 14.0,
+                          "b": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "Mul",
+                              "a": 14.0,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.04
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": -102.0,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.04
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.0765625
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sub",
+                          "a": -102.0,
+                          "b": {
+                            "op": "Add",
+                            "a": {
+                              "op": "Mul",
+                              "a": 14.0,
+                              "b": {
+                                "op": "Sin",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.04
+                                }
+                              }
+                            },
+                            "b": {
+                              "op": "Mul",
+                              "a": -102.0,
+                              "b": {
+                                "op": "Cos",
+                                "a": {
+                                  "op": "Mul",
+                                  "a": {
+                                    "op": "Time"
+                                  },
+                                  "b": 0.04
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "b": 0.0765625
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "eyes",
+        "sprite": "img/回転させる敵目.png",
+        "offsetX": -4.0,
+        "offsetY": -1.0,
+        "width": 49,
+        "height": 49,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 2,
+        "deadly": false,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -4.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Sub",
+                            "a": {
+                              "op": "DirectionToPlayer"
+                            },
+                            "b": {
+                              "op": "ParentTilt"
+                            }
+                          }
+                        },
+                        "b": 3.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "rotateSpeed": 60.0
+  },
+  {
+    "id": "enemy_size",
+    "name": "範囲サイズ調整の敵（投げた先の範囲で拡大⇔縮小）",
+    "type_enum": 25,
+    "hp": 3,
+    "width": 69,
+    "height": 69,
+    "sprite": "img/投げた場所の特定範囲のサイズ調整を行う敵胴体.png",
+    "seSpawn": "",
+    "seAttack": "se_throw",
+    "seDamage": "se_enemy_damage",
+    "seDeath": "se_enemy_death",
+    "hitboxOffsetX": 19,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 31,
+    "hitboxHeight": 68,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": 300.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": 340.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": 40.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": 110.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "cross",
+        "sprite": "img/投げた場所の特定範囲のサイズ調整を行う敵投げるもの.png",
+        "offsetX": -19.0,
+        "offsetY": 0.0,
+        "width": 69,
+        "height": 69,
+        "hitboxOffsetX": 0,
+        "hitboxOffsetY": 0,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": -1,
+        "deadly": false,
+        "script": [],
+        "motions": [
+          {
+            "trigger": "charge",
+            "trigger_param": 0.0,
+            "kind": "shake",
+            "amount": 3.0,
+            "period": 60.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 0,
+            "axis": 0.0,
+            "enabled": true
+          },
+          {
+            "trigger": "always",
+            "trigger_param": 0.0,
+            "kind": "pulse",
+            "amount": 0.05,
+            "period": 120.0,
+            "phase": 0.0,
+            "phase_by_index": 0.0,
+            "duration": 30.0,
+            "delay": 0.0,
+            "easing": 0,
+            "axis": 0.0,
+            "enabled": true
+          }
+        ]
+      }
+    ],
+    "zoneFrames": 360.0,
+    "sizeFactor": 1.8
+  },
+  {
     "id": "enemy_imomushi",
-    "name": "いもむし（飛びかかり・多節）",
+    "name": "芋虫（飛びかかり・多節）",
     "type_enum": 21,
     "hp": 5,
-    "width": 34,
-    "height": 34,
+    "width": 35,
+    "height": 35,
     "sprite": "img/芋虫頭.png",
     "seSpawn": "",
     "seAttack": "se_enemy_pounce",
     "seDamage": "se_enemy_damage",
     "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
+    "hitboxOffsetX": 2,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
+    "hitboxWidth": 31,
     "hitboxHeight": 34,
     "scale": 1.0,
     "moveSpeed": 0.75,
@@ -173,10 +2267,10 @@
       {
         "id": "body0",
         "sprite": "img/芋虫胴体.png",
-        "offsetX": -16.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
+        "offsetX": -22.0,
+        "offsetY": 2.0,
+        "width": 33,
+        "height": 33,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 20,
@@ -185,105 +2279,15 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "script": []
       },
       {
         "id": "body1",
         "sprite": "img/芋虫胴体.png",
-        "offsetX": -32.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
+        "offsetX": -38.0,
+        "offsetY": 2.0,
+        "width": 33,
+        "height": 33,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 20,
@@ -292,105 +2296,15 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "script": []
       },
       {
         "id": "body2",
         "sprite": "img/芋虫胴体.png",
-        "offsetX": -48.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
+        "offsetX": -54.0,
+        "offsetY": 2.0,
+        "width": 33,
+        "height": 33,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 20,
@@ -399,105 +2313,15 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
+        "script": []
       },
       {
         "id": "body3",
         "sprite": "img/芋虫胴体.png",
-        "offsetX": -64.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
+        "offsetX": -70.0,
+        "offsetY": 2.0,
+        "width": 33,
+        "height": 33,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 20,
@@ -505,2823 +2329,27 @@
         "scale": 1.0,
         "hp": 0,
         "zOrder": -1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "body4",
-        "sprite": "img/芋虫胴体.png",
-        "offsetX": -80.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 20,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "body5",
-        "sprite": "img/芋虫胴体.png",
-        "offsetX": -96.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 20,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "body6",
-        "sprite": "img/芋虫胴体.png",
-        "offsetX": -112.0,
-        "offsetY": 6.0,
-        "width": 24,
-        "height": 24,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 20,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Mul",
-                          "a": {
-                            "op": "ParentDirection"
-                          },
-                          "b": -16.0
-                        },
-                        "b": {
-                          "op": "Add",
-                          "a": {
-                            "op": "PartIndex"
-                          },
-                          "b": 1
-                        }
-                      },
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 3.5
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "Time"
-                              },
-                              "b": 0.3
-                            },
-                            "b": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "PartIndex"
-                              },
-                              "b": 0.9
-                            }
-                          }
-                        },
-                        "b": 8.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "enemy_houdai",
-    "name": "砲台（照準射撃・砲身可動）",
-    "type_enum": 9,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/砲台台座.png",
-    "seSpawn": "",
-    "seAttack": "se_shoot",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": 130.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": 0.55,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": true,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "barrel",
-        "sprite": "img/砲台砲身.png",
-        "offsetX": 0.0,
-        "offsetY": -10.0,
-        "width": 28,
-        "height": 28,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 20,
-        "hitboxHeight": 20,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffsetPolar",
-                    "angle": {
-                      "op": "Sub",
-                      "a": {
-                        "op": "ParentAim"
-                      },
-                      "b": {
-                        "op": "ParentTilt"
-                      }
-                    },
-                    "radius": 10.0
-                  },
-                  {
-                    "op": "SetAngle",
-                    "angle": {
-                      "op": "Sub",
-                      "a": {
-                        "op": "Add",
-                        "a": {
-                          "op": "ParentAim"
-                        },
-                        "b": 1.5707963
-                      },
-                      "b": {
-                        "op": "ParentTilt"
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "enemy_dossun",
-    "name": "ドッスン（落下・視線予告）",
-    "type_enum": 7,
-    "hp": 4,
-    "width": 48,
-    "height": 48,
-    "sprite": "img/ドッスン本体.png",
-    "seSpawn": "",
-    "seAttack": "se_dossun",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_dossun",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 48,
-    "hitboxHeight": 48,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 30.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": 130.0,
-    "fallDelay": 26.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": 56.0,
-    "fastForwardJitter": 30.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": 2.5,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": 1.4,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "pupils",
-        "sprite": "img/93_20261004212953.png",
-        "offsetX": -9.0,
-        "offsetY": 0.0,
-        "width": 48,
-        "height": 48,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 1,
-        "hitboxHeight": 1,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Cos",
-                        "a": {
-                          "op": "Sub",
-                          "a": {
-                            "op": "DirectionToPlayer"
-                          },
-                          "b": {
-                            "op": "ParentTilt"
-                          }
-                        }
-                      },
-                      "b": 3.0
-                    },
-                    "dy": {
-                      "op": "Mul",
-                      "a": {
-                        "op": "Sin",
-                        "a": {
-                          "op": "Sub",
-                          "a": {
-                            "op": "DirectionToPlayer"
-                          },
-                          "b": {
-                            "op": "ParentTilt"
-                          }
-                        }
-                      },
-                      "b": 3.0
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "part1",
-        "sprite": "img/93_20261004213149.png",
-        "offsetX": -18.0,
-        "offsetY": -6.0,
-        "width": 0,
-        "height": 0,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 32,
-        "hitboxHeight": 32,
-        "scale": 0.1,
-        "hp": 0,
-        "zOrder": 0,
         "deadly": false,
         "script": []
       }
     ]
   },
   {
-    "id": "enemy_maboroshi",
-    "name": "まぼろし（過去追跡・停止無効）",
-    "type_enum": 14,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/80_20260924170915.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": 110.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": true,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_taiyou",
-    "name": "たいよう（全方位・回転拡散弾）",
-    "type_enum": 8,
-    "hp": 4,
-    "width": 44,
-    "height": 44,
-    "sprite": "img/82_20260924172628.png",
-    "seSpawn": "",
-    "seAttack": "se_shoot_alt",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 44,
-    "hitboxHeight": 44,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": 140.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": 0.32,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": 8,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": true,
-    "spreadRotationStep": 0.39,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_drone",
-    "name": "ドローン（浮遊追尾）",
-    "type_enum": 10,
-    "hp": 2,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/81_20260924171553.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": 0.22,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 340.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": 26.0,
-    "floatFrequency": 0.05,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": 0.55,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_honeycomb",
-    "name": "ハニカム（分裂・縮小復活）",
-    "type_enum": 12,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/83_20260924173312.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": 0.32,
-    "enragedMoveSpeed": 0.95,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 320.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": 0.55,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_kikagaku",
-    "name": "ジオメトリ（サイズ変化）",
-    "type_enum": 15,
-    "hp": 3,
-    "width": 40,
-    "height": 40,
-    "sprite": "img/幾何学的な敵.png",
-    "seSpawn": "",
-    "seAttack": "se_size_change",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 40,
-    "hitboxHeight": 40,
-    "scale": 1.0,
-    "moveSpeed": 0.25,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": 0.45,
-    "sizeFrequency": 0.03,
-    "minScale": 0.5,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_bero",
-    "name": "ベロ（舌を伸ばす待ち伏せ）",
-    "type_enum": 20,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/舌のある敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [
-      {
-        "hat": "OnSpawn",
-        "body": [
-          {
-            "op": "Forever",
-            "body": [
-              {
-                "op": "FaceTowards"
-              },
-              {
-                "op": "ApplyImpulse",
-                "vx": 0.0
-              },
-              {
-                "op": "Wait",
-                "frames": 1
-              }
-            ]
-          }
-        ]
-      }
-    ],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "tongue0",
-        "sprite": "img/乗ったら落ちる床.png",
-        "offsetX": 8.0,
-        "offsetY": 12.0,
-        "width": 18,
-        "height": 10,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 14,
-        "hitboxHeight": 8,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "And",
-                      "a": {
-                        "op": "Lt",
-                        "a": {
-                          "op": "DistanceToPlayer"
-                        },
-                        "b": 170.0
-                      },
-                      "b": {
-                        "op": "Not",
-                        "a": {
-                          "op": "EditFlipped"
-                        }
-                      }
-                    },
-                    "body": [
-                      {
-                        "op": "SetVar",
-                        "name": "r",
-                        "value": 10.0
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 58.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": 6.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 18
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 12.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": -5.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 45
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "SetLocalOffset",
-                        "dx": 8.0,
-                        "dy": 12.0
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 1
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "tongue1",
-        "sprite": "img/乗ったら落ちる床.png",
-        "offsetX": 8.0,
-        "offsetY": 12.0,
-        "width": 18,
-        "height": 10,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 14,
-        "hitboxHeight": 8,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "And",
-                      "a": {
-                        "op": "Lt",
-                        "a": {
-                          "op": "DistanceToPlayer"
-                        },
-                        "b": 170.0
-                      },
-                      "b": {
-                        "op": "Not",
-                        "a": {
-                          "op": "EditFlipped"
-                        }
-                      }
-                    },
-                    "body": [
-                      {
-                        "op": "SetVar",
-                        "name": "r",
-                        "value": 10.0
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 58.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": 6.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 18
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 12.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": -5.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 45
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "SetLocalOffset",
-                        "dx": 8.0,
-                        "dy": 12.0
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 1
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      },
-      {
-        "id": "tongue2",
-        "sprite": "img/乗ったら落ちる床.png",
-        "offsetX": 8.0,
-        "offsetY": 12.0,
-        "width": 18,
-        "height": 10,
-        "hitboxOffsetX": 0,
-        "hitboxOffsetY": 0,
-        "hitboxWidth": 14,
-        "hitboxHeight": 8,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "IfElse",
-                    "cond": {
-                      "op": "And",
-                      "a": {
-                        "op": "Lt",
-                        "a": {
-                          "op": "DistanceToPlayer"
-                        },
-                        "b": 170.0
-                      },
-                      "b": {
-                        "op": "Not",
-                        "a": {
-                          "op": "EditFlipped"
-                        }
-                      }
-                    },
-                    "body": [
-                      {
-                        "op": "SetVar",
-                        "name": "r",
-                        "value": 10.0
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Gt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 58.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": 6.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 18
-                      },
-                      {
-                        "op": "RepeatUntil",
-                        "cond": {
-                          "op": "Lt",
-                          "a": {
-                            "op": "GetVar",
-                            "name": "r"
-                          },
-                          "b": 12.0
-                        },
-                        "body": [
-                          {
-                            "op": "ChangeVar",
-                            "name": "r",
-                            "value": -5.0
-                          },
-                          {
-                            "op": "SetLocalOffsetPolar",
-                            "angle": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "radius": {
-                              "op": "Mul",
-                              "a": {
-                                "op": "GetVar",
-                                "name": "r"
-                              },
-                              "b": {
-                                "op": "Div",
-                                "a": {
-                                  "op": "Add",
-                                  "a": {
-                                    "op": "PartIndex"
-                                  },
-                                  "b": 1
-                                },
-                                "b": 3.0
-                              }
-                            }
-                          },
-                          {
-                            "op": "Wait",
-                            "frames": 1
-                          }
-                        ]
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 45
-                      }
-                    ],
-                    "else": [
-                      {
-                        "op": "SetLocalOffset",
-                        "dx": 8.0,
-                        "dy": 12.0
-                      },
-                      {
-                        "op": "Wait",
-                        "frames": 1
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "enemy_pyon",
-    "name": "ぴょん（定期ジャンプ）",
-    "type_enum": 1,
-    "hp": 2,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/普通の敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": 80.0,
-    "jumpPowerMult": 0.8,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_kotei_hou",
-    "name": "固定砲（全方位狙い撃ち）",
-    "type_enum": 2,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/砲台.png",
-    "seSpawn": "",
-    "seAttack": "se_shoot",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": 115.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": 0.6,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_sakuteki",
-    "name": "サーチャー（索敵して撃つ）",
-    "type_enum": 3,
-    "hp": 3,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/機械的な敵.png",
-    "seSpawn": "",
-    "seAttack": "se_shoot_alt",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": 0.45,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 300.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": 0.5,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_aruki",
-    "name": "あるき（歩いて詰めてくる）",
-    "type_enum": 4,
-    "hp": 2,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/普通の敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": 0.4,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 280.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_oikake",
-    "name": "おいかけ（壁を跳び越えて追う）",
-    "type_enum": 5,
-    "hp": 3,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/ハニカムな敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": 0.55,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": 0.85,
-    "triggerRange": 340.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_totsushin",
-    "name": "とっしん（溜めて突進）",
-    "type_enum": 6,
-    "hp": 4,
-    "width": 40,
-    "height": 40,
-    "sprite": "img/ドッスン.png",
-    "seSpawn": "",
-    "seAttack": "se_dossun",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_dossun",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 40,
-    "hitboxHeight": 40,
-    "scale": 1.0,
-    "moveSpeed": 0.3,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 260.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": 30.0,
-    "dashSpeedMult": 1.5,
-    "dashDuration": 40.0,
-    "cooldownTime": 70.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_tobi",
-    "name": "とび（近くへ瞬間移動）",
-    "type_enum": 11,
-    "hp": 2,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/幽霊のような敵.png",
-    "seSpawn": "",
-    "seAttack": "se_teleport",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": 170.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_tate",
-    "name": "たて（周期的に無敵になる）",
-    "type_enum": 13,
-    "hp": 3,
-    "width": 38,
-    "height": 38,
-    "sprite": "img/幾何学的な敵.png",
-    "seSpawn": "",
-    "seAttack": "se_shield_crack",
-    "seDamage": "se_shield_crack",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 38,
-    "hitboxHeight": 38,
-    "scale": 1.0,
-    "moveSpeed": 0.3,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 300.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_tempo",
-    "name": "テンポ（速さが乱れる）",
-    "type_enum": 16,
-    "hp": 3,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/機械的な敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": 0.4,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 300.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_kurayami",
-    "name": "くらやみ（画面を暗くする）",
-    "type_enum": 17,
-    "hp": 3,
-    "width": 36,
-    "height": 36,
-    "sprite": "img/幽霊のような敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 36,
-    "hitboxHeight": 36,
-    "scale": 1.0,
-    "moveSpeed": 0.3,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 300.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_irozome",
-    "name": "いろぞめ（画面を染める）",
-    "type_enum": 18,
-    "hp": 3,
-    "width": 40,
-    "height": 40,
-    "sprite": "img/太陽のような敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 40,
-    "hitboxHeight": 40,
-    "scale": 1.0,
-    "moveSpeed": 0.3,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": 300.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_yugami",
-    "name": "ゆがみ（画面を歪ませる）",
-    "type_enum": 19,
-    "hp": 3,
-    "width": 38,
-    "height": 38,
-    "sprite": "img/幾何学的な敵.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "se_enemy_damage",
-    "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 38,
-    "hitboxHeight": 38,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
     "id": "enemy_kikai_imomushi",
-    "name": "機械いもむし（跳ね回る・連なる）",
+    "name": "機械芋虫（跳ね回る・連なる）",
     "type_enum": 22,
     "hp": 3,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/機械いもむし頭部.png",
+    "width": 35,
+    "height": 35,
+    "sprite": "img/機械芋虫頭目なし.png",
     "seSpawn": "",
     "seAttack": "se_hit",
     "seDamage": "se_enemy_damage",
     "seDeath": "se_enemy_death",
-    "hitboxOffsetX": 0,
+    "hitboxOffsetX": 2,
     "hitboxOffsetY": 0,
-    "hitboxWidth": 30,
-    "hitboxHeight": 30,
+    "hitboxWidth": 31,
+    "hitboxHeight": 34,
     "scale": 1.0,
     "moveSpeed": -1.0,
     "enragedMoveSpeed": -1.0,
@@ -3393,11 +2421,11 @@
     "parts": [
       {
         "id": "body0",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -22.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "sprite": "img/機械芋虫胴体.png",
+        "offsetX": -20.0,
+        "offsetY": 4.0,
+        "width": 27,
+        "height": 27,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 22,
@@ -3410,11 +2438,11 @@
       },
       {
         "id": "body1",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -44.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "sprite": "img/機械芋虫胴体.png",
+        "offsetX": -42.0,
+        "offsetY": 4.0,
+        "width": 27,
+        "height": 27,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 22,
@@ -3427,11 +2455,11 @@
       },
       {
         "id": "body2",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -66.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "sprite": "img/機械芋虫胴体.png",
+        "offsetX": -64.0,
+        "offsetY": 4.0,
+        "width": 27,
+        "height": 27,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 22,
@@ -3444,11 +2472,11 @@
       },
       {
         "id": "body3",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -88.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "sprite": "img/機械芋虫胴体.png",
+        "offsetX": -86.0,
+        "offsetY": 4.0,
+        "width": 27,
+        "height": 27,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 22,
@@ -3461,11 +2489,11 @@
       },
       {
         "id": "body4",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -110.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "sprite": "img/機械芋虫胴体.png",
+        "offsetX": -108.0,
+        "offsetY": 4.0,
+        "width": 27,
+        "height": 27,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
         "hitboxWidth": 22,
@@ -3477,206 +2505,16 @@
         "script": []
       },
       {
-        "id": "body5",
-        "sprite": "img/機械いもむし胴体.png",
-        "offsetX": -132.0,
+        "id": "eye",
+        "sprite": "img/機械芋虫目.png",
+        "offsetX": -2.0,
         "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
+        "width": 35,
+        "height": 35,
         "hitboxOffsetX": 0,
         "hitboxOffsetY": 0,
-        "hitboxWidth": 22,
-        "hitboxHeight": 22,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      }
-    ]
-  },
-  {
-    "id": "enemy_1",
-    "name": "新敵",
-    "type_enum": 0,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/72_20260921220222.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_2",
-    "name": "目玉の敵（プレイヤーを見る目（黒目））",
-    "type_enum": 18,
-    "hp": 3,
-    "width": 48,
-    "height": 48,
-    "sprite": "img/102_20261008211315.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 48,
-    "hitboxHeight": 48,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "pupil0",
-        "sprite": "img/102_20261008211334.png",
-        "offsetX": 5.0,
-        "offsetY": 2.6,
-        "width": 38,
-        "height": 38,
-        "hitboxOffsetX": 4,
-        "hitboxOffsetY": 4,
-        "hitboxWidth": 30,
-        "hitboxHeight": 30,
+        "hitboxWidth": 1,
+        "hitboxHeight": 1,
         "scale": 1.0,
         "hp": 0,
         "zOrder": 1,
@@ -3692,7 +2530,7 @@
                     "op": "SetLocalOffset",
                     "dx": {
                       "op": "Add",
-                      "a": 5.0,
+                      "a": -2.0,
                       "b": {
                         "op": "Mul",
                         "a": {
@@ -3707,12 +2545,12 @@
                             }
                           }
                         },
-                        "b": 0.0
+                        "b": 4.0
                       }
                     },
                     "dy": {
                       "op": "Add",
-                      "a": 2.6000000000000014,
+                      "a": -0.0,
                       "b": {
                         "op": "Mul",
                         "a": {
@@ -3727,7 +2565,7 @@
                             }
                           }
                         },
-                        "b": 0.0
+                        "b": 4.0
                       }
                     }
                   },
@@ -3742,786 +2580,5 @@
         ]
       }
     ]
-  },
-  {
-    "id": "enemy_3",
-    "name": "目玉の敵（プレイヤーを見る目（黒目））",
-    "type_enum": 7,
-    "hp": 3,
-    "width": 48,
-    "height": 48,
-    "sprite": "img/93_20261004213149.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 48,
-    "hitboxHeight": 48,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "pupil0",
-        "sprite": "img/93_20261004212953.png",
-        "offsetX": 4.0,
-        "offsetY": 6.4,
-        "width": 40,
-        "height": 40,
-        "hitboxOffsetX": 4,
-        "hitboxOffsetY": 4,
-        "hitboxWidth": 32,
-        "hitboxHeight": 32,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": 1,
-        "deadly": false,
-        "script": [
-          {
-            "hat": "OnSpawn",
-            "body": [
-              {
-                "op": "Forever",
-                "body": [
-                  {
-                    "op": "SetLocalOffset",
-                    "dx": {
-                      "op": "Add",
-                      "a": 4.0,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Cos",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "b": {
-                              "op": "ParentTilt"
-                            }
-                          }
-                        },
-                        "b": 3.0
-                      }
-                    },
-                    "dy": {
-                      "op": "Add",
-                      "a": 6.399999999999999,
-                      "b": {
-                        "op": "Mul",
-                        "a": {
-                          "op": "Sin",
-                          "a": {
-                            "op": "Sub",
-                            "a": {
-                              "op": "DirectionToPlayer"
-                            },
-                            "b": {
-                              "op": "ParentTilt"
-                            }
-                          }
-                        },
-                        "b": 3.0
-                      }
-                    }
-                  },
-                  {
-                    "op": "Wait",
-                    "frames": 1
-                  }
-                ]
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  },
-  {
-    "id": "enemy_4",
-    "name": "omemetama",
-    "type_enum": 17,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/103_20261008214337.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_5",
-    "name": "yurei",
-    "type_enum": 14,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/104_20261008220005.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_6",
-    "name": "機械いもむし（連なる体節（敵タイプが動かす））",
-    "type_enum": 22,
-    "hp": 3,
-    "width": 34,
-    "height": 34,
-    "sprite": "img/107_20261009223357.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 34,
-    "hitboxHeight": 34,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": 22.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": [
-      {
-        "id": "body0",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -22.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      },
-      {
-        "id": "body1",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -44.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      },
-      {
-        "id": "body2",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -66.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      },
-      {
-        "id": "body3",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -88.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      },
-      {
-        "id": "body4",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -110.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      },
-      {
-        "id": "body5",
-        "sprite": "img/107_20261009223411.png",
-        "offsetX": -132.0,
-        "offsetY": 0.0,
-        "width": 26,
-        "height": 26,
-        "hitboxOffsetX": 2,
-        "hitboxOffsetY": 2,
-        "hitboxWidth": 21,
-        "hitboxHeight": 21,
-        "scale": 1.0,
-        "hp": 0,
-        "zOrder": -1,
-        "deadly": false,
-        "script": []
-      }
-    ]
-  },
-  {
-    "id": "enemy_7",
-    "name": "新敵",
-    "type_enum": 15,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/2.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_8",
-    "name": "新敵",
-    "type_enum": 19,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/3.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
-  },
-  {
-    "id": "enemy_9",
-    "name": "新敵",
-    "type_enum": 0,
-    "hp": 3,
-    "width": 32,
-    "height": 32,
-    "sprite": "img/5.png",
-    "seSpawn": "",
-    "seAttack": "",
-    "seDamage": "",
-    "seDeath": "",
-    "hitboxOffsetX": 0,
-    "hitboxOffsetY": 0,
-    "hitboxWidth": 32,
-    "hitboxHeight": 32,
-    "scale": 1.0,
-    "moveSpeed": -1.0,
-    "enragedMoveSpeed": -1.0,
-    "actionInterval": -1.0,
-    "jumpPowerMult": -1.0,
-    "triggerRange": -1.0,
-    "detectionRangeY": -1.0,
-    "projectileSpeed": -1.0,
-    "chargeTime": -1.0,
-    "dashSpeedMult": -1.0,
-    "dashDuration": -1.0,
-    "cooldownTime": -1.0,
-    "fallDelay": -1.0,
-    "spreadAngle": -1.0,
-    "spreadCount": -1,
-    "floatAmplitude": -1.0,
-    "floatFrequency": -1.0,
-    "teleportRangeMin": -1.0,
-    "teleportRangeMax": -1.0,
-    "shrinkFactor": -1.0,
-    "shieldOnDuration": -1.0,
-    "shieldOffDuration": -1.0,
-    "mimicDelayFrames": -1.0,
-    "sizeAmplitude": -1.0,
-    "sizeFrequency": -1.0,
-    "minScale": -1.0,
-    "tempoFrequency": -1.0,
-    "tempoMin": -1.0,
-    "tempoMax": -1.0,
-    "effectRange": -1.0,
-    "brightnessMin": -1.0,
-    "tintStrength": -1.0,
-    "zoomAmplitude": -1.0,
-    "zoomFrequency": -1.0,
-    "waveShape": -1.0,
-    "maxScale": -1.0,
-    "tintColorR": -1.0,
-    "tintColorG": -1.0,
-    "tintColorB": -1.0,
-    "counterFilter": -1.0,
-    "brightenMax": -1.0,
-    "counterBrightness": -1.0,
-    "chargeWarnFrames": -1.0,
-    "chargeWarnZoom": -1.0,
-    "aimJitter": -1.0,
-    "shockwaveRadius": -1.0,
-    "fastForwardJitter": -1.0,
-    "fastForwardAttackMult": -1.0,
-    "diagonalFallSpeed": -1.0,
-    "ignorePause": false,
-    "bodyIgnoresTilt": false,
-    "radialFire": false,
-    "spreadRotationStep": -1.0,
-    "verticalTrackSpeed": -1.0,
-    "riseSpeed": -1.0,
-    "bounceSpeed": -1.0,
-    "bounceRandomness": -1.0,
-    "segmentGap": -1.0,
-    "consumePartOnAttack": false,
-    "noScale": false,
-    "noRotate": false,
-    "noMove": false,
-    "noFlip": false,
-    "noPause": false,
-    "noRewind": false,
-    "noSpeed": false,
-    "script": [],
-    "edit_reactions": {},
-    "parts": []
   }
 ]
