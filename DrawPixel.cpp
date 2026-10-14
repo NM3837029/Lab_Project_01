@@ -366,6 +366,10 @@ struct EnemyDef {
     // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。
     //   無いとエディタで保存した瞬間にこのキーが黙って消えてしまう。
     bool ignorePause = false;
+    // 画面（モニター）に映っていない間も動くか。既定 false＝映っていない間は、移動・重力・射撃・画面エフェクト・
+    // 各タイマー・パーツのスクリプトまで、敵の更新を丸ごと止める（映った瞬間に、止まっていた状態の続きから動く）。
+    // 幽霊（過去追跡）のように、画面の外でも追ってくること自体が役目の敵だけ true にする。
+    bool activeOffscreen = false;
 
     // 「本体の絵は回転させない」型かどうか。
     //
@@ -918,6 +922,7 @@ void LoadAssetDefinitions() {
                     def.mimicDelayFrames = e.value("mimicDelayFrames", -1.0f);
                     // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
                     def.ignorePause = e.value("ignorePause", false);
+                    def.activeOffscreen = e.value("activeOffscreen", false);
                     // 本体の絵を回転させない型か（砲台の台座など。既定false＝従来どおり全体が回る）
                     def.bodyIgnoresTilt = e.value("bodyIgnoresTilt", false);
                     // 敵の行動改良で追加したパラメータ。未指定なら false / -1 のままにしておき、
@@ -8119,6 +8124,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             return false;
         };
 
+        // 敵が「いまモニターに映っているか」。映している範囲（ズーム・画面の寄せを含む）と、敵の当たり判定が少しでも重なれば true。
+        // 映っていない敵は更新しない（下の canEnemyAct）。範囲は Screen_ComputeView（描画・マウス変換と同じもの）から求める。
+        // カメラの更新はこのあとなので、前フレームの値で見ることになる（1フレームの遅れは見た目に影響しない）。
+        int viewSrcX = 0, viewSrcY = 0, viewSrcW = SCREEN_WIDTH, viewSrcH = SCREEN_HEIGHT;
+        Screen_ComputeView(viewSrcX, viewSrcY, viewSrcW, viewSrcH);
+        const float viewL = cameraX + (float)viewSrcX, viewT = cameraY + (float)viewSrcY;
+        const float viewR = viewL + (float)viewSrcW, viewB = viewT + (float)viewSrcH;
+        auto EnemyOnScreen = [&](const Enemy& e) {
+            float ew = (float)e.hitboxWidth * e.scale, eh = (float)e.hitboxHeight * e.scale;
+            return e.x < viewR && e.x + ew > viewL && e.y < viewB && e.y + eh > viewT;
+        };
+
         bool canPlayerAct = CanUpdate(player.x, player.y, (float)player.width, (float)player.height, player.scale, player.isPaused);
 
         // 射撃（通常モードまたはEnterキー）
@@ -8595,6 +8612,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 const EnemyDef* pauseDef = FindEnemyDef(enemy.assetId);
                 bool enemyIgnoresPause = (pauseDef != nullptr && pauseDef->ignorePause);
                 bool canEnemyAct = enemy.isActive && CanUpdate(enemy.x, enemy.y, (float)enemy.hitboxWidth, (float)enemy.hitboxHeight, enemy.scale, enemy.isPaused, enemyIgnoresPause);
+                // 画面に映っていない敵は何もしない（映った瞬間に、止まっていた状態の続きから動く）。
+                // 例外は定義の activeOffscreen（幽霊など）。更新の全体（移動・重力・射撃・画面エフェクト・タイマー・
+                // パーツのスクリプト・巻き戻し用の記録）がこの1つの判定に乗っているので、ここで止めれば全部止まる。
+                // ※ ズーム固定の「固定」は、更新の外の別ループ（毎フレームの申告）で保たれるので、画面外でも解けない。
+                if (canEnemyAct && !(pauseDef != nullptr && pauseDef->activeOffscreen) && !EnemyOnScreen(enemy)) canEnemyAct = false;
                 if (canEnemyAct) {
                     float ets = ts * enemy.speedScale;
 

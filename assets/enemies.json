@@ -682,7 +682,8 @@
           }
         ]
       }
-    ]
+    ],
+    "activeOffscreen": true
   },
   {
     "id": "enemy_taihou",

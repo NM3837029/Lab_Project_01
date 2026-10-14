@@ -934,6 +934,9 @@ public class EnemyDef
     // ここに無いキーは、エディタでアセットを保存し直した瞬間にenemies.jsonから黙って消える。
     // いずれも false / -1 が「従来どおりの挙動」を意味する既定値。
     public bool ignorePause { get; set; } = false;               // trueならプレイヤーの一時停止を無視して動き続ける（幽霊タイプ用）
+    // trueなら、画面（モニター）に映っていない間も動く。既定falseは「映っていない間は、更新を丸ごと止める」。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
+    public bool activeOffscreen { get; set; } = false;
     // trueなら、プレイヤーが回転させても本体の絵は傾かない（回るのはパーツだけ）。
     // 砲台のように「本体＝台座／回るのは砲身パーツ」という構成の敵で使う。
     // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
