@@ -4592,6 +4592,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     bool  fxLockActive = false;
     float fxLockZoom = 1.0f, fxLockFocusX = SCREEN_WIDTH / 2.0f, fxLockFocusY = SCREEN_HEIGHT / 2.0f;
     float fxCurFocusX = SCREEN_WIDTH / 2.0f, fxCurFocusY = SCREEN_HEIGHT / 2.0f;
+    // プレイヤーのズーム（Zキー）。マウスの位置を動かさないまま拡大する「虫眼鏡」。
+    //   playerZoomLevel … 倍率。Z を押したままホイールで 1.2〜3.0。次に押したときも、この倍率から始める
+    //   fxAnchorX/Y     … 拡大しても動かさない点（画面 640x480 の座標。Z 押下中はカーソルの位置）
+    //   fxAnchorActive  … アンカーで焦点を決める間（Z 押下中＋元の倍率へ戻りきるまで）。戻るときも同じ点を中心に縮む
+    //   fxAnchorHeld    … このフレームに Z でアンカーを更新したか（毎フレーム立て直す）
+    float playerZoomLevel = 1.6f;
+    float fxAnchorX = SCREEN_WIDTH / 2.0f, fxAnchorY = SCREEN_HEIGHT / 2.0f;
+    bool  fxAnchorActive = false, fxAnchorHeld = false;
+    int   playerZoomFlash = 0; // ホイールで倍率を変えた直後の、バッジの強調（残りフレーム）
     // 彩度・色相・コントラスト。カラー補正パネル、色補正ゾーン、敵の演出のどれもが Screen_MixGrade で重ねる
     // （彩度は掛け算、色相とコントラストは足し算で合成するので、複数の発生源が同時に効いても破綻しない）。
     float fxTargetSat = 1.0f, fxCurSat = 1.0f;
@@ -4641,6 +4650,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxTargetSat = 1.0f; fxTargetHue = 0.0f; fxTargetContrast = 0.0f;
         fxSnap = false;
         fxLockActive = false; fxLockZoom = 1.0f; // 強制ズームは、申告する敵がいるあいだだけ毎フレーム立て直す
+        fxAnchorHeld = false;
     };
     auto Screen_UpdateFrame = [&](float dts) {
         // パネルをつかんでいる間は lerp=1（目標値をそのまま反映）。ふだんはゆっくり追従して演出になじませる
@@ -4656,6 +4666,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         fxCurFocusX += (focusTX - fxCurFocusX) * lerp;
         fxCurFocusY += (focusTY - fxCurFocusY) * lerp;
         fxCurZoom   += (fxTargetZoom   - fxCurZoom)   * lerp;
+        // プレイヤーのズーム：アンカー（カーソルの下の点）を動かさないよう、映す範囲の中心を「いまの倍率」から毎フレーム直接求める。
+        // 範囲の左上を a×(1−1/z) にすると、画面上の点 a は倍率に関係なく同じ場所に映る。
+        // 焦点は滑らかに追わせず、その場で反映する（追わせると、倍率の途中でカーソルの下の絵がずれる）。
+        // ズーム固定の敵（強制ズーム）の間は、強制側の焦点を優先する。
+        if (!fxLockActive && fxAnchorActive) {
+            float az = fxCurZoom < 1.0f ? 1.0f : fxCurZoom;
+            fxCurFocusX = fxAnchorX * (1.0f - 1.0f / az) + SCREEN_WIDTH * 0.5f / az;
+            fxCurFocusY = fxAnchorY * (1.0f - 1.0f / az) + SCREEN_HEIGHT * 0.5f / az;
+            if (!fxAnchorHeld && fxCurZoom < 1.01f) fxAnchorActive = false; // 元の大きさへ戻りきったら、中央へ戻す
+        }
         fxCurSat      += (fxTargetSat      - fxCurSat)      * lerp;
         fxCurHue      += (fxTargetHue      - fxCurHue)      * lerp;
         fxCurContrast += (fxTargetContrast - fxCurContrast) * lerp;
@@ -6901,7 +6921,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "停止中の ← →", "1コマずつ進める／戻す" },
             { "R（長押し）", "巻き戻し" },
             { "F（長押し）", "早送り" },
-            { "T/Z/X/C（長押し）", "色・ズーム・暗転・明転" },
+            { "T/X/C（長押し）", "色フィルタ・暗転・明転" },
+            { "Z（長押し）", "カーソルの位置を拡大" },
+            { "Z（長押し）＋ホイール", "ズームの倍率（1.2〜3倍）" },
             { "右下のパネル", "明るさ・色を細かく調整" },
             { "M", "効果音のミュート" },
             { "F10 / F11", "拡大表示 / フルスクリーン" },
@@ -6955,7 +6977,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (helpOnly) done = true; else page = 0;
                 }
                 // 2列ぶんの幅が要るので、ゲーム画面（640px）より広く取り、編集パネルの上まで広げる
-                const int pw = 900, ph = 480; // 左の列が16行あるので、フッターと重ならない高さにする
+                const int pw = 900, ph = 524; // 左の列が18行あるので、フッターと重ならない高さにする
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
                 if (px1 < 8) px1 = 8;
                 DrawUiWindow(px1, py1, px1 + pw, py1 + ph, uiWindowHandle, GameCfg::UIK_MENU);
@@ -7214,6 +7236,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // ゲームの判定に使う色フィルタ（0=なし 1=赤 2=緑 3=青）は、色の輪の位置から求める
             playerColorFilter = ColorGrade::JudgeFilter(cgState);
         }
+
+        // Z を押したままホイール＝ズームの倍率。ホイールは物の拡縮（下の処理）にも使われるので、ここで使い切って競合させない。
+        // Ctrl+Z（取り消し）は Z としては数えない。ズームが使えないとき（封印・コスト0）は、ホイールを今までどおり物の拡縮へ回す。
+        if (wheelRot != 0 && currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f
+            && CheckHitKey(KEY_INPUT_Z) != 0 && !editCtrlHeld) {
+            playerZoomLevel += (float)wheelRot * 0.1f;
+            if (playerZoomLevel < 1.2f) playerZoomLevel = 1.2f;
+            if (playerZoomLevel > 3.0f) playerZoomLevel = 3.0f;
+            playerZoomLevel = roundf(playerZoomLevel * 10.0f) / 10.0f; // 0.1刻みに揃える（浮動小数点のずれを溜めない）
+            playerZoomFlash = 45;
+            wheelRot = 0;
+        }
+        if (playerZoomFlash > 0) playerZoomFlash--;
 
         globalTimeScale = isFastForward ? 2.0f : 1.0f;
         float finalTimeScale = globalTimeScale;
@@ -11772,6 +11807,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Z:ズーム保持, X:暗転保持, C:明転保持, T(上で処理済み)の色フィルタを継続適用
         // Feature: 編集コストゲージ — Z/X/Cは「画面エフェクト」の継続系操作
         bool zHeldThisFrame = false, xHeldThisFrame = false, cHeldThisFrame = false;
+        bool playerZoomOn = false; // このフレーム、プレイヤーのズームが実際に効いているか（バッジ・左パネルの表示に使う）
 
         // カラー補正パネルの値を画面へ反映する（X/C長押しの固定値より先に置き、長押しが優先される）。
         // 時間停止中・ドラッグ中でも反映するため、canPlayerAct の外に置く。
@@ -11794,7 +11830,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             xHeldThisFrame = CheckHitKey(KEY_INPUT_X) != 0;
             cHeldThisFrame = CheckHitKey(KEY_INPUT_C) != 0;
             bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
-            if (zHeldThisFrame && canUseScreenFx) Screen_SetZoom(1.6f);
+            if (zHeldThisFrame && canUseScreenFx) {
+                Screen_SetZoom(playerZoomLevel);
+                playerZoomOn = true;
+                // アンカー＝カーソルの下の点（画面 640x480 の座標。モニターの外にあるときは、端へ丸める）
+                float aX = isEditMode ? (float)(mx - monitorX) / viewScale : (float)mx * (float)SCREEN_WIDTH / (float)WINDOW_WIDTH;
+                float aY = isEditMode ? (float)(my - monitorY) / viewScale : (float)my * (float)SCREEN_HEIGHT / (float)WINDOW_HEIGHT;
+                fxAnchorX = aX < 0.0f ? 0.0f : (aX > (float)SCREEN_WIDTH ? (float)SCREEN_WIDTH : aX);
+                fxAnchorY = aY < 0.0f ? 0.0f : (aY > (float)SCREEN_HEIGHT ? (float)SCREEN_HEIGHT : aY);
+                fxAnchorActive = true; fxAnchorHeld = true;
+            }
             if (xHeldThisFrame && canUseScreenFx) Screen_SetBrightness(0.3f);
             if (cHeldThisFrame && canUseScreenFx) Screen_SetBrightness(1.7f);
             // 色フィルタの画面への掛け方は、上のパネル反映（色の輪→TintMultiplier）に一本化した
@@ -13787,6 +13832,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     sprintf_s(bb, sizeof(bb), "明るさ %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? "（暗い判定）" : jb > 0 ? "（明るい判定）" : "");
                     badges.push_back({ bb, jb < 0 ? (unsigned int)GetColor(140, 170, 255) : jb > 0 ? (unsigned int)GetColor(255, 220, 120) : (unsigned int)GetColor(230, 230, 230) });
                 }
+                // プレイヤーのズーム。倍率と、いまの操作（ホイールで倍率）を伝える。ホイールで変えた直後は少し強調する
+                if (playerZoomOn) {
+                    char zb[64];
+                    sprintf_s(zb, sizeof(zb), "ズーム ×%.1f　ホイールで倍率", playerZoomLevel);
+                    badges.push_back({ zb, playerZoomFlash > 0 ? (unsigned int)GetColor(255, 240, 150) : (unsigned int)GetColor(190, 225, 255) });
+                } else if (zHeldThisFrame && screenEffectOpEnabled && editCost <= 0.0f) {
+                    badges.push_back({ "ズーム：編集コストが足りません", (unsigned int)GetColor(255, 130, 110) });
+                }
                 // ズーム固定の敵に捕まっている間。解く方法（原因の敵を倒す）も一緒に伝える
                 if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", (unsigned int)GetColor(255, 170, 120) });
                 if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", (unsigned int)GetColor(210, 210, 210) });
@@ -13887,13 +13940,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     { "巻き戻し [R]",       rewindOpEnabled },
                     { "時間停止 [Space]",   pauseOpEnabled },
                     { "早送り [F]",         fastForwardOpEnabled },
-                    { "画面効果 [TZXC]",    screenEffectOpEnabled },
+                    { "色・明暗 [T X C]",   screenEffectOpEnabled },
+                    { "ズーム [Z長押し]",   screenEffectOpEnabled },
                     { "物の編集 [右クリック]", objectEditOpEnabled },
                     { "カット [Ctrl]",      cutOpEnabled },
                 };
-                for (int ti = 0; ti < 6; ti++) {
-                    int rowY = 114 + ti * 20;
+                for (int ti = 0; ti < 7; ti++) {
+                    int rowY = 114 + ti * 19; // 7行をコストのゲージ（y=254）の上に収める
                     DrawString(24, rowY, toolRows[ti].label, toolRows[ti].on ? UiInk() : UiInkSub());
+                    // ズームの行：拡大しているあいだは、倍率を出す
+                    if (ti == 4 && playerZoomOn) {
+                        char zv[16]; sprintf_s(zv, sizeof(zv), "×%.1f", playerZoomLevel);
+                        DrawString(158, rowY, zv, UiInkAccent());
+                    }
                     // 使える＝「○」、封印されている＝「封印」。ラベルの「[右クリック]」と同じ行に収めるため、使える側は1文字にする
                     DrawString(toolRows[ti].on ? 222 : 206, rowY, toolRows[ti].on ? "○" : "封印", toolRows[ti].on ? UiInkOk() : UiInkSub());
                 }
@@ -13920,8 +13979,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(24, 354, "つまみ：引いて変形", gc);
                 DrawString(24, 374, "ダブルクリック：反転", gc);
                 DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
-                DrawString(24, 414, "Ctrl+Z：取り消し", gc);
-                DrawString(24, 434, "Ctrl+Y：やり直し", gc);
+                DrawString(24, 414, "Ctrl+Z/Y：取り消し・戻す", gc);
+                // Z＋ホイールは、画面エフェクトの封印に従う（物の編集ではない）
+                DrawString(24, 434, "Z+ホイール：ズーム倍率", screenEffectOpEnabled ? UiInk() : UiInkSub());
             }
 
             // キー操作の早見表。ヒントバー（モニター下端）は状況で内容が変わるので、
@@ -13945,6 +14005,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawBox(monitorX - 2, monitorY - 2, monitorX + monitorW + 2, monitorY + monitorH + 2, GetColor(100, 100, 100), FALSE);
             Screen_DrawComposited(monitorX, monitorY, monitorW, monitorH, gameScreen);
             DrawHudLayer(monitorX, monitorY, monitorW, monitorH); // HUDはモニターの上に重ねる（色補正・ズームの影響を受けない）
+
+            // ズームの拡大枠：「いま Z を押したら、ここが映る」範囲を、カーソルのまわりに薄く出す。
+            // 虫眼鏡なので、カーソルの下の点は動かず、枠の中がモニターいっぱいに広がる。押す前に、どこが拡大されるか分かる。
+            // 編集の邪魔にならないよう、操作中（ドラッグ・メニュー・範囲選択・メッセージ）と、ズーム中・ズーム固定中は出さない。
+            if (currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f && !playerZoomOn && !fxLockActive && fxCurZoom < 1.05f
+                && !menu.isOpen && !isAreaSelecting && !isShowingMessage
+                && !(isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate || isColorDrag)
+                && mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH) {
+                float zf = playerZoomLevel;
+                float ax = (float)(mx - monitorX), ay = (float)(my - monitorY);       // モニター上のカーソル位置
+                float fw = (float)monitorW / zf, fh = (float)monitorH / zf;           // 枠の大きさ
+                int fx1 = monitorX + (int)(ax * (1.0f - 1.0f / zf)), fy1 = monitorY + (int)(ay * (1.0f - 1.0f / zf));
+                int fx2 = fx1 + (int)fw, fy2 = fy1 + (int)fh;
+                // 暗い縁の上に明るい線を重ねて、明るい地形・暗い地形のどちらの上でも見えるようにする
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 150);
+                DrawBox(fx1 - 1, fy1 - 1, fx2 + 1, fy2 + 1, GetColor(20, 18, 16), FALSE);
+                DrawBox(fx1, fy1, fx2, fy2, GetColor(235, 245, 255), FALSE);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 200);
+                const int tick = 10; // 四隅の印
+                DrawBox(fx1, fy1, fx1 + tick, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy1, fx1 + 2, fy1 + tick, GetColor(255, 240, 150), TRUE);
+                DrawBox(fx2 - tick, fy1, fx2, fy1 + 2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy1, fx2, fy1 + tick, GetColor(255, 240, 150), TRUE);
+                DrawBox(fx1, fy2 - 2, fx1 + tick, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx1, fy2 - tick, fx1 + 2, fy2, GetColor(255, 240, 150), TRUE);
+                DrawBox(fx2 - tick, fy2 - 2, fx2, fy2, GetColor(255, 240, 150), TRUE); DrawBox(fx2 - 2, fy2 - tick, fx2, fy2, GetColor(255, 240, 150), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                char zl[32];
+                sprintf_s(zl, sizeof(zl), "Z ×%.1f", zf);
+                DrawTextEdge(fx1 + 4, fy1 + 4, zl, GetColor(255, 240, 150), 14);
+            }
 
             // 範囲選択矩形の描画
             if (isAreaSelecting) {
