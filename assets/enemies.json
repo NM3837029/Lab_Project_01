@@ -2281,7 +2281,37 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": []
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "ParentDirection"
+                        },
+                        "b": -21.0
+                      }
+                    },
+                    "dy": 2.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
         "id": "body1",
@@ -2298,7 +2328,37 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": []
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "ParentDirection"
+                        },
+                        "b": -37.0
+                      }
+                    },
+                    "dy": 2.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
         "id": "body2",
@@ -2315,7 +2375,37 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": []
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "ParentDirection"
+                        },
+                        "b": -53.0
+                      }
+                    },
+                    "dy": 2.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       },
       {
         "id": "body3",
@@ -2332,7 +2422,37 @@
         "hp": 0,
         "zOrder": -1,
         "deadly": false,
-        "script": []
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": -1.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "ParentDirection"
+                        },
+                        "b": -69.0
+                      }
+                    },
+                    "dy": 2.0
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   },

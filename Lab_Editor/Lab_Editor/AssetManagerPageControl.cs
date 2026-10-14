@@ -136,6 +136,7 @@ public class AssetManagerPageControl : UserControl
     {
         ("ignorePause", "一時停止を無視して動き続ける", 0),
         ("activeOffscreen", "画面の外でも動く（ふつうは映っている間だけ動く）", 0),
+        ("artFacesLeft", "絵が左向きに描かれている（右を向くとき反転して描く）", 0),
         ("bodyIgnoresTilt", "回転しても本体の絵は傾けない（回るのはパーツだけ）", 0),
     };
     // アセットごとに「この編集操作を禁止する」ための共通欄。

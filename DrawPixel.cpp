@@ -371,6 +371,10 @@ struct EnemyDef {
     // 各タイマー・パーツのスクリプトまで、敵の更新を丸ごと止める（映った瞬間に、止まっていた状態の続きから動く）。
     // 幽霊（過去追跡）のように、画面の外でも追ってくること自体が役目の敵だけ true にする。
     bool activeOffscreen = false;
+    // 絵が「左向き」に描かれているか。既定 true（主人公以外の絵は、絵師が左を前として描いている）。
+    // enemy.direction は 0=右向き / 1=左向き なので、左向きの絵は、右を向くとき（direction==0）に左右反転して描く。
+    // 右向きに描かれた絵を使うときだけ false にする。本体の絵・アニメーション・パーツの絵すべてに効く。
+    bool artFacesLeft = true;
 
     // 「本体の絵は回転させない」型かどうか。
     //
@@ -932,6 +936,7 @@ void LoadAssetDefinitions() {
                     // 新敵ロスター対応 — 一時停止を無視するか（既定false＝従来どおり止まる）
                     def.ignorePause = e.value("ignorePause", false);
                     def.activeOffscreen = e.value("activeOffscreen", false);
+                    def.artFacesLeft = e.value("artFacesLeft", true);
                     // 本体の絵を回転させない型か（砲台の台座など。既定false＝従来どおり全体が回る）
                     def.bodyIgnoresTilt = e.value("bodyIgnoresTilt", false);
                     // 敵の行動改良で追加したパラメータ。未指定なら false / -1 のままにしておき、
@@ -1594,7 +1599,9 @@ void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ct
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
 // alphaMul は、パーツ全体にかける不透明度（幽霊の「姿の濃さ」など。1.0＝そのまま）。
-void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent, float alphaMul = 1.0f) {
+// flipH は、パーツの絵を左右反転して描くか（左向きの絵の敵が、右を向いているとき）。絵の中心を軸に反転するので、
+// 親と同じ箱に重ねてあるパーツは、本体と一緒に反転すれば位置がずれない。位置が動くパーツ（体節など）は、スクリプトの ParentDirection で置く。
+void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent, float alphaMul = 1.0f, bool flipH = false) {
     for (const auto& part : parts) {
         if (!part.isActive) continue; // 破壊済みのパーツは描画しない
         // wantBehindParent==trueのパス呼び出し時はzOrder<0（親より奥）のパーツだけ、
@@ -1631,11 +1638,11 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
                 GetGraphSize(part.handle, &iw, &ih);
                 if (iw > 0 && ih > 0) {
                     double ex = (double)part.width / iw * pm * part.motionScale, ey = (double)part.height / ih * pm * part.motionScale;
-                    DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, ex, ey, ang, part.handle, TRUE, FALSE);
+                    DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, ex, ey, ang, part.handle, TRUE, flipH ? TRUE : FALSE);
                     return;
                 }
             }
-            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, ang, part.handle, TRUE);
+            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, ang, part.handle, TRUE, flipH ? TRUE : FALSE);
         };
         if (needBlend) SetDrawBlendMode(part.additive ? DX_BLENDMODE_ADD : DX_BLENDMODE_ALPHA, alphaI);
         if (hasTint) SetDrawBright(b255(mulR), b255(mulG), b255(mulB));
@@ -13013,7 +13020,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 // 幽霊は「姿の濃さ」（auxF2）で半透明に描く。消えている間は、本体もパーツも描かない。
                 const float ghostDrawA = (enemy.type == ENEMY_MIMIC_GHOST) ? (enemy.auxF2 < 0.0f ? 0.0f : (enemy.auxF2 > 1.0f ? 1.0f : enemy.auxF2)) : 1.0f;
-                DrawPartsPass(enemy.parts, cameraX, cameraY, true, ghostDrawA); // Feature: Composite Multi-Part Objects (Parts-M5)
+                // 左向きに描かれた絵は、右を向いている（direction==0）ときに反転する。向きが右の絵（artFacesLeft=false）は逆。
+                const EnemyDef* facingDef = FindEnemyDef(enemy.assetId);
+                const bool artLeft = (facingDef == nullptr) || facingDef->artFacesLeft;
+                const bool drawFlipped = artLeft ? (enemy.direction == 0) : (enemy.direction != 0);
+                DrawPartsPass(enemy.parts, cameraX, cameraY, true, ghostDrawA, drawFlipped); // Feature: Composite Multi-Part Objects (Parts-M5)
                 int imgW, imgH;
                 GetGraphSize(enemy.handle, &imgW, &imgH);
                 int ecx = (int)(enemy.x + (enemy.hitboxWidth * enemy.scale) / 2.0f - cameraX);
@@ -13044,8 +13055,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
-                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, enemy.direction != 0);
-                } else if (enemy.direction == 0) {
+                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, drawFlipped);
+                } else if (!drawFlipped) {
                     // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
                     DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE);
                 } else {
@@ -13088,7 +13099,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawFormatString((int)(enemy.x - cameraX), (int)(enemy.y - cameraY) - (isDebugDrawMode ? 88 : 56), GetColor(255, 60, 60), "SCRIPT ERROR");
                 }
 
-                DrawPartsPass(enemy.parts, cameraX, cameraY, false, ghostDrawA); // Feature: Composite Multi-Part Objects (Parts-M5)
+                DrawPartsPass(enemy.parts, cameraX, cameraY, false, ghostDrawA, drawFlipped); // Feature: Composite Multi-Part Objects (Parts-M5)
             }
         }
 

@@ -938,6 +938,9 @@ public class EnemyDef
     // trueなら、画面（モニター）に映っていない間も動く。既定falseは「映っていない間は、更新を丸ごと止める」。
     // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
     public bool activeOffscreen { get; set; } = false;
+    // 絵が左向きに描かれているか（既定true：主人公以外の絵は左を前として描かれている）。右を向くときに左右反転して描く。
+    // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
+    public bool artFacesLeft { get; set; } = true;
     // trueなら、プレイヤーが回転させても本体の絵は傾かない（回るのはパーツだけ）。
     // 砲台のように「本体＝台座／回るのは砲身パーツ」という構成の敵で使う。
     // 【重要】C++側(DrawPixel.cpp の EnemyDef)と必ず対で持つこと。
