@@ -41,17 +41,6 @@
     "y": 384.0
   },
   "bgm_id": "bgm_editing_05",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#B4D2F0",
-      "drawOrder": 0,
-      "scrollRate": 0.0,
-      "loop": true,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
   "map": [
     [
       0,
@@ -1732,7 +1721,7 @@
       0,
       0,
       0,
-      0,
+      1,
       0,
       0,
       0,
@@ -7347,6 +7336,17 @@
       0,
       0
     ]
+  ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#B4D2F0",
+      "drawOrder": 0,
+      "scrollRate": 0.0,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
   ],
   "triggers": [
     {

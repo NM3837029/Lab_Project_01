@@ -41,17 +41,6 @@
     "y": 384.0
   },
   "bgm_id": "bgm_editing_05",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#B4D2F0",
-      "drawOrder": 0,
-      "scrollRate": 0.0,
-      "loop": true,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
   "map": [
     [
       0,
@@ -14548,6 +14537,17 @@
       0
     ]
   ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#B4D2F0",
+      "drawOrder": 0,
+      "scrollRate": 0.0,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [
     {
       "id": "r00_intro",
@@ -15264,7 +15264,10 @@
       "id": "gim_gate_door",
       "x": 576.0,
       "y": 256.0,
-      "param": "d_color"
+      "param": "d_color",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15275,7 +15278,10 @@
       "id": "gim_gate_door",
       "x": 1216.0,
       "y": 256.0,
-      "param": "d_dark"
+      "param": "d_dark",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15286,7 +15292,10 @@
       "id": "gim_gate_door",
       "x": 1856.0,
       "y": 256.0,
-      "param": "d_bright"
+      "param": "d_bright",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15297,7 +15306,10 @@
       "id": "gim_gate_door",
       "x": 2496.0,
       "y": 256.0,
-      "param": "d_grade"
+      "param": "d_grade",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15308,7 +15320,10 @@
       "id": "gim_gate_door",
       "x": 3136.0,
       "y": 256.0,
-      "param": "d_zoomin"
+      "param": "d_zoomin",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15319,7 +15334,10 @@
       "id": "gim_gate_door",
       "x": 3776.0,
       "y": 256.0,
-      "param": "d_zoomout"
+      "param": "d_zoomout",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15330,7 +15348,10 @@
       "id": "gim_gate_door",
       "x": 4416.0,
       "y": 256.0,
-      "param": "d_menu"
+      "param": "d_menu",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15346,7 +15367,10 @@
       "id": "gim_gate_door",
       "x": 5056.0,
       "y": 256.0,
-      "param": "d_move"
+      "param": "d_move",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15373,7 +15397,10 @@
       "id": "gim_gate_door",
       "x": 5696.0,
       "y": 256.0,
-      "param": "gateT"
+      "param": "gateT",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15384,7 +15411,10 @@
       "id": "gim_gate_door",
       "x": 6336.0,
       "y": 256.0,
-      "param": "d_rotate"
+      "param": "d_rotate",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15400,7 +15430,10 @@
       "id": "gim_gate_door",
       "x": 6976.0,
       "y": 256.0,
-      "param": "d_flip"
+      "param": "d_flip",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15416,7 +15449,10 @@
       "id": "gim_gate_door",
       "x": 7616.0,
       "y": 256.0,
-      "param": "d_undo"
+      "param": "d_undo",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15432,7 +15468,10 @@
       "id": "gim_gate_door",
       "x": 8256.0,
       "y": 256.0,
-      "param": "d_areaselect"
+      "param": "d_areaselect",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gim_scalable_box",
@@ -15448,7 +15487,10 @@
       "id": "gim_gate_door",
       "x": 8896.0,
       "y": 256.0,
-      "param": "d_cut"
+      "param": "d_cut",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
@@ -15459,7 +15501,10 @@
       "id": "gim_gate_door",
       "x": 9536.0,
       "y": 256.0,
-      "param": "d_ground"
+      "param": "d_ground",
+      "noScale": true,
+      "noRotate": true,
+      "noMove": true
     },
     {
       "id": "gimmick_checkpoint",
