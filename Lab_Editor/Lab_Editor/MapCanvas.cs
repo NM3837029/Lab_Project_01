@@ -268,6 +268,7 @@ public class MapCanvas : Panel
                              def?.sprite, en.Angle, icon,
                              SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50));
             DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: false);
+            DrawLockBadge(g, en.X, en.Y, bodySize, en.EditLocks);
         }
 
         // 9. ギミック — ギミック定義は width/height を持たず、当たり判定サイズが表示サイズを兼ねている
@@ -281,6 +282,7 @@ public class MapCanvas : Panel
             DrawPlacedObject(g, gi.X, gi.Y, new SizeF(gimW, gimH),
                              def?.sprite, gi.Angle, icon,
                              SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220));
+            DrawLockBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.EditLocks);
         }
 
         // 10. アイテム（ギミックと同じくhitboxサイズが表示サイズ）
@@ -291,6 +293,7 @@ public class MapCanvas : Panel
             DrawPlacedObject(g, it.X, it.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale),
                              def?.sprite, it.Angle, icon,
                              SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0));
+            DrawLockBadge(g, it.X, it.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale), it.EditLocks);
         }
 
         // 11. トリガー矩形 (Feature 5)。1件以上存在する場合のみ描画処理を呼ぶ（無駄な呼び出しを避ける）。
@@ -887,6 +890,15 @@ public class MapCanvas : Panel
             var miEdit = new ToolStripMenuItem("大きさ・角度を編集...");
             miEdit.Click += (s, e) => EditPlacedTransform(target);
             menu.Items.Add(miEdit);
+            // この1つだけ、ゲーム内でプレイヤーにできる編集操作（移動・拡縮・回転…）を許可／禁止する。
+            // 設定済みのものは、メニューにも件数を出して「何かが設定されている」ことが分かるようにする。
+            var curLocks = GetEditLocks(target);
+            string lockText = "編集の可否を設定...";
+            if (curLocks != null && curLocks.Any())
+                lockText += $"（禁止 {curLocks.DenyCount()} ／ 許可 {curLocks.AllowCount()}）";
+            var miLocks = new ToolStripMenuItem(lockText);
+            miLocks.Click += (s, e) => EditPlacedLocks(target);
+            menu.Items.Add(miLocks);
             menu.Items.Add(new ToolStripSeparator());
         }
         var miDel = new ToolStripMenuItem("削除");
@@ -898,6 +910,9 @@ public class MapCanvas : Panel
             else if (target is EventTrigger tr) Stage.Triggers.Remove(tr);
             SelectedObject = null;
             Fire(); Invalidate();
+            // メニューからの操作はマウスのドラッグではないので OnMouseUp の EditCompleted が来ない。
+            // ここで知らせないと、保存も「元に戻す」への登録も、次にマウスを操作するまで行われない。
+            EditCompleted?.Invoke(this, EventArgs.Empty);
         };
         menu.Items.Add(miDel);
         menu.Show(PointToScreen(new Point(cx, cy)));
@@ -957,6 +972,71 @@ public class MapCanvas : Panel
         propScaleY?.SetValue(target, dlg.ResultScaleY);
         propAngle.SetValue(target, dlg.ResultAngle);
         Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty); // メニュー操作の結果も保存・履歴へ（上の削除と同じ理由）
+    }
+
+    // 配置物の「編集の可否」の上書きを返す（敵・ギミック・アイテム以外は null）
+    private static PlacedEditLocks? GetEditLocks(object target) => target switch
+    {
+        PlacedEnemy e => e.EditLocks,
+        PlacedGimmick g => g.EditLocks,
+        PlacedItem i => i.EditLocks,
+        _ => null,
+    };
+
+    // 右クリックメニュー「編集の可否を設定...」。この配置物だけ、7つの編集操作を「既定／許可／禁止」から選ぶ。
+    // 「既定」はアセット側の設定（noMove 等）に従う。アセットが禁止していても、この1つだけ許可することもできる。
+    private void EditPlacedLocks(object target)
+    {
+        var locks = GetEditLocks(target);
+        if (locks == null || Assets == null) return;
+
+        // アセット側の設定（ダイアログに「アセットは禁止」と出すため）と、表示名
+        bool[] assetLocks = new bool[7];
+        string name = "";
+        bool isItem = target is PlacedItem;
+        if (target is PlacedEnemy pe)
+        {
+            var d = Assets.Enemies.FirstOrDefault(x => x.id == pe.Id);
+            name = d?.name ?? pe.Id;
+            if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
+        }
+        else if (target is PlacedGimmick pg)
+        {
+            var d = Assets.Gimmicks.FirstOrDefault(x => x.id == pg.Id);
+            name = d?.name ?? pg.Id;
+            if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
+        }
+        else if (target is PlacedItem pi)
+        {
+            var d = Assets.Items.FirstOrDefault(x => x.id == pi.Id);
+            name = d?.name ?? pi.Id;
+            if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
+        }
+
+        using var dlg = new PlacedEditLockForm(name, locks, assetLocks, isItem);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        for (int i = 0; i < 7; i++) locks.Set(i, dlg.Result.Get(i));
+        Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty);
+    }
+
+    // 編集の可否を上書きした配置物の右上に、小さな印を出す（禁止があれば赤の「禁n」、許可だけなら緑の「許n」）。
+    // 設定したものをステージ画面で見分けられないと、どれに設定したか分からなくなるため。
+    private void DrawLockBadge(Graphics g, float worldX, float worldY, SizeF worldSize, PlacedEditLocks locks)
+    {
+        if (!locks.Any()) return;
+        var rect = ToScreenRect(worldX, worldY, worldSize.Width, worldSize.Height);
+        if (rect.Right < 0 || rect.Left > Width || rect.Bottom < 0 || rect.Top > Height) return;
+        int deny = locks.DenyCount(), allow = locks.AllowCount();
+        string text = deny > 0 ? $"禁{deny}" : $"許{allow}";
+        var back = deny > 0 ? Color.FromArgb(210, 200, 40, 40) : Color.FromArgb(210, 40, 150, 70);
+        using var font = new Font("Meiryo UI", 7f, FontStyle.Bold);
+        var size = g.MeasureString(text, font);
+        var badge = new RectangleF(rect.Right - size.Width + 2, rect.Top - 4, size.Width, size.Height - 2);
+        using var br = new SolidBrush(back);
+        g.FillRectangle(br, badge);
+        g.DrawString(text, font, Brushes.White, badge.X, badge.Y - 1);
     }
 
     // 角度をAIが自前の状態に使っているギミックの種類。

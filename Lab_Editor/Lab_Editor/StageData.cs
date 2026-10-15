@@ -331,7 +331,8 @@ public class StageData
                         PatrolLeft = e["patrol_left"]?.Value<float>() ?? -1,
                         PatrolRight = e["patrol_right"]?.Value<float>() ?? -1,
                         Scale = e["scale"]?.Value<float>() ?? 1.0f,
-                        Angle = e["angle"]?.Value<float>() ?? 0f
+                        Angle = e["angle"]?.Value<float>() ?? 0f,
+                        EditLocks = PlacedEditLocks.ReadFrom(e)
                     });
 
             // ギミック — 配置座標とオプションパラメータ(param)を読み込む。
@@ -346,7 +347,8 @@ public class StageData
                         Scale = g["scale"]?.Value<float>() ?? 1.0f,
                         // scaleY を省略した既存ステージは等方拡大として読む（ゲーム側と同じ既定）
                         ScaleY = g["scaleY"]?.Value<float>() ?? g["scale"]?.Value<float>() ?? 1.0f,
-                        Angle = g["angle"]?.Value<float>() ?? 0f
+                        Angle = g["angle"]?.Value<float>() ?? 0f,
+                        EditLocks = PlacedEditLocks.ReadFrom(g)
                     });
 
             // アイテム — 配置座標を読み込む。
@@ -358,7 +360,8 @@ public class StageData
                         X = i["x"]?.Value<float>() ?? 0,
                         Y = i["y"]?.Value<float>() ?? 0,
                         Scale = i["scale"]?.Value<float>() ?? 1.0f,
-                        Angle = i["angle"]?.Value<float>() ?? 0f
+                        Angle = i["angle"]?.Value<float>() ?? 0f,
+                        EditLocks = PlacedEditLocks.ReadFrom(i)
                     });
 
             // プラットフォーム — 当たり判定用の矩形（始点・終点座標）の一覧を読み込む。
@@ -441,6 +444,7 @@ public class StageData
             // 既定値と同じなら書かない（既存ステージへ余計な差分を出さないため）
             if (e.Scale != 1.0f) ej["scale"] = e.Scale;
             if (e.Angle != 0f) ej["angle"] = e.Angle;
+            e.EditLocks.WriteTo(ej); // 編集操作の可否の上書き（無ければ何も書かない）
             ea.Add(ej);
         }
         j["enemies"] = ea;
@@ -454,6 +458,7 @@ public class StageData
             if (g.Scale != 1.0f) gj["scale"] = g.Scale;
             if (g.ScaleY != 1.0f) gj["scaleY"] = g.ScaleY;
             if (g.Angle != 0f) gj["angle"] = g.Angle;
+            g.EditLocks.WriteTo(gj);
             ga.Add(gj);
         }
         j["gimmicks"] = ga;
@@ -465,6 +470,7 @@ public class StageData
             var ij = new JObject { ["id"] = i.Id, ["x"] = i.X, ["y"] = i.Y };
             if (i.Scale != 1.0f) ij["scale"] = i.Scale;
             if (i.Angle != 0f) ij["angle"] = i.Angle;
+            i.EditLocks.WriteTo(ij);
             ia2.Add(ij);
         }
         j["items"] = ia2;
@@ -734,6 +740,98 @@ public class EditCostSettings
 }
 
 // ===== 配置オブジェクト =====
+
+// 置いた物（敵・ギミック・アイテム1つ）ごとの「編集操作の可否」の上書き。
+//
+// アセット単位の禁止フラグ（noMove 等。EnemyDef / GimmickDef / ItemDef）だけだと、同じ敵を置いた場所ごとに
+// 変えられない（「この1体だけ動かせる」「この1体だけ止められない」など）。そこで、ステージJSONの各エントリに、
+// アセットと同じ名前のキーを書けるようにした。
+//   null  … アセットの設定に従う（既定。キーを書かない）
+//   true  … この物は、その操作を禁止する
+//   false … この物は、アセットが禁止していても、その操作を許可する
+// ゲーム側は DrawPixel.cpp の EditLockOverride（ReadEditLockOverride / IsEnemyEditLocked 等）。片方だけだと保存時に消える。
+// 履歴（元に戻す）は StageData 全体をJSONにして覚えるので、値は public プロパティ（setter付き）にしてある。
+public class PlacedEditLocks
+{
+    public bool? NoScale { get; set; }
+    public bool? NoRotate { get; set; }
+    public bool? NoMove { get; set; }
+    public bool? NoFlip { get; set; }
+    public bool? NoPause { get; set; }
+    public bool? NoRewind { get; set; }
+    public bool? NoSpeed { get; set; }
+
+    // ステージJSONのキー。並びはゲーム側の EditOp（拡大縮小・回転・移動・反転・一時停止・巻き戻し・速度変更）と同じ
+    public static readonly string[] Keys = { "noScale", "noRotate", "noMove", "noFlip", "noPause", "noRewind", "noSpeed" };
+    // 画面に出す操作名
+    public static readonly string[] Labels = { "拡大縮小", "回転", "移動", "向き反転", "個別の一時停止", "個別の巻き戻し", "速度変更" };
+
+    // 添字（Keys と同じ並び）で読み書きする。ダイアログやJSON入出力で7回同じことを書かないため
+    public bool? Get(int i) => i switch
+    {
+        0 => NoScale, 1 => NoRotate, 2 => NoMove, 3 => NoFlip, 4 => NoPause, 5 => NoRewind, _ => NoSpeed,
+    };
+    public void Set(int i, bool? v)
+    {
+        switch (i)
+        {
+            case 0: NoScale = v; break;
+            case 1: NoRotate = v; break;
+            case 2: NoMove = v; break;
+            case 3: NoFlip = v; break;
+            case 4: NoPause = v; break;
+            case 5: NoRewind = v; break;
+            default: NoSpeed = v; break;
+        }
+    }
+
+    // 上書きが1つでもあるか（保存・印の表示の判定に使う）
+    public bool Any()
+    {
+        for (int i = 0; i < 7; i++) if (Get(i).HasValue) return true;
+        return false;
+    }
+    public int DenyCount()
+    {
+        int n = 0;
+        for (int i = 0; i < 7; i++) if (Get(i) == true) n++;
+        return n;
+    }
+    public int AllowCount()
+    {
+        int n = 0;
+        for (int i = 0; i < 7; i++) if (Get(i) == false) n++;
+        return n;
+    }
+    public PlacedEditLocks Clone()
+    {
+        var c = new PlacedEditLocks();
+        for (int i = 0; i < 7; i++) c.Set(i, Get(i));
+        return c;
+    }
+
+    // 配置1件のJSONから読む。キーが無い（または真偽値でない）操作は null のまま
+    public static PlacedEditLocks ReadFrom(JToken? entry)
+    {
+        var locks = new PlacedEditLocks();
+        if (entry == null) return locks;
+        for (int i = 0; i < 7; i++)
+        {
+            var t = entry[Keys[i]];
+            if (t != null && t.Type == JTokenType.Boolean) locks.Set(i, t.Value<bool>());
+        }
+        return locks;
+    }
+    // 配置1件のJSONへ書く。上書きの無い操作はキーを書かない（既存ステージに余計な差分を出さないため）
+    public void WriteTo(JObject entry)
+    {
+        for (int i = 0; i < 7; i++)
+        {
+            var v = Get(i);
+            if (v.HasValue) entry[Keys[i]] = v.Value;
+        }
+    }
+}
 // マップ上に実際に1体配置された敵1体分の情報。EnemyDef（敵の「種類」の定義）とは別に、
 // 「どの種類の敵を、どこに、どんな巡回範囲で置くか」を表す。
 public class PlacedEnemy
@@ -761,6 +859,11 @@ public class PlacedEnemy
     public float Scale { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
+
+    // 置いた物ごとの編集操作の可否の上書き（PlacedEditLocks 参照）。右クリックメニュー「編集の可否を設定...」で変える。
+    // プロパティ表には出さない（専用のダイアログで編集する）。
+    [System.ComponentModel.Browsable(false)]
+    public PlacedEditLocks EditLocks { get; set; } = new();
 }
 
 // マップ上に実際に1体配置されたギミック1個分の情報。
@@ -789,6 +892,11 @@ public class PlacedGimmick
     public float ScaleY { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
+
+    // 置いた物ごとの編集操作の可否の上書き（PlacedEditLocks 参照）。右クリックメニュー「編集の可否を設定...」で変える。
+    // プロパティ表には出さない（専用のダイアログで編集する）。
+    [System.ComponentModel.Browsable(false)]
+    public PlacedEditLocks EditLocks { get; set; } = new();
 }
 
 // マップ上に実際に1個配置されたアイテム1個分の情報。
@@ -808,6 +916,11 @@ public class PlacedItem
     public float Scale { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
+
+    // 置いた物ごとの編集操作の可否の上書き（PlacedEditLocks 参照）。右クリックメニュー「編集の可否を設定...」で変える。
+    // プロパティ表には出さない（専用のダイアログで編集する）。
+    [System.ComponentModel.Browsable(false)]
+    public PlacedEditLocks EditLocks { get; set; } = new();
 }
 
 // 当たり判定用の矩形1個分の情報（足場・壁など、見た目のタイルとは別に判定だけを持たせたい場合に使う）。

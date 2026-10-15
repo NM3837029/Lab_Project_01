@@ -530,6 +530,33 @@ struct GimmickDef {
 std::vector<EnemyDef> enemyDefs;     // 読み込み済みの敵定義（enemies.json由来）を全種類分保持する一覧
 std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義（gimmicks.json由来）を全種類分保持する一覧
 
+// 置いた物（敵・ギミック・アイテム1つ）ごとの「編集操作の可否」の上書き。
+//
+// アセット単位の禁止フラグ（noMove 等。EnemyDef / GimmickDef / ItemDef）だけだと、同じ敵を置いた場所ごとに
+// 変えられない（たとえば「この1体だけ動かせる」「この1体だけ止められない」）。そこで、ステージJSONの
+// 敵・ギミック・アイテムの各エントリに、アセットと同じ名前のキーを書けるようにする。
+//   キーが無い  … アセットの設定に従う（既定。-1）
+//   true        … この物は、その操作を禁止する（1）
+//   false       … この物は、アセットが禁止していても、その操作を許可する（0）
+// 添字は EditOp の並び（拡大縮小・回転・移動・反転・個別の一時停止・個別の巻き戻し・速度変更）と同じ。
+// Lab_Editor の PlacedEnemy / PlacedGimmick / PlacedItem（StageData.cs）にも同名のキーがある。片方だけだと保存時に消える。
+struct EditLockOverride {
+    signed char v[7] = { -1, -1, -1, -1, -1, -1, -1 };
+    bool Any() const { for (int i = 0; i < 7; i++) if (v[i] >= 0) return true; return false; }
+};
+static const char* const kEditLockKeys[7] = { "noScale", "noRotate", "noMove", "noFlip", "noPause", "noRewind", "noSpeed" };
+// ステージJSONの1エントリから読む。キーが無い操作は -1（アセットに従う）のまま
+static void ReadEditLockOverride(const json& j, EditLockOverride& o) {
+    for (int i = 0; i < 7; i++) {
+        auto it = j.find(kEditLockKeys[i]);
+        if (it != j.end() && it->is_boolean()) o.v[i] = it->get<bool>() ? 1 : 0;
+    }
+}
+// ステージJSONの1エントリへ書く。上書きの無い操作はキーを書かない（既存ステージに余計な差分を出さないため）
+static void WriteEditLockOverride(json& j, const EditLockOverride& o) {
+    for (int i = 0; i < 7; i++) if (o.v[i] >= 0) j[kEditLockKeys[i]] = (o.v[i] == 1);
+}
+
 // ステージ上に実際に配置された「敵1体分」の情報。どの定義(EnemyDef)を使うか、どこに置くかだけを持つ軽量な構造体。
 struct PlacedEnemy {
     int def_idx;  // enemyDefs配列内でのインデックス（この敵がどの種類の敵かを指す）
@@ -539,6 +566,7 @@ struct PlacedEnemy {
     // Lab_Editor で付けた値が「ここから一度保存した瞬間に消える」ことになる。
     float scale = 1.0f;
     float angle = 0.0f;
+    EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（保持しないと、ここからの保存で消える）
 };
 // ステージ上に実際に配置された「ギミック1個分」の情報。
 struct PlacedGimmick {
@@ -550,6 +578,7 @@ struct PlacedGimmick {
     float scale = 1.0f;
     float scaleY = 1.0f;
     float angle = 0.0f;
+    EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
@@ -658,6 +687,7 @@ struct PlacedItem {
     // （ここで持たないと、Lab_Editor で付けた値がこの画面からの保存で消える）。
     float scale = 1.0f;
     float angle = 0.0f;
+    EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き
 };
 std::vector<PlacedItem> editorPlacedItems; // 現在編集中/プレイ中のステージに配置されているアイテムの一覧
 
@@ -2090,6 +2120,10 @@ struct Item {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartInstance> parts; // このアイテムを構成する追加パーツ（無ければ空のまま）
+
+    // 置いた物ごとの編集可否の上書き。アイテムはゲーム内の編集ツールでまだ選択できないため、現在は効果が無い
+    // （Lab_Editor で設定・保存はでき、アイテムが選択できるようになったときにそのまま効く）。
+    EditLockOverride lockOv;
 };
 
 // 主要な構造体
@@ -2221,6 +2255,8 @@ struct Enemy {
     float        spawnBaseScale = 1.0f; // アセット既定の scale（リアクションの基準）
     float        spawnBaseAngle = 0.0f; // アセット既定の angle
     unsigned int spawnDirtyMask = 0u;   // 配置時点で立てておくダーティビット
+
+    EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（ステージJSONの noMove 等。EditLockOverride 参照）
 };
 
 // ギミック1個分の実行時状態。GimmickDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・状態を持つ。
@@ -2291,6 +2327,8 @@ struct Gimmick {
     float        spawnBaseWidth = 0.0f, spawnBaseHeight = 0.0f;
     float        spawnBaseAngle = 0.0f;
     unsigned int spawnDirtyMask = 0u;
+
+    EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（ステージJSONの noMove 等）
 };
 
 // 弾1発分の実行時状態。
@@ -2447,8 +2485,15 @@ bool IsDefEditLocked(const DefT* def, EditOp op) {
         default:            return def->noSpeed; // EDITOP_SPEED
     }
 }
-bool IsEnemyEditLocked(const Enemy& e, EditOp op) { return IsDefEditLocked(FindEnemyDef(e.assetId), op); }
-bool IsGimmickEditLocked(const Gimmick& g, EditOp op) { return IsDefEditLocked(FindGimmickDef(g.assetId), op); }
+// 置いた物ごとの上書き（lockOv）があれば、アセットの設定より優先する。EditOp の並びと lockOv.v の添字は同じ。
+bool IsEnemyEditLocked(const Enemy& e, EditOp op) {
+    if (e.lockOv.v[op] >= 0) return e.lockOv.v[op] == 1;
+    return IsDefEditLocked(FindEnemyDef(e.assetId), op);
+}
+bool IsGimmickEditLocked(const Gimmick& g, EditOp op) {
+    if (g.lockOv.v[op] >= 0) return g.lockOv.v[op] == 1;
+    return IsDefEditLocked(FindGimmickDef(g.assetId), op);
+}
 
 bool GimmickAngleIsAiOwned(GimmickType type) {
     return type == GIMMICK_ROTATING_BRIDGE
@@ -5907,6 +5952,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
                             // 基準はアセット既定（倍率は defScale、角度は0）なので、
                             // ゲーム内の編集ツールで同じ倍率・角度にしたときと同じ反応になる。
+                            ReadEditLockOverride(ej, jsonStage.enemies.back().lockOv); // 置いた物ごとの編集可否（noMove 等）
                             {
                                 Enemy& placedEnemy = jsonStage.enemies.back();
                                 float scaleMul = ej.value("scale", 1.0f);
@@ -5977,6 +6023,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     if (angleEdited)       newGim.spawnDirtyMask |= EDIT_DIRTY_ANGLE;
                                 }
                             }
+                            ReadEditLockOverride(gj, newGim.lockOv); // 置いた物ごとの編集可否（noMove 等）
                             jsonStage.gimmicks.push_back(newGim);
                         }
                     }
@@ -6010,6 +6057,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             newItem.assetId = id;
                             newItem.handle = iHandle;
                             newItem.angle = ij.value("angle", 0.0f);
+                            ReadEditLockOverride(ij, newItem.lockOv); // 置いた物ごとの編集可否（アイテムは今は効果なし）
                             jsonStage.items.push_back(newItem);
                         }
                     }
@@ -14594,6 +14642,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             PlacedEnemy pe = {def_idx, e["x"], e["y"]};
                                             pe.scale = e.value("scale", 1.0f);
                                             pe.angle = e.value("angle", 0.0f);
+                                            ReadEditLockOverride(e, pe.lockOv);
                                             editorPlacedEnemies.push_back(pe);
                                         }
                                     }
@@ -14609,6 +14658,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             pg.scale = e.value("scale", 1.0f);
                                             pg.scaleY = e.value("scaleY", pg.scale);
                                             pg.angle = e.value("angle", 0.0f);
+                                            ReadEditLockOverride(e, pg.lockOv);
                                             editorPlacedGimmicks.push_back(pg);
                                         }
                                     }
@@ -14622,6 +14672,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             PlacedItem pi = {def_idx, e["x"], e["y"]};
                                             pi.scale = e.value("scale", 1.0f);
                                             pi.angle = e.value("angle", 0.0f);
+                                            ReadEditLockOverride(e, pi.lockOv);
                                             editorPlacedItems.push_back(pi);
                                         }
                                     }
@@ -14690,6 +14741,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 既定値のときはキーを書かない（既存ステージに余計な差分を出さないため）
                     if (e.scale != 1.0f) j["scale"] = e.scale;
                     if (e.angle != 0.0f) j["angle"] = e.angle;
+                    WriteEditLockOverride(j, e.lockOv);
                     stageData["enemies"].push_back(j);
                 }
                 stageData["gimmicks"] = json::array();
@@ -14699,6 +14751,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (g.scale != 1.0f) j["scale"] = g.scale;
                     if (g.scaleY != 1.0f) j["scaleY"] = g.scaleY;
                     if (g.angle != 0.0f) j["angle"] = g.angle;
+                    WriteEditLockOverride(j, g.lockOv);
                     stageData["gimmicks"].push_back(j);
                 }
                 stageData["items"] = json::array();
@@ -14706,6 +14759,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     json j = { {"id", itemDefs[i.def_idx].id}, {"x", i.x}, {"y", i.y} };
                     if (i.scale != 1.0f) j["scale"] = i.scale;
                     if (i.angle != 0.0f) j["angle"] = i.angle;
+                    WriteEditLockOverride(j, i.lockOv);
                     stageData["items"].push_back(j);
                 }
                 // 保存と同時に、メモリ上のステージが持つ性能も更新する。
