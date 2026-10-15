@@ -321,15 +321,6 @@
       "unlock": "always",
       "require": [],
       "item_total": 24
-    },
-    {
-      "file": "stage_demo.json",
-      "name": "あたらしい素材のおためし",
-      "thumbnail": "",
-      "order": 8,
-      "unlock": "always",
-      "require": [],
-      "item_total": 27
     }
   ],
   "result": {

@@ -36,22 +36,17 @@
     "flatCutCreate": 20.0,
     "cutCostPerTile": 1.2
   },
+  "player_locks": {
+    "noMove": true,
+    "noScale": true,
+    "noRotate": true,
+    "noGround": true
+  },
   "goal": {
     "x": 6560.0,
     "y": 384.0
   },
   "bgm_id": "bgm_editing_06",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#F1E1EA",
-      "drawOrder": 0,
-      "scrollRate": 0.0,
-      "loop": true,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
   "map": [
     [
       6,
@@ -9688,6 +9683,17 @@
       0
     ]
   ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#F1E1EA",
+      "drawOrder": 0,
+      "scrollRate": 0.0,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [],
   "enemies": [
     {
@@ -9813,6 +9819,16 @@
       "y": 380.0,
       "patrol_left": 6464.0,
       "patrol_right": 6688.0
+    },
+    {
+      "id": "enemy_kaiten",
+      "x": 5568.0,
+      "y": 256.0
+    },
+    {
+      "id": "enemy_kaiten",
+      "x": 5568.0,
+      "y": 256.0
     }
   ],
   "gimmicks": [
@@ -10258,11 +10274,5 @@
       "y": 336.0
     }
   ],
-  "platforms": [],
-  "player_locks": {
-    "noMove": true,
-    "noScale": true,
-    "noRotate": true,
-    "noGround": true
-  }
+  "platforms": []
 }

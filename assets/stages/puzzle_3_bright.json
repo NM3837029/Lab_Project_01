@@ -41,17 +41,6 @@
     "y": 384.0
   },
   "bgm_id": "bgm_editing_07",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#BCC9E0",
-      "drawOrder": 0,
-      "scrollRate": 0.0,
-      "loop": true,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
   "map": [
     [
       6,
@@ -9958,6 +9947,17 @@
       0
     ]
   ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#BCC9E0",
+      "drawOrder": 0,
+      "scrollRate": 0.0,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [],
   "enemies": [
     {
@@ -10084,6 +10084,11 @@
       "y": 380.0,
       "patrol_left": 6688.0,
       "patrol_right": 6912.0
+    },
+    {
+      "id": "enemy_size",
+      "x": 1088.0,
+      "y": 256.0
     }
   ],
   "gimmicks": [
