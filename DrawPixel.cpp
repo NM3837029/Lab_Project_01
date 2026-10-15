@@ -5121,14 +5121,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // コストが足りなくて操作できなかったとき。拒否音と、必要量・残量をまとめて出す。
     // 以前は拒否音だけで、「なぜ通らないのか」が分からなかった。
     auto EditDeniedCost = [&](float need) {
-        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied);
         char b[96];
         sprintf_s(b, sizeof(b), "コストが足りません（必要 %.0f／残り %.0f）", need, editCost);
         ShowEditToast(b, 2);
     };
     // コスト以外の理由で操作できなかったとき（対象がロックされている、取り消す物が無い、など）
     auto EditDeniedWhy = [&](const std::string& why) {
-        SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied);
         ShowEditToast(why, 2);
     };
     // 継続系の操作（時間停止・早送り・画面エフェクト）が使えなかったとき。
@@ -5173,7 +5173,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
         redoStack.push_back(en);
         NoteEditOp("undo");
-        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset);
         {
             char b[96];
             if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "取り消しました：%s（コスト +%.0f）", DescribeEditFields(en).c_str(), en.cost);
@@ -5192,7 +5192,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         editCost -= en.cost;
         ApplySnaps(en.after, en.fields);
         undoStack.push_back(en);
-        SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset);
         {
             char b[96];
             if (en.cost > 0.0f) sprintf_s(b, sizeof(b), "やり直しました：%s（コスト -%.0f）", DescribeEditFields(en).c_str(), en.cost);
@@ -5492,7 +5492,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->direction = (g->direction == 0 ? 1 : 0);
             g->editDirtyMask |= EDIT_DIRTY_DIR;
         }
-        SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.flip); // 反転できたときの音
         PushUndo(undoBefore, currentEditCost.flatDirectionFlip, false);
         NoteEditOp("flip");
         return true;
@@ -5531,7 +5531,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->isRewinding = false;
             g->editDirtyMask = EDIT_DIRTY_NONE;
         }
-        SoundManager::Get().PlaySe(gameConfig.editSe.reset); // 編集を戻せたときの音
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset); // 編集を戻せたときの音
         PushUndo(undoBefore, currentEditCost.flatResetAll, false);
         return true;
     };
@@ -5607,7 +5607,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                 selectedType = SELECT_NONE;
                 targetGimmick = nullptr;
-                SoundManager::Get().PlaySe(gameConfig.editSe.reset);
+                SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset);
             } else {
                 EditDeniedCost(currentEditCost.flatMenuToggle);
             }
@@ -6342,6 +6342,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         collectedItemIds.clear();
 
         // Feature 3: BGM再生
+        // 鳴らせないBGM（IDが無い・ファイルが読めない）を指定されたときも、前のステージのBGMは止める
+        // （PlayBgm が止める）。BGMの指定が無いステージは、何も鳴らさない。
         if (!stage.bgmId.empty()) {
             SoundManager::Get().PlayBgm(stage.bgmId);
         } else {
@@ -6892,12 +6894,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 if (hover && clickEdge) {
                     if (unlocked) chosen = i;
-                    else SoundManager::Get().PlaySe(gameConfig.editSe.denied); // 選べない理由が伝わるように音で返す
+                    else SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied); // 選べない理由が伝わるように音で返す
                 }
             }
             if (decideEdge && selectCursor >= 0 && selectCursor < count) {
                 if (GameCfg::IsStageUnlocked(gameConfig, saveData, (size_t)selectCursor)) chosen = selectCursor;
-                else SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                else SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied);
             }
 
             // 「もどる」ボタン
@@ -7150,7 +7152,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else if (act == 4) {
                     // 終了は取り返しがつかないので、2回押して確定する（別の項目へ動かすと取り消し）
                     if (confirmQuit) { sysQuit = true; done = true; }
-                    else { confirmQuit = true; SoundManager::Get().PlaySe(gameConfig.editSe.denied); }
+                    else { confirmQuit = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied); }
                 }
             }
 
@@ -7233,8 +7235,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         static bool lastMiddleClick = false;
         bool currentMiddleClick = (GetMouseInput() & MOUSE_INPUT_MIDDLE) != 0;
         if (currentMiddleClick && !lastMiddleClick) {
-            if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            if (isPaused) { isPaused = false; menu.isOpen = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; menu.isOpen = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
             else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastMiddleClick = currentMiddleClick;
@@ -7243,8 +7245,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — 一時停止は編集コストを消費する継続系操作。停止解除は常に無料
         static bool lastPauseKey = false;
         if (CheckHitKey(KEY_INPUT_SPACE) && !lastPauseKey) {
-            if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+            if (isPaused) { isPaused = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
+            else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
             else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
         }
         lastPauseKey = (CheckHitKey(KEY_INPUT_SPACE) != 0);
@@ -7265,8 +7267,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ — 早送りは継続系操作。解除は常に無料
         static bool lastFFKey = false;
         if (CheckHitKey(KEY_INPUT_F) && !lastFFKey) {
-            if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
-            else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySe(gameConfig.editSe.fastForward); }
+            if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.fastForward); }
+            else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.fastForward); }
             else { EditDeniedToggle(fastForwardOpEnabled, "早送り"); }
         }
         lastFFKey = (CheckHitKey(KEY_INPUT_F) != 0);
@@ -7283,7 +7285,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 色の輪を「赤・緑・青・なし」のどれかへ合わせる（判定の色フィルタは、輪の状態から毎フレーム求め直す）
                 ColorGrade::SetQuickFilter(cgState, nextFilter);
                 playerColorFilter = nextFilter;
-                SoundManager::Get().PlaySe(gameConfig.editSe.colorFilter);
+                SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.colorFilter);
             } else if (!screenEffectOpEnabled) {
                 EditDeniedToggle(false, "画面エフェクト");
             } else {
@@ -7320,7 +7322,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             lastStepKey  = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
             lastStepKeyL = (CheckHitKey(KEY_INPUT_LEFT)  != 0);
         }
-        if (isStepFrame) SoundManager::Get().PlaySe(gameConfig.editSe.step); // コマ送り1回ぶんの音
+        if (isStepFrame) SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.step); // コマ送り1回ぶんの音
 
         static bool lastLeftClick = false;
         bool currentLeftClick = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
@@ -7387,7 +7389,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // （音源 Rewind.wav はこれまで一度も使われていなかった）
         {
             static bool lastRewindKey = false;
-            if (isRKeyPressed && !lastRewindKey) SoundManager::Get().PlaySe(gameConfig.editSe.rewind);
+            if (isRKeyPressed && !lastRewindKey) SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.rewind);
             lastRewindKey = isRKeyPressed;
         }
 
@@ -7681,10 +7683,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 if (editCtrlHeld) {
                     ApplyAngleDelta((float)wheelRot * (EDIT_KNOB_PI / 12.0f));
-                    SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
+                    SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.rotate);
                 } else {
                     ApplyScaleDelta((float)wheelRot * 0.1f, (float)wheelRot * 32.0f, true);
-                    SoundManager::Get().PlaySe(gameConfig.editSe.scale);
+                    SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.scale);
                 }
             }
             // ホイールが止まって0.4秒たったら、まとめた操作を確定する
@@ -7699,7 +7701,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool redoNow = editCtrlHeld && CheckHitKey(KEY_INPUT_Y);
                 if (objectEditOpEnabled && !gestureActive && !isAreaSelecting && !menu.isOpen) {
                     if (undoNow && !lastUndoKey) {
-                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySe(gameConfig.editSe.denied); ShowEditToast("カットの作成を取りやめました", 0); }
+                        if (tempCutStart >= 0.0f) { tempCutStart = -1.0f; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied); ShowEditToast("カットの作成を取りやめました", 0); }
                         else EditUndo();
                     }
                     if (redoNow && !lastRedoKey) EditRedo();
@@ -7749,8 +7751,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (currentLeftClick && !menu.isOpen && !menuClickConsumed) {
                 // 一時停止ボタンのチェック
                 if (!lastLeftClick && !bigView && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
-                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
-                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySe(gameConfig.editSe.pause); }
+                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
+                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
                     else { EditDeniedToggle(pauseOpEnabled, "時間停止"); }
                 }
 
@@ -7775,7 +7777,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (tempCutStart < 0.0f) {
                             // 1点目：始点を記録するだけ。ここではまだコストを消費しない
                             tempCutStart = ct;
-                            SoundManager::Get().PlaySe(gameConfig.editSe.cut);
+                            SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.cut);
                         } else if (editCost >= pendingCutCost) {
                             // 2点目：区間が確定。クリック順に関係なく小さい方を始点にそろえる
                             float start = (ct > tempCutStart ? tempCutStart : ct);
@@ -7801,7 +7803,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 gimmicks.push_back(cut);
                                 NoteEditOp("cut");
                                 tempCutStart = -1.0f;
-                                SoundManager::Get().PlaySe(gameConfig.editSe.cut);
+                                SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.cut);
                             }
                         } else {
                             // コスト不足。始点は残さず捨てて、打ち直しさせる
@@ -8266,9 +8268,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // マウスを離して確定した瞬間に1回だけ鳴らす。
                 // 取り消し用：ジェスチャが終わったので、前後の差を1手として記録する
                 if (gestureActive) { PushUndo(gestureBefore, 0.0f, false); gestureActive = false; gestureBefore.clear(); }
-                if (isScaling || isScalingHeight || isHandleScale) SoundManager::Get().PlaySe(gameConfig.editSe.scale);
-                else if (isRotating || isHandleRotate)             SoundManager::Get().PlaySe(gameConfig.editSe.rotate);
-                else if (isDragging)                               SoundManager::Get().PlaySe(gameConfig.editSe.move);
+                if (isScaling || isScalingHeight || isHandleScale) SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.scale);
+                else if (isRotating || isHandleRotate)             SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.rotate);
+                else if (isDragging)                               SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.move);
                 isDragging = isScaling = isScalingHeight = isRotating = false;
                 isHandleScale = isHandleRotate = false;
                 isInspScale = isInspAngle = isInspSpeed = false;
@@ -12081,7 +12083,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (auto& g : gimmicks) g.isRewinding = false;
                 for (auto& b : bullets)  b.isRewinding = false;
                 for (auto& it : items)   it.isRewinding = false;
-                SoundManager::Get().PlaySe(gameConfig.editSe.costEmpty);
+                SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.costEmpty);
             }
         }
 
@@ -13693,7 +13695,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (g_breakSizeHint.timer > 0.0f) {
             if (g_breakSizeHint.justTriggered) {
                 // 「その操作では通らない」ことを伝える既存の音を流用する
-                SoundManager::Get().PlaySe(gameConfig.editSe.denied);
+                SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.denied);
                 g_breakSizeHint.justTriggered = false;
             }
             int hintX = (int)(g_breakSizeHint.x - cameraX);
@@ -13820,6 +13822,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             lastPlayerHp = player.hp;
 
+            // ゲームオーバー・クリアの音は、BGMに隠れて聞こえなくなるので、先にBGMを止める。
+            // （やり直し・次のステージ・セレクトへ戻るときは、それぞれのステージ開始・セレクトの処理でBGMを鳴らし直す）
+            if (prevSceneForSave == PLAY && (currentScene == RESULT_GAMEOVER || currentScene == RESULT_VICTORY)) {
+                SoundManager::Get().StopBgm();
+            }
             if (prevSceneForSave == PLAY && currentScene == RESULT_GAMEOVER) {
                 SoundManager::Get().PlaySe(gameConfig.playerSe.death);
                 SoundManager::Get().PlaySe(gameConfig.metaSe.gameover);

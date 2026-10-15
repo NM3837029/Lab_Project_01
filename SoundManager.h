@@ -55,8 +55,10 @@ public:
     // forceRestart : trueの場合、既に同じBGMを再生中でも最初から再生し直す
     void PlayBgm(const std::string& id, bool forceRestart = false) {
         auto it = bgmMap.find(id);
-        // 指定されたIDが見つからない、またはハンドルが無効（読み込み失敗）の場合は何もしない。
-        if (it == bgmMap.end() || it->second.handle < 0) return;
+        // 指定されたIDが見つからない、またはハンドルが無効（読み込み失敗）の場合は、鳴らせない。
+        // 以前はここで何もせずに戻っていたため、次のステージのBGMが鳴らせないとき（IDの書き間違い・ファイルが無い）、
+        // 前のステージのBGMが鳴り続けていた。「このBGMを鳴らす」と頼まれたのに前のBGMが残るのは誤りなので、止めて無音にする。
+        if (it == bgmMap.end() || it->second.handle < 0) { StopBgm(); return; }
         int h = it->second.handle;
 
         // 既に同じBGMが再生中で、かつ強制リスタートが指定されていない場合は何もしない
@@ -86,28 +88,53 @@ public:
     // プレイヤーが使う「ステルスツール」（Mキー）用のミュート切り替え。
     // これがtrueの間は新しく再生しようとしたSEだけが抑制され、BGMには影響しない。
     void SetMuted(bool muted) { isMuted = muted; }
+    // いま鳴っているBGMのID（何も鳴らしていなければ空文字）。検証・表示用
+    const std::string& CurrentBgmId() const { return currentBgmId; }
     // 現在ミュート状態かどうかを取得する関数。
     bool IsMuted() const { return isMuted; }
 
     // 指定したIDの効果音（SE）を1回再生する関数。BGMと違い、同時に何個でも重ねて再生できる。
     // id : 再生したいSEのID（se.jsonまたはui_se.jsonに登録されているもの）
-    void PlaySe(const std::string& id) {
+    //
+    // 同じSEは、同時に1つだけ鳴らす。すでに鳴っていれば、それを止めて鳴らし直す（さらに 60ms 以内の連打は無視する）。
+    // 以前は呼ぶたびに複製して重ねて鳴らしていたので、ホイールで連続して拡縮したり、操作を素早く繰り返したりすると、
+    // 同じ効果音が何重にも重なって、割れたような大きな音になっていた。
+    void PlaySe(const std::string& id) { PlaySeInGroup(id, id); }
+
+    // 「グループ」で、同時に鳴らせる数を決めるSE。同じグループの音は、どのIDでも同時に1つだけで、鳴っていれば止めて入れ替える。
+    // 編集ツールの効果音（拡縮・回転・移動・停止・巻き戻し…）に使う。操作を素早く切り替えたとき、種類の違う編集音まで
+    // 重なって鳴るのを防ぐ（編集音はどれも「いまの操作の手ごたえ」で、新しい操作の音が前の音を置き換えるのが自然）。
+    void PlaySeExclusive(const std::string& group, const std::string& id) { PlaySeInGroup("group:" + group, id); }
+
+    // PlaySe / PlaySeExclusive の本体。group が同じ音は、同時に1つだけ鳴る。
+    void PlaySeInGroup(const std::string& group, const std::string& id) {
         // IDが空、またはミュート中の場合は再生しない。
         if (id.empty() || isMuted) return;
         auto it = seMap.find(id);
         // 指定されたIDが見つからない、またはハンドルが無効な場合は何もしない。
         if (it == seMap.end() || it->second.handle < 0) return;
-        // 元のサウンドハンドルを複製する。複製することで、同じSEが重なって再生されても
+
+        int now = GetNowCount();
+        auto voice = seVoices.find(group);
+        if (voice != seVoices.end() && CheckSoundMem(voice->second.handle) == 1) {
+            // 同じSEが 60ms 以内にもう一度頼まれたときは無視する（毎フレーム呼ばれても、鳴り直し続けて音が出なくならないように）
+            if (voice->second.id == id && now - voice->second.startMs < SE_MIN_RETRIGGER_MS) return;
+            // 鳴っている音を止めて、新しい音と入れ替える（重ねない）
+            StopSoundMem(voice->second.handle);
+        }
+
+        // 元のサウンドハンドルを複製する。複製することで、同じSEが続けて鳴らされても
         // 互いの音量変更や停止タイミングが干渉しないようにしている。
         int dup = DuplicateSoundMem(it->second.handle);
         if (dup >= 0) {
             // 音量は複製後の再生用ハンドル(dup)に適用する（元のit->second.handleに適用すると
             // 以降ロードし直すまで全ての複製に影響してしまうため）
             ChangeVolumeSoundMem((int)(it->second.volume * 255), dup);
-            // バックグラウンド再生（他の音と重ねて鳴らせるモード）で1回再生する。
+            // バックグラウンド再生で1回再生する。
             PlaySoundMem(dup, DX_PLAYTYPE_BACK, TRUE);
             // 再生が終わったら後片付け（DeleteSoundMem）できるよう、一時ハンドルとして記録しておく。
             AddTempHandle(dup);
+            seVoices[group] = { dup, now, id };
         }
     }
 
@@ -219,6 +246,11 @@ public:
         for (int i = (int)tempHandles.size() - 1; i >= 0; i--) {
             if (curTime - tempHandles[i].startTimeMs >= 100) {
                 if (CheckSoundMem(tempHandles[i].handle) == 0) {
+                    // 解放するハンドルは、「いま鳴っている音」の記録からも消す（DxLibはハンドル番号を使い回すので、
+                    // 残しておくと、あとで無関係の音を止めてしまうおそれがある）
+                    for (auto v = seVoices.begin(); v != seVoices.end(); ) {
+                        if (v->second.handle == tempHandles[i].handle) v = seVoices.erase(v); else ++v;
+                    }
                     DeleteSoundMem(tempHandles[i].handle);
                     tempHandles.erase(tempHandles.begin() + i);
                 }
@@ -251,6 +283,7 @@ public:
         }
         // すべてのコンテナと状態を初期状態に戻す。
         tempHandles.clear();
+        seVoices.clear();
         bgmMap.clear();
         seMap.clear();
         currentBgmId = "";
@@ -283,6 +316,10 @@ private:
     std::map<std::string, SoundEntry> bgmMap; // BGMのID→設定・ハンドルのマップ
     std::map<std::string, SoundEntry> seMap;  // SE（UI音含む）のID→設定・ハンドルのマップ
     std::vector<TempSoundHandle> tempHandles; // PlaySe/PlayAnimaleseで複製した、再生完了待ちの一時ハンドル一覧
+    // 「いま鳴っているSE」の記録（グループ名 → 鳴らしている複製ハンドル・開始時刻・ID）。同じグループは同時に1つだけにするために使う
+    struct SeVoice { int handle = -1; int startMs = 0; std::string id; };
+    std::map<std::string, SeVoice> seVoices;
+    static const int SE_MIN_RETRIGGER_MS = 60; // 同じSEの連打を無視する間隔
     std::string currentBgmId;                 // 現在再生中のBGMのID（何も再生していなければ空文字）
     bool isMuted = false;                     // SEのミュート状態（trueならPlaySeが無視される）
     AnimaleseSynthesizer animaleseSynth;      // どうぶつ語プロシージャル音声合成エンジン
