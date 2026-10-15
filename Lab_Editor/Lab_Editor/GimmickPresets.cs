@@ -111,6 +111,8 @@ public static class GimmickPresets
         LockPlat("lock_warm", "🌅 暖色のときだけ現れる足場", "暖色（色温度+40以上）", 4, 0.4f, 999f, "gim_grade_lock_warm_"),
         LockPlat("lock_cool", "🧊 寒色のときだけ現れる足場", "寒色（色温度-40以下）", 4, -999f, -0.4f, "gim_grade_lock_cool_"),
         LockPlat("lock_hue", "🔄 色相がずれているときだけ現れる足場", "色相が+60〜+180度ずれている", 3, 60f, 180f, "gim_grade_lock_hue_"),
+        LockPlat("lock_zoomin", "🔍 拡大中だけ現れる足場", "拡大中（Zキー、1.15倍以上）", 6, 1.15f, 999f, "gim_grade_lock_zoomin_"),
+        LockPlat("lock_zoomout", "🔭 縮小中だけ現れる足場", "縮小中（Vキー、0.95倍以下）", 7, -999f, 0.95f, "gim_grade_lock_zoomout_"),
 
         // ───────────── 色調・明暗ゾーン ─────────────
         ZonePreset("zone_mono", "⚫ モノクロゾーン（白黒になる）", "範囲に入っている間、画面が白黒になります。「白黒のときだけ現れる足場」や「白黒にすると開く扉」と組み合わせて、プレイヤーが自分で操作しなくても条件を満たす通路を作れます。",

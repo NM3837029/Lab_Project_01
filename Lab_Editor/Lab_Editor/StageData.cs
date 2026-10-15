@@ -195,6 +195,9 @@ public class StageData
     // 編集ツール許可設定・編集コスト経済設定（ステージ単位）
     // このステージでプレイヤーがどの編集ツール（巻き戻し等）を使えるか、使った時のコスト消費量。
     public EditToolFlags EditTools { get; set; } = new();
+    // プレイヤー自身への編集操作のロック（ステージJSONの "player_locks"）。ゲーム側は DrawPixel.cpp の PlayerEditLocks。
+    // 片方だけだと保存時に消える。全部 false（既定）のときはJSONへ書かない。
+    public PlayerEditLocks PlayerLocks { get; set; } = new();
     public EditCostSettings EditCost { get; set; } = new();
 
     // タイルマップ（MapH行 × MapW列）。各マスにTileDef.idの数値が入る、地形の本体データ。
@@ -297,6 +300,8 @@ public class StageData
                 data.EditTools = j["allowed_edit_tools"]!.ToObject<EditToolFlags>() ?? new();
             if (j["edit_cost_settings"] != null)
                 data.EditCost = j["edit_cost_settings"]!.ToObject<EditCostSettings>() ?? new();
+            if (j["player_locks"] != null)
+                data.PlayerLocks = j["player_locks"]!.ToObject<PlayerEditLocks>() ?? new();
 
             // サウンド設定 (Feature 3) — bgm_id項目が無ければ空文字列（BGMなし）として扱う。
             data.BgmId = j["bgm_id"]?.Value<string>() ?? "";
@@ -410,6 +415,8 @@ public class StageData
             ["allowed_edit_tools"] = JToken.FromObject(EditTools),
             ["edit_cost_settings"] = JToken.FromObject(EditCost)
         };
+        // プレイヤーのロックは、1つでも設定されているときだけ書く（既存のステージに差分を出さないため）
+        if (PlayerLocks.Any()) j["player_locks"] = JToken.FromObject(PlayerLocks);
 
         // ゴール — 未設定(-1)の場合はJSONにgoal項目自体を出力しない。
         if (GoalX >= 0)
@@ -625,6 +632,23 @@ public class PlayerCapabilities
 // ===== 編集ツール許可設定 =====
 // このステージでプレイヤーがどの「編集ツール」（時間巻き戻し等、このゲーム独自のギミック操作）
 // を使用できるかを、機能ごとにON/OFFで設定する。
+// プレイヤー自身への編集操作のロック。パズルのステージで「自分をドラッグして壁を越える」「巨大化して穴をまたぐ」
+// 「Gキーで足場を置く」といった近道を封じるために使う。ステージ設定のうち「プレイヤー」の欄ではなく、
+// JSONの "player_locks" として保存される（キーが無ければ、全部許可）。
+public class PlayerEditLocks
+{
+    [System.ComponentModel.DisplayName("自分をドラッグで動かせない")]
+    public bool noMove { get; set; }
+    [System.ComponentModel.DisplayName("自分を拡大縮小できない")]
+    public bool noScale { get; set; }
+    [System.ComponentModel.DisplayName("自分を回せない")]
+    public bool noRotate { get; set; }
+    [System.ComponentModel.DisplayName("Gキーで足場を置けない")]
+    public bool noGround { get; set; }
+
+    public bool Any() => noMove || noScale || noRotate || noGround;
+}
+
 public class EditToolFlags
 {
     // trueの場合、時間を巻き戻す「巻き戻し」ツールが使用可能になる。

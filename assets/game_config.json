@@ -269,10 +269,64 @@
       "item_total": 32
     },
     {
+      "file": "puzzle_1_size.json",
+      "name": "パズル1：サイズと角度",
+      "thumbnail": "",
+      "order": 2,
+      "unlock": "always",
+      "require": [],
+      "item_total": 10
+    },
+    {
+      "file": "puzzle_2_color.json",
+      "name": "パズル2：色",
+      "thumbnail": "",
+      "order": 3,
+      "unlock": "always",
+      "require": [],
+      "item_total": 10
+    },
+    {
+      "file": "puzzle_3_bright.json",
+      "name": "パズル3：明るさと暗さ",
+      "thumbnail": "",
+      "order": 4,
+      "unlock": "always",
+      "require": [],
+      "item_total": 11
+    },
+    {
+      "file": "puzzle_4_zoom.json",
+      "name": "パズル4：ズーム",
+      "thumbnail": "",
+      "order": 5,
+      "unlock": "always",
+      "require": [],
+      "item_total": 9
+    },
+    {
+      "file": "puzzle_5_cut.json",
+      "name": "パズル5：カット",
+      "thumbnail": "",
+      "order": 6,
+      "unlock": "always",
+      "require": [],
+      "item_total": 13
+    },
+    {
+      "file": "puzzle_6_rewind.json",
+      "name": "パズル6：巻き戻し",
+      "thumbnail": "",
+      "order": 7,
+      "unlock": "always",
+      "require": [],
+      "item_total": 9
+    },
+    {
       "file": "stage_demo.json",
       "name": "あたらしい素材のおためし",
       "thumbnail": "",
-      "order": 2,
+      "order": 8,
       "unlock": "always",
       "require": [],
       "item_total": 27

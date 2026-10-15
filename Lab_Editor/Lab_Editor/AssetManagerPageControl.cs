@@ -251,7 +251,8 @@ public class AssetManagerPageControl : UserControl
         (24, "24 = カスタムスクリプト (Custom Script)", "「🧩 挙動スクリプトを編集」ボタンから、ブロックを組み立てて挙動を自作します。"),
         (25, "25 = チェックポイント (Checkpoint)", "プレイヤーが触れるとその地点が復帰地点として記録されます。ゲームオーバーや落下死からのリトライは、記録済みならステージ開始位置ではなくこの地点から再開します。1ステージに複数置くと直近で触れたものが有効になります。"),
         (26, "26 = 補正スイッチ (Grade Switch)", "カラー補正パネルの値（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）が、指定した範囲に入っている間だけ「押された」状態になるスイッチです。同じparam値のゲート扉を、重量スイッチと同じ仕組みで開けます。「暗いと開く扉」「白黒にすると開く扉」「赤フィルタで開く扉」などが作れます。"),
-        (27, "27 = 補正ロック足場 (Grade Lock Platform)", "カラー補正パネルの値が、指定した範囲に入っている間だけ実体化する足場です（色ロック・明暗ロックを、コントラスト・彩度・色相・色温度にも広げたもの）。足場の上には条件が文字で出ます。"),
+        (27, "27 = 補正ロック足場 (Grade Lock Platform)", "カラー補正パネルの値が、指定した範囲に入っている間だけ実体化する足場です（色ロック・明暗ロックを、コントラスト・彩度・色相・色温度にも広げたもの）。「見る値」に、拡大中（Zキー）・縮小中（Vキー）も選べます。足場の上には条件が文字で出ます。"),
+        (28, "28 = 逆行ゲート (Rewind Gate)", "いずれかの物が巻き戻し中（Rキー、または右クリックメニューの物ごとの巻き戻し）のあいだだけ、通れる壁です。早送りゲートの巻き戻し版。物ごとの巻き戻しを入れておくと、プレイヤーは時間を戻らずに通れます。向き反転すると「巻き戻し中だけ閉じる」壁になります。"),
     };
     // アイテムのtype_enum(タイプ番号)ごとの説明一覧。敵・ギミックと同じ (番号, 表示名, 詳細説明) の形式
     private static readonly (int type, string desc, string detail)[] ItemTypes =
@@ -1436,9 +1437,9 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             if (field == "gradeChannel")
             {
                 var cbo = new ComboBox { Location = new Point(4, y + 18), Size = new Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Meiryo UI", 8.5f) };
-                cbo.Items.AddRange(new object[] { "0 = 明るさ", "1 = コントラスト", "2 = 彩度", "3 = 色相", "4 = 色温度", "5 = 色フィルタ (1赤/2緑/3青)" });
+                cbo.Items.AddRange(new object[] { "0 = 明るさ", "1 = コントラスト", "2 = 彩度", "3 = 色相", "4 = 色温度", "5 = 色フィルタ (1赤/2緑/3青)", "6 = 拡大中 (Zキー、1.0=通常)", "7 = 縮小中 (Vキー、1.0=通常)" });
                 int cur = (int)Math.Round(Convert.ToSingle(prop.GetValue(paramsObj)));
-                cbo.SelectedIndex = cur < 0 || cur > 5 ? 0 : cur;
+                cbo.SelectedIndex = cur < 0 || cur > 7 ? 0 : cur;
                 cbo.SelectedIndexChanged += (s, e) =>
                 {
                     if (_isUpdatingBehaviorPanel) return;

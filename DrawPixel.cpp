@@ -645,6 +645,19 @@ struct EditToolFlags {
     bool cutEnabled = true;
 };
 
+// プレイヤー自身への編集操作のロック（ステージ単位。ステージJSONの "player_locks"）。
+//
+// 置いた物（敵・ギミック・アイテム）には noMove 等のロックがあるが、プレイヤーには無かった。
+// プレイヤーを自分でドラッグすると、壁・穴・トゲ・ゴールを一瞬で越えられる。巨大化すれば穴をまたげる。
+// Gキーの足場は無料・無制限に置ける。パズルを成り立たせたいステージは、これらを封印する。
+// キーが無いステージは、すべて false（従来どおり何でもできる）。
+struct PlayerEditLocks {
+    bool noMove = false;   // 自分をドラッグして動かせない
+    bool noScale = false;  // 自分を拡大縮小できない
+    bool noRotate = false; // 自分を回せない
+    bool noGround = false; // Gキーで足場を置けない
+};
+
 // 編集系ツールを使い続けるための「コストゲージ」に関する数値設定。
 // ゲージは時間経過で回復し、各操作を使うたびに消費される。値が尽きるとその操作が使えなくなる。
 struct EditCostSettings {
@@ -2074,7 +2087,10 @@ enum GimmickType {
     // ===== カラー補正パネル（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）と連動するギミック =====
     // どちらも GimmickDef の gradeChannel / gradeMin / gradeMax で「どの値が、どの範囲のとき成立するか」を決める。
     GIMMICK_GRADE_SWITCH,            // 補正スイッチ：条件が成立している間だけ「押された」状態になり、同じparamのゲート扉を開ける
-    GIMMICK_GRADE_LOCK_PLATFORM      // 補正ロック足場：条件が成立している間だけ実体化する足場（色ロック/明暗ロックの一般化）
+    GIMMICK_GRADE_LOCK_PLATFORM,     // 補正ロック足場：条件が成立している間だけ実体化する足場（色ロック/明暗ロックの一般化）
+    // 逆行ゲート：いずれかの物が巻き戻し中（Rキー・円形メニューの物ごとの巻き戻し）のあいだだけ、通れる壁。
+    // 早送りゲート(GIMMICK_FASTFORWARD_GATE)の巻き戻し版。物ごとの巻き戻しを入れておくと、プレイヤーは時間を戻らずに通れる。
+    GIMMICK_REWIND_GATE
 };
 
 // 巻き戻し機能のために毎フレーム記録する、ギミック1個・1フレーム分のスナップショット。
@@ -2082,6 +2098,11 @@ struct GimmickState {
     float x, y;     // 座標
     float angle;     // 回転角度
     bool isActive;    // 有効/実体化しているか
+    // ちくわブロックの内部状態（val2＝落ちるまでの猶予／落下速度、customTimer＝乗っている時間）。
+    // 以前は履歴に入っておらず、巻き戻すと位置だけ戻って、落下速度などが古いまま残り、
+    // 巻き戻した足場がすぐ落ちてしまっていた。ちくわだけが、この2つを巻き戻しの対象にする。
+    float val2 = 0.0f;
+    float customTimer = 0.0f;
 };
 
 // 将来の拡張用のアイテムシステムテンプレート
@@ -2418,6 +2439,7 @@ struct StageData {
     // Feature: 編集コストゲージ（ステージ単位設定）
     EditToolFlags editToolFlags;         // このステージで許可する編集ツールの設定
     EditCostSettings editCostSettings;   // このステージでの編集コストゲージの数値設定
+    PlayerEditLocks playerLocks;         // プレイヤー自身への編集操作のロック（"player_locks"）
 
     // このステージでのプレイヤーの基本性能（歩く速さ・ジャンプ力・使える行動）。
     //
@@ -3134,6 +3156,19 @@ struct EditBox { float x, y, w, h; };
 inline EditBox EnemyEditBox(const Enemy& e)     { return { e.x, e.y, (float)e.hitboxWidth * e.scale, (float)e.hitboxHeight * e.scale }; }
 inline EditBox PlayerEditBox(const Player& p)   { return { p.x, p.y, (float)p.width * p.scale, (float)p.height * p.scale }; }
 inline EditBox GimmickEditBox(const Gimmick& g) { return { g.x, g.y, g.spriteWidth, g.spriteHeight }; }
+// ギミックをクリックで掴めるか。元の向きの矩形の中なら掴める（従来どおり）。
+// さらに、回転して描かれている物は、見えている向きの矩形の中でも掴めるようにする
+// （立てて置いた橋のように、見た目の長い辺をクリックしても反応しない、ということが無いように）。
+// 点を、ギミックの中心まわりに逆回転して、元の矩形と比べる。角度をAIが自前の状態に使う型（ちくわ等）は、見た目が回らないので対象外。
+inline bool GimmickHitTest(const Gimmick& g, float wx, float wy) {
+    if (wx >= g.x && wx <= g.x + g.spriteWidth && wy >= g.y && wy <= g.y + g.spriteHeight) return true;
+    if (g.angle == 0.0f || GimmickAngleIsAiOwned(g.type)) return false;
+    float cx = g.x + g.spriteWidth * 0.5f, cy = g.y + g.spriteHeight * 0.5f;
+    float dx = wx - cx, dy = wy - cy;
+    float c = cosf(-g.angle), sn = sinf(-g.angle);
+    float rx = dx * c - dy * sn, ry = dx * sn + dy * c;
+    return fabsf(rx) <= g.spriteWidth * 0.5f && fabsf(ry) <= g.spriteHeight * 0.5f;
+}
 
 const float EDIT_KNOB_PI          = 3.14159265f;
 const float EDIT_KNOB_RADIUS = 7.0f;   // 回転つまみ（丸）の半径(px)。つかめる範囲はこれより少し広く取る
@@ -3263,6 +3298,7 @@ inline bool GimmickRespectsTerrain(GimmickType t) {
 struct ScreenFxSnapshot {
     float brightness = 1.0f;  // 1.0が通常。0.6未満で暗い、1.3超で明るいとみなす
     float zoom       = 1.0f;
+    float zoomOut    = 1.0f;  // ズームアウト（Vキー）の縮小率。1.0が通常、小さいほど広く映す（0.5〜1.0）
     int   colorFilter = 0;    // 0=なし, 1=赤, 2=緑, 3=青
     bool  fastForward = false;
     float saturation  = 1.0f; // 彩度。1.0が通常、0で白黒（カラー補正パネル・色補正ゾーン・敵の演出の合成結果）
@@ -3277,7 +3313,7 @@ ScreenFxSnapshot g_screenFx;
 // 見る値は「画面に実際に出ている値」(g_screenFx)。パネルだけでなく、色調ゾーンや敵の演出で動いた値にも反応する。
 inline int GradeChannelOf(const GimmickDef* d) {
     int ch = d ? (int)(d->gradeChannel + 0.5f) : 0;
-    return (ch < 0 || ch > 5) ? 0 : ch;
+    return (ch < 0 || ch > 7) ? 0 : ch; // 0〜5：明るさ・コントラスト・彩度・色相・色温度・色フィルタ ／ 6：拡大中（Z） ／ 7：縮小中（V）
 }
 inline float GradeChannelValue(int ch) {
     switch (ch) {
@@ -3286,6 +3322,8 @@ inline float GradeChannelValue(int ch) {
         case 2: return g_screenFx.saturation;
         case 3: return g_screenFx.hue;
         case 4: return g_screenFx.temperature;
+        case 6: return g_screenFx.zoom;     // ズームイン（Z）。1.0が通常、拡大するほど大きい
+        case 7: return g_screenFx.zoomOut;  // ズームアウト（V）。1.0が通常、縮小するほど小さい
         default: return (float)g_screenFx.colorFilter;
     }
 }
@@ -3294,8 +3332,9 @@ inline void GradeRange(const GimmickDef* d, int ch, float& lo, float& hi) {
     lo = d ? d->gradeMin : -999.0f;
     hi = d ? d->gradeMax : 999.0f;
     if (lo <= -998.0f && hi >= 998.0f) {
-        static const float L[6] = { -999.0f, 0.3f, -999.0f, 30.0f, 0.3f, 1.0f };
-        static const float H[6] = { 0.6f, 999.0f, 0.2f, 180.0f, 999.0f, 1.0f };
+        // 6：拡大中（Z。1.15倍以上）／ 7：縮小中（V。0.95倍以下）。押し始めから約17フレームで成立する
+        static const float L[8] = { -999.0f, 0.3f, -999.0f, 30.0f, 0.3f, 1.0f, 1.15f, -999.0f };
+        static const float H[8] = { 0.6f, 999.0f, 0.2f, 180.0f, 999.0f, 1.0f, 999.0f, 0.95f };
         lo = L[ch]; hi = H[ch];
     }
 }
@@ -3347,6 +3386,10 @@ inline std::string GradeConditionLabel(const GimmickDef* d) {
             else if (noLo) sprintf_s(b, sizeof(b), "色温度 %+d以下", (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
             else sprintf_s(b, sizeof(b), "色温度 %+d〜%+d", (int)(lo * 100.0f + (lo < 0 ? -0.5f : 0.5f)), (int)(hi * 100.0f + (hi < 0 ? -0.5f : 0.5f)));
             return b;
+        case 6:
+            return "拡大中（Z）";
+        case 7:
+            return "縮小中（V）";
         default: {
             static const char* names[4] = { "フィルタなし", "赤フィルタ", "緑フィルタ", "青フィルタ" };
             int l = (int)(lo + 0.5f), h = (int)(hi + 0.5f);
@@ -3368,6 +3411,8 @@ inline int GradeConditionColor(const GimmickDef* d) {
         case 2: return (hi <= 0.3f && lo <= -998.0f) ? GetColor(150, 150, 150) : GetColor(255, 90, 170);
         case 3: return GetColor(170, 120, 255);
         case 4: return (lo > 0.0f) ? GetColor(255, 170, 70) : GetColor(90, 150, 255);
+        case 6: return GetColor(120, 220, 255);
+        case 7: return GetColor(255, 200, 120);
         default: {
             int c = (int)(lo + 0.5f);
             return c == 2 ? GetColor(80, 220, 80) : c == 3 ? GetColor(80, 140, 255) : GetColor(255, 90, 90);
@@ -3886,7 +3931,7 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
         // Feature: ゲート扉の修正（友人フィードバック対応）— GIMMICK_GATE_DOORを横方向の実体判定に追加。
         // isActive==true（施錠中/閉状態）の間だけこのループに乗り、通行を塞げるようにする
         // （元々ここに無かったため、閉じているはずのドアを素通りできてしまっていた）。
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_GATE_DOOR) {
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_REWIND_GATE || gim.type == GIMMICK_GATE_DOOR) {
             // Feature: 編集リアクション — 倒した扉は「壁」ではなく「床」になるので、
             // 横方向の実体判定からは外れる。実効ボックスで縦横の入れ替えも反映する。
             if (gim.type == GIMMICK_GATE_DOOR && GimmickIsTipped(gim)) continue;
@@ -3919,7 +3964,7 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
-        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE
+        if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_REWIND_GATE
             || (gim.type == GIMMICK_GATE_DOOR && GimmickIsTipped(gim))) {
             // Feature: 編集リアクション — 倒した扉はここで床として拾う（横の壁判定からは外れている）。
             float gbx, gby, gbw, gbh;
@@ -4717,6 +4762,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // ===== Feature: 編集コストゲージ（ステージ単位設定・実行時状態）=====
     EditToolFlags currentEditTools;   // 現在のステージの許可設定（ResetStageで反映）
+    PlayerEditLocks currentPlayerLocks; // 現在のステージの、プレイヤー自身へのロック（ResetStageで反映）
     EditCostSettings currentEditCost; // 現在のステージのコスト経済（ResetStageで反映）
     auto IsEditToolEnabled = [&](bool stageFlag, bool unlockedFlag) { return stageFlag || unlockedFlag; };
 
@@ -5244,7 +5290,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (&gm == self || !gm.isActive || gm.isTimelineCut) continue;
             // 衝突判定（CheckGimmickCollisionX/Y）が「壁・床」として扱っている型だけを地形とみなす
             bool solid = gm.type == GIMMICK_SCALABLE_BOX || gm.type == GIMMICK_SCALABLE_GROUND || gm.type == GIMMICK_PUSHABLE_ROCK
-                      || gm.type == GIMMICK_FASTFORWARD_GATE || gm.type == GIMMICK_BREAKABLE_BLOCK
+                      || gm.type == GIMMICK_FASTFORWARD_GATE || gm.type == GIMMICK_REWIND_GATE || gm.type == GIMMICK_BREAKABLE_BLOCK
                       || (gm.type == GIMMICK_GATE_DOOR && !GimmickIsTipped(gm));
             if (!solid) continue;
             float gbx, gby, gbw, gbh;
@@ -5295,6 +5341,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         e.editDirtyMask |= EDIT_DIRTY_SCALE;
     };
     auto RescalePlayer = [&](Player& p, float want) {
+        if (currentPlayerLocks.noScale) return; // このステージでは、自分を拡大縮小できない
+        if (want > 3.0f) want = 3.0f;           // 自分の倍率の上限（巨大化で、穴や壁をまたいでしまわないように）
         float ox, oy;
         float got = FitAnchoredScale(p.x, p.y, (float)p.width, (float)p.height, p.scale, want, ox, oy);
         float dx = ox - p.x, dy = oy - p.y;
@@ -5397,7 +5445,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // angleをAIが自前の状態に使っている型は回さない（回すと壊れるため）。
     auto ApplyAngleDelta = [&](float da) {
         if (da != 0.0f) NoteEditOp("rotate");
-        for (auto* p : selectedPlayers) { p->angle += da; }
+        for (auto* p : selectedPlayers) { if (!currentPlayerLocks.noRotate) p->angle += da; }
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
             e->angle += da;
@@ -5418,6 +5466,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
     auto EditTogglePause = [&]() -> bool {
         if (targetPaused == nullptr) return false;
+        // 円形メニューも、ステージの「一時停止」の許可に従う（以前は、封印したステージでも、メニューから停止できた）
+        if (!IsEditToolEnabled(currentEditTools.pauseEnabled, unlockedEditTools.pauseEnabled)) { EditDeniedWhy("このステージでは時間停止が使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
@@ -5431,6 +5481,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     };
     auto EditToggleRewind = [&]() -> bool {
         if (targetRewind == nullptr) return false;
+        // 円形メニューも、ステージの「巻き戻し」の許可に従う
+        if (!IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled)) { EditDeniedWhy("このステージでは巻き戻しが使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
@@ -5676,8 +5728,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         for (int i = 0; i < (int)gimmicks.size(); i++) {
             if (!gimmicks[i].isActive || gimmicks[i].isTimelineCut) continue;
-            EditBox b = GimmickEditBox(gimmicks[i]);
-            if (wx >= b.x && wx <= b.x + b.w && wy >= b.y && wy <= b.y + b.h) { kind = 2; idx = i; return true; }
+            if (GimmickHitTest(gimmicks[i], wx, wy)) { kind = 2; idx = i; return true; }
         }
         return false;
     };
@@ -5813,6 +5864,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                       ef.screenEffectEnabled ? 1 : 0, ef.objectEditEnabled ? 1 : 0, ef.cutEnabled ? 1 : 0);
                             Logger::Info("System", "LoadStageJson", toolLog);
                         }
+                    }
+
+                    // プレイヤー自身への編集ロック（キー未指定は、すべて許可）
+                    if (sj.contains("player_locks") && sj["player_locks"].is_object()) {
+                        const auto& pl = sj["player_locks"];
+                        jsonStage.playerLocks.noMove   = pl.value("noMove", false);
+                        jsonStage.playerLocks.noScale  = pl.value("noScale", false);
+                        jsonStage.playerLocks.noRotate = pl.value("noRotate", false);
+                        jsonStage.playerLocks.noGround = pl.value("noGround", false);
                     }
 
                     // 編集コスト経済設定（ステージ単位、キー未指定時はコード既定値）
@@ -6178,6 +6238,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
         currentEditTools = stage.editToolFlags;
+        currentPlayerLocks = stage.playerLocks;
         currentEditCost = stage.editCostSettings;
         editCost = currentEditCost.maxCost;
         // ゲージを満タンに戻すのは「操作」ではないので、増減の浮き表示に拾わせない（基準を取り直させる）
@@ -7460,7 +7521,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (rightOnSelected) {
                     // 選択はそのまま
                 }
-                else if (gx >= player.x && gx <= player.x + player.width * player.scale &&
+                // 「物の編集」が封印されているステージ（カットだけ許可、など）では、プレイヤー・敵・ギミックを右クリックで選べない
+                // （以前は、プレイヤーと敵だけ選べて、円形メニューが開いていた）。
+                else if (objectEditOpEnabled && gx >= player.x && gx <= player.x + player.width * player.scale &&
                     gy >= player.y && gy <= player.y + player.height * player.scale) {
                     selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                     selectedPlayers.push_back(&player);
@@ -7475,7 +7538,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     targetGimmick = nullptr;
                     targetEnemy = nullptr;
                 }
-                else {
+                else if (objectEditOpEnabled) {
                     // 敵の選択状態をチェック
                     bool enemySelected = false;
                     for (auto& enemy : enemies) {
@@ -7510,8 +7573,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // ここで判定するとマップ左上の1点に当たり判定があるように振る舞ってしまう。
                             // カットの選択は後段の「タイムライン帯上での右クリック」で行う。
                             if (gim.isTimelineCut) continue;
-                            if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
-                                gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
+                            if (GimmickHitTest(gim, gx, gy)) {
                                 selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                 selectedGimmicks.push_back(&gim);
                                 selectedType = SELECT_GIMMICK;
@@ -7715,7 +7777,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // ボタンの状態と関係なく、押した瞬間にカーソルの位置へ置く（モニターの外・円形メニュー表示中は置かない）。
             static bool lastGKey = false;
             bool currentGKey = CheckHitKey(KEY_INPUT_G) != 0;
-            if (currentGKey && !lastGKey && objectEditOpEnabled && !menu.isOpen
+            if (currentGKey && !lastGKey && objectEditOpEnabled && !currentPlayerLocks.noGround && !menu.isOpen
                 && mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH) {
                 int imgW, imgH;
                 GetGraphSize(jimenHandle, &imgW, &imgH);
@@ -8055,8 +8117,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!objectClicked) {
                                 for (auto& gim : gimmicks) {
                                     if (gim.isActive) {
-                                        if (gx >= gim.x && gx <= gim.x + gim.spriteWidth &&
-                                            gy >= gim.y && gy <= gim.y + gim.spriteHeight) {
+                                        if (GimmickHitTest(gim, gx, gy)) {
                                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                             selectedGimmicks.push_back(&gim);
                                             selectedType = SELECT_GIMMICK;
@@ -8165,7 +8226,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float dy = gy - prevGy;
                     if (fabsf(dx) + fabsf(dy) > 0.5f) NoteEditOp("move");
 
-                    for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
+                    // 自分のドラッグ移動は、ステージが封印していれば効かない（壁・穴・ゴールを一瞬で越えられるため）
+                    if (!currentPlayerLocks.noMove) for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
                     // アセット側で禁止されている操作は、選択に混ざっていても飛ばす。
                     // 選択時点ではなくここで1体ずつ見るのは、複数選択に
                     // 禁止された相手とそうでない相手が混ざりうるため。
@@ -8487,6 +8549,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 見えている画面と判定を一致させたいので、追従後の値をそのまま渡すのが正しい。
         g_screenFx.brightness  = fxCurBright;
         g_screenFx.zoom        = fxCurZoom;
+        g_screenFx.zoomOut     = fxCurZoomOut;
         g_screenFx.colorFilter = playerColorFilter;
         g_screenFx.fastForward = isFastForward;
         g_screenFx.saturation  = fxCurSat;
@@ -11559,6 +11622,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     gim.x = s.x; gim.y = s.y;
                     gim.angle = s.angle;
                     gim.isActive = s.isActive;
+                    if (gim.type == GIMMICK_CHIKUWA_BLOCK) { gim.val2 = s.val2; gim.customTimer = s.customTimer; }
                 }
                 // 巻き戻しによる位置ジャンプは乗っているプレイヤー/敵に追従させない
                 gim.lastDeltaX = 0.0f;
@@ -11785,6 +11849,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else if (gr.tipped)  gim.isActive = isFastForward;
                         else                 gim.isActive = !isFastForward;
                     }
+                    else if (gim.type == GIMMICK_REWIND_GATE) {
+                        // 逆行ゲート：いずれかの物が巻き戻し中のあいだだけ通れる（isActive=false が通れる状態）。
+                        // 編集リアクション：向き反転 → 開く条件が反転し、「巻き戻し中だけ閉じる」壁になる。
+                        if (gr.flipped) gim.isActive = isAnyRewindActive;
+                        else            gim.isActive = !isAnyRewindActive;
+                    }
                     else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
                              || gim.type == GIMMICK_ZOOM_LENS || gim.type == GIMMICK_SLOWMO_FIELD) {
                         // 画面全体エフェクト系ゾーン：範囲内にプレイヤーがいる間だけ効果を発動する
@@ -11960,7 +12030,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                 }
                 if (canGimAct) {
-                    gim.history.push_back({ gim.x, gim.y, gim.angle, gim.isActive });
+                    gim.history.push_back({ gim.x, gim.y, gim.angle, gim.isActive, gim.val2, gim.customTimer });
                     if (gim.history.size() > MAX_HISTORY_FRAMES) gim.history.erase(gim.history.begin());
                 }
                 // このフレームの移動量を記録し、乗っているプレイヤー/敵が次フレーム追従できるようにする
@@ -12673,7 +12743,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // どこに足場が現れるのかが画面に無いと、色や明るさを切り替える手掛かりが一切無くなる。
             bool drawsGhostWhenInactive = (gim.type == GIMMICK_COLOR_LOCK_PLATFORM
                                         || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM
-                                        || gim.type == GIMMICK_GRADE_LOCK_PLATFORM);
+                                        || gim.type == GIMMICK_GRADE_LOCK_PLATFORM
+                                        || gim.type == GIMMICK_REWIND_GATE); // 逆行ゲートも、通れる間は半透明で位置を示す
             if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
@@ -12957,6 +13028,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else DrawBox(fx1, fy1, fx2, fy2, GetColor(0, 200, 255), TRUE);
                 if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 WorldLabel(fx1, fy1 - 18, "早送りで通れる", GetColor(0, 200, 255));
+            }
+            else if (gim.type == GIMMICK_REWIND_GATE) {
+                // 逆行ゲート：閉じている間は不透明、巻き戻し中（通れる間）は半透明にして位置だけ示す
+                int rx1 = (int)(gim.x - cameraX);
+                int ry1 = (int)(gim.y - cameraY);
+                int rx2 = (int)(gim.x + gim.spriteWidth - cameraX);
+                int ry2 = (int)(gim.y + gim.spriteHeight - cameraY);
+                if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 90);
+                if (gim.handle >= 0) DrawExtendGraph(rx1, ry1, rx2, ry2, gim.handle, TRUE);
+                else DrawBox(rx1, ry1, rx2, ry2, GetColor(190, 120, 255), TRUE);
+                DrawBox(rx1, ry1, rx2, ry2, GetColor(190, 120, 255), FALSE);
+                if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                WorldLabel(rx1, ry1 - 18, "巻き戻し中だけ通れる", GetColor(190, 120, 255));
             }
             else if (gim.type == GIMMICK_COLOR_LOCK_PLATFORM) {
                 // 色ロック足場：実体化中は不透明、不一致中は色付きの半透明ゴーストで位置だけ示す
