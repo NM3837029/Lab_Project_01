@@ -345,6 +345,7 @@ struct EnemyDef {
     float tintColorG = -1.0f;
     float tintColorB = -1.0f;
     float counterFilter = -1.0f;     // COLOR_SHIFTERを打ち消せる自分の色フィルタ。-1=自動（寄せる色と同じ）0=打ち消せない 1=赤 2=緑 3=青
+    float forcePlayerFilter = -1.0f; // COLOR_SHIFTERが射程内のプレイヤーの色フィルタ(Tキー)そのものを書き換えるか。-1/0=書き換えない（画面を染めるだけ） 1=書き換える
     float brightenMax = -1.0f;       // BRIGHTNESS_PHANTOMを反転したときの最大の明るさ（従来1.7）
     float counterBrightness = -1.0f; // BRIGHTNESS_PHANTOMを打ち消せる自分の明るさのしきい値（従来1.3）
     float chargeWarnFrames = -1.0f;  // STATIONARY/PATROL_SHOOTERの発射前の予兆の長さ(フレーム。従来20)
@@ -1025,6 +1026,7 @@ void LoadAssetDefinitions() {
                     def.tintColorG = e.value("tintColorG", -1.0f);
                     def.tintColorB = e.value("tintColorB", -1.0f);
                     def.counterFilter = e.value("counterFilter", -1.0f);
+                    def.forcePlayerFilter = e.value("forcePlayerFilter", -1.0f);
                     def.brightenMax = e.value("brightenMax", -1.0f);
                     def.counterBrightness = e.value("counterBrightness", -1.0f);
                     def.chargeWarnFrames = e.value("chargeWarnFrames", -1.0f);
@@ -4681,6 +4683,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // プレイヤーが能動的に使う「編集ツール」の状態
     int playerColorFilter = 0; // 0=なし, 1=赤, 2=緑, 3=青（Tキーで巡回）
+    // このフレーム、色変化の敵（forcePlayerFilter）が色フィルタを書き換えているか。
+    // 書き換えられた色は自分で選んだ色ではないので、エネルギー（継続コスト）を減らさない。
+    bool colorFilterForcedNow = false;
 
     // ===== 画面全体エフェクト（明るさ・色調・ズーム）=====
     // 「動画編集」コンセプトのコアシステム。敵やギミックが毎フレーム Screen_SetXxx() で
@@ -10439,6 +10444,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             int counterF = (edef && edef->counterFilter >= 0.0f) ? (int)(edef->counterFilter + 0.5f) : shiftColor;
                             // 同じ色を自分でも掛けていれば打ち消せる
                             bool counteredCs = (counterF != 0) && (playerColorFilter == counterF);
+                            // 色フィルタの書き換え（forcePlayerFilter）：射程内にいる間、プレイヤーのTキーの色を、
+                            // この敵が押し付ける色に上書きし続ける。足場やスイッチが見ているのは画面の染まり具合ではなく
+                            // このTキーの色なので、「色ロックの足場を出すための色」を敵が奪う、という仕掛けになる。
+                            //   ・傾ける   → 押し付ける色が赤→緑→青と切り替わる（敵の色を変えて、必要な色に合わせられる）
+                            //   ・向き反転 → 押し付ける色が次の色へずれる
+                            //   ・倒す     → 上書きが止まる（Tキーで自分の色を選び直せる）
+                            // 上書き中は色フィルタそのものが画面を染めるので、この敵の染め（下のSetTint）は掛けない。
+                            if (edef && edef->forcePlayerFilter > 0.5f && distCol < range) {
+                                int forcedColor = erFlipEdited ? ((shiftColor % 3) + 1) : shiftColor;
+                                // 判定に使う色フィルタは毎フレーム「色の輪の位置」から求め直されるので、
+                                // 変数だけを書き換えても次のフレームで消えてしまう。輪そのものを、その色へ合わせる
+                                // （Tキーと同じ操作。色の輪にも、強制されている色が映る）。
+                                ColorGrade::SetQuickFilter(cgState, forcedColor);
+                                playerColorFilter = forcedColor;
+                                colorFilterForcedNow = true;
+                                counteredCs = true;
+                            }
                             if (distCol < range && !counteredCs) {
                                 float t = 1.0f - (distCol / range);
                                 if (customTint) {
@@ -12135,8 +12157,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (isAnyRewindActive)                drainPerSec += currentEditCost.drainRewindPerSec;
             if (isPaused)                         drainPerSec += currentEditCost.drainPausePerSec;
             if (isFastForward)                    drainPerSec += currentEditCost.drainFastForwardPerSec;
-            if (zHeldThisFrame || playerZoomOutOn || xHeldThisFrame || cHeldThisFrame || playerColorFilter != 0 || ColorGrade::CostlyActive(cgState))
-                                                   drainPerSec += currentEditCost.drainScreenEffectPerSec;
+            {
+                // 色変化の敵に書き換えられている間の色フィルタ（と、色の輪の色）は、自分で選んだ色ではないので、コストに数えない
+                bool screenFxCost = zHeldThisFrame || playerZoomOutOn || xHeldThisFrame || cHeldThisFrame || ColorGrade::BrightActive(cgState);
+                if (!colorFilterForcedNow && (playerColorFilter != 0 || ColorGrade::TintActive(cgState))) screenFxCost = true;
+                if (screenFxCost) drainPerSec += currentEditCost.drainScreenEffectPerSec;
+            }
+            colorFilterForcedNow = false;
 
             if (drainPerSec > 0.0f) editCost -= drainPerSec * perFrame;
             else                    editCost += currentEditCost.regenPerSec * perFrame;

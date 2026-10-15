@@ -275,7 +275,7 @@
       "order": 2,
       "unlock": "always",
       "require": [],
-      "item_total": 10
+      "item_total": 19
     },
     {
       "file": "puzzle_2_color.json",
@@ -284,7 +284,7 @@
       "order": 3,
       "unlock": "always",
       "require": [],
-      "item_total": 10
+      "item_total": 22
     },
     {
       "file": "puzzle_3_bright.json",
@@ -293,7 +293,7 @@
       "order": 4,
       "unlock": "always",
       "require": [],
-      "item_total": 11
+      "item_total": 23
     },
     {
       "file": "puzzle_4_zoom.json",
@@ -302,7 +302,7 @@
       "order": 5,
       "unlock": "always",
       "require": [],
-      "item_total": 9
+      "item_total": 22
     },
     {
       "file": "puzzle_5_cut.json",
@@ -311,7 +311,7 @@
       "order": 6,
       "unlock": "always",
       "require": [],
-      "item_total": 13
+      "item_total": 23
     },
     {
       "file": "puzzle_6_rewind.json",
@@ -320,7 +320,7 @@
       "order": 7,
       "unlock": "always",
       "require": [],
-      "item_total": 9
+      "item_total": 24
     },
     {
       "file": "stage_demo.json",

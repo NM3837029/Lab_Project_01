@@ -1047,6 +1047,7 @@ public class EnemyDef
     public float tintColorG { get; set; } = -1.0f;
     public float tintColorB { get; set; } = -1.0f;
     public float counterFilter { get; set; } = -1.0f;       // 打ち消せる自分の色フィルタ（-1=自動 0=なし 1=赤 2=緑 3=青）
+    public float forcePlayerFilter { get; set; } = -1.0f;   // 色変化の敵が、射程内のプレイヤーの色フィルタ(Tキー)を書き換えるか（-1/0=書き換えない 1=書き換える）
     public float brightenMax { get; set; } = -1.0f;         // 暗転の敵を反転したときの最大の明るさ（従来1.7）
     public float counterBrightness { get; set; } = -1.0f;   // 暗転を打ち消せる自分の明るさのしきい値（従来1.3）
     public float chargeWarnFrames { get; set; } = -1.0f;    // 射撃の予兆の長さ（従来20フレーム）

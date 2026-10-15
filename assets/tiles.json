@@ -304,5 +304,23 @@
     "breakByPlayer": false,
     "breakMinScale": 0.0,
     "breakSe": "se_hit"
+  },
+  {
+    "id": 17,
+    "name": "ぶ厚い壁（1.5倍以上の体当たりで崩れる）",
+    "color": "#2A3F7A",
+    "collidable": true,
+    "deadly": false,
+    "sprite": "img/ｓｆ風タイル２.png",
+    "srcX": 0,
+    "srcY": 0,
+    "srcW": 0,
+    "srcH": 0,
+    "breakBySlam": false,
+    "breakByRam": true,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakMinScale": 1.5,
+    "breakSe": "se_hit"
   }
 ]
