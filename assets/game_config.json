@@ -251,10 +251,28 @@
   },
   "stages": [
     {
+      "file": "tutorial_1_kihon.json",
+      "name": "チュートリアル1：きほんと時間",
+      "thumbnail": "",
+      "order": 0,
+      "unlock": "always",
+      "require": [],
+      "item_total": 16
+    },
+    {
+      "file": "tutorial_2_hensyu.json",
+      "name": "チュートリアル2：画面と物の編集",
+      "thumbnail": "",
+      "order": 1,
+      "unlock": "always",
+      "require": [],
+      "item_total": 32
+    },
+    {
       "file": "stage_demo.json",
       "name": "あたらしい素材のおためし",
       "thumbnail": "",
-      "order": 0,
+      "order": 2,
       "unlock": "always",
       "require": [],
       "item_total": 27

@@ -5111,6 +5111,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return s;
     };
 
+    // プレイヤーが編集操作をした瞬間に呼ぶ。イベントのスイッチ "op_<name>" を ON にするだけ。
+    // ステージ側は、トリガー条件 SwitchOn（conditionParam="op_zoomin" など）で「その操作をしたら扉を開く」と書ける
+    // （チュートリアルのように、操作を覚えさせてから先へ進ませたいときに使う）。
+    // name は select / menu / move / scale / rotate / flip / undo / areaselect / ground / zoomin / zoomout。
+    // スイッチはステージのやり直しで消える（EventManager::Reset）。時間停止中はイベントが動かないが、スイッチは残るので解除後に反応する。
+    auto NoteEditOp = [&](const char* name) { EventManager::Get().SetSwitch(std::string("op_") + name, true); };
     auto EditUndo = [&]() -> bool {
         FlushWheelUndo();
         if (undoStack.empty()) { EditDeniedWhy("取り消せる操作がありません"); return false; }
@@ -5121,6 +5127,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         editCost += en.cost;
         if (editCost > currentEditCost.maxCost) editCost = currentEditCost.maxCost;
         redoStack.push_back(en);
+        NoteEditOp("undo");
         SoundManager::Get().PlaySe(gameConfig.editSe.reset);
         {
             char b[96];
@@ -5296,6 +5303,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     //   stepByTile … ホイール用。可変地面は横幅を「絵のタイル1枚ぶん」単位で増減する
     //                （32pxずつだとタイル幅への丸めで元へ戻ってしまい、回しても大きくならない）
     auto ApplyScaleDelta = [&](float ds, float dw, bool stepByTile = false) {
+        if (ds != 0.0f || dw != 0.0f) NoteEditOp("scale");
         // 敵・プレイヤーは足元を固定して伸び縮みし、拡大で地形に食い込むなら手前で止まる
         for (auto* p : selectedPlayers) RescalePlayer(*p, fmaxf(p->scale + ds, 0.1f));
         for (auto* e : selectedEnemies) {
@@ -5343,6 +5351,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 選択中の全員を da ラジアンだけ回す。
     // angleをAIが自前の状態に使っている型は回さない（回すと壊れるため）。
     auto ApplyAngleDelta = [&](float da) {
+        if (da != 0.0f) NoteEditOp("rotate");
         for (auto* p : selectedPlayers) { p->angle += da; }
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
@@ -5440,6 +5449,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         SoundManager::Get().PlaySe(gameConfig.editSe.flip); // 反転できたときの音
         PushUndo(undoBefore, currentEditCost.flatDirectionFlip, false);
+        NoteEditOp("flip");
         return true;
     };
 
@@ -6403,7 +6413,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         } else if (action == "OpenDoor") {
             for (auto& gim : gimmicks) {
-                if (gim.type == GIMMICK_GATE_DOOR && gim.assetId == p1) {
+                // p2（任意）が指定されていれば、置いた扉の param が一致するものだけを開ける（同じ種類の扉を1枚ずつ開けるため）
+                if (gim.type == GIMMICK_GATE_DOOR && gim.assetId == p1 && (p2.empty() || gim.param == p2)) {
                     gim.isActive = false; // isActive=falseが開いた状態を表す
                     gim.val1 = 1.0f;      // 重量スイッチの自動ロジックに上書きされないよう、手動オープン済みであることを記録
                 }
@@ -6968,7 +6979,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             { "Space / 中ボタン", "時間停止（コストを消費）" },
             { "停止中の ← →", "1コマずつ進める／戻す" },
             { "R（長押し）", "巻き戻し" },
-            { "F（長押し）", "早送り" },
+            { "F（切り替え）", "早送り（もう一度 F で元の速さ）" },
             { "T/X/C（長押し）", "色フィルタ・暗転・明転" },
             { "Z（長押し）", "カーソルの位置を拡大" },
             { "Z（長押し）＋ホイール", "ズームの倍率（1.2〜3倍）" },
@@ -7193,8 +7204,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature 5: ShowMessageアクションで表示中のメッセージウィンドウをEnterキーで閉じる
         static bool lastMsgKey = false;
         bool currentMsgKey = CheckHitKey(KEY_INPUT_RETURN) != 0;
+        // このフレームに Enter でメッセージを閉じたか。同じ Enter が、直後の射撃の判定でも「押した瞬間」に見えて、
+        // メッセージを閉じるたびに弾が出てしまっていた。射撃側で、この Enter は射撃に使わない。
+        bool msgClosedByEnterThisFrame = false;
         if (isShowingMessage && currentMsgKey && !lastMsgKey) {
             isShowingMessage = false;
+            msgClosedByEnterThisFrame = true;
             SoundManager::Get().StopAnimalese();
         }
         lastMsgKey = currentMsgKey;
@@ -7250,6 +7265,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             bool stepFwd  = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_RIGHT) && !lastStepKey);
             bool stepBack = (isEditMode && isPaused && CheckHitKey(KEY_INPUT_LEFT)  && !lastStepKeyL);
             isStepFrame = (stepFwd || stepBack);
+            // コマ送りは、この同じフレームのイベント更新（isStepFrame のときだけ動く）に間に合うよう、ここで記録する。
+            // 時間停止中はイベントが止まるので、あとで記録すると、停止を解くまで「できた」が出なくなる。
+            if (isStepFrame) NoteEditOp("step");
             stepFrameDir = stepBack ? -1.0f : 1.0f;
             lastStepKey  = (CheckHitKey(KEY_INPUT_RIGHT) != 0);
             lastStepKeyL = (CheckHitKey(KEY_INPUT_LEFT)  != 0);
@@ -7509,6 +7527,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // Feature: ポータルの作り直し（友人フィードバック対応）— CUT_PORTAL専用の「Delete Cut」メニューは
                     // 廃止し、他のギミックと同じ標準コンテキストメニュー（巻き戻し/一時停止トグル等）を使う
                     menu.isOpen = true;
+                    NoteEditOp("select"); // 右クリックで物を選んだ
+                    NoteEditOp("menu");   // 円形メニューが開いた
                     menu.x = max(RADIAL_MARGIN_X, min(WINDOW_WIDTH - RADIAL_MARGIN_X, mx));
                     menu.y = max(RADIAL_MARGIN_Y, min(WINDOW_HEIGHT - RADIAL_MARGIN_Y, my));
                     // 押しっぱなしのまま項目の方向へ動かして離す使い方に備える。
@@ -7551,6 +7571,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // エディタの範囲選択ドラッグ終了
             if (!currentLeftClick && lastLeftClick && isAreaSelecting) {
                 isAreaSelecting = false;
+                NoteEditOp("areaselect");
                 
                 float selX1 = 0.0f, selX2 = 0.0f, selY1 = 0.0f, selY2 = 0.0f;
                 Screen_MouseToWorld((float)min(areaSelectStartX, areaSelectEndX), (float)min(areaSelectStartY, areaSelectEndY), selX1, selY1);
@@ -7639,6 +7660,44 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // エディタUI / ドラッグ操作
+            // Gキーで可変地面を追加。
+            // 以前はこの処理が「左ボタンを押している間」のブロックの中にあったため、左ボタンを押しながらでないと G が効かなかった。
+            // ボタンの状態と関係なく、押した瞬間にカーソルの位置へ置く（モニターの外・円形メニュー表示中は置かない）。
+            static bool lastGKey = false;
+            bool currentGKey = CheckHitKey(KEY_INPUT_G) != 0;
+            if (currentGKey && !lastGKey && objectEditOpEnabled && !menu.isOpen
+                && mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH) {
+                int imgW, imgH;
+                GetGraphSize(jimenHandle, &imgW, &imgH);
+                float h = 32.0f;
+                float tileW = h * ((float)imgW / imgH);
+                float w = tileW * 3.0f; // 初期は3タイル分
+
+                // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
+                // targetGimmick / selectedGimmicks の生ポインタが全てダングリングになる。
+                // そのまま触ると不正アクセスで落ちるので、追加の前に選択を解除しておく
+                // （タイムラインカット生成側と同じ手順）。
+                selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
+                selectedType = SELECT_NONE;
+                targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
+                targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
+                targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
+
+                // 【重要】ここは以前 hitboxWidth / hitboxHeight の2つを渡し忘れており、
+                // 集成初期化の値が1つずつ前へずれていた：
+                //   hitboxWidth ← true(=1.0f) / hitboxHeight ← 0.0f / isActive ← 0.0f(=false)
+                // true→float も 0.0f→bool も「定数式で元の値へ戻せる」ため narrowing とみなされず、
+                // コンパイルは通ってしまう。その結果、Gキーで置いた地面は isActive==false のまま生成され、
+                // 描画も当たり判定も全てスキップされて「置いても何も出てこない」状態だった。
+                // Gimmickのメンバ順（type,x,y,width,height,spriteWidth,spriteHeight,
+                // hitboxOffsetX,hitboxOffsetY,hitboxWidth,hitboxHeight,isActive,val1,val2,
+                // angle,customTimer,isPaused,isRewinding,history）に合わせて19個を渡す。
+                gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, w, h,
+                                     0.0f, 0.0f, w, h, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
+                NoteEditOp("ground");
+            }
+            lastGKey = currentGKey;
+
             if (currentLeftClick && !menu.isOpen && !menuClickConsumed) {
                 // 一時停止ボタンのチェック
                 if (!lastLeftClick && !bigView && mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2) {
@@ -7692,6 +7751,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                              true, start, end, 0.0f, 0.0f, false, false, {} };
                                 cut.isTimelineCut = true;
                                 gimmicks.push_back(cut);
+                                NoteEditOp("cut");
                                 tempCutStart = -1.0f;
                                 SoundManager::Get().PlaySe(gameConfig.editSe.cut);
                             }
@@ -7732,39 +7792,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     areaSelectEndY = my;
                 }
 
-                // Gキーで可変地面を追加
-                static bool lastGKey = false;
-                bool currentGKey = CheckHitKey(KEY_INPUT_G) != 0;
-                if (currentGKey && !lastGKey && objectEditOpEnabled) {
-                    int imgW, imgH;
-                    GetGraphSize(jimenHandle, &imgW, &imgH);
-                    float h = 32.0f;
-                    float tileW = h * ((float)imgW / imgH);
-                    float w = tileW * 3.0f; // 初期は3タイル分
-
-                    // push_backでgimmicksが再確保されると、選択中オブジェクトを指している
-                    // targetGimmick / selectedGimmicks の生ポインタが全てダングリングになる。
-                    // そのまま触ると不正アクセスで落ちるので、追加の前に選択を解除しておく
-                    // （タイムラインカット生成側と同じ手順）。
-                    selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
-                    selectedType = SELECT_NONE;
-                    targetScale = nullptr; targetAngle = nullptr; targetSpeedScale = nullptr;
-                    targetPaused = nullptr; targetRewind = nullptr; targetDirection = nullptr;
-                    targetEnemyType = nullptr; targetGimmick = nullptr; targetEnemy = nullptr;
-
-                    // 【重要】ここは以前 hitboxWidth / hitboxHeight の2つを渡し忘れており、
-                    // 集成初期化の値が1つずつ前へずれていた：
-                    //   hitboxWidth ← true(=1.0f) / hitboxHeight ← 0.0f / isActive ← 0.0f(=false)
-                    // true→float も 0.0f→bool も「定数式で元の値へ戻せる」ため narrowing とみなされず、
-                    // コンパイルは通ってしまう。その結果、Gキーで置いた地面は isActive==false のまま生成され、
-                    // 描画も当たり判定も全てスキップされて「置いても何も出てこない」状態だった。
-                    // Gimmickのメンバ順（type,x,y,width,height,spriteWidth,spriteHeight,
-                    // hitboxOffsetX,hitboxOffsetY,hitboxWidth,hitboxHeight,isActive,val1,val2,
-                    // angle,customTimer,isPaused,isRewinding,history）に合わせて19個を渡す。
-                    gimmicks.push_back({ GIMMICK_SCALABLE_GROUND, gx - w / 2.0f, gy - h / 2.0f, w, h, w, h,
-                                         0.0f, 0.0f, w, h, true, 0.0f, 0.0f, 0.0f, 0.0f, false, false, {} });
-                }
-                lastGKey = currentGKey;
 
                 // オブジェクトの選択と変形（タイムラインやパネル内ではなく、モニター画面のプレビュー内のみで選択されるようにする）
                 if (!lastLeftClick && objectEditOpEnabled && !isDragging && !isScaling && !isScalingHeight && !isRotating && !isHandleScale && !isHandleRotate && !isInspScale && !isInspAngle && !isInspSpeed && !isAreaSelecting &&
@@ -7988,7 +8015,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             targetSpeedScale = &gim.speedScale; // 従来はcustomTimerを流用しUI上は"N/A"だった
                                             targetPaused = &gim.isPaused;
                                             targetRewind = &gim.isRewinding;
-                                            targetDirection = nullptr;
+                                            targetDirection = &gim.direction; // 左クリックで選んだギミックも反転できるように（以前は nullptr で、ダブルクリックの反転が空振りしていた。右クリック側は修正済み）
                                             targetEnemyType = nullptr;
                                             targetGimmick = &gim;
                                             targetEnemy = nullptr;
@@ -8086,6 +8113,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     Screen_MouseToWorld((float)lastMouseX, (float)lastMouseY, prevGx, prevGy);
                     float dx = gx - prevGx;
                     float dy = gy - prevGy;
+                    if (fabsf(dx) + fabsf(dy) > 0.5f) NoteEditOp("move");
 
                     for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
                     // アセット側で禁止されている操作は、選択に混ざっていても飛ばす。
@@ -8255,6 +8283,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         static bool lastShot = false;
         bool isClickInScreen = (mx >= monitorX && mx <= monitorX + monitorW && my >= monitorY && my <= monitorY + monitorH);
         bool currentShot = (CheckHitKey(KEY_INPUT_RETURN) != 0) || (currentLeftClick && isClickInScreen && selectedType == SELECT_NONE);
+        if (msgClosedByEnterThisFrame && currentShot) lastShot = true; // メッセージを閉じた Enter では撃たない（離すまで次の1発も出ない）
         if (currentShot && !lastShot && canPlayerAct) {
             for (int i = 0; i < MAX_BULLETS; i++) {
                 if (!bullets[i].isActive) {
@@ -8281,6 +8310,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bullets[i].vx = fwdX * BULLET_SPEED;
                     bullets[i].vy = fwdY * BULLET_SPEED; // 傾いているときは斜めにも飛ぶ（角度0なら0）
                     bullets[i].isPlayerOwned = true; // プレイヤーの弾
+                    NoteEditOp("shoot");
                     bullets[i].isRewinding = false;
                     bullets[i].history.clear();
                     SoundManager::Get().PlaySe(gameConfig.playerSe.shoot); // 射撃音（従来は無音だった）
@@ -8317,6 +8347,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             static bool lastDashing = false;
             bool nowDashing = wantDash && (player.vx != 0.0f);
             if (nowDashing && !lastDashing) SoundManager::Get().PlaySe(gameConfig.playerSe.dash);
+            if (nowDashing) NoteEditOp("dash"); // ステージの扉を「ダッシュしたら開く」にできる（チュートリアル用）
             lastDashing = nowDashing;
             if (currentJumpKey && !lastJumpKey && !player.isJumping) {
                 player.vy = baseJmp;
@@ -11931,6 +11962,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (zHeldThisFrame && canUseScreenFx) {
                 Screen_SetZoom(playerZoomLevel);
                 playerZoomOn = true;
+                NoteEditOp("zoomin");
                 // アンカー＝カーソルの下の点（画面 640x480 の座標。モニターの外にあるときは、端へ丸める）
                 float aX = isEditMode ? (float)(mx - monitorX) / viewScale : (float)mx * (float)SCREEN_WIDTH / (float)WINDOW_WIDTH;
                 float aY = isEditMode ? (float)(my - monitorY) / viewScale : (float)my * (float)SCREEN_HEIGHT / (float)WINDOW_HEIGHT;
@@ -11943,6 +11975,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (vHeldThisFrame && canUseScreenFx) {
                 fxTargetZoomOut = playerZoomOutLevel;
                 playerZoomOutOn = true;
+                NoteEditOp("zoomout");
                 float aX = isEditMode ? (float)(mx - monitorX) / viewScale : (float)mx * (float)SCREEN_WIDTH / (float)WINDOW_WIDTH;
                 float aY = isEditMode ? (float)(my - monitorY) / viewScale : (float)my * (float)SCREEN_HEIGHT / (float)WINDOW_HEIGHT;
                 fxAnchorX = aX < 0.0f ? 0.0f : (aX > (float)SCREEN_WIDTH ? (float)SCREEN_WIDTH : aX);
@@ -11959,6 +11992,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (cHeldThisFrame && canUseScreenFx) Screen_SetBrightness(1.7f);
             // 色フィルタの画面への掛け方は、上のパネル反映（色の輪→TintMultiplier）に一本化した
             // （赤は従来どおり (1.0, 0.4, 0.4)）。
+        }
+
+        // 時間・画面の操作を、ステージ側が「やったら扉を開く」に使えるよう、イベントのスイッチ op_xxx に反映する（NoteEditOp）。
+        // 押しているだけでなく、結果の状態で見る：パネルで暗くした場合も dark、色の輪で色を付けた場合も color になる。
+        if (currentScene == PLAY) {
+            if (isPaused) NoteEditOp("pause");
+            if (isAnyRewindActive) NoteEditOp("rewind");
+            if (isFastForward) NoteEditOp("ff");
+            if (playerColorFilter != 0) NoteEditOp("color");
+            if (fxCurBright < 0.6f) NoteEditOp("dark");
+            if (fxCurBright > 1.3f) NoteEditOp("bright");
+            if (fxCurSat < 0.3f || fabsf(fxCurHue) > 20.0f || fxCurContrast > 0.3f) NoteEditOp("grade");
         }
 
         // ===== Feature: 編集コストゲージ：継続系ドレイン／自然回復／ゼロ到達時の強制解除 =====

@@ -161,6 +161,9 @@ public:
             triggers[i].elapsedTime = 0.0f;
         }
         actionQueue.clear();
+        // スイッチも消す。以前は残っていたため、やり直すと SwitchOn のトリガーが1フレーム目から再発火していた
+        // （ほかの状態はすべてやり直しで元に戻るのに、スイッチだけ残るのは不整合）。
+        activeSwitches.clear();
     }
 
     // SetSwitchアクションとSwitchOn条件の両方から参照される、共有スイッチ状態を切り替える関数。
@@ -209,7 +212,13 @@ public:
                 if (enemyCount == 0) condMet = true;
             } else if (tr.condition == "SwitchOn") {
                 // 指定したスイッチIDがONになっている場合に条件成立とする。
-                if (IsSwitchOn(tr.conditionParam)) condMet = true;
+                // ただし "op_" で始まるスイッチ（プレイヤーの操作を表す。DrawPixel.cpp の NoteEditOp）は、
+                // トリガーの矩形の中にプレイヤーがいるときだけ成立とする。ほかの部屋でやった操作で、先の部屋の扉が開いたり
+                // メッセージが出たりしないようにするため（チュートリアルで、部屋ごとに操作を教えるのに使う）。
+                if (IsSwitchOn(tr.conditionParam)) {
+                    if (tr.conditionParam.compare(0, 3, "op_") == 0) condMet = isInside;
+                    else condMet = true;
+                }
             } else if (tr.condition == "ItemCollected") {
                 if (tr.conditionParam.empty()) {
                     // conditionParamが指定されていない場合は「何か1つでもアイテムを取得していれば成立」とする。
