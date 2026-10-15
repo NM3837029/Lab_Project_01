@@ -79,7 +79,6 @@ partial class Form1
 
     // イベントパレット（敵・ギミック・アイテム）
     private System.Windows.Forms.ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;  // 敵/ギミック/アイテムの選択リスト
-    private System.Windows.Forms.RadioButton rbTrigger = null!, rbPlayerStart = null!, rbGoal = null!;  // 汎用トリガー/プレイヤー開始位置/ゴール位置の配置モード選択ラジオボタン
 
     // イベントリスト (配置済み)
     private System.Windows.Forms.ListBox lstPlacedEvents = null!;  // 現在のステージに配置済みの敵/ギミック/アイテム/トリガー一覧
@@ -391,15 +390,21 @@ partial class Form1
         lstItems = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 215), Size = new System.Drawing.Size(200, 60) };
         lstItems.SelectedIndexChanged += lstItems_SelectedIndexChanged;
 
-        // 汎用トリガー配置モードを既定選択にしておく。
-        rbTrigger = new System.Windows.Forms.RadioButton { Text = "⚡汎用トリガー", Location = new System.Drawing.Point(5, 285), Size = new System.Drawing.Size(120, 20), Checked = true };
-        rbPlayerStart = new System.Windows.Forms.RadioButton { Text = "🚶プレイヤー開始位置", Location = new System.Drawing.Point(5, 310), Size = new System.Drawing.Size(200, 20) };
-        rbGoal = new System.Windows.Forms.RadioButton { Text = "🏁ゴール位置", Location = new System.Drawing.Point(5, 335), Size = new System.Drawing.Size(200, 20) };
-        rbTrigger.CheckedChanged += EventModeItem_CheckedChanged;
-        rbPlayerStart.CheckedChanged += EventModeItem_CheckedChanged;
-        rbGoal.CheckedChanged += EventModeItem_CheckedChanged;
+        // トリガー・プレイヤー開始位置・ゴールは、以前はここのラジオボタンで配置モードを切り替えていたが、
+        // 範囲選択（左ドラッグ）と操作が重なるため、ステージ上の右クリック／右ドラッグへ移した。使い方をここに書いておく。
+        var lblEventHelp = new System.Windows.Forms.Label
+        {
+            Text = "⚡ トリガー・開始位置・ゴールは、ステージ上で右ボタンを使います。\r\n"
+                 + "・何も無い所を右ボタンでドラッグ：トリガーの範囲を作る\r\n"
+                 + "・何も無い所を右クリック：ここにトリガー／開始位置／ゴール\r\n"
+                 + "・トリガーを右クリック：編集・削除",
+            Location = new System.Drawing.Point(5, 285),
+            Size = new System.Drawing.Size(200, 110),
+            ForeColor = System.Drawing.Color.DimGray,
+            Font = new System.Drawing.Font("Meiryo UI", 8f),
+        };
 
-        tabEventPalette.Controls.AddRange(new System.Windows.Forms.Control[] { lblEn, lstEnemies, lblGi, lstGimmicks, lblIt, lstItems, rbTrigger, rbPlayerStart, rbGoal });
+        tabEventPalette.Controls.AddRange(new System.Windows.Forms.Control[] { lblEn, lstEnemies, lblGi, lstGimmicks, lblIt, lstItems, lblEventHelp });
 
         // イベントリスト (配置済み)：現在のステージに配置されているオブジェクトの一覧をリスト表示する。
         lstPlacedEvents = new System.Windows.Forms.ListBox { Dock = System.Windows.Forms.DockStyle.Fill };
@@ -436,6 +441,7 @@ partial class Form1
         // メインの編集キャンバス。MapCanvas側で発火する各種イベントをここで購読する。
         mapCanvas = new MapCanvas { Dock = System.Windows.Forms.DockStyle.Fill, BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle };
         mapCanvas.ObjectSelected += mapCanvas_ObjectSelected;
+        mapCanvas.TriggerEditRequested += (s, t) => OpenTriggerEditor(t);
         mapCanvas.StageModified += mapCanvas_StageModified;
         mapCanvas.EditCompleted += mapCanvas_EditCompleted;
         mapCanvas.TestPlayClicked += mapCanvas_TestPlayClicked;

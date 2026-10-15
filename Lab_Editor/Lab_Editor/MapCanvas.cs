@@ -122,6 +122,18 @@ public class MapCanvas : Panel
     /// <summary>Feature 5: トリガー矩形が確定された時のイベント</summary>
     public event EventHandler<EventTrigger>? TriggerPlaced;
 
+    /// <summary>右クリックメニューの「トリガーを編集...」が選ばれた時のイベント（編集ダイアログは Form1 が開く）</summary>
+    public event EventHandler<EventTrigger>? TriggerEditRequested;
+
+    // イベント・トリガー系統は右ボタンで操作する（左ボタンの範囲選択・配置と重ならないように）。
+    //   右ボタンを動かさずに離す … 右クリックメニュー（物の上ならその物のメニュー、何も無い所なら「ここにトリガー／開始位置／ゴール」）
+    //   何も無い所から右ボタンでドラッグ … トリガーの矩形を作る（離すと編集ダイアログが開く）
+    // タイル系のモード（メイン・遠景・近景）の右ボタンは、今までどおりタイルを消す。
+    private bool _rightPressActive;      // 右ボタンを押していて、メニュー／トリガー作成のどちらかを離したときに決める状態か
+    private Point _rightPressPos;        // 右ボタンを押した位置（キャンバス座標）
+    private bool _rightDragged;          // 右ボタンを、4px以上ドラッグしたか
+    private bool _rightPressOnEmpty;     // 押した位置に配置物が無かったか（物の上から始めたドラッグでは、トリガーを作らない）
+
     // 左ボタンドラッグ中かどうか（タイル連続配置などに使用）。
     private bool isDragging = false;
     // 右ボタンドラッグ中かどうか（タイル連続削除に使用）。
@@ -749,8 +761,21 @@ public class MapCanvas : Panel
 
         // 左クリック：ドラッグ開始フラグを立て、ストローク内配置済みフラグをリセットしてから編集処理を実行する。
         if (e.Button == MouseButtons.Left) { isDragging = true; _strokePlacedAsset = false; HandleLeft(e.X, e.Y); }
-        // 右クリック：ドラッグ削除の開始として扱う。
-        else if (e.Button == MouseButtons.Right) { isRightDrag = true; HandleRight(e.X, e.Y); }
+        // 右ボタン：タイル系のモードは、今までどおり押した瞬間からタイルを消す（ドラッグで連続して消せる）。
+        else if (e.Button == MouseButtons.Right && IsTileEraseMode)
+        {
+            isRightDrag = true;
+            HandleRight(e.X, e.Y);
+        }
+        // それ以外のモードは、離したときに「メニュー」か「トリガーの矩形」かを決める（ここでは覚えるだけ）。
+        else if (e.Button == MouseButtons.Right)
+        {
+            isRightDrag = true;
+            _rightPressActive = true;
+            _rightPressPos = e.Location;
+            _rightDragged = false;
+            _rightPressOnEmpty = FindObjectAt(e.X, e.Y) == null;
+        }
     }
 
     // マウス移動時の処理。ドラッグ中であれば継続して編集を適用し、モードに応じてカーソル形状も切り替える。
@@ -758,6 +783,21 @@ public class MapCanvas : Panel
     {
         base.OnMouseMove(e);
         if (Stage == null) return;
+
+        // 右ボタンのドラッグ：何も無い所から始めていれば、トリガーの矩形を伸ばす（プレビューはトリガーのドラッグと同じ描き方）
+        if (_rightPressActive && e.Button == MouseButtons.Right)
+        {
+            if (!_rightDragged && (Math.Abs(e.X - _rightPressPos.X) >= 4 || Math.Abs(e.Y - _rightPressPos.Y) >= 4))
+                _rightDragged = true;
+            if (_rightDragged && _rightPressOnEmpty)
+            {
+                _isTriggerDragging = true;
+                _triggerDragRect = new Rectangle(Math.Min(_rightPressPos.X, e.X), Math.Min(_rightPressPos.Y, e.Y),
+                                                 Math.Abs(e.X - _rightPressPos.X), Math.Abs(e.Y - _rightPressPos.Y));
+                Invalidate();
+            }
+            return;
+        }
 
         // Feature 5: トリガードラッグ中の矩形更新。始点と現在位置から矩形の左上・幅・高さを再計算する。
         if (_isTriggerDragging && e.Button == MouseButtons.Left)
@@ -791,6 +831,30 @@ public class MapCanvas : Panel
     {
         base.OnMouseUp(e);
 
+        // 右ボタンを離した：何も無い所からのドラッグならトリガーを作る。それ以外（動かしていない／物の上から）は右クリックメニュー。
+        // メニューの各操作は、それぞれ保存・履歴を知らせるので、ここでは EditCompleted を出さない。
+        if (_rightPressActive && e.Button == MouseButtons.Right)
+        {
+            _rightPressActive = false;
+            isDragging = isRightDrag = false;
+            var rect = _triggerDragRect;
+            bool makeTrigger = _rightDragged && _rightPressOnEmpty && rect.Width > 4 && rect.Height > 4;
+            _isTriggerDragging = false;
+            _triggerDragRect = Rectangle.Empty;
+            if (makeTrigger && Stage != null)
+            {
+                var (wx1, wy1) = ToWorld(rect.Left, rect.Top);
+                var (wx2, wy2) = ToWorld(rect.Right, rect.Bottom);
+                TriggerPlaced?.Invoke(this, new EventTrigger { id = NextTriggerId(), x = wx1, y = wy1, width = wx2 - wx1, height = wy2 - wy1 });
+            }
+            else
+            {
+                ShowObjectMenu(_rightPressPos.X, _rightPressPos.Y);
+            }
+            Invalidate();
+            return;
+        }
+
         // Feature 5: トリガーのドラッグ確定。左ボタンが離されたタイミングでトリガーを生成する。
         if (_isTriggerDragging && e.Button == MouseButtons.Left)
         {
@@ -803,7 +867,7 @@ public class MapCanvas : Panel
                 var trigger = new EventTrigger
                 {
                     // トリガーIDは連番形式（trigger_001など）で自動採番する。
-                    id = $"trigger_{Stage!.Triggers.Count + 1:D3}",
+                    id = NextTriggerId(),
                     x = wx1, y = wy1,
                     width = wx2 - wx1,
                     height = wy2 - wy1
@@ -986,6 +1050,55 @@ public class MapCanvas : Panel
         }
     }
 
+    // メイン・遠景・近景のタイル編集中か（右ボタンがタイル消しになるモード）
+    private bool IsTileEraseMode => CurrentMode == EditMode.Tile || CurrentMode == EditMode.DecoLayerBack || CurrentMode == EditMode.DecoLayerFront;
+
+    // 新しいトリガーのID（trigger_001 形式）。削除で欠番があっても、既存と重ならない最初の番号を使う
+    private string NextTriggerId()
+    {
+        int n = 1;
+        if (Stage != null) while (Stage.Triggers.Any(t => t.id == $"trigger_{n:D3}")) n++;
+        return $"trigger_{n:D3}";
+    }
+
+    // 何も無い所を右クリックしたときのメニュー。イベント系統（トリガー・開始位置・ゴール）は、ここと右ドラッグで作る。
+    private void ShowEmptyMenu(int cx, int cy)
+    {
+        if (Stage == null) return;
+        var menu = new ContextMenuStrip();
+        var (wx, wy) = ToWorldSnapped(cx, cy);
+
+        var miTrig = new ToolStripMenuItem("ここにトリガーを作る（大きさは、何も無い所を右ボタンでドラッグしても決められます）");
+        miTrig.Click += (s, e) =>
+            TriggerPlaced?.Invoke(this, new EventTrigger { id = NextTriggerId(), x = wx, y = wy, width = 96f, height = 96f });
+        menu.Items.Add(miTrig);
+        menu.Items.Add(new ToolStripSeparator());
+
+        var miStart = new ToolStripMenuItem("ここをプレイヤーの開始位置にする");
+        miStart.Click += (s, e) =>
+        {
+            Stage.PlayerStartX = wx; Stage.PlayerStartY = wy;
+            Fire(); Invalidate();
+            EditCompleted?.Invoke(this, EventArgs.Empty);
+        };
+        menu.Items.Add(miStart);
+        var miGoal = new ToolStripMenuItem("ここをゴールにする");
+        miGoal.Click += (s, e) =>
+        {
+            Stage.GoalX = wx; Stage.GoalY = wy;
+            Fire(); Invalidate();
+            EditCompleted?.Invoke(this, EventArgs.Empty);
+        };
+        menu.Items.Add(miGoal);
+
+        if (_tileSel.HasValue)
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            AddTileSelectionMenuItems(menu);
+        }
+        menu.Show(PointToScreen(new Point(cx, cy)));
+    }
+
     // 右クリックした配置物に対するメニューを出す。
     // 何も無い場所ではメニューを出さない（空振りで出ると何に対する操作か紛らわしいため）。
     private void ShowObjectMenu(int cx, int cy)
@@ -994,13 +1107,8 @@ public class MapCanvas : Panel
         object? target = FindObjectAt(cx, cy);
         if (target == null)
         {
-            // 何も無い所：タイルの選択範囲があれば、その範囲に対するメニューを出す
-            if (_tileSel.HasValue)
-            {
-                var tm = new ContextMenuStrip();
-                AddTileSelectionMenuItems(tm);
-                tm.Show(PointToScreen(new Point(cx, cy)));
-            }
+            // 何も無い所：トリガー・開始位置・ゴールを作るメニュー（タイルの選択範囲があれば、その項目も出る）
+            ShowEmptyMenu(cx, cy);
             return;
         }
 
@@ -1018,6 +1126,14 @@ public class MapCanvas : Panel
         Invalidate();
 
         var menu = new ContextMenuStrip();
+        // トリガー：編集ダイアログは、選んだだけでは開かない（範囲選択などの邪魔になるため）。ここから開く。
+        if (target is EventTrigger trig)
+        {
+            var miTrigEdit = new ToolStripMenuItem("トリガーを編集...");
+            miTrigEdit.Click += (s, e) => TriggerEditRequested?.Invoke(this, trig);
+            menu.Items.Add(miTrigEdit);
+            menu.Items.Add(new ToolStripSeparator());
+        }
         // トリガーには大きさ・角度の概念が無いので、その場合は削除だけを出す。
         bool canTransform = target is PlacedEnemy || target is PlacedGimmick || target is PlacedItem;
         if (canTransform)

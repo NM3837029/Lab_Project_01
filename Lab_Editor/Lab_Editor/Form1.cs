@@ -551,22 +551,16 @@ public partial class Form1 : Form
 
     // イベントパレット内のラジオボタン（トリガー/開始位置/ゴール）の選択状態が変わったときの処理。
     // 現在Layer4（イベントレイヤー）が選択されている場合のみ、実際の編集モードに反映する。
-    private void EventModeItem_CheckedChanged(object? sender, EventArgs e)
-    {
-        if (tsbLayer4.Checked)
-            UpdateEventModeSubTool();
-    }
+
 
     // イベントレイヤー(Layer4)内で、具体的にどの種類のイベントを配置するモードにするかを、
     // ラジオボタンおよび敵/ギミック/アイテムリストの選択状態から総合的に判定して設定する。
     private void UpdateEventModeSubTool()
     {
-        // 優先順位: トリガー用ラジオボタン → 開始位置 → ゴール → 敵選択中 → ギミック選択中 → アイテム選択中。
+        // 優先順位: 敵選択中 → ギミック選択中 → アイテム選択中。
         // どれにも該当しなければ「選択モード」をデフォルトとする。
-        if (rbTrigger.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Trigger;
-        else if (rbPlayerStart.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.PlayerStart;
-        else if (rbGoal.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Goal;
-        else if (lstEnemies.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
+        // （トリガー・開始位置・ゴールは、ステージ上の右クリック／右ドラッグで作るので、左クリックのモードには無い）
+        if (lstEnemies.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
         else if (lstGimmicks.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Gimmick;
         else if (lstItems.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Item;
         else mapCanvas.CurrentMode = MapCanvas.EditMode.Select; // デフォルト
@@ -716,13 +710,10 @@ public partial class Form1 : Form
         }
         else if (sel.Count == 1)
         {
+            // トリガーは座標や種別以外に多くの設定項目を持ち、専用の編集ダイアログがある。
+            // 以前は選んだだけでダイアログが開いたが、範囲選択などの邪魔になるため、右クリックメニュー「トリガーを編集...」
+            // （またはイベント一覧のダブルクリック）から開くようにした。
             propertyGrid.SelectedObject = sel[0];
-            // トリガーが選択された場合は編集フォームを開く (Feature 5)。
-            // トリガーだけは座標や種別以外に多くの設定項目を持つため、専用の編集ダイアログで詳細を編集させる。
-            if (sel[0] is EventTrigger trigger)
-            {
-                OpenTriggerEditor(trigger);
-            }
         }
         else
         {
