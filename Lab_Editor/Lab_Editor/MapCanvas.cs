@@ -31,8 +31,15 @@ public class MapCanvas : Panel
         Goal,            // ゴール位置の指定
         Trigger,         // Feature 5: トリガー矩形配置（ドラッグで範囲指定するイベント発生エリア）
         TestPlay,        // Feature 4: ここからプレイ（クリック位置取得。実際のテストプレイ開始地点を選ぶ）
-        Eraser           // 消しゴムモード（タイル/装飾/配置オブジェクトを削除する）
+        Eraser,          // 消しゴムモード（タイル/装飾/配置オブジェクトを削除する）
+        Fill             // タイルのバケツ塗り（クリックした所とつながった同じタイルを、選んでいるタイルで埋める）
     }
+
+    // タイルのフィル・選択範囲の塗りつぶしが、どのタイル層に効くか。
+    // 編集モード（CurrentMode）とは別に持つ。フィルや範囲選択のツールを使っている間は、CurrentMode がそれらのツールになるため。
+    // Form1 が、Layer 1〜3 のボタンに合わせて切り替える（Layer 4 のときはメイン層）。
+    public enum TileLayer { Back, Main, Front }
+    public TileLayer FillLayer { get; set; } = TileLayer.Main;
 
     // 現在アクティブな編集モード。既定値はタイル編集。
     public EditMode CurrentMode { get; set; } = EditMode.Tile;
@@ -42,13 +49,57 @@ public class MapCanvas : Panel
     public string? SelectedAssetId { get; set; }
 
     // 編集対象のステージデータ本体（マップ配列・配置オブジェクト等を保持）。
-    public StageData? Stage { get; set; }
+    // 「元に戻す」「やり直し」「ステージの切り替え」はステージの実体ごと差し替えるため、選択していた物の参照は古くなる。
+    // そこで、実体が変わったときに選択（物・タイルの範囲）をすべて外し、画面側（プロパティ表）にも知らせる。
+    private StageData? _stage;
+    public StageData? Stage
+    {
+        get => _stage;
+        set
+        {
+            if (ReferenceEquals(_stage, value)) return;
+            _stage = value;
+            bool hadSelection = _selection.Count > 0;
+            _selection.Clear();
+            _tileSel = null;
+            _marqueeActive = false;
+            _dragOrig = null;
+            if (hadSelection) ObjectSelected?.Invoke(this, EventArgs.Empty);
+        }
+    }
     // タイル定義や敵/ギミック/アイテムの定義など、アセット全体の情報。
     public AssetDefinitions? Assets { get; set; }
 
-    // 選択モードで選ばれている配置済みオブジェクト（敵/ギミック/アイテム/トリガーのいずれか、またはnull）。
-    // プロパティグリッド側で編集する対象として外部から参照される。
-    public object? SelectedObject { get; set; }
+    // 選択モードで選ばれている配置済みオブジェクト。範囲選択で複数選べる（敵・ギミック・アイテム。トリガーは1つだけ）。
+    // 選ばれた順に並ぶ。参照の同一性で数える（同じ内容の別の物を同じとは見ない）。
+    private readonly List<object> _selection = new();
+    // 選択の先頭（1つだけ選ばれているときはその物、何も無ければ null）。
+    // 以前の「1つだけ選ぶ」使い方（一覧からの選択・SelectAndScrollTo）のために残してあり、代入すると、その1つだけの選択になる。
+    public object? SelectedObject
+    {
+        get => _selection.Count > 0 ? _selection[0] : null;
+        set { _selection.Clear(); if (value != null) _selection.Add(value); }
+    }
+    // 選択中のすべての物（Form1 がプロパティ表へ渡す）。
+    public IReadOnlyList<object> SelectedObjects => _selection;
+    public bool IsSelected(object? o) => o != null && _selection.Any(x => ReferenceEquals(x, o));
+
+    // タイルの選択範囲（タイル座標）。範囲ドラッグで作り、「選択範囲を塗りつぶす」「フィル」の範囲になる。無ければ null。
+    private TileRect? _tileSel;
+    public TileRect? TileSelection => _tileSel;
+    public bool HasTileSelection => _tileSel.HasValue;
+
+    // 範囲ドラッグ（何も無い所から始めた四角）の状態。キャンバス座標。
+    private bool _marqueeActive;
+    private Point _marqueeStart;
+    private Rectangle _marqueeRect;
+    private bool _marqueeAdditive; // Ctrl を押して始めた（いまの選択へ足す）
+    // 選択した物のドラッグ移動の状態。始めた時点の位置を覚えておき、移動量（32pxの格子）から毎回求め直す。
+    private List<(object obj, float x, float y)>? _dragOrig;
+    private PointF _dragStartWorld;
+    private bool _dragMoved;
+    // 複数選択の1つを、ドラッグせずにクリックだけしたとき、そのクリックした物だけの選択に絞る（離したときに決める）
+    private object? _clickedSelected;
 
     // 現在の水平スクロール量（px単位、画面表示上のオフセット）。
     public int ScrollX { get; set; } = 0;
@@ -212,9 +263,11 @@ public class MapCanvas : Panel
         // ==== レイヤー描画順: 装飾後景 → メイン → 装飾前景 ====
 
         // 現在の編集モードに応じて、どのレイヤーを「アクティブ（明るく表示）」にするかを判定する。
-        bool isL1 = CurrentMode == EditMode.DecoLayerBack;
-        bool isL2 = CurrentMode == EditMode.Tile;
-        bool isL3 = CurrentMode == EditMode.DecoLayerFront;
+        // フィルのときは、塗りつぶし先の層（FillLayer）をアクティブ（明るい）として見せる
+        bool isFillMode = CurrentMode == EditMode.Fill;
+        bool isL1 = CurrentMode == EditMode.DecoLayerBack || (isFillMode && FillLayer == TileLayer.Back);
+        bool isL2 = CurrentMode == EditMode.Tile || (isFillMode && FillLayer == TileLayer.Main);
+        bool isL3 = CurrentMode == EditMode.DecoLayerFront || (isFillMode && FillLayer == TileLayer.Front);
         bool isL4 = CurrentMode == EditMode.Trigger || CurrentMode == EditMode.PlayerStart || CurrentMode == EditMode.Goal || CurrentMode == EditMode.Enemy || CurrentMode == EditMode.Gimmick || CurrentMode == EditMode.Item;
         // Select/TestPlay/Eraserモードではどのレイヤーも「非アクティブ扱いにしない」（全レイヤーを通常表示する）。
         bool isNeutral = CurrentMode == EditMode.Select || CurrentMode == EditMode.TestPlay || CurrentMode == EditMode.Eraser;
@@ -266,7 +319,7 @@ public class MapCanvas : Panel
             DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: true);
             DrawPlacedObject(g, en.X, en.Y, bodySize,
                              def?.sprite, en.Angle, icon,
-                             SelectedObject == en ? Color.Magenta : Color.FromArgb(220, 50, 50));
+                             IsSelected(en) ? Color.Magenta : Color.FromArgb(220, 50, 50));
             DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: false);
             DrawLockBadge(g, en.X, en.Y, bodySize, en.EditLocks);
         }
@@ -281,7 +334,7 @@ public class MapCanvas : Panel
             float gimH = (def?.hitboxHeight > 0 ? def.hitboxHeight : GAME_TILE) * (gi.ScaleY > 0 ? gi.ScaleY : 1f);
             DrawPlacedObject(g, gi.X, gi.Y, new SizeF(gimW, gimH),
                              def?.sprite, gi.Angle, icon,
-                             SelectedObject == gi ? Color.Magenta : Color.FromArgb(50, 120, 220));
+                             IsSelected(gi) ? Color.Magenta : Color.FromArgb(50, 120, 220));
             DrawLockBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.EditLocks);
         }
 
@@ -292,7 +345,7 @@ public class MapCanvas : Panel
             string icon = AssetIcons.ForItem(def?.type_enum ?? -1);
             DrawPlacedObject(g, it.X, it.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale),
                              def?.sprite, it.Angle, icon,
-                             SelectedObject == it ? Color.Magenta : Color.FromArgb(255, 200, 0));
+                             IsSelected(it) ? Color.Magenta : Color.FromArgb(255, 200, 0));
             DrawLockBadge(g, it.X, it.Y, ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale), it.EditLocks);
         }
 
@@ -308,6 +361,11 @@ public class MapCanvas : Panel
             g.FillRectangle(trigBrush, _triggerDragRect);
             g.DrawRectangle(trigPen, _triggerDragRect);
         }
+
+        // 12.5. タイルの選択範囲と、範囲ドラッグ中の四角。選択ツール・フィルのときだけ見せる
+        // （ほかのツールのときに残っていると、何の範囲か分からなくなるため）。
+        if (CurrentMode == EditMode.Select || CurrentMode == EditMode.Fill)
+            DrawSelectionOverlays(g);
 
         // 13. アクティブレイヤーのインジケーター（画面左上に現在の編集モードを文字で表示）。
         DrawLayerIndicator(g);
@@ -392,7 +450,7 @@ public class MapCanvas : Panel
             int rx = (int)(en.PatrolRight * scale) - ScrollX;
             // 縦位置は敵の中心（Y + GAME_TILEの半分）を基準にする。
             int ly = (int)((en.Y + GAME_TILE / 2f) * scale) - ScrollY;
-            bool selected = SelectedObject == en;
+            bool selected = IsSelected(en);
 
             // 選択中の敵は太いマゼンタ線、それ以外は細い赤系の線で描画する。
             using var patrolPen = new Pen(selected ? Color.Magenta : Color.FromArgb(170, 220, 60, 60), selected ? 2.5f : 1.5f)
@@ -420,10 +478,36 @@ public class MapCanvas : Panel
             using var pen = new Pen(Color.OrangeRed, 1.5f);
             g.FillRectangle(brush, px, py, pw, ph);
             g.DrawRectangle(pen, px, py, pw, ph);
+            if (IsSelected(t))
+            {
+                using var selPen = new Pen(Color.Magenta, 2.5f);
+                g.DrawRectangle(selPen, px, py, pw, ph);
+            }
             // トリガーID表示（矩形の左上に小さく描画）
             using var font = new Font("Meiryo UI", 6, FontStyle.Bold);
             using var tb = new SolidBrush(Color.OrangeRed);
             g.DrawString($"T:{t.id}", font, tb, px + 2, py + 2);
+        }
+    }
+
+    // タイルの選択範囲（水色の破線）と、範囲ドラッグ中の四角（青の破線）を描く。
+    private void DrawSelectionOverlays(Graphics g)
+    {
+        if (_tileSel.HasValue)
+        {
+            var r = _tileSel.Value;
+            var rect = new Rectangle(r.Col * TILE_SIZE - ScrollX, r.Row * TILE_SIZE - ScrollY, r.Cols * TILE_SIZE, r.Rows * TILE_SIZE);
+            using var fill = new SolidBrush(Color.FromArgb(40, 0, 180, 255));
+            using var pen = new Pen(Color.FromArgb(230, 0, 140, 220), 2) { DashStyle = DashStyle.Dash };
+            g.FillRectangle(fill, rect);
+            g.DrawRectangle(pen, rect);
+        }
+        if (_marqueeActive && (_marqueeRect.Width > 0 || _marqueeRect.Height > 0))
+        {
+            using var fill = new SolidBrush(Color.FromArgb(35, 60, 90, 255));
+            using var pen = new Pen(Color.RoyalBlue, 1.5f) { DashStyle = DashStyle.Dash };
+            g.FillRectangle(fill, _marqueeRect);
+            g.DrawRectangle(pen, _marqueeRect);
         }
     }
 
@@ -438,6 +522,8 @@ public class MapCanvas : Panel
             EditMode.DecoLayerFront => "📌 装飾レイヤー[前景]編集中",
             EditMode.Trigger => "📌 トリガー配置中 (ドラッグで矩形)",
             EditMode.TestPlay => "📍 クリックでテストプレイ開始位置を指定",
+            EditMode.Fill => $"🪣 フィル → {FillLayerName()}" + (_tileSel.HasValue ? "（選択範囲の中だけ）" : ""),
+            EditMode.Select => SelectIndicatorText(),
             // 上記以外のモードでは特に表示するメッセージがないため空文字にする。
             _ => ""
         };
@@ -652,6 +738,15 @@ public class MapCanvas : Panel
             return;
         }
 
+        // 選択ツール：クリックで1つ選ぶ／Ctrl+クリックで足す・外す／何も無い所からのドラッグで範囲選択／選択中の物のドラッグで移動。
+        // 離したときの保存・履歴は、下の一般の処理（isDragging → EditCompleted）にそのまま乗せる。
+        if (CurrentMode == EditMode.Select && e.Button == MouseButtons.Left)
+        {
+            isDragging = true;
+            SelectDown(e);
+            return;
+        }
+
         // 左クリック：ドラッグ開始フラグを立て、ストローク内配置済みフラグをリセットしてから編集処理を実行する。
         if (e.Button == MouseButtons.Left) { isDragging = true; _strokePlacedAsset = false; HandleLeft(e.X, e.Y); }
         // 右クリック：ドラッグ削除の開始として扱う。
@@ -679,7 +774,11 @@ public class MapCanvas : Panel
         // カーソル変更：現在のモードに応じて分かりやすいカーソル形状に切り替える。
         if (CurrentMode == EditMode.TestPlay) Cursor = Cursors.Cross;
         else if (CurrentMode == EditMode.Trigger) Cursor = Cursors.SizeNWSE;
+        else if (CurrentMode == EditMode.Fill) Cursor = Cursors.Cross;
         else Cursor = Cursors.Default;
+
+        // 選択ツールのドラッグ（範囲選択・選択した物の移動）
+        if (isDragging && CurrentMode == EditMode.Select) { SelectMove(e); return; }
 
         // 左ドラッグ中なら継続して配置処理を行う（タイルの連続塗り等）。
         if (isDragging) HandleLeft(e.X, e.Y);
@@ -717,6 +816,9 @@ public class MapCanvas : Panel
             return;
         }
 
+        // 選択ツールのドラッグの確定（範囲選択の結果・移動の確定）。保存と履歴は、すぐ下の EditCompleted で行う
+        if (isDragging && CurrentMode == EditMode.Select && e.Button == MouseButtons.Left) SelectUp(e);
+
         // 何らかの編集ドラッグ（左/右）が行われていたかどうかを判定してから、両フラグをリセットする。
         bool wasEditing = isDragging || isRightDrag;
         isDragging = isRightDrag = false;
@@ -740,6 +842,21 @@ public class MapCanvas : Panel
                 var (col, row) = ToTile(cx, cy);
                 if (Stage.Map[row, col] != SelectedTileId)
                 { Stage.Map[row, col] = SelectedTileId; Fire(); }
+                break;
+
+            case EditMode.Fill:
+                // バケツ塗り。ドラッグ中に何度も塗らないよう、1回のクリック（ストローク）につき1回だけ。
+                // 選択範囲があれば、その中だけで塗る（範囲の外をクリックしたときは何もしない）。
+                if (!_strokePlacedAsset)
+                {
+                    _strokePlacedAsset = true;
+                    int fc = (cx + ScrollX) / TILE_SIZE, fr = (cy + ScrollY) / TILE_SIZE;
+                    if (cx + ScrollX >= 0 && cy + ScrollY >= 0 && fc < Stage.MapW && fr < Stage.MapH)
+                    {
+                        int n = TileFill.FloodFill(FillLayerArray(), fc, fr, SelectedTileId, _tileSel);
+                        if (n > 0) Fire();
+                    }
+                }
                 break;
 
             case EditMode.Eraser:
@@ -875,7 +992,25 @@ public class MapCanvas : Panel
     {
         if (Stage == null) return;
         object? target = FindObjectAt(cx, cy);
-        if (target == null) return;
+        if (target == null)
+        {
+            // 何も無い所：タイルの選択範囲があれば、その範囲に対するメニューを出す
+            if (_tileSel.HasValue)
+            {
+                var tm = new ContextMenuStrip();
+                AddTileSelectionMenuItems(tm);
+                tm.Show(PointToScreen(new Point(cx, cy)));
+            }
+            return;
+        }
+
+        // 複数選択のうちの1つを右クリックしたときは、選択を保ったまま、全員に対するメニューを出す
+        // （選び直してしまうと、まとめて選んだのが1つに縮んで、同時に編集できなくなる）。
+        if (_selection.Count > 1 && IsSelected(target) && target is not EventTrigger)
+        {
+            ShowMultiMenu(cx, cy);
+            return;
+        }
 
         // メニューを出す前に選択しておく。どれに対する操作なのかが見た目で分かるようにするため。
         SelectedObject = target;
@@ -901,6 +1036,7 @@ public class MapCanvas : Panel
             menu.Items.Add(miLocks);
             menu.Items.Add(new ToolStripSeparator());
         }
+        if (_tileSel.HasValue) { AddTileSelectionMenuItems(menu); menu.Items.Add(new ToolStripSeparator()); }
         var miDel = new ToolStripMenuItem("削除");
         miDel.Click += (s, e) =>
         {
@@ -916,6 +1052,39 @@ public class MapCanvas : Panel
         };
         menu.Items.Add(miDel);
         menu.Show(PointToScreen(new Point(cx, cy)));
+    }
+
+    // 複数選択中の右クリックメニュー。大きさ・角度／編集の可否／削除を、選択中の全員に対して行う。
+    private void ShowMultiMenu(int cx, int cy)
+    {
+        var menu = new ContextMenuStrip();
+        int n = _selection.Count;
+        var miEdit = new ToolStripMenuItem($"大きさ・角度を編集（{n}個）...");
+        miEdit.Click += (s, e) => EditSelectedTransform();
+        menu.Items.Add(miEdit);
+        var miLocks = new ToolStripMenuItem($"編集の可否を設定（{n}個）...");
+        miLocks.Click += (s, e) => EditSelectedLocks();
+        menu.Items.Add(miLocks);
+        menu.Items.Add(new ToolStripSeparator());
+        if (_tileSel.HasValue) { AddTileSelectionMenuItems(menu); menu.Items.Add(new ToolStripSeparator()); }
+        var miDel = new ToolStripMenuItem($"削除（{n}個）");
+        miDel.Click += (s, e) => DeleteSelection();
+        menu.Items.Add(miDel);
+        menu.Show(PointToScreen(new Point(cx, cy)));
+    }
+
+    // タイルの選択範囲に対するメニュー項目（塗りつぶし・空にする・選択を解除）
+    private void AddTileSelectionMenuItems(ContextMenuStrip menu)
+    {
+        var miFill = new ToolStripMenuItem($"選択範囲を、選んでいるタイル（{SelectedTileId}）で塗りつぶす");
+        miFill.Click += (s, e) => FillTileSelection();
+        menu.Items.Add(miFill);
+        var miClear = new ToolStripMenuItem("選択範囲のタイルを空にする");
+        miClear.Click += (s, e) => ClearTilesInSelection();
+        menu.Items.Add(miClear);
+        var miOff = new ToolStripMenuItem("選択を解除");
+        miOff.Click += (s, e) => { ClearAllSelection(); };
+        menu.Items.Add(miOff);
     }
 
     // クリック位置にある配置物を1つ返す（DoSelect と同じ「中心がいちばん近いもの」の選び方）。
@@ -938,6 +1107,74 @@ public class MapCanvas : Panel
         foreach (var it in Stage.Items) Consider(it);
         foreach (var t in Stage.Triggers) Consider(t);
         return best;
+    }
+
+    // 選択中の全員の大きさ・角度を、まとめて編集する（右クリックメニュー）。
+    // ダイアログの各項目に「変更しない」が付いていて、触った項目だけを全員へ書き込む。
+    // ギミックの縦の大きさは、縦の大きさを持つ物（ギミック）にだけ、
+    // 角度は、AIが角度を使う型のギミック（自動回転する橋など）を除いて書き込む。
+    private void EditSelectedTransform()
+    {
+        var targets = _selection.Where(o => o is PlacedEnemy || o is PlacedGimmick || o is PlacedItem).ToList();
+        if (targets.Count == 0) return;
+        if (targets.Count == 1) { EditPlacedTransform(targets[0]); return; }
+
+        var first = targets[0];
+        var propScale = first.GetType().GetProperty("Scale");
+        var propAngle = first.GetType().GetProperty("Angle");
+        var propScaleY = first.GetType().GetProperty("ScaleY");
+        float curScale = (float)(propScale?.GetValue(first) ?? 1.0f);
+        float curAngle = (float)(propAngle?.GetValue(first) ?? 0f);
+        bool anyGimmick = targets.Any(o => o is PlacedGimmick);
+        float curScaleY = propScaleY != null ? (float)(propScaleY.GetValue(first) ?? 1.0f) : curScale;
+        // 角度を変えられる対象が1つも無ければ、角度の欄は触れなくする
+        bool allAngleAiOwned = targets.All(IsAngleAiOwned);
+
+        using var dlg = new PlacedTransformForm(curScale, curScaleY, curAngle,
+                                                separateAxes: anyGimmick,
+                                                angleIsAiOwned: allAngleAiOwned,
+                                                multiCount: targets.Count);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        if (!dlg.ApplyScale && !dlg.ApplyScaleY && !dlg.ApplyAngle) return; // 何も変えない
+        foreach (var t in targets)
+        {
+            if (dlg.ApplyScale) t.GetType().GetProperty("Scale")?.SetValue(t, dlg.ResultScale);
+            if (dlg.ApplyScaleY) t.GetType().GetProperty("ScaleY")?.SetValue(t, dlg.ResultScaleY);
+            if (dlg.ApplyAngle && !IsAngleAiOwned(t)) t.GetType().GetProperty("Angle")?.SetValue(t, dlg.ResultAngle);
+        }
+        Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty); // 1回の操作＝履歴1つ
+    }
+
+    // 角度をAIが自前の状態に使っている型のギミックか（そうなら、角度を編集として変えてはいけない）
+    private bool IsAngleAiOwned(object target)
+    {
+        if (target is not PlacedGimmick pg) return false;
+        int te = Assets?.Gimmicks.FirstOrDefault(d => d.id == pg.Id)?.type_enum ?? -1;
+        return GimmickAngleIsAiOwned(te);
+    }
+
+    // 選択中の全員の「編集の可否」を、まとめて設定する。「変更しない」の操作は、各自の今の設定を残す。
+    private void EditSelectedLocks()
+    {
+        var targets = _selection.Where(o => o is PlacedEnemy || o is PlacedGimmick || o is PlacedItem).ToList();
+        if (targets.Count == 0) return;
+        if (targets.Count == 1) { EditPlacedLocks(targets[0]); return; }
+
+        bool hasItem = targets.Any(o => o is PlacedItem);
+        using var dlg = new PlacedEditLockForm($"選択中の {targets.Count}個", new PlacedEditLocks(), new bool[7], hasItem, multi: true);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        bool any = false;
+        foreach (var t in targets)
+        {
+            var locks = GetEditLocks(t);
+            if (locks == null) continue;
+            for (int i = 0; i < 7; i++)
+                if (dlg.Changed[i]) { locks.Set(i, dlg.Result.Get(i)); any = true; }
+        }
+        if (!any) return;
+        Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty);
     }
 
     // 配置ごとの大きさ・角度を編集する小さなダイアログを出す。
@@ -1142,6 +1379,289 @@ public class MapCanvas : Panel
 
         // 削除対象が見つかった場合のみ実際に削除を実行し、変更通知と再描画を行う。
         if (removeBest != null) { removeBest(); Fire(); Invalidate(); }
+    }
+
+    // ===== 選択ツール：複数選択・範囲選択・ドラッグ移動 =====
+
+    // 画面に描いている大きさの矩形（ワールド座標）。範囲選択で「囲んだ物」を決めるのに使う。
+    // 描く大きさ（OnPaint と同じ計算）に、小さすぎて掴めなくならない最小の大きさを与える。
+    private (float x, float y, float w, float h) GetDrawnRect(object obj)
+    {
+        SizeF size;
+        float x, y;
+        switch (obj)
+        {
+            case PlacedEnemy en:
+            {
+                var def = Assets?.Enemies.FirstOrDefault(d => d.id == en.Id);
+                size = ObjectWorldSize(def?.width ?? 0, def?.height ?? 0, def?.scale ?? 1f, en.Scale);
+                x = en.X; y = en.Y; break;
+            }
+            case PlacedGimmick gi:
+            {
+                var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == gi.Id);
+                size = new SizeF((def?.hitboxWidth > 0 ? def.hitboxWidth : GAME_TILE) * (gi.Scale > 0 ? gi.Scale : 1f),
+                                 (def?.hitboxHeight > 0 ? def.hitboxHeight : GAME_TILE) * (gi.ScaleY > 0 ? gi.ScaleY : 1f));
+                x = gi.X; y = gi.Y; break;
+            }
+            case PlacedItem it:
+            {
+                var def = Assets?.Items.FirstOrDefault(d => d.id == it.Id);
+                size = ObjectWorldSize(def?.hitboxWidth ?? 0, def?.hitboxHeight ?? 0, 1f, it.Scale);
+                x = it.X; y = it.Y; break;
+            }
+            default:
+                return GetFootprint(obj);
+        }
+        return (x, y, Math.Max(size.Width, 16f), Math.Max(size.Height, 16f));
+    }
+
+    // 範囲ドラッグの四角（ワールド座標）に、少しでもかかっている敵・ギミック・アイテムを返す。
+    // トリガーは含めない（トリガーは自分の矩形が大きく、範囲選択に混ぜると、ほかの物を選ぶ邪魔になるため。クリックで選ぶ）。
+    private List<object> ObjectsInWorldRect(float wx1, float wy1, float wx2, float wy2)
+    {
+        var list = new List<object>();
+        if (Stage == null) return list;
+        void Consider(object o)
+        {
+            var (x, y, w, h) = GetDrawnRect(o);
+            if (x < wx2 && x + w > wx1 && y < wy2 && y + h > wy1) list.Add(o);
+        }
+        foreach (var e in Stage.Enemies) Consider(e);
+        foreach (var g in Stage.Gimmicks) Consider(g);
+        foreach (var i in Stage.Items) Consider(i);
+        return list;
+    }
+
+    private bool CtrlHeld => (ModifierKeys & Keys.Control) == Keys.Control;
+
+    // 選択ツールでボタンを押した瞬間。物の上なら選択（Ctrl で足す・外す）と移動の準備、何も無い所なら範囲選択の開始。
+    private void SelectDown(MouseEventArgs e)
+    {
+        _dragOrig = null;
+        _clickedSelected = null;
+        _marqueeActive = false;
+        bool ctrl = CtrlHeld;
+        var hit = FindObjectAt(e.X, e.Y);
+
+        if (hit == null)
+        {
+            // 何も無い所：範囲選択を始める。Ctrl なしなら、いまの選択はここで外す
+            _marqueeActive = true;
+            _marqueeStart = e.Location;
+            _marqueeRect = new Rectangle(e.X, e.Y, 0, 0);
+            _marqueeAdditive = ctrl;
+            if (!ctrl && _selection.Count > 0) _selection.Clear();
+            Invalidate();
+            return;
+        }
+
+        if (hit is EventTrigger)
+        {
+            // トリガーは今までどおり、1つだけ選んで専用エディタを開く（範囲選択・移動の対象にしない）
+            _selection.Clear();
+            _selection.Add(hit);
+            ObjectSelected?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+            return;
+        }
+
+        if (ctrl)
+        {
+            // Ctrl+クリック：選択へ足す／外す。トリガーが選ばれていたら外す（トリガーは混ぜない）
+            _selection.RemoveAll(o => o is EventTrigger);
+            if (IsSelected(hit)) _selection.RemoveAll(o => ReferenceEquals(o, hit));
+            else _selection.Add(hit);
+            ObjectSelected?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+            return;
+        }
+
+        if (IsSelected(hit))
+        {
+            // すでに選んでいる物：選択は保ったまま、ドラッグで全員を動かせる。
+            // 動かさずに離したときだけ、その1つに選択を絞る（離したときに決める）
+            if (_selection.Count > 1) _clickedSelected = hit;
+        }
+        else
+        {
+            _selection.Clear();
+            _selection.Add(hit);
+            ObjectSelected?.Invoke(this, EventArgs.Empty);
+        }
+
+        // 移動の準備：選択中の全員の、いまの位置を覚える
+        _dragOrig = _selection.Select(o => (o, GetX(o), GetY(o))).ToList();
+        _dragStartWorld = new PointF(ToWorld(e.X, e.Y).wx, ToWorld(e.X, e.Y).wy);
+        _dragMoved = false;
+        Invalidate();
+    }
+
+    private static float GetX(object o) => o switch { PlacedEnemy a => a.X, PlacedGimmick b => b.X, PlacedItem c => c.X, _ => 0f };
+    private static float GetY(object o) => o switch { PlacedEnemy a => a.Y, PlacedGimmick b => b.Y, PlacedItem c => c.Y, _ => 0f };
+    private static void SetXY(object o, float x, float y)
+    {
+        switch (o)
+        {
+            case PlacedEnemy a: a.X = x; a.Y = y; break;
+            case PlacedGimmick b: b.X = x; b.Y = y; break;
+            case PlacedItem c: c.X = x; c.Y = y; break;
+        }
+    }
+
+    // 選択ツールのドラッグ中。範囲選択の四角を伸ばす／選択した物を、移動量に合わせて動かす。
+    private void SelectMove(MouseEventArgs e)
+    {
+        if (Stage == null) return;
+        if (_marqueeActive)
+        {
+            int x = Math.Min(_marqueeStart.X, e.X), y = Math.Min(_marqueeStart.Y, e.Y);
+            _marqueeRect = new Rectangle(x, y, Math.Abs(e.X - _marqueeStart.X), Math.Abs(e.Y - _marqueeStart.Y));
+            Invalidate();
+            return;
+        }
+        if (_dragOrig == null) return;
+
+        // 移動量は、始めた位置からの差を32pxの格子に丸めたもの（置くときと同じ格子の感覚）。
+        // 始めた時点の位置からの足し算にするので、行って戻れば元の位置に戻り、元から格子に乗っていない物の端数も保たれる。
+        var (wx, wy) = ToWorld(e.X, e.Y);
+        float dx = (float)(Math.Round((wx - _dragStartWorld.X) / GAME_TILE) * GAME_TILE);
+        float dy = (float)(Math.Round((wy - _dragStartWorld.Y) / GAME_TILE) * GAME_TILE);
+        float maxX = Stage.MapW * (float)GAME_TILE, maxY = Stage.MapH * (float)GAME_TILE;
+        foreach (var (obj, ox, oy) in _dragOrig)
+            SetXY(obj, Math.Clamp(ox + dx, 0f, maxX), Math.Clamp(oy + dy, 0f, maxY));
+        if (dx != 0f || dy != 0f) { _dragMoved = true; Fire(); }
+        Invalidate();
+    }
+
+    // 選択ツールでボタンを離した瞬間。範囲選択の結果を確定する／移動を確定する。
+    private void SelectUp(MouseEventArgs e)
+    {
+        if (Stage == null) return;
+        if (_marqueeActive)
+        {
+            _marqueeActive = false;
+            if (_marqueeRect.Width >= 4 && _marqueeRect.Height >= 4)
+            {
+                // 範囲にかかった物を選ぶ（Ctrl なら、いまの選択へ足す）。同時に、その四角を「タイルの選択範囲」にもする
+                var (wx1, wy1) = ToWorld(_marqueeRect.Left, _marqueeRect.Top);
+                var (wx2, wy2) = ToWorld(_marqueeRect.Right, _marqueeRect.Bottom);
+                if (_marqueeAdditive) _selection.RemoveAll(o => o is EventTrigger);
+                foreach (var o in ObjectsInWorldRect(wx1, wy1, wx2, wy2))
+                    if (!IsSelected(o)) _selection.Add(o);
+                var (c1, r1) = ToTile(_marqueeRect.Left, _marqueeRect.Top);
+                var (c2, r2) = ToTile(_marqueeRect.Right, _marqueeRect.Bottom);
+                _tileSel = TileRect.FromCorners(c1, r1, c2, r2, Stage.MapW, Stage.MapH);
+            }
+            else if (!_marqueeAdditive)
+            {
+                // ほぼ動かさずに離した＝何も無い所をクリックしただけ：すべての選択を外す
+                _tileSel = null;
+            }
+            _marqueeRect = Rectangle.Empty;
+            ObjectSelected?.Invoke(this, EventArgs.Empty);
+            Invalidate();
+            return;
+        }
+
+        if (_dragOrig != null)
+        {
+            // 動かさずに、複数選択の1つをクリックしただけなら、その1つに選択を絞る
+            if (!_dragMoved && _clickedSelected != null && !CtrlHeld)
+            {
+                _selection.Clear();
+                _selection.Add(_clickedSelected);
+                ObjectSelected?.Invoke(this, EventArgs.Empty);
+            }
+            _dragOrig = null;
+            _clickedSelected = null;
+            Invalidate();
+        }
+    }
+
+    // ----- 外から使う操作（Form1 のボタン・キー）-----
+
+    // 選択の数（物の数）
+    public int SelectedCount => _selection.Count;
+
+    // 物とタイルの選択を、すべて外す
+    public void ClearAllSelection()
+    {
+        bool had = _selection.Count > 0;
+        _selection.Clear();
+        _tileSel = null;
+        _marqueeActive = false;
+        _dragOrig = null;
+        if (had) ObjectSelected?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+    }
+
+    // Delete キー／メニューの「削除」。選んでいる物があれば全部消す。無ければ、タイルの選択範囲のタイルを空にする。
+    // 何かを消したら true。1回の操作が履歴1つになる。
+    public bool DeleteSelection()
+    {
+        if (Stage == null) return false;
+        var targets = _selection.ToList();
+        if (targets.Count > 0)
+        {
+            foreach (var t in targets)
+            {
+                if (t is PlacedEnemy pe) Stage.Enemies.Remove(pe);
+                else if (t is PlacedGimmick pg) Stage.Gimmicks.Remove(pg);
+                else if (t is PlacedItem pi) Stage.Items.Remove(pi);
+                else if (t is EventTrigger tr) Stage.Triggers.Remove(tr);
+            }
+            _selection.Clear();
+            ObjectSelected?.Invoke(this, EventArgs.Empty);
+            Fire(); Invalidate();
+            EditCompleted?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        if (_tileSel.HasValue) return ClearTilesInSelection();
+        return false;
+    }
+
+    // 選択範囲のタイルを、いま選んでいるタイルで塗りつぶす（塗りつぶし先は FillLayer）。範囲があれば true
+    public bool FillTileSelection()
+    {
+        if (Stage == null || !_tileSel.HasValue) return false;
+        int n = TileFill.FillRect(FillLayerArray(), _tileSel.Value, SelectedTileId);
+        if (n > 0) { Fire(); Invalidate(); EditCompleted?.Invoke(this, EventArgs.Empty); }
+        return true;
+    }
+
+    // 選択範囲のタイルを空（0）にする
+    public bool ClearTilesInSelection()
+    {
+        if (Stage == null || !_tileSel.HasValue) return false;
+        int n = TileFill.FillRect(FillLayerArray(), _tileSel.Value, 0);
+        if (n > 0) { Fire(); Invalidate(); EditCompleted?.Invoke(this, EventArgs.Empty); }
+        return true;
+    }
+
+    private int[,] FillLayerArray() => FillLayer switch
+    {
+        TileLayer.Back => Stage!.DecoLayerBack,
+        TileLayer.Front => Stage!.DecoLayerFront,
+        _ => Stage!.Map,
+    };
+
+    private string FillLayerName() => FillLayer switch
+    {
+        TileLayer.Back => "Layer 1（遠景）",
+        TileLayer.Front => "Layer 3（近景）",
+        _ => "Layer 2（メイン）",
+    };
+
+    // 選択ツールのとき、画面の左上に出す説明（何も選んでいなければ出さない）
+    private string SelectIndicatorText()
+    {
+        if (_selection.Count == 0 && !_tileSel.HasValue) return "";
+        var parts = new List<string>();
+        if (_selection.Count > 1) parts.Add($"{_selection.Count}個を選択中（ドラッグで移動／Delete で削除／右クリックで同時編集）");
+        else if (_selection.Count == 1) parts.Add("1個を選択中");
+        if (_tileSel.HasValue) parts.Add($"範囲 {_tileSel.Value.Cols}×{_tileSel.Value.Rows}マス → {FillLayerName()}");
+        return "🔍 " + string.Join(" ／ ", parts);
     }
 
     // ステージデータが変更されたことを外部（Form1）へ通知するための共通ヘルパー。

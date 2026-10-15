@@ -60,6 +60,8 @@ partial class Form1
     private System.Windows.Forms.ToolStripButton tsbPen = null!;     // ペン（配置）ツール切替ボタン
     private System.Windows.Forms.ToolStripButton tsbEraser = null!;  // 消しゴムツール切替ボタン
     private System.Windows.Forms.ToolStripButton tsbSelect = null!;  // 選択ツール切替ボタン
+    private System.Windows.Forms.ToolStripButton tsbFill = null!;    // フィル（バケツ塗り）ツール切替ボタン
+    private System.Windows.Forms.ToolStripButton tsbFillSel = null!; // 「選択範囲を塗りつぶす」実行ボタン（切り替えではなく、押すと1回実行）
     private System.Windows.Forms.ToolStripSeparator toolStripSeparator2 = null!;  // ツール切替ボタン群とプレイ系ボタンの間の区切り線
     private System.Windows.Forms.ToolStripButton tsbPlay = null!;          // 通常テストプレイ開始ボタン
     private System.Windows.Forms.ToolStripButton tsbTestPlayHere = null!;  // 「ここから」テストプレイ開始ボタン（クリック位置指定モード）
@@ -172,11 +174,18 @@ partial class Form1
         // ツール切替ボタン（ペン/消しゴム/選択）。ペンを既定でチェック済みにする。
         tsbPen = new System.Windows.Forms.ToolStripButton("🖊ペン") { CheckOnClick = true, Checked = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
         tsbEraser = new System.Windows.Forms.ToolStripButton("⬜消しゴム") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
-        tsbSelect = new System.Windows.Forms.ToolStripButton("🔍選択") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text };
+        tsbSelect = new System.Windows.Forms.ToolStripButton("🔍選択") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text,
+            ToolTipText = "クリックで1つ選ぶ／Ctrl+クリックで足す・外す／何も無い所からドラッグで範囲選択／選んだ物をドラッグで移動／Delete で削除" };
+        tsbFill = new System.Windows.Forms.ToolStripButton("🪣フィル") { CheckOnClick = true, DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text,
+            ToolTipText = "クリックした所とつながった同じタイルを、選んでいるタイルで塗りつぶす（選択範囲があれば、その中だけ）" };
+        tsbFillSel = new System.Windows.Forms.ToolStripButton("▦選択範囲を塗る") { DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Text,
+            ToolTipText = "「選択」ツールのドラッグで作った範囲を、選んでいるタイルで塗りつぶす（Delete で空にする／Esc で範囲を解除）" };
 
         tsbPen.Click += TsbTool_Click;
         tsbEraser.Click += TsbTool_Click;
         tsbSelect.Click += TsbTool_Click;
+        tsbFill.Click += TsbTool_Click;
+        tsbFillSel.Click += TsbFillSel_Click;
 
         toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
         // 通常のテストプレイ開始ボタン（プレイヤー開始位置から開始）。
@@ -190,7 +199,7 @@ partial class Form1
         toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             tsbLayer1, tsbLayer2, tsbLayer3, tsbLayer4,
             toolStripSeparator1,
-            tsbPen, tsbEraser, tsbSelect,
+            tsbPen, tsbEraser, tsbSelect, tsbFill, tsbFillSel,
             toolStripSeparator2,
             tsbPlay, tsbTestPlayHere
         });

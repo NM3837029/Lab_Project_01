@@ -59,6 +59,8 @@ public partial class Form1 : Form
         mapCanvas.AssetsPath = assetsPath;
         // フォーム自身がキー入力を最初に受け取れるようにする（子コントロールにフォーカスがあってもショートカットを拾うため）。
         KeyPreview = true;
+        // プロパティ表で値を変えたら、保存と「元に戻す」への登録をする（以前は、次にキャンバスを操作するまで保存されなかった）。
+        propertyGrid.PropertyValueChanged += PropertyGrid_PropertyValueChanged;
     }
 
     // キーが押された瞬間に呼ばれる処理。矢印キー全部同時押しでのゲーム起動や、Undo/Redoのショートカットを判定する。
@@ -75,6 +77,33 @@ public partial class Form1 : Form
         // Ctrl+Z で元に戻す、Ctrl+Y でやり直し。
         if (e.Control && e.KeyCode == Keys.Z) Undo();
         if (e.Control && e.KeyCode == Keys.Y) Redo();
+
+        // Delete：選んでいる物をまとめて削除（物が無ければ、タイルの選択範囲を空にする）。Esc：選択をすべて外す。
+        // 文字や数値を入力しているとき（プロパティ表・数値欄・テキスト欄など）は、その入力のためのキーなので使わない。
+        if (!IsTypingInInput())
+        {
+            if (e.KeyCode == Keys.Delete && !e.Control)
+            {
+                if (mapCanvas.DeleteSelection()) { e.Handled = true; e.SuppressKeyPress = true; }
+            }
+            else if (e.KeyCode == Keys.Escape)
+            {
+                mapCanvas.ClearAllSelection();
+            }
+        }
+    }
+
+    // 文字・数値を入力している途中か（Delete・Esc をキャンバスの操作として使ってよいかの判定）。
+    // フォーカスのあるコントロールが、プロパティ表（の中の入力欄）・テキスト欄・数値欄・選択欄なら true。
+    private bool IsTypingInInput()
+    {
+        Control? c = ActiveControl;
+        while (c is ContainerControl cc && cc.ActiveControl != null && cc.ActiveControl != c) c = cc.ActiveControl;
+        for (Control? p = c; p != null; p = p.Parent)
+        {
+            if (p is PropertyGrid || p is TextBoxBase || p is NumericUpDown || p is ComboBox) return true;
+        }
+        return false;
     }
     // キーが離された瞬間に呼ばれる処理。押下中キーの記録から取り除くだけ。
     protected override void OnKeyUp(KeyEventArgs e) { base.OnKeyUp(e); pressedKeys.Remove(e.KeyCode); }
@@ -330,12 +359,17 @@ public partial class Form1 : Form
             // 現在アクティブなレイヤーモードを保持しつつタイル選択。
             // 遠景/近景レイヤー編集中にタイルを選んでも、その専用レイヤーへの配置モードを維持し、
             // それ以外（メインレイヤー編集中など）の場合のみ通常のTileモードに切り替える。
-            if (mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerBack &&
+            // フィルのとき、およびタイルの選択範囲があるときの「選択」ツールは、ツールを切り替えない
+            // （範囲を作ってからタイルを選び、「選択範囲を塗る」を押す使い方を、パレットを触っただけで壊さないため）。
+            bool keepTool = mapCanvas.CurrentMode == MapCanvas.EditMode.Fill
+                         || (mapCanvas.CurrentMode == MapCanvas.EditMode.Select && mapCanvas.HasTileSelection);
+            if (!keepTool &&
+                mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerBack &&
                 mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerFront)
                 mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
             mapCanvas.SelectedTileId = id;
             // パレットからタイルを選んだので、ツールバー側の表示も必ず「ペン」に同期させる（下記コメント参照）。
-            SyncToolButtonsToPen();
+            if (!keepTool) SyncToolButtonsToPen();
             // 選択されたボタンだけ見た目を「押し込まれた状態(Standard)」にし、他は通常のフラット表示に戻す。
             foreach (Control c in flpTiles.Controls)
                 if (c is Button b) b.FlatStyle = b == btn ? FlatStyle.Standard : FlatStyle.Flat;
@@ -451,16 +485,24 @@ public partial class Form1 : Form
         tsbLayer3.Checked = sender == tsbLayer3;
         tsbLayer4.Checked = sender == tsbLayer4;
 
+        // フィル・範囲選択（タイルの塗りつぶし）が効く層。Layer 4（イベント）のときはメイン層
+        mapCanvas.FillLayer = tsbLayer1.Checked ? MapCanvas.TileLayer.Back
+                            : tsbLayer3.Checked ? MapCanvas.TileLayer.Front
+                            : MapCanvas.TileLayer.Main;
+        // 消しゴム・選択・フィルを使っている間は、層を切り替えてもそのツールのままにする
+        // （以前は層ボタンを押すと編集モードだけがペンに戻り、ツールバーの表示と食い違っていた）。
+        bool toolActive = !tsbPen.Checked;
+
         // 選ばれたレイヤーに応じてキャンバスの編集モードを切り替え、右側パレットも対応するタブへ切り替える。
-        if (tsbLayer1.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerBack; tabRight.SelectedTab = tabTilePalette; }
-        else if (tsbLayer2.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.Tile; tabRight.SelectedTab = tabTilePalette; }
-        else if (tsbLayer3.Checked) { mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerFront; tabRight.SelectedTab = tabTilePalette; }
+        if (tsbLayer1.Checked) { if (!toolActive) mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerBack; tabRight.SelectedTab = tabTilePalette; }
+        else if (tsbLayer2.Checked) { if (!toolActive) mapCanvas.CurrentMode = MapCanvas.EditMode.Tile; tabRight.SelectedTab = tabTilePalette; }
+        else if (tsbLayer3.Checked) { if (!toolActive) mapCanvas.CurrentMode = MapCanvas.EditMode.DecoLayerFront; tabRight.SelectedTab = tabTilePalette; }
         else if (tsbLayer4.Checked)
         {
             // イベントモード時はイベント配置パレットを表示し、
             // ラジオボタン/敵・ギミック・アイテムの選択状態から実際のサブモードを決定し直す。
             tabRight.SelectedTab = tabEventPalette;
-            UpdateEventModeSubTool();
+            if (!toolActive) UpdateEventModeSubTool();
         }
         UpdateLayerInfo();
         mapCanvas.Invalidate();
@@ -469,13 +511,15 @@ public partial class Form1 : Form
     // ツールバーのペン/消しゴム/選択ボタンがクリックされたときの処理。
     private void TsbTool_Click(object? sender, EventArgs e)
     {
-        // 3つのツールボタンも排他的に1つだけチェックされる。
+        // 4つのツールボタンも排他的に1つだけチェックされる。
         tsbPen.Checked = sender == tsbPen;
         tsbEraser.Checked = sender == tsbEraser;
         tsbSelect.Checked = sender == tsbSelect;
+        tsbFill.Checked = sender == tsbFill;
 
         if (tsbEraser.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Eraser;
         else if (tsbSelect.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Select;
+        else if (tsbFill.Checked) mapCanvas.CurrentMode = MapCanvas.EditMode.Fill;
         else if (tsbPen.Checked)
         {
             // ペンに戻す際、現在チェックされているレイヤーボタンを再度クリックしたのと同じ処理を呼び出し、
@@ -495,6 +539,14 @@ public partial class Form1 : Form
         tsbPen.Checked = true;
         tsbEraser.Checked = false;
         tsbSelect.Checked = false;
+        tsbFill.Checked = false;
+    }
+
+    // 「選択範囲を塗る」ボタン。「選択」ツールのドラッグで作った範囲を、いま選んでいるタイルで塗りつぶす。
+    private void TsbFillSel_Click(object? sender, EventArgs e)
+    {
+        if (!mapCanvas.FillTileSelection())
+            lblStatus.Text = "ℹ 先に「選択」ツールで、何も無い所からドラッグして範囲を作ってください。";
     }
 
     // イベントパレット内のラジオボタン（トリガー/開始位置/ゴール）の選択状態が変わったときの処理。
@@ -620,6 +672,14 @@ public partial class Form1 : Form
         mapCanvas.Invalidate();
     }
 
+    // フィル・範囲塗りつぶしの対象の層の名前（情報ラベル用）
+    private string FillLayerLabel() => mapCanvas.FillLayer switch
+    {
+        MapCanvas.TileLayer.Back => "Layer 1",
+        MapCanvas.TileLayer.Front => "Layer 3",
+        _ => "Layer 2",
+    };
+
     // 現在の編集モードに応じて、画面上部のレイヤー情報ラベル（lblLayerInfo）の文言を切り替える。
     private void UpdateLayerInfo()
     {
@@ -635,20 +695,87 @@ public partial class Form1 : Form
             MapCanvas.EditMode.Gimmick => "Layer 4: ギミックの配置",
             MapCanvas.EditMode.Item => "Layer 4: アイテムの配置",
             MapCanvas.EditMode.TestPlay => "📍 クリックでテストプレイ開始位置を指定",
+            MapCanvas.EditMode.Fill => "フィル：クリックでつながった同じタイルを塗る（" + FillLayerLabel() + "）",
+            MapCanvas.EditMode.Select => "選択：ドラッグで範囲選択／Ctrl+クリックで追加（" + FillLayerLabel() + "）",
             _ => "選択 / 消去 モード"
         };
     }
 
     // ===== プロパティ =====
     // キャンバス上でオブジェクトが選択されたときに呼ばれる。プロパティグリッドに選択中オブジェクトを表示する。
+    // 複数選択のとき、IDを変えられないようにするために、選んだ時点のIDを覚えておく（プロパティ表で全員が同じIDになるのを防ぐ）
+    private readonly Dictionary<object, string> _multiIds = new();
+
     private void mapCanvas_ObjectSelected(object? sender, EventArgs e)
     {
-        propertyGrid.SelectedObject = mapCanvas.SelectedObject;
-        // トリガーが選択された場合は編集フォームを開く (Feature 5)。
-        // トリガーだけは座標や種別以外に多くの設定項目を持つため、専用の編集ダイアログで詳細を編集させる。
-        if (mapCanvas.SelectedObject is EventTrigger trigger)
+        var sel = mapCanvas.SelectedObjects;
+        _multiIds.Clear();
+        if (sel.Count == 0)
         {
-            OpenTriggerEditor(trigger);
+            propertyGrid.SelectedObject = null;
+        }
+        else if (sel.Count == 1)
+        {
+            propertyGrid.SelectedObject = sel[0];
+            // トリガーが選択された場合は編集フォームを開く (Feature 5)。
+            // トリガーだけは座標や種別以外に多くの設定項目を持つため、専用の編集ダイアログで詳細を編集させる。
+            if (sel[0] is EventTrigger trigger)
+            {
+                OpenTriggerEditor(trigger);
+            }
+        }
+        else
+        {
+            // 複数選択：同じ種類だけを選んでいるときは、プロパティ表で値をまとめて編集できる。
+            // 種類が混ざっているときは、共通でない項目が出せないので何も出さない（右クリックの同時編集メニューを使う）。
+            var t0 = sel[0].GetType();
+            if (sel.All(o => o.GetType() == t0))
+            {
+                foreach (var o in sel) _multiIds[o] = GetPlacedId(o);
+                propertyGrid.SelectedObjects = sel.ToArray();
+            }
+            else
+            {
+                propertyGrid.SelectedObject = null;
+            }
+            lblStatus.ForeColor = Color.DimGray;
+            lblStatus.Text = $"ℹ {sel.Count}個を選択中：ドラッグで移動 ／ Delete で削除 ／ 右クリックで大きさ・編集の可否を同時に編集";
+        }
+    }
+
+    // 配置物のID（敵・ギミック・アイテム）。それ以外は空
+    private static string GetPlacedId(object o) => o switch
+    {
+        PlacedEnemy e => e.Id, PlacedGimmick g => g.Id, PlacedItem i => i.Id, _ => "",
+    };
+    private static void SetPlacedId(object o, string id)
+    {
+        switch (o)
+        {
+            case PlacedEnemy e: e.Id = id; break;
+            case PlacedGimmick g: g.Id = id; break;
+            case PlacedItem i: i.Id = id; break;
+        }
+    }
+
+    // プロパティ表で値が変わったとき。保存と「元に戻す」への登録をする。
+    // 複数選択中に ID を変えようとしたら、全員が同じ種類になってしまうので、元に戻す。
+    private void PropertyGrid_PropertyValueChanged(object? s, PropertyValueChangedEventArgs e)
+    {
+        if (mapCanvas.SelectedObjects.Count > 1 && e.ChangedItem?.PropertyDescriptor?.Name == "Id")
+        {
+            foreach (var o in mapCanvas.SelectedObjects)
+                if (_multiIds.TryGetValue(o, out var id)) SetPlacedId(o, id);
+            propertyGrid.Refresh();
+            lblStatus.ForeColor = Color.Firebrick;
+            lblStatus.Text = "⚠ 複数を選んでいる間は、IDを変えられません。";
+            return;
+        }
+        mapCanvas.Invalidate();
+        if (currentStage != null)
+        {
+            SaveCurrentStage();
+            historyMgr.Push(currentStage);
         }
     }
 

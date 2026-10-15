@@ -28,6 +28,13 @@ public class PlacedTransformForm : Form
     public float ResultScaleY { get; private set; }
     public float ResultAngle { get; private set; } // ラジアン
 
+    // 複数選択のとき、どの項目を書き換えるか。1つだけのときは全部 true。
+    // 触っていない項目で、全員の値が上書きされてしまわないよう、複数のときは「変更しない」が初期値になる。
+    public bool ApplyScale { get; private set; } = true;
+    public bool ApplyScaleY { get; private set; } = true;
+    public bool ApplyAngle { get; private set; } = true;
+    private CheckBox? _chkScale, _chkScaleY, _chkAngle;
+
     private readonly NumericUpDown _nudScale;
     private readonly NumericUpDown? _nudScaleY;
     private readonly NumericUpDown _nudAngle;
@@ -40,12 +47,14 @@ public class PlacedTransformForm : Form
     // angleRad  : 編集開始時の角度（ラジアン）
     // separateAxes  : 横縦を別々に出すか（ギミック = true）
     // angleIsAiOwned: 角度をAIが握っている型か（回転を禁止する）
+    // multiCount : 複数選択の個数（2以上で複数選択のダイアログになる）。0・1なら今までどおり
     public PlacedTransformForm(float scale, float scaleY, float angleRad,
-                               bool separateAxes = false, bool angleIsAiOwned = false)
+                               bool separateAxes = false, bool angleIsAiOwned = false, int multiCount = 0)
     {
         _angleIsAiOwned = angleIsAiOwned;
+        bool multi = multiCount >= 2;
 
-        Text = "大きさ・角度";
+        Text = multi ? $"大きさ・角度（{multiCount}個を同時に編集）" : "大きさ・角度";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -62,6 +71,7 @@ public class PlacedTransformForm : Form
         _nudScale.Value = (decimal)Math.Clamp(scale <= 0 ? 1.0f : scale, 0.1f, 10f);
         _nudScale.ValueChanged += (s, e) => UpdateReaction();
         Controls.Add(_nudScale);
+        if (multi) _chkScale = AddKeepCheck(y, _nudScale, null);
         y += 54;
 
         if (separateAxes)
@@ -71,6 +81,7 @@ public class PlacedTransformForm : Form
             _nudScaleY.Value = (decimal)Math.Clamp(scaleY <= 0 ? 1.0f : scaleY, 0.1f, 10f);
             _nudScaleY.ValueChanged += (s, e) => UpdateReaction();
             Controls.Add(_nudScaleY);
+            if (multi) _chkScaleY = AddKeepCheck(y, _nudScaleY, null);
             y += 54;
         }
 
@@ -84,6 +95,7 @@ public class PlacedTransformForm : Form
         Controls.Add(_nudAngle);
 
         // よく使う角度はボタン一発で入れられるようにする（数値を打つより速い）
+        var angleButtons = new System.Collections.Generic.List<Button>();
         int bx = 124;
         foreach (int deg in new[] { 0, 45, 90, 180 })
         {
@@ -93,8 +105,11 @@ public class PlacedTransformForm : Form
             b.Enabled = !angleIsAiOwned;
             b.Click += (s, e) => _nudAngle.Value = captured;
             Controls.Add(b);
+            angleButtons.Add(b);
             bx += 60;
         }
+        // 角度は、全員が「AIが角度を使う型」のときは変えられない（複数のときの「変更しない」とは別）
+        if (multi && !angleIsAiOwned) _chkAngle = AddKeepCheck(y, _nudAngle, angleButtons);
         y += 52;
 
         // 「この設定だとゲーム内でどう扱われるか」をその場で出す。
@@ -116,6 +131,13 @@ public class PlacedTransformForm : Form
             ResultScale = (float)_nudScale.Value;
             ResultScaleY = _nudScaleY != null ? (float)_nudScaleY.Value : (float)_nudScale.Value;
             ResultAngle = (float)((double)_nudAngle.Value * Math.PI / 180.0);
+            if (multi)
+            {
+                // 「変更しない」が付いている項目は、書き換えない（各自の値がそのまま残る）
+                ApplyScale = _chkScale != null && !_chkScale.Checked;
+                ApplyScaleY = _chkScaleY != null && !_chkScaleY.Checked;
+                ApplyAngle = _chkAngle != null && !_chkAngle.Checked;
+            }
             DialogResult = DialogResult.OK;
             Close();
         };
@@ -133,6 +155,30 @@ public class PlacedTransformForm : Form
         ClientSize = new Size(398, y + 40);
 
         UpdateReaction();
+    }
+
+    // 複数選択のとき、項目の見出しの右に「変更しない」を出す。チェックされている間は、その項目の入力欄を使えなくする。
+    // 初期値はチェック済み（触らなければ何も書き換えない）。
+    private CheckBox AddKeepCheck(int labelY, NumericUpDown nud, System.Collections.Generic.List<Button>? extra)
+    {
+        var chk = new CheckBox
+        {
+            Text = "変更しない",
+            Checked = true,
+            Location = new Point(308, labelY - 2),
+            Size = new Size(86, 22),
+            Font = UiTheme.Small,
+        };
+        nud.Enabled = false;
+        if (extra != null) foreach (var b in extra) b.Enabled = false;
+        chk.CheckedChanged += (s, e) =>
+        {
+            nud.Enabled = !chk.Checked;
+            if (extra != null) foreach (var b in extra) b.Enabled = !chk.Checked;
+            UpdateReaction();
+        };
+        Controls.Add(chk);
+        return chk;
     }
 
     // 敵・アイテム用の簡易コンストラクタ（横縦の区別が無いもの）。
