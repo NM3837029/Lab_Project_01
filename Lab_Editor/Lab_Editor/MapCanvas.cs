@@ -310,8 +310,13 @@ public class MapCanvas : Panel
         DrawMarker(g, Stage.PlayerStartX, Stage.PlayerStartY, "P", Color.FromArgb(0, 200, 100));
 
         // 7. ゴール (G) を描画する（未設定の場合はX座標が負値になっているため描画をスキップ）。
+        //    絵を変えてあるときは、その絵を（ゲームと同じ大きさで）描き、当たり判定の枠を金色で重ねる。
         if (Stage.GoalX >= 0)
-            DrawMarker(g, Stage.GoalX, Stage.GoalY, "G", Color.FromArgb(255, 215, 0));
+        {
+            var goalImg = GetAssetImage(Stage.GoalSprite);
+            if (goalImg != null) DrawGoalSprite(g, goalImg);
+            else DrawMarker(g, Stage.GoalX, Stage.GoalY, "G", Color.FromArgb(255, 215, 0));
+        }
 
         // 7.5. 敵の巡回範囲プレビュー（MZ の移動ルートプレビュー風の点線表示）。
         DrawPatrolRanges(g);
@@ -664,6 +669,22 @@ public class MapCanvas : Panel
             using var pen = new Pen(color, 2);
             g.DrawRectangle(pen, rect);
         }
+    }
+
+    // ゴールの絵を描く。ゲームの表示（48px×倍率、中心はゴール位置の中心）に合わせ、
+    // 当たり判定（32px×倍率）の枠を金色の細い線で重ねる。
+    private void DrawGoalSprite(Graphics g, Image img)
+    {
+        if (Stage == null) return;
+        float scale = (float)TILE_SIZE / GAME_TILE;
+        float k = Stage.GoalScale <= 0 ? 1.0f : Stage.GoalScale;
+        float cxw = Stage.GoalX + GAME_TILE / 2f, cyw = Stage.GoalY + GAME_TILE / 2f;   // ゴールの中心（ワールド）
+        float drawPx = GAME_TILE * 1.5f * k * scale;
+        float hitPx = GAME_TILE * k * scale;
+        float cx = cxw * scale - ScrollX, cy = cyw * scale - ScrollY;
+        g.DrawImage(img, cx - drawPx / 2, cy - drawPx / 2, drawPx, drawPx);
+        using var pen = new Pen(Color.FromArgb(220, 255, 215, 0), 2) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash };
+        g.DrawRectangle(pen, cx - hitPx / 2, cy - hitPx / 2, hitPx, hitPx);
     }
 
     private void DrawMarker(Graphics g, float worldX, float worldY, string label, Color color, float fontSize = 7f)
@@ -1090,6 +1111,10 @@ public class MapCanvas : Panel
             EditCompleted?.Invoke(this, EventArgs.Empty);
         };
         menu.Items.Add(miGoal);
+        // ゴールの絵と大きさ。ゴールが置いてあるときだけ使える（置いてないと、変える対象が無い）
+        var miGoalLook = new ToolStripMenuItem("ゴールの見た目を変える...") { Enabled = Stage.GoalX >= 0 };
+        miGoalLook.Click += (s, e) => EditGoalAppearance();
+        menu.Items.Add(miGoalLook);
 
         if (_tileSel.HasValue)
         {
@@ -1097,6 +1122,20 @@ public class MapCanvas : Panel
             AddTileSelectionMenuItems(menu);
         }
         menu.Show(PointToScreen(new Point(cx, cy)));
+    }
+
+    // 「ゴールの見た目を変える」ダイアログを開き、OKなら絵と大きさをステージへ反映する（保存と履歴も知らせる）。
+    private void EditGoalAppearance()
+    {
+        if (Stage == null || Stage.GoalX < 0) return;
+        using var dlg = new GoalAppearanceForm(AppPaths.ProjectRoot, Stage.GoalSprite, Stage.GoalScale);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        _assetImages.Remove(Stage.GoalSprite ?? "");      // 同じ名前で絵を差し替えたときのために、読み込み済みの絵を捨てる
+        _assetImages.Remove(dlg.ResultSprite);
+        Stage.GoalSprite = dlg.ResultSprite;
+        Stage.GoalScale = dlg.ResultScale;
+        Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty);
     }
 
     // 右クリックした配置物に対するメニューを出す。

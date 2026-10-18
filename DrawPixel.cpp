@@ -2433,6 +2433,13 @@ struct StageData {
     float playerStartY = 0.0f; // プレイヤーの初期スポーンY座標
     float goalX = -1.0f;   // -1 = ゴール未設定
     float goalY = -1.0f;   // ゴールのY座標
+    // ゴールの見た目（ステージJSONの goal.sprite / goal.scale。Lab_Editor の「ゴールの見た目を変える」で設定する）。
+    //   goalSprite … 絵のパス（"img/xxx.png"）。空なら、全ステージ共通の既定の絵（img/ゴール.png）
+    //   goalScale  … 大きさの倍率。表示と当たり判定の両方に掛かる（既定1.0＝従来どおり）
+    //   goalCustomHandle … goalSprite を読み込んだ絵。-1なら既定の絵を使う（読み込めなかったときも既定へ戻す）
+    std::string goalSprite = "";
+    float goalScale = 1.0f;
+    int goalCustomHandle = -1;
     std::vector<Enemy> enemies;     // このステージに配置される敵の実行時状態一覧
     std::vector<Gimmick> gimmicks;  // このステージに配置されるギミックの実行時状態一覧
     std::vector<Item> items;        // このステージに配置されるアイテムの実行時状態一覧
@@ -5821,6 +5828,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (sj.contains("goal")) {
                         jsonStage.goalX = sj["goal"].value("x", -1.0f);
                         jsonStage.goalY = sj["goal"].value("y", -1.0f);
+                        // ゴールの見た目。無ければ従来どおり（既定の絵・1.0倍）
+                        jsonStage.goalSprite = sj["goal"].value("sprite", "");
+                        jsonStage.goalScale = sj["goal"].value("scale", 1.0f);
+                        if (jsonStage.goalScale < 0.25f) jsonStage.goalScale = 0.25f; // 極端な値で見えなく・当たらなくならないように
+                        if (jsonStage.goalScale > 8.0f)  jsonStage.goalScale = 8.0f;
+                        if (!jsonStage.goalSprite.empty()) {
+                            std::string gpath = "assets/" + jsonStage.goalSprite; // 背景と同じ探し方（assets基準→ルート基準）
+                            jsonStage.goalCustomHandle = LoadGraph(gpath.c_str());
+                            if (jsonStage.goalCustomHandle == -1) jsonStage.goalCustomHandle = LoadGraph(jsonStage.goalSprite.c_str());
+                            if (jsonStage.goalCustomHandle == -1) Logger::Error("DrawPixel", "LoadStage", "Failed to load goal sprite", jsonStage.goalSprite);
+                        }
                     }
 
                     // プレイヤー能力。
@@ -12654,8 +12672,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (curStage.goalX >= 0 && currentScene == PLAY && !isPlayerRewinding) {
                 float _pw = (float)player.width * player.scale;
                 float _ph = (float)player.height * player.scale;
-                float gx = curStage.goalX, gy = curStage.goalY;
-                float gw = (float)TILE_SIZE, gh = (float)TILE_SIZE;
+                // 当たり判定は、ゴールの中心を動かさずに、大きさの倍率ぶんだけ広がる（既定1.0倍＝32px四方）
+                float gw = (float)TILE_SIZE * curStage.goalScale, gh = (float)TILE_SIZE * curStage.goalScale;
+                float gx = curStage.goalX - (gw - (float)TILE_SIZE) * 0.5f;
+                float gy = curStage.goalY - (gh - (float)TILE_SIZE) * 0.5f;
                 if (CheckCollision(player.x, player.y, _pw, _ph, gx, gy, gw, gh)) {
                     currentScene = RESULT_VICTORY;
                 }
@@ -12683,9 +12703,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 // ゴール本体。ゆっくり脈動させて「ここが目的地」であることを目立たせる
                 float goalPulse = 1.0f + sinf(BehaviorInterpreter::globalFrameCounter * 0.06f) * 0.06f;
-                int goalSize = (int)(TILE_SIZE * 1.5f * goalPulse);
-                DrawUiIcon(gx + TILE_SIZE / 2, gy + TILE_SIZE / 2, goalSize, goalHandle);
-                WorldLabel(gx - 4, gy - TILE_SIZE - 18, "ゴール", GetColor(255, 255, 160));
+                int goalSize = (int)(TILE_SIZE * 1.5f * curStage.goalScale * goalPulse);
+                // ステージごとの絵が指定され、読み込めていればそれを使う。無ければ（読み込めなくても）既定の絵
+                int goalDrawHandle = (curStage.goalCustomHandle >= 0) ? curStage.goalCustomHandle : goalHandle;
+                DrawUiIcon(gx + TILE_SIZE / 2, gy + TILE_SIZE / 2, goalSize, goalDrawHandle);
+                // 「ゴール」の文字は、大きくした絵に隠れないよう、絵の上端から一定の高さに置く（1.0倍のときは従来と同じ位置）
+                WorldLabel(gx - 4, gy + TILE_SIZE / 2 - goalSize / 2 - 42, "ゴール", GetColor(255, 255, 160));
             }
         }
 

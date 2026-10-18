@@ -189,6 +189,13 @@ public class StageData
     public float GoalX { get; set; } = -1;  // -1 = 未設定
     public float GoalY { get; set; } = -1;
 
+    // ゴールの見た目（ステージJSONの goal.sprite / goal.scale）。ゲーム側は DrawPixel.cpp の goalSprite / goalScale。
+    //   GoalSprite … 絵のパス（"img/xxx.png"）。空なら、全ステージ共通の既定の絵（img/ゴール.png）
+    //   GoalScale  … 大きさの倍率。表示と当たり判定の両方に掛かる（1.0＝従来どおり）
+    // 片方だけだと保存し直した瞬間に消える。既定のままのときはJSONへ書かない。
+    public string GoalSprite { get; set; } = "";
+    public float GoalScale { get; set; } = 1.0f;
+
     // プレイヤー能力。このステージでプレイヤーがどんなアクション（2段ジャンプ等）を使えるか。
     public PlayerCapabilities Capabilities { get; set; } = new();
 
@@ -289,6 +296,8 @@ public class StageData
             {
                 data.GoalX = j["goal"]!["x"]?.Value<float>() ?? -1;
                 data.GoalY = j["goal"]!["y"]?.Value<float>() ?? -1;
+                data.GoalSprite = j["goal"]!["sprite"]?.Value<string>() ?? "";
+                data.GoalScale = j["goal"]!["scale"]?.Value<float>() ?? 1.0f;
             }
 
             // プレイヤー能力。JSONの構造をそのままPlayerCapabilitiesクラスへ変換する。
@@ -420,7 +429,13 @@ public class StageData
 
         // ゴール — 未設定(-1)の場合はJSONにgoal項目自体を出力しない。
         if (GoalX >= 0)
-            j["goal"] = new JObject { ["x"] = GoalX, ["y"] = GoalY };
+        {
+            var goalJ = new JObject { ["x"] = GoalX, ["y"] = GoalY };
+            // 見た目は、既定から変えているときだけ書く（既存のステージに差分を出さないため）
+            if (!string.IsNullOrEmpty(GoalSprite)) goalJ["sprite"] = GoalSprite;
+            if (Math.Abs(GoalScale - 1.0f) > 0.001f) goalJ["scale"] = GoalScale;
+            j["goal"] = goalJ;
+        }
 
         // サウンド設定 (Feature 3) — BGM未設定（空文字列）の場合はbgm_id項目を出力しない。
         if (!string.IsNullOrEmpty(BgmId))
