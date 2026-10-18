@@ -36,22 +36,17 @@
     "flatCutCreate": 20.0,
     "cutCostPerTile": 1.2
   },
+  "player_locks": {
+    "noMove": true,
+    "noScale": true,
+    "noRotate": true,
+    "noGround": true
+  },
   "goal": {
     "x": 6240.0,
     "y": 384.0
   },
   "bgm_id": "bgm_editing_05",
-  "backgrounds": [
-    {
-      "sprite": "",
-      "color": "#CFE3F5",
-      "drawOrder": 0,
-      "scrollRate": 0.0,
-      "loop": true,
-      "offsetX": 0.0,
-      "offsetY": 0.0
-    }
-  ],
   "map": [
     [
       6,
@@ -9148,6 +9143,17 @@
       0
     ]
   ],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#CFE3F5",
+      "drawOrder": 0,
+      "scrollRate": 0.0,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [],
   "enemies": [
     {
@@ -9166,7 +9172,6 @@
       "id": "enemy_kikai_straight",
       "x": 5664.0,
       "y": 292.0,
-      "angle": 0,
       "noScale": false,
       "noRotate": true,
       "noMove": true,
@@ -9545,11 +9550,5 @@
       "y": 316.0
     }
   ],
-  "platforms": [],
-  "player_locks": {
-    "noMove": true,
-    "noScale": true,
-    "noRotate": true,
-    "noGround": true
-  }
+  "platforms": []
 }
