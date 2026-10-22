@@ -799,6 +799,9 @@ public class PlacedEditLocks
     public bool? NoPause { get; set; }
     public bool? NoRewind { get; set; }
     public bool? NoSpeed { get; set; }
+    // ドラッグ移動の向きの制限の上書き（null=アセットに従う 0=自由 1=十字 2=X字）。JSONのキーは "moveMode"
+    public int? MoveMode { get; set; }
+    public static readonly string[] MoveModeLabels = { "自由", "十字（上下左右だけ）", "X字（斜めだけ）" };
 
     // ステージJSONのキー。並びはゲーム側の EditOp（拡大縮小・回転・移動・反転・一時停止・巻き戻し・速度変更）と同じ
     public static readonly string[] Keys = { "noScale", "noRotate", "noMove", "noFlip", "noPause", "noRewind", "noSpeed" };
@@ -828,7 +831,7 @@ public class PlacedEditLocks
     public bool Any()
     {
         for (int i = 0; i < 7; i++) if (Get(i).HasValue) return true;
-        return false;
+        return MoveMode.HasValue;
     }
     public int DenyCount()
     {
@@ -846,6 +849,7 @@ public class PlacedEditLocks
     {
         var c = new PlacedEditLocks();
         for (int i = 0; i < 7; i++) c.Set(i, Get(i));
+        c.MoveMode = MoveMode;
         return c;
     }
 
@@ -859,6 +863,8 @@ public class PlacedEditLocks
             var t = entry[Keys[i]];
             if (t != null && t.Type == JTokenType.Boolean) locks.Set(i, t.Value<bool>());
         }
+        var mm = entry["moveMode"];
+        if (mm != null && mm.Type == JTokenType.Integer) locks.MoveMode = Math.Clamp(mm.Value<int>(), 0, 2);
         return locks;
     }
     // 配置1件のJSONへ書く。上書きの無い操作はキーを書かない（既存ステージに余計な差分を出さないため）
@@ -869,6 +875,7 @@ public class PlacedEditLocks
             var v = Get(i);
             if (v.HasValue) entry[Keys[i]] = v.Value;
         }
+        if (MoveMode.HasValue) entry["moveMode"] = MoveMode.Value;
     }
 }
 // マップ上に実際に1体配置された敵1体分の情報。EnemyDef（敵の「種類」の定義）とは別に、
@@ -1120,6 +1127,10 @@ public class EnemyDef
     public bool noScale { get; set; } = false;
     public bool noRotate { get; set; } = false;
     public bool noMove { get; set; } = false;
+    // ドラッグ移動の向きの制限（0=自由 1=十字（上下左右だけ） 2=X字（斜めだけ））。C++側の EnemyDef/GimmickDef::moveMode と対応する。
+    // 片方だけだと保存し直した瞬間に消える。自由（0）のときはJSONへ書かない。
+    public int moveMode { get; set; } = 0;
+    public bool ShouldSerializemoveMode() => moveMode != 0;
     public bool noFlip { get; set; } = false;
     public bool noPause { get; set; } = false;
     public bool noRewind { get; set; } = false;
@@ -1205,6 +1216,10 @@ public class GimmickDef
     public bool noScale { get; set; } = false;
     public bool noRotate { get; set; } = false;
     public bool noMove { get; set; } = false;
+    // ドラッグ移動の向きの制限（0=自由 1=十字（上下左右だけ） 2=X字（斜めだけ））。C++側の EnemyDef/GimmickDef::moveMode と対応する。
+    // 片方だけだと保存し直した瞬間に消える。自由（0）のときはJSONへ書かない。
+    public int moveMode { get; set; } = 0;
+    public bool ShouldSerializemoveMode() => moveMode != 0;
     public bool noFlip { get; set; } = false;
     public bool noPause { get; set; } = false;
     public bool noRewind { get; set; } = false;
@@ -1258,6 +1273,10 @@ public class ItemDef
     public bool noScale { get; set; } = false;
     public bool noRotate { get; set; } = false;
     public bool noMove { get; set; } = false;
+    // ドラッグ移動の向きの制限（0=自由 1=十字（上下左右だけ） 2=X字（斜めだけ））。C++側の EnemyDef/GimmickDef::moveMode と対応する。
+    // 片方だけだと保存し直した瞬間に消える。自由（0）のときはJSONへ書かない。
+    public int moveMode { get; set; } = 0;
+    public bool ShouldSerializemoveMode() => moveMode != 0;
     public bool noFlip { get; set; } = false;
     public bool noPause { get; set; } = false;
     public bool noRewind { get; set; } = false;

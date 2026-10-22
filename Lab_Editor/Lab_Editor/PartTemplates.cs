@@ -15,7 +15,7 @@ namespace Lab_Editor;
 // 【型の出どころ】
 //   ・既存の敵から取り出した型 …… 5つ。いまゲームに入っている敵のパーツ構成を、数値で調整できる形にした。
 //                                  初期値は元の敵と同じ動きになる。
-//   ・新しい型 ……………………… 6つ。羽ばたく翼・ふりふり尻尾・2連装砲身・開閉するはさみ・鉄球つきの鎖・周回する盾。
+//   ・新しい型 ……………………… 7つ。羽ばたく翼・ふりふり尻尾・2連装砲身・開閉するはさみ・鉄球つきの鎖・周回する盾・ファイアバー。
 //   ・色・明るさの型 ……………… 9つ（PartTemplatesColor.cs）。光る電球・3原色の光球・色相環・回転灯・月の満ち欠け・
 //                                  露出メーター・フラッシュ・色ずれ・カラーバー。色（color）と加算合成、明るさ・色相のモーションで作る。
 //
@@ -153,7 +153,7 @@ public static partial class PartTemplates
         // ───────────── 既存の敵から取り出した型 ─────────────
         SegmentedBody(), SpringChain(), AimBarrel(), WatchingEyes(), TongueChain(),
         // ───────────── 新しい型 ─────────────
-        Wings(), TailWag(), TwinBarrels(), Claws(), MorningStar(), ShieldOrbiter(),
+        Wings(), TailWag(), TwinBarrels(), Claws(), MorningStar(), ShieldOrbiter(), FireBar(),
     }.Concat(ColorTemplates()).Concat(ScreenTemplates()).ToList(); // ───────────── 色・明るさの型（PartTemplatesColor.cs）／画面や物を操る敵の型（PartTemplatesScreen.cs）─────────────
 
     // ── 1. 多節体（敵: enemy_imomushi） ──
@@ -482,6 +482,59 @@ public static partial class PartTemplates
             }
             for (int i = 0; i < n; i++) list.Add(At($"{v.IdPrefix}{i}", gap * (i + 1), link, false, 0));
             list.Add(At("ball", gap * (n + 1) + ball / 2.0, ball, true, 1));
+            return list;
+        },
+    };
+
+    // ── 12. ファイアバー（回る火の玉の棒）──
+    // 本体の中心を支点に、火の玉が一列に並んで回り続ける（マリオのファイアバーのような仕掛け）。
+    // 回る向きと速さ・最初の向き・数・間隔・大きさを決められ、「反対側にも伸ばす」で両側に伸びる棒にもなる。
+    //
+    // 【角度の編集への対応】
+    // パーツは親（本体）の傾きに合わせて、本体の中心を軸に一緒に回る（ParentPose の仕組み）。
+    // そのため、ゲーム内の「角度を変える編集」（Ctrl+ホイール）で本体を傾けると、棒全体が支点を中心に回った向きになり、
+    // そこからまた回り続ける。式には傾きを書かない（書くと、傾きが二重に掛かってしまう）。
+    private static PartTemplate FireBar() => new()
+    {
+        Id = "fire_bar", Name = "🔥 ファイアバー（回る火の玉の棒）", Category = CategoryNew,
+        Description = "本体の中心を支点に、火の玉が一列に並んで回り続けます。火の玉に触れるとダメージを受けます（壊せません）。"
+                    + "ゲーム内で本体の角度を変える編集（Ctrl+ホイール）をすると、棒全体が支点を中心に回った向きから、また回り続けます。"
+                    + "なお、角度の編集が効くのは「回せる型」だけです。ギミックなら『壊せるブロック(3)』（壊れない設定にして使います）や『拡大できるブロック(7)』に付けてください"
+                    + "（『カスタムスクリプト(24)』は角度を自分で使うため、回せません）。すぐ使える完成品として、ギミック『ファイアバー（支点ブロックつき・回せる）』も用意してあります。",
+        PreviewNote = "角度を変える編集の動きは、ゲーム内で確かめてください（ここでは、編集していない状態で回ります）。",
+        DefaultIdPrefix = "fire",
+        DefaultSprite = "img/弾2.png",
+        Params =
+        {
+            Num("balls", "火の玉の数（片側）", 1, 12, 6), Num("gap", "火の玉の間隔", 4, 40, 14), Num("size", "火の玉の大きさ", 6, 40, 16),
+            Num("speed", "回る速さ（ラジアン/フレーム）", -0.2m, 0.2m, 0.03m, 0.01m, 2, "マイナスで逆回り（0.03 でおよそ3.5秒に1周）"),
+            Num("start", "最初の向き（度）", -180, 180, 0, 15, 0, "0＝右。時計回りにプラス"),
+            Flag("both", "反対側にも同じ数だけ伸ばす", false, "ONにすると、支点をはさんで両側に伸びる棒になります。"),
+            Num("core", "支点の大きさ（0なら無し）", 0, 40, 0, 1, 0, "支点にも火の玉を1つ置きます。0なら置きません。"),
+        },
+        Suggest = v => new EnemySuggestion { TypeEnum = -1, TypeNote = "どの敵タイプとも組み合わせられます（動かない敵・ギミックの土台に向きます）。", Hp = 3, Width = 32, Height = 32, BaseName = "ファイアバー" },
+        Build = v =>
+        {
+            var list = new List<PartDef>();
+            int n = v.I("balls");
+            double gap = v.D("gap"), sz = v.D("size"), sp = v.D("speed"), a0 = v.D("start") * D2R, core = v.D("core");
+            double cx = v.BodyW / 2.0, cy = v.BodyH / 2.0;
+            if (core > 0)
+                list.Add(Part("core", v.Sprite, cx - core / 2.0, cy - core / 2.0, core, core, 0, 1, true, null));
+            int sides = v.B("both") ? 2 : 1;
+            for (int side = 0; side < sides; side++)
+            {
+                double start = a0 + side * Math.PI;
+                for (int i = 1; i <= n; i++)
+                {
+                    double r = gap * i;
+                    JToken a = Add(V(start), Mul(TimeOp(), V(sp)));
+                    var dx = Add(V(cx - sz / 2.0), Mul(Cos(a), V(r)));
+                    var dy = Add(V(cy - sz / 2.0), Mul(Sin(a), V(r)));
+                    list.Add(Part($"{v.IdPrefix}{side}_{i}", v.Sprite, cx - sz / 2.0 + Math.Cos(start) * r, cy - sz / 2.0 + Math.Sin(start) * r,
+                                  sz, sz, 0, 1, true, Loop(SetOffset(dx, dy))));
+                }
+            }
             return list;
         },
     };

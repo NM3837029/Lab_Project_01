@@ -147,6 +147,7 @@ public class AssetManagerPageControl : UserControl
         ("noScale",  "拡大縮小を禁止", 0),
         ("noRotate", "回転を禁止", 0),
         ("noMove",   "移動を禁止", 0),
+        ("moveMode", "移動の向き（ドラッグ）", 0),
         ("noFlip",   "向き反転を禁止", 0),
         ("noPause",  "一時停止を禁止", 0),
         ("noRewind", "巻き戻しを禁止", 0),
@@ -253,6 +254,7 @@ public class AssetManagerPageControl : UserControl
         (26, "26 = 補正スイッチ (Grade Switch)", "カラー補正パネルの値（明るさ・コントラスト・彩度・色相・色温度・色フィルタ）が、指定した範囲に入っている間だけ「押された」状態になるスイッチです。同じparam値のゲート扉を、重量スイッチと同じ仕組みで開けます。「暗いと開く扉」「白黒にすると開く扉」「赤フィルタで開く扉」などが作れます。"),
         (27, "27 = 補正ロック足場 (Grade Lock Platform)", "カラー補正パネルの値が、指定した範囲に入っている間だけ実体化する足場です（色ロック・明暗ロックを、コントラスト・彩度・色相・色温度にも広げたもの）。「見る値」に、拡大中（Zキー）・縮小中（Vキー）も選べます。足場の上には条件が文字で出ます。"),
         (28, "28 = 逆行ゲート (Rewind Gate)", "いずれかの物が巻き戻し中（Rキー、または右クリックメニューの物ごとの巻き戻し）のあいだだけ、通れる壁です。早送りゲートの巻き戻し版。物ごとの巻き戻しを入れておくと、プレイヤーは時間を戻らずに通れます。向き反転すると「巻き戻し中だけ閉じる」壁になります。"),
+        (29, "29 = 一方通行の壁 (One-way Wall)", "絵の矢印の向きには通れて、逆向きには通れない壁です。プレイヤーと、すり抜けの能力を持たない全ての敵（幽霊以外）に効きます。角度の編集（Ctrl+ホイール）で向きを回せます（見た目は自由に回り、通れる向きは、いちばん近い上下左右の4方向に丸められます）。上向きにすると「下から通り抜けられて、上に乗れる床」、下向きにすると「上から通り抜けられて、下からは頭をぶつける天井」になります。向き反転の編集で、通れる向きが逆になります。絵は右向きの矢印として描いてください。"),
     };
     // アイテムのtype_enum(タイプ番号)ごとの説明一覧。敵・ギミックと同じ (番号, 表示名, 詳細説明) の形式
     private static readonly (int type, string desc, string detail)[] ItemTypes =
@@ -1432,6 +1434,24 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             }
 
             var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
+
+            // ドラッグ移動の向きは、数字ではなく名前で選ばせる（0=自由 1=十字 2=X字）
+            if (field == "moveMode")
+            {
+                var cboMove = new ComboBox { Location = new Point(4, y + 18), Size = new Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Meiryo UI", 8.25f) };
+                cboMove.Items.AddRange(new object[] { "自由（どこへでも・従来）", "十字（上下左右だけ）", "X字（斜めだけ）" });
+                int curMove = Convert.ToInt32(prop.GetValue(paramsObj));
+                cboMove.SelectedIndex = curMove < 0 || curMove > 2 ? 0 : curMove;
+                cboMove.SelectedIndexChanged += (s, e) =>
+                {
+                    if (_isUpdatingBehaviorPanel) return;
+                    prop.SetValue(paramsObj, cboMove.SelectedIndex);
+                };
+                pnlBehaviorParams.Controls.Add(lbl);
+                pnlBehaviorParams.Controls.Add(cboMove);
+                y += 42;
+                continue;
+            }
 
             // 補正スイッチ・補正ロック足場の「見る値」は、番号を覚えさせずに名前で選ばせる
             if (field == "gradeChannel")

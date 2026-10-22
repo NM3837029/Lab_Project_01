@@ -26,6 +26,9 @@ public class PlacedEditLockForm : Form
     public PlacedEditLocks Result { get; private set; }
     // 操作ごとに「この操作の設定を書き換えるか」。1つだけのとき（multi=false）は全部 true
     public bool[] Changed { get; } = { true, true, true, true, true, true, true };
+    // 「移動の向き」を書き換えるか（複数選択で「変更しない」のとき false）
+    public bool ChangedMoveMode { get; private set; } = true;
+    private ComboBox _cboMoveMode = null!;
 
     // 操作ごとの選択肢。Tag は 値（null=既定 / false=許可 / true=禁止）、または KeepTag（変更しない）
     private static readonly object KeepTag = new();
@@ -36,7 +39,8 @@ public class PlacedEditLockForm : Form
     // assetLocks  : アセット側の設定（true=アセットがその操作を禁止している）。複数のときは出さない
     // isItem      : アイテムを含むか。アイテムはゲーム内で選択できず、設定は保存されるが現在は効果が無いことを断る
     // multi       : 複数選択か（「変更しない」を足す）
-    public PlacedEditLockForm(string name, PlacedEditLocks current, bool[] assetLocks, bool isItem, bool multi = false)
+    // assetMoveMode : アセット側の「移動の向き」（0=自由 1=十字 2=X字）。複数のときは出さない
+    public PlacedEditLockForm(string name, PlacedEditLocks current, bool[] assetLocks, bool isItem, bool multi = false, int assetMoveMode = 0)
     {
         Result = current.Clone();
 
@@ -127,6 +131,26 @@ public class PlacedEditLockForm : Form
             }
             y += 28;
         }
+
+        // 8行目：ドラッグ移動の向き。ほかの7つの「許可／禁止」とは別の、3択の設定なので、選択欄で選ばせる
+        Controls.Add(UiTheme.CreateLabel("移動の向き（ドラッグ）", new Point(12, y + 5)));
+        _cboMoveMode = new ComboBox { Location = new Point(colBase - 10, y + 2), Size = new Size(multi ? 200 : 170, 24), DropDownStyle = ComboBoxStyle.DropDownList, Font = UiTheme.Small };
+        if (multi) _cboMoveMode.Items.Add("変更しない");
+        _cboMoveMode.Items.Add("既定（アセットに従う）");
+        foreach (var l in PlacedEditLocks.MoveModeLabels) _cboMoveMode.Items.Add(l);
+        int moveBase = multi ? 2 : 1; // 「自由」の選択肢の位置
+        if (multi) _cboMoveMode.SelectedIndex = 0;
+        else _cboMoveMode.SelectedIndex = current.MoveMode.HasValue ? current.MoveMode.Value + moveBase : 0;
+        Controls.Add(_cboMoveMode);
+        if (!multi)
+        {
+            Controls.Add(new Label
+            {
+                Location = new Point(364, y + 6), Size = new Size(124, 18), Font = new Font("Meiryo UI", 8f), ForeColor = Color.DimGray,
+                Text = "アセット：" + PlacedEditLocks.MoveModeLabels[Math.Clamp(assetMoveMode, 0, 2)].Split('（')[0],
+            });
+        }
+        y += 32;
         y += 6;
 
         var btnReset = UiTheme.CreateButton(multi ? "すべて変更しない" : "すべて既定に戻す", new Point(12, y), new Size(130, 28));
@@ -152,6 +176,10 @@ public class PlacedEditLockForm : Form
                     break;
                 }
             }
+            // 移動の向き：選択肢の並びは（複数のとき）変更しない／既定／自由／十字／X字、（1つのとき）既定／自由／十字／X字
+            int sel = _cboMoveMode.SelectedIndex;
+            if (multi) { ChangedMoveMode = sel != 0; sel -= 1; }
+            r.MoveMode = sel <= 0 ? (int?)null : sel - 1;
             Result = r;
             DialogResult = DialogResult.OK;
             Close();

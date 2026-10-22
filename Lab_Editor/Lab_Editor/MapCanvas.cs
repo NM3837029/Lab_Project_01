@@ -1326,6 +1326,7 @@ public class MapCanvas : Panel
             if (locks == null) continue;
             for (int i = 0; i < 7; i++)
                 if (dlg.Changed[i]) { locks.Set(i, dlg.Result.Get(i)); any = true; }
+            if (dlg.ChangedMoveMode) { locks.MoveMode = dlg.Result.MoveMode; any = true; }
         }
         if (!any) return;
         Fire(); Invalidate();
@@ -1385,19 +1386,20 @@ public class MapCanvas : Panel
 
         // アセット側の設定（ダイアログに「アセットは禁止」と出すため）と、表示名
         bool[] assetLocks = new bool[7];
+        int assetMoveMode = 0;
         string name = "";
         bool isItem = target is PlacedItem;
         if (target is PlacedEnemy pe)
         {
             var d = Assets.Enemies.FirstOrDefault(x => x.id == pe.Id);
             name = d?.name ?? pe.Id;
-            if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
+            if (d != null) { assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed }; assetMoveMode = d.moveMode; }
         }
         else if (target is PlacedGimmick pg)
         {
             var d = Assets.Gimmicks.FirstOrDefault(x => x.id == pg.Id);
             name = d?.name ?? pg.Id;
-            if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
+            if (d != null) { assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed }; assetMoveMode = d.moveMode; }
         }
         else if (target is PlacedItem pi)
         {
@@ -1406,9 +1408,10 @@ public class MapCanvas : Panel
             if (d != null) assetLocks = new[] { d.noScale, d.noRotate, d.noMove, d.noFlip, d.noPause, d.noRewind, d.noSpeed };
         }
 
-        using var dlg = new PlacedEditLockForm(name, locks, assetLocks, isItem);
+        using var dlg = new PlacedEditLockForm(name, locks, assetLocks, isItem, assetMoveMode: assetMoveMode);
         if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
         for (int i = 0; i < 7; i++) locks.Set(i, dlg.Result.Get(i));
+        locks.MoveMode = dlg.Result.MoveMode;
         Fire(); Invalidate();
         EditCompleted?.Invoke(this, EventArgs.Empty);
     }
@@ -1421,7 +1424,8 @@ public class MapCanvas : Panel
         var rect = ToScreenRect(worldX, worldY, worldSize.Width, worldSize.Height);
         if (rect.Right < 0 || rect.Left > Width || rect.Bottom < 0 || rect.Top > Height) return;
         int deny = locks.DenyCount(), allow = locks.AllowCount();
-        string text = deny > 0 ? $"禁{deny}" : $"許{allow}";
+        // 移動の向きの上書きだけのときは、禁止も許可も数えないので「向」と出す
+        string text = deny > 0 ? $"禁{deny}" : allow > 0 ? $"許{allow}" : "向";
         var back = deny > 0 ? Color.FromArgb(210, 200, 40, 40) : Color.FromArgb(210, 40, 150, 70);
         using var font = new Font("Meiryo UI", 7f, FontStyle.Bold);
         var size = g.MeasureString(text, font);

@@ -2809,5 +2809,586 @@
     "script": [],
     "edit_reactions": {},
     "parts": []
+  },
+  {
+    "id": "gim_oneway_wall",
+    "name": "一方通行の壁",
+    "type_enum": 29,
+    "sprite": "img/一方通行ブロック案3.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 96,
+    "rotationSpeed": -1.0,
+    "sinkSpeed": -1.0,
+    "maxDepthOffset": -1.0,
+    "pushOutDistance": -1.0,
+    "triggerWidthThreshold": -1.0,
+    "travelDistance": -1.0,
+    "oscillationSpeed": -1.0,
+    "stepIncrement": -1.0,
+    "standDelayFrames": -1.0,
+    "standTolerancePx": -1.0,
+    "respawnDelayFrames": -1.0,
+    "radius": -1.0,
+    "brightLevel": -1.0,
+    "darkLevel": -1.0,
+    "tintR": -1.0,
+    "tintG": -1.0,
+    "tintB": -1.0,
+    "zoomLevel": -1.0,
+    "warpOffsetPx": -1.0,
+    "gradeChannel": -1.0,
+    "gradeMin": -999.0,
+    "gradeMax": 999.0,
+    "zoneSat": 1.0,
+    "zoneHue": 0.0,
+    "zoneContrast": 0.0,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "breakBySlam": true,
+    "breakByRam": true,
+    "breakByBullet": true,
+    "breakByPlayer": true,
+    "breakByTip": true,
+    "breakMinScale": 0.0,
+    "spriteAlt": "",
+    "script": [],
+    "edit_reactions": {},
+    "parts": []
+  },
+  {
+    "id": "gim_firebar_block",
+    "name": "ファイアバー（支点ブロックつき・回せる）",
+    "type_enum": 3,
+    "sprite": "img/黒い石タイル.png",
+    "seActivate": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "rotationSpeed": -1.0,
+    "sinkSpeed": -1.0,
+    "maxDepthOffset": -1.0,
+    "pushOutDistance": -1.0,
+    "triggerWidthThreshold": -1.0,
+    "travelDistance": -1.0,
+    "oscillationSpeed": -1.0,
+    "stepIncrement": -1.0,
+    "standDelayFrames": -1.0,
+    "standTolerancePx": -1.0,
+    "respawnDelayFrames": -1.0,
+    "radius": -1.0,
+    "brightLevel": -1.0,
+    "darkLevel": -1.0,
+    "tintR": -1.0,
+    "tintG": -1.0,
+    "tintB": -1.0,
+    "zoomLevel": -1.0,
+    "warpOffsetPx": -1.0,
+    "gradeChannel": -1.0,
+    "gradeMin": -999.0,
+    "gradeMax": 999.0,
+    "zoneSat": 1.0,
+    "zoneHue": 0.0,
+    "zoneContrast": 0.0,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "breakBySlam": false,
+    "breakByRam": false,
+    "breakByBullet": false,
+    "breakByPlayer": false,
+    "breakByTip": false,
+    "breakMinScale": 0.0,
+    "spriteAlt": "",
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "fire0_1",
+        "sprite": "img/弾2.png",
+        "offsetX": 22.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 14.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 14.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_2",
+        "sprite": "img/弾2.png",
+        "offsetX": 36.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 28.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 28.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_3",
+        "sprite": "img/弾2.png",
+        "offsetX": 50.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 42.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 42.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_4",
+        "sprite": "img/弾2.png",
+        "offsetX": 64.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 56.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 56.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_5",
+        "sprite": "img/弾2.png",
+        "offsetX": 78.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 70.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 70.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_6",
+        "sprite": "img/弾2.png",
+        "offsetX": 92.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

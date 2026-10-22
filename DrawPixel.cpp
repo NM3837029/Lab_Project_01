@@ -421,6 +421,9 @@ struct EnemyDef {
     bool noScale = false;   // 拡大縮小を禁止
     bool noRotate = false;  // 回転を禁止
     bool noMove = false;    // 移動を禁止
+    // ドラッグで動かすときの向きの制限（0=自由 1=十字（上下左右だけ） 2=X字（斜めだけ）。MOVE_MODE_*）。
+    // ※ Lab_Editor 側の EnemyDef にも同名プロパティを用意してあること。置いた物ごとの上書きは EditLockOverride::moveMode。
+    int moveMode = 0;
     bool noFlip = false;    // 向き反転を禁止
     bool noPause = false;   // 個別の一時停止を禁止
     bool noRewind = false;  // 個別の巻き戻しを禁止
@@ -491,6 +494,7 @@ struct GimmickDef {
     bool noScale = false;
     bool noRotate = false;
     bool noMove = false;
+    int moveMode = 0;       // ドラッグ移動の向きの制限（EnemyDef::moveMode と同じ。0=自由 1=十字 2=X字）
     bool noFlip = false;
     bool noPause = false;
     bool noRewind = false;
@@ -533,6 +537,10 @@ std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義�
 
 // 置いた物（敵・ギミック・アイテム1つ）ごとの「編集操作の可否」の上書き。
 //
+// ドラッグ移動の向きの制限。0=自由（従来） 1=十字（上下左右の4方向だけ） 2=X字（斜め4方向だけ）
+enum MoveMode { MOVE_MODE_FREE = 0, MOVE_MODE_CROSS = 1, MOVE_MODE_DIAGONAL = 2 };
+static int ClampMoveMode(int m) { return (m < 0 || m > 2) ? 0 : m; }
+
 // アセット単位の禁止フラグ（noMove 等。EnemyDef / GimmickDef / ItemDef）だけだと、同じ敵を置いた場所ごとに
 // 変えられない（たとえば「この1体だけ動かせる」「この1体だけ止められない」）。そこで、ステージJSONの
 // 敵・ギミック・アイテムの各エントリに、アセットと同じ名前のキーを書けるようにする。
@@ -543,7 +551,9 @@ std::vector<GimmickDef> gimmickDefs; // 読み込み済みのギミック定義�
 // Lab_Editor の PlacedEnemy / PlacedGimmick / PlacedItem（StageData.cs）にも同名のキーがある。片方だけだと保存時に消える。
 struct EditLockOverride {
     signed char v[7] = { -1, -1, -1, -1, -1, -1, -1 };
-    bool Any() const { for (int i = 0; i < 7; i++) if (v[i] >= 0) return true; return false; }
+    // ドラッグ移動の向きの制限の上書き（-1=アセットに従う 0=自由 1=十字 2=X字）。キーは "moveMode"
+    signed char moveMode = -1;
+    bool Any() const { for (int i = 0; i < 7; i++) if (v[i] >= 0) return true; return moveMode >= 0; }
 };
 static const char* const kEditLockKeys[7] = { "noScale", "noRotate", "noMove", "noFlip", "noPause", "noRewind", "noSpeed" };
 // ステージJSONの1エントリから読む。キーが無い操作は -1（アセットに従う）のまま
@@ -552,10 +562,13 @@ static void ReadEditLockOverride(const json& j, EditLockOverride& o) {
         auto it = j.find(kEditLockKeys[i]);
         if (it != j.end() && it->is_boolean()) o.v[i] = it->get<bool>() ? 1 : 0;
     }
+    auto mm = j.find("moveMode");
+    if (mm != j.end() && mm->is_number_integer()) o.moveMode = (signed char)ClampMoveMode(mm->get<int>());
 }
 // ステージJSONの1エントリへ書く。上書きの無い操作はキーを書かない（既存ステージに余計な差分を出さないため）
 static void WriteEditLockOverride(json& j, const EditLockOverride& o) {
     for (int i = 0; i < 7; i++) if (o.v[i] >= 0) j[kEditLockKeys[i]] = (o.v[i] == 1);
+    if (o.moveMode >= 0) j["moveMode"] = (int)o.moveMode;
 }
 
 // ステージ上に実際に配置された「敵1体分」の情報。どの定義(EnemyDef)を使うか、どこに置くかだけを持つ軽量な構造体。
@@ -607,6 +620,7 @@ struct ItemDef {
     bool noScale = false;
     bool noRotate = false;
     bool noMove = false;
+    int moveMode = 0;       // ドラッグ移動の向きの制限（EnemyDef::moveMode と同じ。0=自由 1=十字 2=X字）
     bool noFlip = false;
     bool noPause = false;
     bool noRewind = false;
@@ -997,6 +1011,7 @@ void LoadAssetDefinitions() {
                     def.noScale  = e.value("noScale",  false);
                     def.noRotate = e.value("noRotate", false);
                     def.noMove   = e.value("noMove",   false);
+                    def.moveMode = ClampMoveMode(e.value("moveMode", 0));
                     def.noFlip   = e.value("noFlip",   false);
                     def.noPause  = e.value("noPause",  false);
                     def.noRewind = e.value("noRewind", false);
@@ -1190,6 +1205,7 @@ void LoadAssetDefinitions() {
                     def.noScale  = g.value("noScale",  false);
                     def.noRotate = g.value("noRotate", false);
                     def.noMove   = g.value("noMove",   false);
+                    def.moveMode = ClampMoveMode(g.value("moveMode", 0));
                     def.noFlip   = g.value("noFlip",   false);
                     def.noPause  = g.value("noPause",  false);
                     def.noRewind = g.value("noRewind", false);
@@ -2092,7 +2108,11 @@ enum GimmickType {
     GIMMICK_GRADE_LOCK_PLATFORM,     // 補正ロック足場：条件が成立している間だけ実体化する足場（色ロック/明暗ロックの一般化）
     // 逆行ゲート：いずれかの物が巻き戻し中（Rキー・円形メニューの物ごとの巻き戻し）のあいだだけ、通れる壁。
     // 早送りゲート(GIMMICK_FASTFORWARD_GATE)の巻き戻し版。物ごとの巻き戻しを入れておくと、プレイヤーは時間を戻らずに通れる。
-    GIMMICK_REWIND_GATE
+    GIMMICK_REWIND_GATE,
+    // 一方通行の壁：矢印の向きには通れて、逆向きには通れない。プレイヤーと、すり抜けの能力を持たない全ての敵に効く。
+    // 角度の編集で向きを回せる（見た目は自由に回り、通れる向きは、いちばん近い上下左右の4方向に丸める）。
+    // 向き反転の編集で、通れる向きが逆になる。
+    GIMMICK_ONEWAY_WALL
 };
 
 // 巻き戻し機能のために毎フレーム記録する、ギミック1個・1フレーム分のスナップショット。
@@ -2524,6 +2544,47 @@ bool IsEnemyEditLocked(const Enemy& e, EditOp op) {
 bool IsGimmickEditLocked(const Gimmick& g, EditOp op) {
     if (g.lockOv.v[op] >= 0) return g.lockOv.v[op] == 1;
     return IsDefEditLocked(FindGimmickDef(g.assetId), op);
+}
+
+// ドラッグ移動の向きの制限（置いた物ごとの上書き → アセットの設定の順。0=自由 1=十字 2=X字）
+int EnemyMoveMode(const Enemy& e) {
+    if (e.lockOv.moveMode >= 0) return e.lockOv.moveMode;
+    const EnemyDef* d = FindEnemyDef(e.assetId);
+    return d ? ClampMoveMode(d->moveMode) : MOVE_MODE_FREE;
+}
+int GimmickMoveMode(const Gimmick& g) {
+    if (g.lockOv.moveMode >= 0) return g.lockOv.moveMode;
+    const GimmickDef* d = FindGimmickDef(g.assetId);
+    return d ? ClampMoveMode(d->moveMode) : MOVE_MODE_FREE;
+}
+
+// ドラッグ移動の向きの制限を掛けた、このフレームの移動量を求める。
+//
+// 自由（従来）は、マウスの動きをそのまま返す。十字・X字は、つかんだ直後の動きで「どの線の上を動くか」を決め、
+// 離すまでその線の上だけを動く。決める前（動きが小さい間）は、その場に留まる。
+//   cumX/cumY  … ドラッグを始めてからのマウスの総移動量（ワールド座標）
+//   st         … この物の、ドラッグ中の状態（axis=-1 なら、まだ線を決めていない）
+//   outDx/outDy… このフレームに実際に動かす量。決めた瞬間は、それまでの総移動量を線へ射影した分をまとめて動かす
+// 十字：横か縦（総移動量の大きいほう）。X字：総移動量の符号で決まる、右下がり／右上がりの斜め線。
+struct DragAxisState { int axis = -1; float appliedX = 0.0f, appliedY = 0.0f; float startCx = 0.0f, startCy = 0.0f; };
+const float DRAG_AXIS_DECIDE_PX = 6.0f; // これ以上動いたら、線を決める
+void ConstrainDragDelta(int mode, float dx, float dy, float cumX, float cumY, DragAxisState& st, float& outDx, float& outDy) {
+    if (mode == MOVE_MODE_FREE) { outDx = dx; outDy = dy; return; }
+    outDx = 0.0f; outDy = 0.0f;
+    if (st.axis < 0) {
+        if (fmaxf(fabsf(cumX), fabsf(cumY)) < DRAG_AXIS_DECIDE_PX) return;
+        if (mode == MOVE_MODE_CROSS) st.axis = (fabsf(cumX) >= fabsf(cumY)) ? 0 : 1;        // 0=横 1=縦
+        else                         st.axis = ((cumX >= 0.0f) == (cumY >= 0.0f)) ? 2 : 3;  // 2=右下がり(\) 3=右上がり(/)
+    }
+    float tx = 0.0f, ty = 0.0f; // ドラッグ開始からの、線の上での総移動量
+    switch (st.axis) {
+        case 0: tx = cumX; break;
+        case 1: ty = cumY; break;
+        case 2: { float a = (cumX + cumY) * 0.5f; tx = a; ty = a; break; }   // (1,1)方向へ射影
+        default: { float a = (cumX - cumY) * 0.5f; tx = a; ty = -a; break; } // (1,-1)方向へ射影
+    }
+    outDx = tx - st.appliedX; outDy = ty - st.appliedY;
+    st.appliedX = tx; st.appliedY = ty;
 }
 
 bool GimmickAngleIsAiOwned(GimmickType type) {
@@ -3929,6 +3990,36 @@ bool CheckGridCollisionY(float x, float& y, float& vy, int width, float scale, i
     return isGrounded;
 }
 
+// ===== 一方通行の壁 =====
+// 通れる向き：0=右 1=下 2=左 3=上（角度0が右向き。DrawRotaGraph と同じ時計回りに90度ごと）。
+// 見た目の角度は15度刻みなどで自由に回るが、通れる向きは「いちばん近い4方向」に丸める（70度なら下）。
+// 向き反転の編集をされていると、通れる向きが逆になる。
+float OneWayAngle(const Gimmick& g) {
+    return g.angle + (GetGimmickEditReaction(g).flipped ? 3.14159265f : 0.0f);
+}
+int OneWayDir(const Gimmick& g) {
+    int d = (int)floorf(OneWayAngle(g) / 1.57079633f + 0.5f);
+    return ((d % 4) + 4) % 4;
+}
+// 当たり判定の箱。上下（縦向き）のときは、中心を動かさずに縦横が入れ替わる（見た目も同じ中心で回る）
+void GetOneWayBox(const Gimmick& g, float& outX, float& outY, float& outW, float& outH) {
+    outX = g.x; outY = g.y; outW = g.width; outH = g.height;
+    if (OneWayDir(g) % 2 == 1) {
+        float cx = g.x + g.width * 0.5f, cy = g.y + g.height * 0.5f;
+        outW = g.height; outH = g.width;
+        outX = cx - outW * 0.5f; outY = cy - outH * 0.5f;
+    }
+}
+// この壁が、向き (mvx, mvy) へ動くものを止めるか。通れる向きの逆（に動く成分）を止める。
+bool OneWayBlocksMove(const Gimmick& g, float mvx, float mvy) {
+    switch (OneWayDir(g)) {
+        case 0:  return mvx < 0.0f;  // 右へ通れる壁は、左へ戻る動きを止める
+        case 1:  return mvy < 0.0f;  // 下へ通れる壁は、上へ戻る動き（下からの跳び上がり）を止める
+        case 2:  return mvx > 0.0f;
+        default: return mvy > 0.0f;  // 上へ通れる壁は、下へ落ちる動きを止める（上に乗れる。下からは通り抜けられる）
+    }
+}
+
 // X方向についての、実体化した地形系ギミック（伸縮ボックス、伸縮地面、岩、早送りゲート、ゲート扉）との衝突判定。
 // タイルマップの衝突とは別に、ギミック側の座標・サイズをもとにX座標を押し戻す。
 void CheckGimmickCollisionX(float& x, float y, int width, float scale, int height, float vx, const std::vector<Gimmick>& gimmicks) {
@@ -3937,6 +4028,22 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
+        // 一方通行の壁：左右の動きだけを、通れる向きの逆から止める（上下向きの壁は、左右の動きを止めない）
+        if (gim.type == GIMMICK_ONEWAY_WALL) {
+            int dir = OneWayDir(gim);
+            if (dir == 1 || dir == 3) continue;
+            float obx, oby, obw, obh;
+            GetOneWayBox(gim, obx, oby, obw, obh);
+            if (y + objH > oby + 4.0f && y < oby + obh - 4.0f) {
+                float tolOW = std::abs(vx) + 12.0f;
+                if (dir == 0 && vx < 0.0f) {          // 右へ通れる壁：右側から左へ入ろうとするのを止める
+                    if (x > obx + obw - tolOW && x < obx + obw) x = obx + obw;
+                } else if (dir == 2 && vx > 0.0f) {   // 左へ通れる壁：左側から右へ入ろうとするのを止める
+                    if (x < obx && x + objW > obx && x + objW <= obx + tolOW) x = obx - objW;
+                }
+            }
+            continue;
+        }
         // Feature: ゲート扉の修正（友人フィードバック対応）— GIMMICK_GATE_DOORを横方向の実体判定に追加。
         // isActive==true（施錠中/閉状態）の間だけこのループに乗り、通行を塞げるようにする
         // （元々ここに無かったため、閉じているはずのドアを素通りできてしまっていた）。
@@ -3973,6 +4080,25 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
     
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
+        // 一方通行の壁：上下の動きだけを、通れる向きの逆から止める（左右向きの壁は、上下の動きを止めない）。
+        // 上へ通れる壁は、下からは通り抜けられて、上からは床として乗れる。下へ通れる壁は、その逆の天井になる
+        if (gim.type == GIMMICK_ONEWAY_WALL) {
+            int dir = OneWayDir(gim);
+            if (dir == 0 || dir == 2) continue;
+            float obx, oby, obw, obh;
+            GetOneWayBox(gim, obx, oby, obw, obh);
+            if (x + objW > obx + 2.0f && x < obx + obw - 2.0f) {
+                if (dir == 3 && vy >= 0.0f) {         // 上へ通れる壁：上から落ちてくるものは、乗る
+                    float footY = y + objH;
+                    float thresholdOW = vy + 12.0f;
+                    if (footY >= oby && footY <= oby + thresholdOW) { y = oby - objH; vy = 0.0f; isGrounded = true; }
+                } else if (dir == 1 && vy < 0.0f) {   // 下へ通れる壁：下から跳び上がるものは、頭をぶつける
+                    float thresholdOW = -vy + 12.0f;
+                    if (y <= oby + obh && y >= oby + obh - thresholdOW) { y = oby + obh; vy = 0.0f; }
+                }
+            }
+            continue;
+        }
         if (gim.type == GIMMICK_SCALABLE_BOX || gim.type == GIMMICK_SCALABLE_GROUND || gim.type == GIMMICK_PUSHABLE_ROCK || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_REWIND_GATE
             || (gim.type == GIMMICK_GATE_DOOR && GimmickIsTipped(gim))) {
             // Feature: 編集リアクション — 倒した扉はここで床として拾う（横の壁判定からは外れている）。
@@ -8242,12 +8368,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 軸ごとにバラバラな挙動になり、プレイヤーから何が保存され何が戻るのか読めなくなる。
                 // 巻き戻すのは位置・速度・生死だけ、編集した形はそのまま維持される、に統一する。
                 // 履歴は最大600件だがドラッグ中のフレームだけの処理なのでコストは無視できる。
+                // ドラッグ移動の向きの制限用：ドラッグを始めてからのマウスの総移動量と、物ごとの状態。離したら捨てる
+                static float dragCumX = 0.0f, dragCumY = 0.0f;
+                static std::map<const void*, DragAxisState> dragAxes;
+                if (!isDragging) { dragCumX = 0.0f; dragCumY = 0.0f; dragAxes.clear(); }
                 if (isDragging && selectedType != SELECT_NONE) {
                     float prevGx = 0.0f, prevGy = 0.0f;
                     Screen_MouseToWorld((float)lastMouseX, (float)lastMouseY, prevGx, prevGy);
                     float dx = gx - prevGx;
                     float dy = gy - prevGy;
                     if (fabsf(dx) + fabsf(dy) > 0.5f) NoteEditOp("move");
+                    dragCumX += dx; dragCumY += dy;
 
                     // 自分のドラッグ移動は、ステージが封印していれば効かない（壁・穴・ゴールを一瞬で越えられるため）
                     if (!currentPlayerLocks.noMove) for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
@@ -8256,15 +8387,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 禁止された相手とそうでない相手が混ざりうるため。
                     for (auto* e : selectedEnemies) {
                         if (IsEnemyEditLocked(*e, EDITOP_MOVE)) continue;
-                        e->x += dx; e->y += dy; e->vx = 0; e->vy = 0;
+                        // 移動の向きの制限（十字・X字）。自由のときは、マウスの動きがそのまま入る
+                        float mdx = dx, mdy = dy;
+                        ConstrainDragDelta(EnemyMoveMode(*e), dx, dy, dragCumX, dragCumY, dragAxes[e], mdx, mdy);
+                        e->x += mdx; e->y += mdy; e->vx = 0; e->vy = 0;
                         e->editDirtyMask |= EDIT_DIRTY_POS;
-                        for (auto& h : e->history) { h.x += dx; h.y += dy; }
+                        for (auto& h : e->history) { h.x += mdx; h.y += mdy; }
                     }
                     for (auto* g : selectedGimmicks) {
                         if (IsGimmickEditLocked(*g, EDITOP_MOVE)) continue;
-                        g->x += dx; g->y += dy;
+                        float mdx = dx, mdy = dy;
+                        ConstrainDragDelta(GimmickMoveMode(*g), dx, dy, dragCumX, dragCumY, dragAxes[g], mdx, mdy);
+                        g->x += mdx; g->y += mdy;
                         g->editDirtyMask |= EDIT_DIRTY_POS;
-                        for (auto& h : g->history) { h.x += dx; h.y += dy; }
+                        for (auto& h : g->history) { h.x += mdx; h.y += mdy; }
                     }
 
                     lastMouseX = mx;
@@ -11084,6 +11220,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         if (tid > 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) return true;
                                     }
                                 }
+                                // 一方通行の壁：いまの進行方向が、通れる向きの逆なら、壁として跳ね返る（通れる向きなら素通り）
+                                for (const auto& gOW : gimmicks) {
+                                    if (gOW.type != GIMMICK_ONEWAY_WALL || !gOW.isActive) continue;
+                                    if (!OneWayBlocksMove(gOW, cosf(headingW), sinf(headingW))) continue;
+                                    float obx, oby, obw, obh;
+                                    GetOneWayBox(gOW, obx, oby, obw, obh);
+                                    if (px < obx + obw && px + bw > obx && py < oby + obh && py + bh > oby) return true;
+                                }
                                 return false;
                             };
                             float bwW = (float)enemy.hitboxWidth * enemy.scale;
@@ -13078,6 +13222,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 else DrawBox(fx1, fy1, fx2, fy2, GetColor(0, 200, 255), TRUE);
                 if (!gim.isActive) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 WorldLabel(fx1, fy1 - 18, "早送りで通れる", GetColor(0, 200, 255));
+            }
+            else if (gim.type == GIMMICK_ONEWAY_WALL) {
+                // 一方通行の壁：絵は「右向き」に描かれている前提で、角度（と向き反転）のぶんだけ中心で回して描く。
+                // 当たり判定の箱（上下向きのときは縦横が入れ替わる）と同じ中心・同じ向きになる。
+                float obx, oby, obw, obh;
+                GetOneWayBox(gim, obx, oby, obw, obh);
+                if (gim.handle >= 0) {
+                    int imgW = 1, imgH = 1;
+                    GetGraphSize(gim.handle, &imgW, &imgH);
+                    float gcx = gim.x + gim.width * 0.5f - cameraX, gcy = gim.y + gim.height * 0.5f - cameraY;
+                    DrawRotaGraph3((int)gcx, (int)gcy, imgW / 2, imgH / 2, (double)gim.width / imgW, (double)gim.height / imgH,
+                                   OneWayAngle(gim), gim.handle, TRUE, FALSE);
+                } else {
+                    DrawBox((int)(obx - cameraX), (int)(oby - cameraY), (int)(obx + obw - cameraX), (int)(oby + obh - cameraY), GetColor(120, 120, 200), TRUE);
+                }
             }
             else if (gim.type == GIMMICK_REWIND_GATE) {
                 // 逆行ゲート：閉じている間は不透明、巻き戻し中（通れる間）は半透明にして位置だけ示す
