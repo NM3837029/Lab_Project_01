@@ -2320,7 +2320,8 @@ struct Player {
     bool isPaused;              // 一時停止中かどうか
     int hp;                      // 現在HP
 
-    // 被ダメージ後の無敵時間（フレーム）。0より大きい間は敵との接触ダメージを受けない
+    // 被ダメージ後の無敵時間（フレーム）。0より大きい間は、どんなダメージも受けない（TryHurtPlayer）。
+    // この間、プレイヤーは赤く染まって点滅する（描画側）。
     float invulnTimer = 0.0f;
 
     // 現在乗っている動くギミックのインデックス（乗っていなければ-1）。ギミックの移動量を追従させるために使う
@@ -2333,6 +2334,21 @@ struct Player {
     // Feature 2: アニメーション
     AnimationController anim; // スプライトアニメーションの再生状態を管理するコントローラ
 };
+
+// ===== プレイヤーのダメージ（被弾）=====
+// 敵・弾・危険パーツ・ドッスンの衝撃波など、プレイヤーがダメージを受ける所は、必ずこの関数を通す。
+// 無敵のあいだは何も起きず（false）、そうでなければHPを1減らして、無敵と赤い点滅を始める（true）。
+// ゲームオーバーの判定（HPが0以下）と、ノックバックは、呼び出し側が続けて行う。
+//   PLAYER_INVULN_FRAMES … 被弾後の無敵の長さ（1フレーム＝1/60秒。60で約1秒）
+//   PLAYER_HURT_BLINK_FRAMES … 赤い点滅の切り替わりの間隔（フレーム）
+const float PLAYER_INVULN_FRAMES = 60.0f;
+const float PLAYER_HURT_BLINK_FRAMES = 5.0f;
+inline bool TryHurtPlayer(Player& p) {
+    if (p.invulnTimer > 0.0f) return false;
+    p.hp--;
+    p.invulnTimer = PLAYER_INVULN_FRAMES;
+    return true;
+}
 
 // 敵1体分の実行時状態。EnemyDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・HP・AI状態を持つ。
 struct Enemy {
@@ -8895,6 +8911,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 player.scale = s.scale; player.angle = s.angle; player.speedScale = s.speedScale;
                 player.isPaused = s.isPaused;
                 player.hp = s.hp;
+                player.invulnTimer = 0.0f; // ダメージを巻き戻したので、そのときの無敵と赤い点滅も消す
             }
         } else {
             if (canPlayerAct) {
@@ -10019,9 +10036,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         float ddxF = pcxF - ecxF, ddyF = pcyF - ecyF;
                                         float distF = sqrtf(ddxF * ddxF + ddyF * ddyF);
                                         // 縮小されたドッスンは衝撃波を起こせない（乗れる安全な台として振る舞う）
-                                        if (!er.shrunk && distF <= shockwaveRadiusF && !isPlayerRewinding && player.invulnTimer <= 0.0f) {
-                                            player.hp--;
-                                            player.invulnTimer = 60.0f;
+                                        if (!er.shrunk && distF <= shockwaveRadiusF && !isPlayerRewinding && TryHurtPlayer(player)) {
                                             float knockDirF = (distF > 0.01f) ? (ddxF / distF) : ((pcxF < ecxF) ? -1.0f : 1.0f);
                                             player.vx = knockDirF * 6.0f;
                                             player.vy = -4.0f;
@@ -12341,21 +12356,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             };
                             BehaviorInterpreter::Tick(part.scriptState, partActor);
 
-                            // Feature: Composite Multi-Part Objects (Parts-M4) — パーツごとの接触ダメージ判定
-                            // （ギミック本体側の個別ロジック(CHOMPER/SPIKES等)とは独立して、パーツは常にこの一律の
-                            //   接触ダメージ判定を持つ。hp==0のパーツは常在ハザードとして永続的にこの判定を持ち続ける）
-                            if (!isPlayerRewinding) {
-                                float pw_ = (float)player.width * player.scale;
-                                float ph_ = (float)player.height * player.scale;
-                                float partHX, partHY, partW, partH;
-                                // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
-                                GetPartHitRect(part, partHX, partHY, partW, partH);
-                                if (CheckCollision(player.x, player.y, pw_, ph_,
-                                                    partHX, partHY, partW, partH)) {
-                                    player.hp--;
-                                    if (player.hp <= 0) currentScene = RESULT_GAMEOVER;
-                                }
-                            }
+                            // ギミックのパーツの接触ダメージは、ここでは行わない。
+                            // 危険なパーツ（deadly）が当たったときのダメージは、プレイヤーの被弾の処理にある
+                            // 「危険パーツ」の判定（ノックバックと無敵つき）が受け持つ。以前はここでも、
+                            // 危険でないパーツ（引き戸の戸板など）を含めて、無敵なしで毎フレームHPを減らしていた。
                         }
                         CapturePartsLocal(gim.parts, gPartPose); // 必ず ApplyPartsParentPose より前
                     }
@@ -12678,9 +12682,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             break;
                         }
                     }
-                    if (hitDeadlyPart) {
-                        player.hp--;
-                        player.invulnTimer = 60.0f;
+                    if (hitDeadlyPart && TryHurtPlayer(player)) {
                         // 当たったパーツから離れる向きへ弾き飛ばす（ハザードの上で連続被弾し続けるのを防ぐ）
                         float playerCx = player.x + pw_scaled / 2.0f;
                         player.vx = (playerCx < partCx ? -1.0f : 1.0f) * 6.0f;
@@ -12728,9 +12730,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                         // 本体・パーツのどちらかにヒットした時点で1ダメージのみ（同一フレームでの多重ヒットを防止）。
                         // 被弾後は無敵時間を与え、敵から離れる方向へノックバックさせる。
-                        if (hitBody || hitPart) {
-                            player.hp--;
-                            player.invulnTimer = 60.0f;
+                        if ((hitBody || hitPart) && TryHurtPlayer(player)) {
                             float enemyCenterX = enemy.x + ew_scaled / 2.0f;
                             float playerCenterX = player.x + pw_scaled / 2.0f;
                             float knockDir = (playerCenterX < enemyCenterX) ? -1.0f : 1.0f;
@@ -12958,8 +12958,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     } else {
                         // 敵の弾がプレイヤーにヒット
                         if (!isPlayerRewinding) {
-                            if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, player.x, player.y, pw_scaled, ph_scaled)) {
-                                player.hp--;
+                            // 無敵のあいだは、弾はプレイヤーをすり抜ける（ダメージも、弾が消えることも起きない）
+                            if (player.invulnTimer <= 0.0f &&
+                                CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, player.x, player.y, pw_scaled, ph_scaled)) {
+                                TryHurtPlayer(player);
                                 if (player.hp <= 0) {
                                     currentScene = RESULT_GAMEOVER;
                                 }
@@ -13764,6 +13766,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         int cx = (int)(player.x + (player.width * player.scale) / 2.0f - cameraX);
         int cy = (int)(player.y - cameraY + (player.height * player.scale));
         
+        // 被弾後の無敵のあいだは、プレイヤーを赤く染めて点滅させる。
+        // 一定のフレームごとに「濃い赤」と「薄い赤（半透明）」を交互に出す。無敵が切れたら元の見た目に戻る。
+        const bool playerHurtFlash = (player.invulnTimer > 0.0f) && (player.hp > 0);
+        if (playerHurtFlash) {
+            SetDrawBright(255, 70, 70);
+            if (((int)(player.invulnTimer / PLAYER_HURT_BLINK_FRAMES)) % 2 == 1) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 110);
+        }
         int pImgW = 0, pImgH = 0;
         if (player.anim.HasClip(player.anim.currentClip)) {
             pImgH = player.anim.GetCurrentFrameHeight();
@@ -13784,6 +13793,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (player.direction == 0) DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE, TRUE);
             else DrawRotaGraph(cx, drawCy, playerFit * player.scale, player.angle, player.handle, TRUE);
         }
+        if (playerHurtFlash) { SetDrawBright(255, 255, 255); SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0); }
         
         if (isDebugDrawMode) {
             DrawBox((int)(player.x - cameraX), (int)(player.y - cameraY), (int)(player.x + player.width * player.scale - cameraX), (int)(player.y + player.height * player.scale - cameraY), GetColor(0, 255, 0), FALSE);
