@@ -49,12 +49,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -65,6 +75,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -135,12 +147,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -151,6 +173,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -221,12 +245,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -237,6 +271,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -307,12 +343,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -323,6 +369,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -393,12 +441,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -409,6 +467,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": 2.5,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -555,12 +615,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": 0.6,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -571,6 +641,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -682,9 +754,7 @@
           }
         ]
       }
-    ],
-    "activeOffscreen": false,
-    "revealBrightness": 0.6
+    ]
   },
   {
     "id": "enemy_taihou",
@@ -736,12 +806,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -752,6 +832,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -822,12 +904,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -838,6 +930,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": true,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -1070,12 +1164,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -1086,6 +1190,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -1396,12 +1502,22 @@
     "tintStrength": 0.6,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -1412,6 +1528,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -1591,12 +1709,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": 1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": 180.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -1607,6 +1735,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -1748,8 +1878,7 @@
           }
         ]
       }
-    ],
-    "zoomLockFrames": 180.0
+    ]
   },
   {
     "id": "enemy_kaiten",
@@ -1801,12 +1930,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": 60.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -1817,6 +1956,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -2136,8 +2277,7 @@
           }
         ]
       }
-    ],
-    "rotateSpeed": 60.0
+    ]
   },
   {
     "id": "enemy_size",
@@ -2189,12 +2329,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": 1.8,
+    "zoneFrames": 360.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -2205,6 +2355,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -2271,9 +2423,7 @@
           }
         ]
       }
-    ],
-    "zoneFrames": 360.0,
-    "sizeFactor": 1.8
+    ]
   },
   {
     "id": "enemy_imomushi",
@@ -2325,12 +2475,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -2341,6 +2501,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -2600,12 +2762,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -2616,6 +2788,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -2847,12 +3021,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -2863,6 +3047,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": 2.5,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -3009,12 +3195,22 @@
     "tintStrength": -1.0,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -3025,6 +3221,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -3256,12 +3454,22 @@
     "tintStrength": 0.6,
     "zoomAmplitude": -1.0,
     "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
     "waveShape": -1.0,
     "maxScale": -1.0,
     "tintColorR": -1.0,
     "tintColorG": -1.0,
     "tintColorB": -1.0,
     "counterFilter": -1.0,
+    "forcePlayerFilter": 1.0,
     "brightenMax": -1.0,
     "counterBrightness": -1.0,
     "chargeWarnFrames": -1.0,
@@ -3272,6 +3480,8 @@
     "fastForwardAttackMult": -1.0,
     "diagonalFallSpeed": -1.0,
     "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
     "bodyIgnoresTilt": false,
     "radialFire": false,
     "spreadRotationStep": -1.0,
@@ -3399,7 +3609,658 @@
           }
         ]
       }
-    ],
-    "forcePlayerFilter": 1.0
+    ]
+  },
+  {
+    "id": "enemy_1",
+    "name": "ファイアバー（ファイアバー（回る火の玉の棒））",
+    "type_enum": 0,
+    "hp": 3,
+    "width": 32,
+    "height": 32,
+    "sprite": "img/ファイアバーの根本.png",
+    "seSpawn": "",
+    "seAttack": "",
+    "seDamage": "",
+    "seDeath": "",
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "scale": 1.0,
+    "moveSpeed": -1.0,
+    "enragedMoveSpeed": -1.0,
+    "actionInterval": -1.0,
+    "jumpPowerMult": -1.0,
+    "triggerRange": -1.0,
+    "detectionRangeY": -1.0,
+    "projectileSpeed": -1.0,
+    "chargeTime": -1.0,
+    "dashSpeedMult": -1.0,
+    "dashDuration": -1.0,
+    "cooldownTime": -1.0,
+    "fallDelay": -1.0,
+    "spreadAngle": -1.0,
+    "spreadCount": -1,
+    "floatAmplitude": -1.0,
+    "floatFrequency": -1.0,
+    "teleportRangeMin": -1.0,
+    "teleportRangeMax": -1.0,
+    "shrinkFactor": -1.0,
+    "shieldOnDuration": -1.0,
+    "shieldOffDuration": -1.0,
+    "mimicDelayFrames": -1.0,
+    "sizeAmplitude": -1.0,
+    "sizeFrequency": -1.0,
+    "minScale": -1.0,
+    "tempoFrequency": -1.0,
+    "tempoMin": -1.0,
+    "tempoMax": -1.0,
+    "effectRange": -1.0,
+    "brightnessMin": -1.0,
+    "tintStrength": -1.0,
+    "zoomAmplitude": -1.0,
+    "zoomFrequency": -1.0,
+    "revealBrightness": -1.0,
+    "zoomLockFrames": -1.0,
+    "rotateSpeed": -1.0,
+    "rotatePlayer": true,
+    "rotateEnemies": true,
+    "rotateGimmicks": true,
+    "rotateItems": true,
+    "sizeFactor": -1.0,
+    "zoneFrames": -1.0,
+    "waveShape": -1.0,
+    "maxScale": -1.0,
+    "tintColorR": -1.0,
+    "tintColorG": -1.0,
+    "tintColorB": -1.0,
+    "counterFilter": -1.0,
+    "forcePlayerFilter": -1.0,
+    "brightenMax": -1.0,
+    "counterBrightness": -1.0,
+    "chargeWarnFrames": -1.0,
+    "chargeWarnZoom": -1.0,
+    "aimJitter": -1.0,
+    "shockwaveRadius": -1.0,
+    "fastForwardJitter": -1.0,
+    "fastForwardAttackMult": -1.0,
+    "diagonalFallSpeed": -1.0,
+    "ignorePause": false,
+    "activeOffscreen": false,
+    "artFacesLeft": true,
+    "bodyIgnoresTilt": false,
+    "radialFire": false,
+    "spreadRotationStep": -1.0,
+    "verticalTrackSpeed": -1.0,
+    "riseSpeed": -1.0,
+    "bounceSpeed": -1.0,
+    "bounceRandomness": -1.0,
+    "segmentGap": -1.0,
+    "consumePartOnAttack": false,
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "script": [],
+    "edit_reactions": {},
+    "parts": [
+      {
+        "id": "fire0_1",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 22.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 14.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 14.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_2",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 36.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 28.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 28.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_3",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 50.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 42.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 42.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_4",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 64.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 56.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 56.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_5",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 78.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 70.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 70.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_6",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 92.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "fire0_6_copy",
+        "sprite": "img/ファイアバーの棒.png",
+        "offsetX": 104.0,
+        "offsetY": 8.0,
+        "width": 16,
+        "height": 16,
+        "hitboxOffsetX": 1,
+        "hitboxOffsetY": 1,
+        "hitboxWidth": 13,
+        "hitboxHeight": 13,
+        "scale": 1.0,
+        "hp": 0,
+        "zOrder": 1,
+        "deadly": true,
+        "script": [
+          {
+            "hat": "OnSpawn",
+            "body": [
+              {
+                "op": "Forever",
+                "body": [
+                  {
+                    "op": "SetLocalOffset",
+                    "dx": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Cos",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    },
+                    "dy": {
+                      "op": "Add",
+                      "a": 8.0,
+                      "b": {
+                        "op": "Mul",
+                        "a": {
+                          "op": "Sin",
+                          "a": {
+                            "op": "Add",
+                            "a": 0.0,
+                            "b": {
+                              "op": "Mul",
+                              "a": {
+                                "op": "Time"
+                              },
+                              "b": 0.03
+                            }
+                          }
+                        },
+                        "b": 84.0
+                      }
+                    }
+                  },
+                  {
+                    "op": "Wait",
+                    "frames": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
   }
 ]

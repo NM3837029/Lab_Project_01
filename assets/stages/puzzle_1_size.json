@@ -1909,8 +1909,8 @@
       0,
       0,
       0,
-      0,
-      0,
+      1,
+      1,
       0,
       0,
       0,
@@ -9275,11 +9275,11 @@
       "y": 366.0,
       "noScale": false,
       "noRotate": true,
-      "noMove": true,
       "noFlip": true,
       "noPause": true,
       "noRewind": true,
-      "noSpeed": true
+      "noSpeed": true,
+      "moveMode": 1
     },
     {
       "id": "gim_weight_switch",
