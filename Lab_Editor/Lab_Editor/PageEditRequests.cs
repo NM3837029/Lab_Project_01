@@ -48,7 +48,8 @@ public delegate void BehaviorScriptEditRequestHandler(string label, JArray initi
 // baseLogicalW/H : 本体の論理サイズ(当たり判定の幅・高さ)。パーツのoffsetやwidth/heightは
 //                  この論理座標で解釈されるため、プレビューの倍率計算に必要。0なら画像の原寸で代用する
 // onSaved        : 編集確定時に新しいパーツ一覧を受け取るコールバック
-public delegate void PartsEditRequestHandler(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, Action<List<PartDef>> onSaved);
+// owner          : 持ち主（敵・ギミック・アイテム）の種類と、できること。パーツの「画像の切り替え」で選べる条件を決めるのに使う
+public delegate void PartsEditRequestHandler(string label, List<PartDef> initialParts, string baseSpritePath, float baseLogicalW, float baseLogicalH, PartOwnerInfo owner, Action<List<PartDef>> onSaved);
 
 // 敵の動きの調整要求（「敵の動きを調整」画面）
 // label    : 編集対象を示すラベル文字列

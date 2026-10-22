@@ -1334,6 +1334,10 @@ public class PartDef
     public List<PartMotion> motions { get; set; } = new();
     // 空のときは JSON に出さない（モーションを使っていない大半のパーツのJSONを膨らませないため）
     public bool ShouldSerializemotions() => motions != null && motions.Count > 0;
+    // 条件で画像を切り替える一覧（「条件 × 画像」。上から順に見て、最初に当てはまった行を使う。PartSpriteRules.cs 参照）。
+    // 【重要】C++側 PartDef.spriteRules（JSONキー sprite_rules）と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    public List<PartSpriteRule> sprite_rules { get; set; } = new();
+    public bool ShouldSerializesprite_rules() => sprite_rules != null && sprite_rules.Count > 0;
     // パーツの色（"#RRGGBB"。絵に掛ける乗算。空なら絵のまま）と、合成方法（"add"=加算合成。空なら通常）。
     // 同じ絵を赤・緑・青に塗り分けたり、光る球を重ねたりするための項目。
     // 【重要】C++側 DrawPixel.cpp の PartDef.tintR/G/B・additive（JSONキーは color / blend）と対応する。

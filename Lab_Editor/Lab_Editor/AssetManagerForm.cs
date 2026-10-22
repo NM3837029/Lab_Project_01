@@ -51,9 +51,9 @@ public class AssetManagerForm : Form
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultScript);
         };
         // パーツ構成の編集要求 → PartsEditorFormをモーダル表示し、OKなら結果をコールバックで返す。
-        page.PartsEditRequested += (label, initialParts, baseSpritePath, baseLogicalW, baseLogicalH, onSaved) =>
+        page.PartsEditRequested += (label, initialParts, baseSpritePath, baseLogicalW, baseLogicalH, owner, onSaved) =>
         {
-            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH);
+            using var form = new PartsEditorForm(label, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH, owner);
             if (form.ShowDialog(this) == DialogResult.OK) onSaved(form.ResultParts);
         };
         // 敵の動きの調整要求 → 調整画面をモーダル表示し、OKなら呼び出し側へ知らせる（キャンセルで値は元へ戻る）。

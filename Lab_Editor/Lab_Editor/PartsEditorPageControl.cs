@@ -85,6 +85,9 @@ public partial class PartsEditorPageControl : UserControl
     private Button _btnPlayToggle = null!;
     // パーツのモーション（PartDef.motions）の編集欄と、プレビューで「いま起きていること」の模擬
     private PartMotionEditorControl _motionEditor = null!;
+    // パーツの「画像の切り替え」（PartDef.sprite_rules）の編集欄。選べる条件は、持ち主が何をできるかから決まる
+    private PartSpriteRuleEditorControl _spriteRuleEditor = null!;
+    private readonly PartOwnerInfo _owner;
     private readonly PartMotionEvaluator.SimState _sim = new();
     private ComboBox _cboSim = null!;
 
@@ -134,8 +137,9 @@ public partial class PartsEditorPageControl : UserControl
     // baseSpritePath : 本体の基準スプライトのパス。合成プレビューの中心目印として表示する。
     // baseLogicalW/H : 本体の論理サイズ（当たり判定の幅・高さ）。0なら画像の原寸で代用する。
     //                  詳細は WorldScale のコメントを参照。
-    public PartsEditorPageControl(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath, float baseLogicalW = 0f, float baseLogicalH = 0f)
+    public PartsEditorPageControl(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath, float baseLogicalW = 0f, float baseLogicalH = 0f, PartOwnerInfo? owner = null)
     {
+        _owner = owner ?? PartOwnerInfo.Unknown();
         this.projectRoot = projectRoot;
         this.baseSpritePath = baseSpritePath;
         this.baseLogicalW = baseLogicalW;
@@ -339,6 +343,7 @@ public partial class PartsEditorPageControl : UserControl
         deadly = p.deadly,
         script = (JArray)p.script.DeepClone(),
         motions = p.motions.Select(m => m.Clone()).ToList(),
+        sprite_rules = p.sprite_rules.Select(r => r.Clone()).ToList(),
         color = p.color,
         blend = p.blend,
         stretch = p.stretch,
@@ -1108,6 +1113,19 @@ public partial class PartsEditorPageControl : UserControl
         _motionEditor.CopyToOthersRequested += CopyMotionsToOthers;
         flow.Controls.Add(_motionEditor);
 
+        // ── 画像の切り替え ──
+        // 「いつ」「どの画像にするか」を作る。選べる「いつ」は、この敵・ギミックが何をできるかから決まる。
+        flow.Controls.Add(Heading("画像の切り替え"));
+        _spriteRuleEditor = new PartSpriteRuleEditorControl();
+        _spriteRuleEditor.Changed += key =>
+        {
+            if (_suppressEvents) return;
+            UpdateSelectionInfo();
+            pnlComposer.Invalidate();
+            PushHistory(key);
+        };
+        flow.Controls.Add(_spriteRuleEditor);
+
         pnl.Controls.Add(flow);
         return pnl;
     }
@@ -1212,6 +1230,7 @@ public partial class PartsEditorPageControl : UserControl
             }
             // 動き（モーション）の編集欄を、選んでいるパーツの一覧へ向ける
             _motionEditor?.Bind(hasSel ? parts[selectedIndex].motions : null);
+            _spriteRuleEditor?.Bind(hasSel ? parts[selectedIndex].sprite_rules : null, _owner, projectRoot);
             // 未選択の間は編集しても意味がないため、全ての入力コントロールを無効化してユーザーに
             // 「まずパーツを選んでください」という状態を視覚的に伝える。
             foreach (Control c in new Control[] { txtId, nudOffsetX, nudOffsetY, nudWidth, nudHeight, nudScale, nudHp, nudZOrder, chkDeadly, btnPartColor, chkAdditive, chkStretch }) c.Enabled = hasSel;

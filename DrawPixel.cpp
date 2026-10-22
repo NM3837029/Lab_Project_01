@@ -114,6 +114,50 @@ static const char* const PART_MOTION_TRIGGER_NAMES[PMT_COUNT] =
 static const char* const PART_MOTION_KIND_NAMES[PMK_COUNT] =
     { "sway", "swing", "spin", "orbit", "pulse", "slide", "thrust", "blink", "shake", "face_player", "brightness", "hue_cycle" };
 
+// ===== パーツの「画像の切り替え」（sprite_rules）=====
+//
+// 「ある条件のとき、パーツの画像を別の絵に差し替える」ための定義。1つのパーツに、条件と画像の組を何本でも並べられ、
+// **上から順に見て、最初に当てはまった行の画像**を使う。どれにも当てはまらなければ、パーツ本来の画像のまま
+// （sprite_rules を持たない既存のパーツは、1ピクセルも変わらない）。
+// 条件の名前は Lab_Editor の PartSpriteRules.cs と同じにすること（順番は意味を持たないが、名前は完全に一致させる）。
+// どの条件を選べるかは、Lab_Editor が「その敵・ギミックが何をできるか」から決める。ゲーム側は、名前で判定するだけ。
+enum PartCond {
+    PC_NEAR = 0,    // プレイヤーが param(px) 以内にいる
+    PC_FLIPPED,     // 向きを反転されている（編集ツール）
+    PC_TILTED,      // 傾けられている（編集ツール）
+    PC_ENLARGED,    // 拡大されている（編集ツール）
+    PC_SHRUNK,      // 縮小されている（編集ツール）
+    PC_PAUSED,      // 個別に一時停止されている
+    PC_REWINDING,   // 個別に巻き戻し中
+    PC_HP_LOW,      // 敵：HPが param(%) 以下
+    PC_HURT,        // 敵：弾を受けてから param(フレーム。0なら20) の間
+    PC_ATTACKING,   // 敵：攻撃してから param(フレーム。0なら20) の間
+    PC_CHARGE,      // 敵：予兆・溜め中
+    PC_ACTIVE,      // 敵：行動中（突進中・落下中など）
+    PC_MOVING,      // 敵：動いている（速さが param 以上）
+    PC_AIRBORNE,    // 敵：空中にいる
+    PC_FACING_LEFT, // 敵：左を向いている
+    PC_FACING_RIGHT,// 敵：右を向いている
+    PC_EFFECT_ON,   // 敵：範囲で効果を出す型（暗転・色変化・ズーム固定・回転・サイズ調整）の、効果の範囲にプレイヤーがいる
+    PC_GATE_OPEN,   // ギミック：扉・ゲートが開いている（通れる）
+    PC_GATE_CLOSED, // ギミック：扉・ゲートが閉じている（通れない）
+    PC_PRESSED,     // ギミック：スイッチが押されている（入っている）
+    PC_SOLID,       // ギミック：足場が実体化している
+    PC_ACTIVATED,   // ギミック：チェックポイントが発動済み
+    PC_COUNT
+};
+static const char* const PART_COND_NAMES[PC_COUNT] = {
+    "near", "flipped", "tilted", "enlarged", "shrunk", "paused", "rewinding",
+    "hp_low", "hurt", "attacking", "charge", "active", "moving", "airborne", "facing_left", "facing_right", "effect_on",
+    "gate_open", "gate_closed", "pressed", "solid", "activated" };
+
+struct PartSpriteRule {
+    int cond = PC_NEAR;
+    float param = 0.0f;       // 条件ごとの数値（near=距離px、hp_low=%、hurt/attacking=フレーム、moving=速さ）
+    std::string sprite_path = "";
+    int handle = -1;          // sprite_path を LoadGraph した結果（読めなかったら-1＝この行は無視する）
+};
+
 struct PartMotion {
     int   trigger = PMT_ALWAYS;
     float triggerParam = 0.0f;   // near=距離(px)、moving=速さのしきい値
@@ -167,6 +211,7 @@ struct PartDef {
     // 既定は「何も変えない」値なので、これらを持たない既存のパーツは1ピクセルも変わらない。
     float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
     bool additive = false;
+    std::vector<PartSpriteRule> spriteRules; // 条件で画像を切り替える一覧（空＝従来どおり。上から順に、最初に当てはまった行を使う）
     // 縦横を別々の倍率で伸ばして描くか（細長い光の帯・メーターの針など）。
     // 既定は「縦横比を保って枠に収める」ので、細長いパーツは正方形の絵だと短いほうの辺の正方形になってしまう。
     bool stretch = false;
@@ -205,6 +250,13 @@ struct PartInstance {
     float tintR = 1.0f, tintG = 1.0f, tintB = 1.0f;
     bool additive = false;
     bool stretch = false;
+    // ---- 条件で画像を切り替える（sprite_rules）----
+    // spriteRules は PartDef からのコピー。drawHandle は、今のフレームに描く画像（-1＝本来の画像 handle のまま）。
+    // *Seen / *Clock は、「受けた直後」「攻撃した直後」のような、一定時間だけ続く条件のための記録。
+    std::vector<PartSpriteRule> spriteRules;
+    int drawHandle = -1;
+    int swapSeenHurt = -1, swapSeenAction = -1;
+    float swapHurtClock = -1.0e9f, swapActionClock = -1.0e9f;
 
     // ---- 複合オブジェクトのパーツ追従（親の拡大・傾けへの連動）----
     // x/y はワールド座標だが、それは「ローカルオフセット＋親の姿勢」から毎フレーム組み直した
@@ -902,6 +954,22 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
                 part.motions.push_back(m);
             }
         }
+        // 画像の切り替え。名前が分からない条件は、意味の違う動きをしないよう読み飛ばす。画像が読めない行も、あとで無視される（handle=-1）
+        if (p.contains("sprite_rules") && p["sprite_rules"].is_array()) {
+            for (const auto& rj : p["sprite_rules"]) {
+                if (!rj.is_object()) continue;
+                std::string when = rj.value("when", "");
+                int ci = -1;
+                for (int q = 0; q < PC_COUNT; q++) if (when == PART_COND_NAMES[q]) ci = q;
+                if (ci < 0) continue;
+                PartSpriteRule rule;
+                rule.cond = ci;
+                rule.param = rj.value("param", 0.0f);
+                rule.sprite_path = rj.value("sprite", "");
+                if (!rule.sprite_path.empty()) rule.handle = LoadGraph(rule.sprite_path.c_str());
+                part.spriteRules.push_back(rule);
+            }
+        }
         // 画像パスが指定されていれば実際に読み込み、幅・高さ・当たり判定サイズが
         // JSONで未指定（0のまま）だった場合は画像の実サイズで補完する。
         if (!part.sprite_path.empty()) {
@@ -1291,6 +1359,7 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         inst.stretch = pd.stretch;
         inst.motions = pd.motions;
         inst.motionStates.assign(pd.motions.size(), PartMotionState());
+        inst.spriteRules = pd.spriteRules;
         result.push_back(inst);
     }
     return result;
@@ -1497,6 +1566,17 @@ struct PartMotionCtx {
     float playerX = 0.0f, playerY = 0.0f;
     float parentX = 0.0f, parentY = 0.0f; // 親の中心（距離の測定用）
     bool  flipped = false, tilted = false;
+    // ---- 画像の切り替え（sprite_rules）の判定に使う、親の「いま」。敵・ギミック・アイテムが、分かるぶんだけ詰める ----
+    bool  enlarged = false, shrunk = false;       // 編集ツールで拡大・縮小されている
+    bool  selfPaused = false, selfRewinding = false;
+    float hpRatio = -1.0f;                        // 敵：HPの割合（0〜1）。-1＝HPを持たない
+    bool  airborne = false;                       // 敵：空中にいる
+    bool  facingLeft = false;                     // 敵：左を向いている
+    bool  effectOn = false;                       // 敵：範囲で効果を出す型の、効果の範囲にプレイヤーがいる
+    bool  gateOpen = false, gateClosed = false;   // ギミック：扉・ゲートの開閉（扉の型のときだけ設定する）
+    bool  pressed = false;                        // ギミック：スイッチが入っている
+    bool  solid = false;                          // ギミック：足場が実体化している（ロック足場の型のときだけ設定する）
+    bool  activated = false;                      // ギミック：チェックポイントが発動済み
 };
 
 // 波の形（-1〜1）。t は周期を単位とした時刻（1.0で1周）
@@ -1656,6 +1736,54 @@ void UpdatePartMotions(std::vector<PartInstance>& parts, const PartMotionCtx& ct
     }
 }
 
+// パーツの「画像の切り替え」を評価して、今のフレームに描く画像（drawHandle）を決める。
+// 各パーツの spriteRules を上から順に見て、最初に当てはまった行の画像を使う。どれも当てはまらなければ本来の画像。
+// 1フレームに1回、UpdatePartMotions と同じ場所で呼ぶ（ポーズ中でも呼んでよい。時計 ctx.clock が進まなければ、直後の判定は変わらない）。
+void UpdatePartSprites(std::vector<PartInstance>& parts, const PartMotionCtx& ctx) {
+    float dPlayer = sqrtf((ctx.playerX - ctx.parentX) * (ctx.playerX - ctx.parentX) + (ctx.playerY - ctx.parentY) * (ctx.playerY - ctx.parentY));
+    for (auto& part : parts) {
+        if (part.spriteRules.empty()) { part.drawHandle = -1; continue; }
+        // 「受けた直後」「攻撃した直後」：回数が変わった時刻を覚えておく（最初に見た回数は、起きたこととは数えない）
+        if (part.swapSeenHurt < 0) part.swapSeenHurt = ctx.hurtSeq;
+        if (ctx.hurtSeq != part.swapSeenHurt) { part.swapSeenHurt = ctx.hurtSeq; part.swapHurtClock = ctx.clock; }
+        if (part.swapSeenAction < 0) part.swapSeenAction = ctx.actionSeq;
+        if (ctx.actionSeq != part.swapSeenAction) { part.swapSeenAction = ctx.actionSeq; part.swapActionClock = ctx.clock; }
+
+        int chosen = -1;
+        for (const auto& r : part.spriteRules) {
+            if (r.handle < 0) continue; // 絵が読めなかった行は、無いものとして飛ばす
+            bool on = false;
+            switch (r.cond) {
+                case PC_NEAR:        on = dPlayer <= r.param; break;
+                case PC_FLIPPED:     on = ctx.flipped; break;
+                case PC_TILTED:      on = ctx.tilted; break;
+                case PC_ENLARGED:    on = ctx.enlarged; break;
+                case PC_SHRUNK:      on = ctx.shrunk; break;
+                case PC_PAUSED:      on = ctx.selfPaused; break;
+                case PC_REWINDING:   on = ctx.selfRewinding; break;
+                case PC_HP_LOW:      on = ctx.hpRatio >= 0.0f && ctx.hpRatio * 100.0f <= r.param; break;
+                case PC_HURT:        on = ctx.clock - part.swapHurtClock <= (r.param > 0.0f ? r.param : 20.0f); break;
+                case PC_ATTACKING:   on = ctx.clock - part.swapActionClock <= (r.param > 0.0f ? r.param : 20.0f); break;
+                case PC_CHARGE:      on = ctx.isEnemy && ctx.actionPhase == 1; break;
+                case PC_ACTIVE:      on = ctx.isEnemy && ctx.actionPhase == 2; break;
+                case PC_MOVING:      on = ctx.isEnemy && ctx.speed >= r.param; break;
+                case PC_AIRBORNE:    on = ctx.isEnemy && ctx.airborne; break;
+                case PC_FACING_LEFT: on = ctx.isEnemy && ctx.facingLeft; break;
+                case PC_FACING_RIGHT:on = ctx.isEnemy && !ctx.facingLeft; break;
+                case PC_EFFECT_ON:   on = ctx.effectOn; break;
+                case PC_GATE_OPEN:   on = ctx.gateOpen; break;
+                case PC_GATE_CLOSED: on = ctx.gateClosed; break;
+                case PC_PRESSED:     on = ctx.pressed; break;
+                case PC_SOLID:       on = ctx.solid; break;
+                case PC_ACTIVATED:   on = ctx.activated; break;
+                default: break;
+            }
+            if (on) { chosen = r.handle; break; }
+        }
+        part.drawHandle = chosen;
+    }
+}
+
 // Feature: Composite Multi-Part Objects (Parts-M5) — パーツの描画。
 // zOrder<0のパーツは親本体の描画より先に、zOrder>=0のパーツは後に呼ぶ2パス方式にするため、
 // wantBehindParent引数でどちらのパスを描画するかを切り替える。
@@ -1668,7 +1796,9 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         // wantBehindParent==trueのパス呼び出し時はzOrder<0（親より奥）のパーツだけ、
         // wantBehindParent==falseの呼び出し時はzOrder>=0（親より手前）のパーツだけを描画する
         if ((part.zOrder < 0) != wantBehindParent) continue;
-        if (part.handle < 0) continue; // 画像が読み込まれていないパーツは描画しない
+        // 条件で切り替わった画像があれば、そちらを描く（無ければ、本来の画像）
+        const int ph = (part.drawHandle >= 0) ? part.drawHandle : part.handle;
+        if (ph < 0) continue; // 画像が読み込まれていないパーツは描画しない
         // ワールド座標からカメラ位置を引いて画面上の座標に変換し、パーツの中心座標を求める。
         // 複合オブジェクトのパーツ追従 — 親を拡大したぶん(parentUniform)はパーツのサイズにも効くので、
         // 中心を出すときの半サイズにも同じ倍率を掛ける。掛け忘れると絵の位置が半サイズぶんずれる。
@@ -1679,7 +1809,7 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         int pcx = (int)(part.x + mdx + (part.width * pm) / 2.0f - cameraX);
         int pcy = (int)(part.y + mdy + (part.height * pm) / 2.0f - cameraY);
         // 新アセット移行対応 — パーツ画像(640x640)をパーツ定義の width/height へ収める倍率を掛ける
-        float partFit = ComputeFitScale(part.handle, (float)part.width, (float)part.height);
+        float partFit = ComputeFitScale(ph, (float)part.width, (float)part.height);
         // 親の傾きはパーツ自身の角度に加算する。剛体として親と一緒に回るのが既定の挙動で、
         // 「傾けてもプレイヤーを向き続ける」パーツはスクリプト側で ParentTilt を引いて打ち消す。
         // モーションの回転・大きさ・不透明度は、その上に重ねる（中心は動かさない）。
@@ -1696,14 +1826,14 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
             double ang = part.angle + part.parentTilt + part.motionAngle;
             if (part.stretch && part.width > 0 && part.height > 0) {
                 int iw = 0, ih = 0;
-                GetGraphSize(part.handle, &iw, &ih);
+                GetGraphSize(ph, &iw, &ih);
                 if (iw > 0 && ih > 0) {
                     double ex = (double)part.width / iw * pm * part.motionScale, ey = (double)part.height / ih * pm * part.motionScale;
-                    DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, ex, ey, ang, part.handle, TRUE, flipH ? TRUE : FALSE);
+                    DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, ex, ey, ang, ph, TRUE, flipH ? TRUE : FALSE);
                     return;
                 }
             }
-            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, ang, part.handle, TRUE, flipH ? TRUE : FALSE);
+            DrawRotaGraph(pcx, pcy, partFit * pm * part.motionScale, ang, ph, TRUE, flipH ? TRUE : FALSE);
         };
         if (needBlend) SetDrawBlendMode(part.additive ? DX_BLENDMODE_ADD : DX_BLENDMODE_ALPHA, alphaI);
         if (hasTint) SetDrawBright(b255(mulR), b255(mulG), b255(mulB));
@@ -11472,7 +11602,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     mctx.parentY = enemy.y + (enemy.hitboxHeight * enemy.scale) * 0.5f;
                     mctx.flipped = (enemy.editDirtyMask & EDIT_DIRTY_DIR) != 0u;
                     mctx.tilted = mer.tilted;
+                    // 画像の切り替え（sprite_rules）の判定に使う、敵の「いま」
+                    mctx.enlarged = mer.enlarged; mctx.shrunk = mer.shrunk;
+                    mctx.selfPaused = enemy.isPaused; mctx.selfRewinding = enemy.isRewinding;
+                    { float maxHpS = (mdef && mdef->hp > 0) ? (float)mdef->hp : (float)enemy.hp;
+                      mctx.hpRatio = (maxHpS > 0.0f) ? fminf(1.0f, (float)enemy.hp / maxHpS) : -1.0f; }
+                    mctx.airborne = fabsf(enemy.vy) > 1.0f;
+                    mctx.facingLeft = (enemy.direction != 0);
+                    if (mdef) {
+                        // 範囲で効果を出す型：暗転・色変化・ズーム固定・回転・サイズ調整。範囲は定義の effectRange（拡大で広がる）
+                        const bool rangeType = (enemy.type == ENEMY_BRIGHTNESS_PHANTOM || enemy.type == ENEMY_COLOR_SHIFTER || enemy.type == ENEMY_ZOOM_DISRUPTOR
+                                                || enemy.type == ENEMY_ROTATOR || enemy.type == ENEMY_SIZE_THROWER);
+                        float er = (mdef->effectRange > 0.0f ? mdef->effectRange : 300.0f) * mer.scaleRatio;
+                        float dx2 = mctx.playerX - mctx.parentX, dy2 = mctx.playerY - mctx.parentY;
+                        mctx.effectOn = rangeType && (dx2 * dx2 + dy2 * dy2 <= er * er);
+                    }
                     UpdatePartMotions(enemy.parts, mctx);
+                    UpdatePartSprites(enemy.parts, mctx);
                 }
 
                 // 跳ね回る節足敵の胴体 — 頭の通った跡を一定距離ごとに辿って並ぶ。
@@ -11694,6 +11840,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 ictx.playerY = player.y + (player.height * player.scale) * 0.5f;
                 ictx.parentX = item.x + item.width * 0.5f; ictx.parentY = item.y + item.height * 0.5f;
                 UpdatePartMotions(item.parts, ictx);
+                UpdatePartSprites(item.parts, ictx);
             }
         }
 
@@ -12230,7 +12377,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 gctx.playerX = player.x + (player.width * player.scale) * 0.5f;
                 gctx.playerY = player.y + (player.height * player.scale) * 0.5f;
                 gctx.parentX = gim.x + gim.spriteWidth * 0.5f; gctx.parentY = gim.y + gim.spriteHeight * 0.5f;
+                {
+                    // 画像の切り替え（sprite_rules）の判定に使う、ギミックの「いま」
+                    EditReaction ger = GetGimmickEditReaction(gim);
+                    gctx.flipped = ger.flipped; gctx.tilted = ger.tilted;
+                    gctx.enlarged = ger.enlarged; gctx.shrunk = ger.shrunk;
+                    gctx.selfPaused = gim.isPaused; gctx.selfRewinding = gim.isRewinding;
+                    const bool isDoor = (gim.type == GIMMICK_GATE_DOOR || gim.type == GIMMICK_FASTFORWARD_GATE || gim.type == GIMMICK_REWIND_GATE);
+                    if (isDoor) { gctx.gateOpen = !gim.isActive; gctx.gateClosed = gim.isActive; }
+                    gctx.pressed = (gim.type == GIMMICK_WEIGHT_SWITCH || gim.type == GIMMICK_GRADE_SWITCH) && gim.customTimer > 0.5f;
+                    gctx.solid = (gim.type == GIMMICK_COLOR_LOCK_PLATFORM || gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM
+                                  || gim.type == GIMMICK_GRADE_LOCK_PLATFORM) && gim.isActive;
+                    gctx.activated = (gim.type == GIMMICK_CHECKPOINT) && gim.val1 > 0.5f;
+                }
                 UpdatePartMotions(gim.parts, gctx);
+                UpdatePartSprites(gim.parts, gctx);
             }
         }
 

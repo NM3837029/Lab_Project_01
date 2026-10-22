@@ -1260,6 +1260,22 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return made;
     }
 
+    // 型の一覧（番号, "N = 名前 (English)", 説明）から、画面に出す短い名前（「名前」だけ）を取り出す
+    private static string ShortTypeName((int type, string desc, string detail)[] list, int type)
+    {
+        foreach (var (t, desc, _) in list)
+        {
+            if (t != type) continue;
+            string s = desc;
+            int eq = s.IndexOf('=');
+            if (eq >= 0) s = s[(eq + 1)..].Trim();
+            int paren = s.IndexOf('(');
+            if (paren > 0) s = s[..paren].Trim();
+            return s;
+        }
+        return "";
+    }
+
     private void BtnPartsEditor_Click()
     {
         var kind = GetActiveKind();
@@ -1268,16 +1284,22 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             var row = dgvEnemies.SelectedRows[0];
             var def = GetOrCreateEnemyParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            int et = GetSelectedTypeEnum(row);
+            var eowner = new PartOwnerInfo { Kind = "enemy", TypeEnum = et, TypeName = ShortTypeName(EnemyTypes, et),
+                NoScale = def.noScale, NoRotate = def.noRotate, NoFlip = def.noFlip, NoPause = def.noPause, NoRewind = def.noRewind };
             PartsEditRequested?.Invoke($"敵: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), eowner, parts => def.parts = parts);
         }
         else if (kind == AssetKind.Gimmick)
         {
             var row = dgvGimmicks.SelectedRows[0];
             var def = GetOrCreateGimmickParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
+            int gt = GetSelectedTypeEnum(row);
+            var gowner = new PartOwnerInfo { Kind = "gimmick", TypeEnum = gt, TypeName = ShortTypeName(GimmickTypes, gt),
+                NoScale = def.noScale, NoRotate = def.noRotate, NoFlip = def.noFlip, NoPause = def.noPause, NoRewind = def.noRewind };
             PartsEditRequested?.Invoke($"ギミック: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), gowner, parts => def.parts = parts);
         }
         else if (kind == AssetKind.Item)
         {
@@ -1285,7 +1307,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             var def = GetOrCreateItemParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             PartsEditRequested?.Invoke($"アイテム: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), parts => def.parts = parts);
+                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), new PartOwnerInfo { Kind = "item", TypeEnum = GetSelectedTypeEnum(row) }, parts => def.parts = parts);
         }
         else
         {

@@ -17,7 +17,7 @@ public class PartsEditorForm : Form
     // projectRoot    : 画像パスなどを相対解決するためのプロジェクトルートパス
     // baseSpritePath : ベースとなるスプライト画像のパス
     // baseLogicalW/H : 本体の論理サイズ。プレビューをゲーム本体と同じ倍率で描くのに使う（0なら画像の原寸）
-    public PartsEditorForm(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath, float baseLogicalW = 0f, float baseLogicalH = 0f)
+    public PartsEditorForm(string subjectLabel, List<PartDef> initialParts, string projectRoot, string baseSpritePath, float baseLogicalW = 0f, float baseLogicalH = 0f, PartOwnerInfo? owner = null)
     {
         // ウィンドウのタイトル・サイズ・最小サイズ・表示位置・フォントを設定する。
         Text = $"🧩 パーツエディタ - {subjectLabel}";
@@ -27,7 +27,7 @@ public class PartsEditorForm : Form
         Font = UiTheme.Base;
 
         // 実際の編集UIを持つPageControlを生成し、フォーム全体を埋めるように配置する。
-        var page = new PartsEditorPageControl(subjectLabel, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH) { Dock = DockStyle.Fill };
+        var page = new PartsEditorPageControl(subjectLabel, initialParts, projectRoot, baseSpritePath, baseLogicalW, baseLogicalH, owner) { Dock = DockStyle.Fill };
         // ページ側で「保存」が行われたら、確定したパーツ一覧を受け取ってフォームをOKで閉じる。
         page.Saved += (s, parts) => { ResultParts = parts; DialogResult = DialogResult.OK; Close(); };
         // ページ側で「キャンセル」されたら、このフォームもCancelダイアログ結果として閉じる。
