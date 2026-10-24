@@ -1,573 +1,493 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Media;
-using System.Windows.Forms;
+﻿using System.Media;
 
 namespace Lab_Editor;
 
 // ───────────────────────────────────────────────
-//  SoundManagerForm
-//  BGM（背景音楽）・SE（効果音）・UI音（ボタン操作音などUI用の効果音）の定義を
-//  一括管理するためのエディタフォーム。
+//  SoundManagerForm - BGM・SE・UI音を登録して管理する画面
 //
-//  Feature: サウンド・アセット管理の刷新
-//  以前はBGM/SE/UI音をそれぞれ別タブに分けて表示していたが、今回はタブを廃止し、
-//  「タグ（チェックボックス）による絞り込み」＋「1つの共通グリッド」という構成に作り直した。
-//  これはAssetManagerForm.cs（敵・アイテム等を管理する別のエディタ）で既に確立されている
-//  パターンを踏襲したもの。加えて以下の機能を追加している。
-//    ・音量列（0.00〜1.00の範囲で指定）
-//    ・行の複製機能
-//    ・削除時に他データ（敵/ギミック/アイテム/コモンイベント）からの参照チェック
-//    ・SEとUI音の間でのID重複検証（内部的に同じ名前空間を共有するため）
-//    ・IDや名前による検索絞り込み
-//    ・Undo/Redo（元に戻す・やり直す）機能
+//  以前は id / name / file … の英語の列が並んだ表で、行ごとに「📁選択」「▶試聴」「🗑削除」ボタンが付いていた。
+//  今回は次の作りに改めた。
+//    左 : 登録済みの音の一覧（BGM / SE / UI音ごとにまとめ、検索・絞り込みができる）
+//    右 : 選んだ音の設定フォーム（ID・名前・種類・ファイル・ループ・音量）と、
+//         その音が「どの敵・ギミック・アイテム・コモンイベントで使われているか」
+//  元に戻す／やり直し、削除時の参照チェック、SE と UI音の ID 重複の検査など、以前の機能はそのまま引き継ぐ。
+//  呼び出し側との約束（コンストラクタの引数と ResultBgm / ResultSe / ResultUiSe）も以前のまま。
 // ───────────────────────────────────────────────
-public class SoundManagerForm : Form
+public class SoundManagerForm : EditorFormBase
 {
-    // ── 公開プロパティ ──────────────────────────
-    // 保存ボタンが押された後、呼び出し元（このフォームを開いた側）が結果を受け取るためのプロパティ。
-    // カテゴリごとに分けたリストとして公開する。
     public List<SoundDef> ResultBgm { get; private set; } = new();
     public List<SoundDef> ResultSe { get; private set; } = new();
     public List<SoundDef> ResultUiSe { get; private set; } = new();
 
-    // ── 内部データモデル ────────────────────────
-    // BGM/SE/UI音の3種類を1つのDataGridViewで同時に扱うため、
-    // 各行がどのカテゴリに属するかをこのクラスで保持しておく（グリッドの行のTagにも同じ値を入れる）。
-    private class SoundRow
+    // 編集用の1件分。履歴（元に戻す）に JSON で積むため、公開プロパティだけで持つ。
+    public class SoundRow
     {
-        public string Category { get; set; } = "BGM"; // "BGM" | "SE" | "UI" のいずれか
+        public string Category { get; set; } = "BGM"; // "BGM" | "SE" | "UI"
         public string Id { get; set; } = "";
         public string Name { get; set; } = "";
         public string File { get; set; } = "";
-        public bool IsLoop { get; set; } = false;
+        public bool IsLoop { get; set; }
         public float Volume { get; set; } = 1.0f;
     }
 
-    // ── フィールド ─────────────────────────────
-    private readonly string _projectRoot; // プロジェクトのルートフォルダ（音声ファイルの絶対パス組み立てに使う）
-    private readonly string _soundsDir;   // 音声ファイルのコピー先フォルダ（<プロジェクトルート>/sound）
-
-    // 削除時の参照チェック用（このフォーム側では変更しない読み取り専用データ）。
-    // サウンドIDを削除しようとしたとき、これらのデータのどこかから参照されていないかを調べるために使う。
+    private readonly string _projectRoot;
+    private readonly string _soundsDir;
     private readonly List<EnemyDef> _enemies;
     private readonly List<GimmickDef> _gimmicks;
     private readonly List<ItemDef> _items;
     private readonly List<CommonEventDef> _commonEvents;
 
-    private DataGridView _grid = null!;          // BGM/SE/UI音をまとめて表示・編集するメインのグリッド
-    private TextBox _txtSearch = null!;           // ID・名前で絞り込むための検索ボックス
-    private CheckBox _chkTagBgm = null!, _chkTagSe = null!, _chkTagUi = null!; // カテゴリ別の表示ON/OFFを切り替えるチェックボックス
-    private Button _btnUndo = null!, _btnRedo = null!; // 元に戻す／やり直すボタン（有効・無効を履歴の状態に応じて切り替える）
+    private List<SoundRow> _rows = new();
+    private SoundRow? _cur;
+    private readonly Dictionary<SoundRow, string> _keyOf = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, SoundRow> _byKey = new();
+    private int _keySeq;
 
-    private SoundPlayer? _currentPlayer; // 試聴中の音声を再生するプレイヤー（次の試聴開始時やフォーム終了時に停止・破棄する）
-
-    // 編集履歴（Undo/Redo）を管理するオブジェクト。グリッドの内容をスナップショットとして積んでいく。
     private readonly HistoryManager<List<SoundRow>> _history = new();
+    private readonly System.Windows.Forms.Timer _snapTimer = new() { Interval = 500 };
+    private SoundPlayer? _player;
+    private bool _sync;
 
-    // ── コンストラクタ ─────────────────────────
-    // projectRoot   : プロジェクトのルートフォルダパス
-    // bgm/se/uiSe   : 呼び出し元（親フォーム）から渡される、編集前の各カテゴリのサウンド定義一覧
-    // enemies/gimmicks/items/commonEvents : 削除時の参照チェックに使う既存データ（読み取り専用）
+    // 画面の部品
+    private readonly TextBox _txtSearch = new() { Dock = DockStyle.Fill, PlaceholderText = "🔍 ID・名前で探す", BorderStyle = BorderStyle.FixedSingle };
+    private readonly ChipBar _chips = new();
+    private readonly CardListView _list = new() { Dock = DockStyle.Fill, LayoutMode = CardLayout.Rows };
+    private readonly FieldStack _detail = new() { Dock = DockStyle.Fill };
+    private readonly Label _empty = new()
+    {
+        Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = UiTheme.TextMuted, BackColor = UiTheme.CardBack,
+        Text = "左の一覧から音を選ぶか、\r\n下の「＋ BGM / SE / UI音」で追加してください。",
+    };
+    private readonly Label _warn = new() { AutoSize = false, Height = 40, ForeColor = Color.Firebrick, Font = UiTheme.Small, Tag = "hint" };
+    private readonly TextBox _txtId = new() { Font = UiTheme.Base };
+    private readonly TextBox _txtName = new() { Font = UiTheme.Base };
+    private readonly ComboBox _cmbCategory = new() { DropDownStyle = ComboBoxStyle.DropDownList, Font = UiTheme.Base };
+    private readonly Label _lblFile = new() { AutoSize = true, Font = UiTheme.Base };
+    private readonly Label _lblFileInfo = new() { AutoSize = true, Font = UiTheme.Small, ForeColor = UiTheme.TextMuted };
+    private readonly CheckBox _chkLoop = new() { Text = "ループ再生する（BGM向け）", AutoSize = true, Font = UiTheme.Base };
+    private readonly SliderField _volume = new(0, 1, 0.05, 2, "0 ＝ 無音", "1 ＝ 元の音量");
+    private readonly Label _lblRefs = new() { AutoSize = true, Font = UiTheme.Base, MaximumSize = new Size(420, 0) };
+
+    private static readonly string[] CatNames = { "BGM", "SE", "UI" };
+    private static readonly string[] CatLabels = { "🎵 BGM（背景音楽）", "🔊 SE（効果音）", "🔔 UI音（ボタンの音など）" };
+
     public SoundManagerForm(string projectRoot, List<SoundDef> bgm, List<SoundDef> se, List<SoundDef> uiSe,
         List<EnemyDef> enemies, List<GimmickDef> gimmicks, List<ItemDef> items, List<CommonEventDef> commonEvents)
+        : base("サウンド管理", "BGM・効果音・UI音を登録します。ここで登録した音を、「サウンド割り当て」で敵やギミックに結びつけます。",
+               new Size(1100, 700), new Size(900, 580))
     {
         _projectRoot = projectRoot;
         _soundsDir = Path.Combine(projectRoot, "sound");
-        _enemies = enemies;
-        _gimmicks = gimmicks;
-        _items = items;
-        _commonEvents = commonEvents;
+        _enemies = enemies; _gimmicks = gimmicks; _items = items; _commonEvents = commonEvents;
 
-        InitUI();
+        _rows.AddRange(bgm.Select(d => ToRow("BGM", d)));
+        _rows.AddRange(se.Select(d => ToRow("SE", d)));
+        _rows.AddRange(uiSe.Select(d => ToRow("UI", d)));
 
-        // 3つのカテゴリのリストを、カテゴリ情報付きの1つのSoundRowリストにまとめてからグリッドへ流し込む。
-        var rows = new List<SoundRow>();
-        rows.AddRange(bgm.Select(d => ToRow("BGM", d)));
-        rows.AddRange(se.Select(d => ToRow("SE", d)));
-        rows.AddRange(uiSe.Select(d => ToRow("UI", d)));
-        PopulateGrid(rows);
-        // 初期状態を履歴の最初の1件として積んでおく（これによりUndoで「編集前の初期状態」まで戻れるようになる）。
-        PushHistory();
+        BuildUi();
+        _history.Push(Snapshot());
+        UpdateUndo();
+        InitUndo(Undo, Redo);
+        UpdateUndo();
+        _snapTimer.Tick += (s, e) => { _snapTimer.Stop(); CommitNow(); };
+
+        RebuildList();
+        if (_rows.Count > 0) Select(_rows[0]); else ShowDetail(null);
     }
 
-    // SoundDef（保存用のデータ構造）をSoundRow（グリッド編集用の内部データ構造）に変換するヘルパー。
-    private static SoundRow ToRow(string category, SoundDef d) => new SoundRow
+    private static SoundRow ToRow(string category, SoundDef d) => new()
     {
-        Category = category, Id = d.id, Name = d.name, File = d.file, IsLoop = d.isLoop, Volume = d.volume
+        Category = category, Id = d.id, Name = d.name, File = d.file, IsLoop = d.isLoop, Volume = d.volume,
     };
 
-    // ── UI 構築 ────────────────────────────────
-    // フォーム全体のレイアウトを組み立てる。上部に検索欄とタグ絞り込み、下部にボタン群、
-    // 中央にメイングリッドを配置する。
-    private void InitUI()
+    private static SoundDef ToDef(SoundRow r) => new() { id = r.Id, name = r.Name, file = r.File, isLoop = r.IsLoop, volume = r.Volume };
+
+    // ── 画面の組み立て ───────────────────────────
+    private void BuildUi()
     {
-        Text = "サウンド管理エディタ";
-        Size = new System.Drawing.Size(900, 620);
-        MinimumSize = new System.Drawing.Size(700, 460);
-        Font = new System.Drawing.Font("Meiryo UI", 9f);
-        StartPosition = FormStartPosition.CenterParent;
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.PanelBack };
+        var searchHost = new Panel { Dock = DockStyle.Top, Height = UiTheme.S(this, 36), Padding = new Padding(8, 8, 8, 4) };
+        searchHost.Controls.Add(_txtSearch);
+        _txtSearch.TextChanged += (s, e) => RebuildList();
+        _chips.SelectionChanged += (s, e) => RebuildList();
+        left.Controls.Add(_list);
+        left.Controls.Add(_chips);
+        left.Controls.Add(searchHost);
+        _list.ItemClicked += (s, item) => { if (_byKey.TryGetValue(item.Key, out var r)) { _cur = r; ShowDetail(r); } };
+        _list.DeletePressed += (s, item) => DeleteCurrent();
 
-        // ── 上部: 検索欄 + タグ絞り込み ──
-        var pnlTop = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        right.Controls.Add(_detail);
+        right.Controls.Add(_empty);
 
-        // 検索ボックス行。虫眼鏡アイコンのラベルとテキストボックスを横に並べる。
-        var pnlSearch = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
-        var lblSearch = new Label { Text = "🔍", AutoSize = true, Margin = new Padding(2, 6, 0, 0) };
-        _txtSearch = new TextBox { Width = 220, Margin = new Padding(4, 3, 0, 0), PlaceholderText = "ID・名前で検索..." };
-        // テキストが変更されるたびに絞り込みを再適用する。
-        _txtSearch.TextChanged += (s, e) => ApplyFilter();
-        pnlSearch.Controls.AddRange(new Control[] { lblSearch, _txtSearch });
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 6, FixedPanel = FixedPanel.Panel1, BackColor = UiTheme.CardBorder };
+        split.Panel1.Controls.Add(left);
+        split.Panel2.Controls.Add(right);
+        Body.Controls.Add(split);
+        SplitWhenReady(split, 280, 480, 360);
 
-        // カテゴリ絞り込み用のトグルボタン（チェックボックスをボタン風の見た目にしている）。
-        // 初期状態は全てチェック済み＝全カテゴリを表示する状態にしておく。
-        var pnlTags = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4, 0, 4, 4) };
-        _chkTagBgm = new CheckBox { Text = "🎵 BGM", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        _chkTagSe = new CheckBox { Text = "🔊 SE (効果音)", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        _chkTagUi = new CheckBox { Text = "🔔 UI音", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        // チェック状態が変わるたびに絞り込みを再適用する。
-        _chkTagBgm.CheckedChanged += (s, e) => ApplyFilter();
-        _chkTagSe.CheckedChanged += (s, e) => ApplyFilter();
-        _chkTagUi.CheckedChanged += (s, e) => ApplyFilter();
-        pnlTags.Controls.AddRange(new Control[] { _chkTagBgm, _chkTagSe, _chkTagUi });
+        BuildDetail();
 
-        pnlTop.Controls.Add(pnlTags);
-        pnlTop.Controls.Add(pnlSearch);
-
-        // ── 下部: ボタン群 ──
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-        // 右側: キャンセル・保存ボタン（右詰めで並べる）。
-        var flowRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 6, 8, 2), AutoSize = true };
-        var btnCancel = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
-        // キャンセル時は変更を破棄してダイアログを閉じる（DialogResult.Cancelを返す）。
-        btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-        var btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 6, 10, 6), BackColor = System.Drawing.Color.FromArgb(40, 167, 69), ForeColor = System.Drawing.Color.White, FlatStyle = FlatStyle.Flat };
-        btnSave.Click += BtnSave_Click;
-        flowRight.Controls.Add(btnCancel);
-        flowRight.Controls.Add(btnSave);
-
-        // 左側: 追加・複製・Undo/Redoボタン（左詰めで並べる。折り返しを許可し、ウィンドウが狭くても崩れないようにする）。
-        var flowLeft = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8, 6, 8, 6), AutoSize = true, WrapContents = true };
-        var btnAddBgm = new Button { Text = "＋追加 (BGM)", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddBgm.Click += (s, e) => AddRow("BGM");
-        var btnAddSe = new Button { Text = "＋追加 (SE)", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddSe.Click += (s, e) => AddRow("SE");
-        var btnAddUi = new Button { Text = "＋追加 (UI音)", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddUi.Click += (s, e) => AddRow("UI");
-        var btnDuplicate = new Button { Text = "⧉ 複製", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnDuplicate.Click += (s, e) => DuplicateSelected();
-        _btnUndo = new Button { Text = "↩ 元に戻す (Ctrl+Z)", AutoSize = true, Padding = new Padding(6, 5, 6, 5), Enabled = false };
-        _btnUndo.Click += (s, e) => SoundUndo();
-        _btnRedo = new Button { Text = "↪ やり直す (Ctrl+Y)", AutoSize = true, Padding = new Padding(6, 5, 6, 5), Enabled = false };
-        _btnRedo.Click += (s, e) => SoundRedo();
-        flowLeft.Controls.AddRange(new Control[] { btnAddBgm, btnAddSe, btnAddUi, btnDuplicate, _btnUndo, _btnRedo });
-
-        pnlBottom.Controls.Add(flowRight);
-        pnlBottom.Controls.Add(flowLeft);
-
-        // ── 中央: グリッド ──
-        _grid = BuildGrid();
-
-        // WinFormsのDockレイアウトは「後から追加したコントロールほど内側に配置される」性質があるため、
-        // Fill（中央いっぱいに広がる）指定のグリッドを最初に追加し、Top/Bottomのパネルはその後に追加する。
-        Controls.Add(_grid);
-        Controls.Add(pnlBottom);
-        Controls.Add(pnlTop);
+        LeftBar.Controls.Add(Kit.Btn("＋ BGM", () => AddRow("BGM")));
+        LeftBar.Controls.Add(Kit.Btn("＋ SE", () => AddRow("SE")));
+        LeftBar.Controls.Add(Kit.Btn("＋ UI音", () => AddRow("UI")));
+        LeftBar.Controls.Add(Kit.Btn("⧉ 複製", Duplicate));
+        LeftBar.Controls.Add(Kit.Btn("🗑 削除", DeleteCurrent, danger: true));
     }
 
-    // フォーム上でのキー入力をアプリ全体のショートカットとして横取りする。
-    // Ctrl+Z＝元に戻す、Ctrl+Y＝やり直す。どのコントロールにフォーカスがあっても効くようにするための実装。
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+    private void BuildDetail()
     {
-        if (keyData == (Keys.Control | Keys.Z)) { SoundUndo(); return true; }
-        if (keyData == (Keys.Control | Keys.Y)) { SoundRedo(); return true; }
-        return base.ProcessCmdKey(ref msg, keyData);
-    }
+        _cmbCategory.Items.AddRange(CatLabels);
+        _detail.AddItem(_warn);
+        _detail.AddItem(Kit.Field("ID（ゲーム内でこの音を呼ぶための名前。重複不可）", _txtId));
+        _detail.AddItem(Kit.Field("表示名", _txtName));
+        _detail.AddItem(Kit.Field("種類", _cmbCategory, "SE と UI音は、ゲーム内では同じ名前の置き場を共有します。同じ ID は使えません。"));
 
-    // ── DataGridView 生成 ──────────────────────
-    // BGM/SE/UI音を共通の列で表示するためのグリッドを組み立てて返す。
-    private DataGridView BuildGrid()
-    {
-        var grid = new DataGridView
+        _detail.AddItem(Kit.Heading("🎧 音声ファイル"));
+        _detail.AddItem(_lblFile);
+        _detail.AddItem(_lblFileInfo);
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+        row.Controls.Add(Kit.Btn("📁 ファイルを選ぶ", PickFile, primary: true));
+        row.Controls.Add(Kit.Btn("▶ 試聴", Play));
+        row.Controls.Add(Kit.Btn("■ 止める", () => { _player?.Stop(); }));
+        _detail.AddItem(row);
+        _detail.AddItem(Kit.Hint("試聴できるのは WAV ファイルだけです。mp3 / ogg もゲームでは鳴りますが、ここでは聞けません。"));
+
+        _detail.AddItem(Kit.Heading("🔊 鳴らし方"));
+        _detail.AddItem(_chkLoop);
+        _detail.AddItem(Kit.Field("音量", _volume, "試聴には音量は反映されません。ゲームで鳴らしたときに反映されます。"));
+
+        _detail.AddItem(Kit.Heading("📌 この音が使われている場所"));
+        _detail.AddItem(_lblRefs);
+
+        _txtId.TextChanged += (s, e) => Edit(r => r.Id = _txtId.Text.Trim());
+        _txtName.TextChanged += (s, e) => Edit(r => r.Name = _txtName.Text);
+        _cmbCategory.SelectedIndexChanged += (s, e) =>
         {
-            Dock = DockStyle.Fill,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, // 各列の幅をFillWeightの比率で自動調整する
-            AllowUserToAddRows = false,    // グリッド最下部の「新規行」入力は使わない（専用の追加ボタンを使う）
-            AllowUserToDeleteRows = false, // 行削除もキー操作ではなく専用の削除ボタン経由にする（誤操作防止のため）
-            RowHeadersWidth = 30,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-            ColumnHeadersHeight = 28,
-            Font = new System.Drawing.Font("Meiryo UI", 9),
+            if (_sync || _cur == null || _cmbCategory.SelectedIndex < 0) return;
+            _cur.Category = CatNames[_cmbCategory.SelectedIndex];
+            AfterEdit(immediate: true);
         };
-
-        // 各列の定義。FillWeightは列同士の幅の比率を表す値で、グリッド全体の幅に対する割合として自動計算される。
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colId", HeaderText = "id", FillWeight = 110 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colName", HeaderText = "name", FillWeight = 130 });
-        // ファイルパスは直接テキスト編集させず、必ず「📁選択」ボタン経由で設定させるため読み取り専用にする。
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colFile", HeaderText = "file", FillWeight = 170, ReadOnly = true, DefaultCellStyle = { BackColor = System.Drawing.Color.WhiteSmoke } });
-        grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "colLoop", HeaderText = "ループ(BGM用)", FillWeight = 70 });
-        grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "colVolume", HeaderText = "音量(0.00-1.00)", FillWeight = 70, ValueType = typeof(float) });
-        // 各行に埋め込む操作ボタン列（ファイル選択・試聴・削除）。
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "colBtnFile", HeaderText = "", Text = "📁選択", UseColumnTextForButtonValue = true, FillWeight = 55 });
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "colBtnPlay", HeaderText = "", Text = "▶試聴", UseColumnTextForButtonValue = true, FillWeight = 50 });
-        grid.Columns.Add(new DataGridViewButtonColumn { Name = "colBtnDel", HeaderText = "", Text = "🗑削除", UseColumnTextForButtonValue = true, FillWeight = 50 });
-
-        // ボタン列がクリックされたときの処理をまとめて1箇所で受け取る。
-        grid.CellContentClick += Grid_CellContentClick;
-        // セルの値が変わるたびに履歴（Undo/Redo用）へ現在の状態を積む。
-        grid.CellValueChanged += (s, e) => PushHistory();
-        return grid;
+        _chkLoop.CheckedChanged += (s, e) => Edit(r => r.IsLoop = _chkLoop.Checked, immediate: true);
+        _volume.ValueChanged += (s, e) => Edit(r => r.Volume = (float)_volume.Value);
     }
 
-    // ── グリッド ⇔ SoundRow ────────────────────
-    // SoundRowのリストからグリッドの行を作り直す（Undo/Redoで状態を復元するときにも使う共通処理）。
-    private void PopulateGrid(List<SoundRow> rows)
+    // 入力欄の変更を、選択中の音へ書き戻す。
+    private void Edit(Action<SoundRow> apply, bool immediate = false)
     {
-        _grid.Rows.Clear();
-        foreach (var r in rows)
-        {
-            int idx = _grid.Rows.Add(r.Id, r.Name, r.File, r.IsLoop, r.Volume, "📁選択", "▶試聴", "🗑削除");
-            // カテゴリ情報は表示用の列を持たないため、行のTagプロパティに保持しておく。
-            _grid.Rows[idx].Tag = r.Category;
-        }
-        // 行を作り直した後は検索・タグ絞り込みの状態を再適用する。
-        ApplyFilter();
+        if (_sync || _cur == null) return;
+        apply(_cur);
+        AfterEdit(immediate);
     }
 
-    // 現在のグリッドの内容をSoundRowのリストとして読み出す（保存時・履歴保存時の両方で使う共通処理）。
-    private List<SoundRow> ReadRowsFromGrid()
+    private void AfterEdit(bool immediate)
     {
-        var list = new List<SoundRow>();
-        foreach (DataGridViewRow row in _grid.Rows)
-        {
-            if (row.IsNewRow) continue;
-            string id = row.Cells["colId"].Value?.ToString() ?? "";
-            string file = row.Cells["colFile"].Value?.ToString() ?? "";
-            if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(file)) continue; // 未使用の空行
-            // 音量欄がうまく数値変換できない場合はデフォルトの1.0（最大音量）にフォールバックする。
-            if (!float.TryParse(row.Cells["colVolume"].Value?.ToString(), out float vol)) vol = 1.0f;
-            list.Add(new SoundRow
-            {
-                Category = row.Tag as string ?? "SE",
-                Id = id,
-                Name = row.Cells["colName"].Value?.ToString() ?? "",
-                File = file,
-                IsLoop = row.Cells["colLoop"].Value is true,
-                // 音量は必ず0.0〜1.0の範囲に収める（範囲外の値が入力されてもゲーム側で問題を起こさないようにする）。
-                Volume = Math.Clamp(vol, 0f, 1f),
-            });
-        }
-        return list;
+        MarkDirty();
+        RebuildList();
+        UpdateWarning();
+        if (immediate) CommitNow(); else { _snapTimer.Stop(); _snapTimer.Start(); }
     }
 
-    // 検索テキストとカテゴリ（タグ）チェックボックスの状態に応じて、各行の表示/非表示を切り替える。
-    private void ApplyFilter()
+    // ── 一覧 ────────────────────────────────────
+    private string KeyFor(SoundRow r)
+    {
+        if (!_keyOf.TryGetValue(r, out var k)) { k = "s" + _keySeq++; _keyOf[r] = k; _byKey[k] = r; }
+        return k;
+    }
+
+    private static string Emoji(string cat) => cat switch { "BGM" => "🎵", "UI" => "🔔", _ => "🔊" };
+    private static Color Tint(string cat) => cat switch { "BGM" => UiTheme.KindTrigger, "UI" => UiTheme.KindItem, _ => UiTheme.KindGimmick };
+    private static string GroupName(string cat) => cat switch { "BGM" => "🎵 BGM", "UI" => "🔔 UI音", _ => "🔊 SE（効果音）" };
+
+    private void RebuildList()
     {
         string q = _txtSearch.Text.Trim();
-        foreach (DataGridViewRow row in _grid.Rows)
+        string chip = _chips.SelectedValue;
+        // 絞り込みボタンの件数は、検索に関係なく全体の数にする。
+        _chips.SetChips(new[]
         {
-            string category = row.Tag as string ?? "SE";
-            // カテゴリごとに対応するチェックボックスがONになっているかを判定する。
-            bool tagOk = category switch
+            ("all", "すべて"), ("BGM", $"🎵 BGM {_rows.Count(r => r.Category == "BGM")}"),
+            ("SE", $"🔊 SE {_rows.Count(r => r.Category == "SE")}"), ("UI", $"🔔 UI音 {_rows.Count(r => r.Category == "UI")}"),
+        }, chip.Length > 0 ? chip : "all");
+        chip = _chips.SelectedValue;
+
+        var items = new List<CardItem>();
+        foreach (var cat in CatNames)
+        {
+            if (chip != "all" && chip != cat) continue;
+            foreach (var r in _rows.Where(x => x.Category == cat))
             {
-                "BGM" => _chkTagBgm.Checked,
-                "UI" => _chkTagUi.Checked,
-                _ => _chkTagSe.Checked,
-            };
-            // 検索欄が空なら常に一致とみなす。そうでなければID・名前のどちらかに部分一致するか調べる（大文字小文字は区別しない）。
-            bool searchOk = string.IsNullOrEmpty(q)
-                || (row.Cells["colId"].Value?.ToString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)
-                || (row.Cells["colName"].Value?.ToString() ?? "").Contains(q, StringComparison.OrdinalIgnoreCase);
-            row.Visible = tagOk && searchOk;
+                if (q.Length > 0 && !r.Id.Contains(q, StringComparison.OrdinalIgnoreCase) && !r.Name.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+                bool bad = string.IsNullOrWhiteSpace(r.Id) || string.IsNullOrWhiteSpace(r.File);
+                items.Add(new CardItem
+                {
+                    Key = KeyFor(r),
+                    Title = (bad ? "⚠ " : "") + (r.Name.Length > 0 ? r.Name : r.Id.Length > 0 ? r.Id : "（名前なし）"),
+                    Subtitle = (r.Id.Length > 0 ? r.Id : "IDなし") + " ・ " + (r.File.Length > 0 ? Path.GetFileName(r.File) : "ファイルなし"),
+                    Group = GroupName(cat), Accent = Tint(cat), Icon = Kit.Emoji(Emoji(cat), Tint(cat), 40),
+                    Tip = $"ID: {r.Id}\nファイル: {r.File}",
+                });
+            }
         }
+        _list.EmptyText = q.Length > 0 ? $"「{q}」に合う音がありません" : "この種類の音はまだありません";
+        _list.SetItems(items);
+        if (_cur != null) _list.SetSelectedKey(KeyFor(_cur), scrollIntoView: false);
     }
 
-    // 指定カテゴリの空行を1件追加し、選択状態にする。
+    private void Select(SoundRow r)
+    {
+        _cur = r;
+        _list.SetSelectedKey(KeyFor(r));
+        ShowDetail(r);
+    }
+
+    private void ShowDetail(SoundRow? r)
+    {
+        _empty.Visible = r == null;
+        _detail.Visible = r != null;
+        if (r == null) return;
+        _sync = true;
+        _txtId.Text = r.Id;
+        _txtName.Text = r.Name;
+        _cmbCategory.SelectedIndex = Math.Max(0, Array.IndexOf(CatNames, r.Category));
+        _chkLoop.Checked = r.IsLoop;
+        _volume.Value = r.Volume;
+        _sync = false;
+        UpdateFileInfo();
+        UpdateRefs();
+        UpdateWarning();
+        _detail.ScrollToTop();
+    }
+
+    private void UpdateFileInfo()
+    {
+        if (_cur == null) return;
+        if (string.IsNullOrEmpty(_cur.File)) { _lblFile.Text = "（ファイルが選ばれていません）"; _lblFile.ForeColor = Color.Firebrick; _lblFileInfo.Text = ""; return; }
+        string full = Path.Combine(_projectRoot, _cur.File.Replace('/', '\\'));
+        bool exists = File.Exists(full);
+        _lblFile.Text = Path.GetFileName(_cur.File);
+        _lblFile.ForeColor = exists ? UiTheme.TextMain : Color.Firebrick;
+        var secs = Kit.WavSeconds(full);
+        _lblFileInfo.Text = !exists ? $"⚠ ファイルが見つかりません（{_cur.File}）"
+            : $"{_cur.File}" + (secs != null ? $"  ・ 長さ {secs:0.0#}秒" : "") + $"  ・ {new FileInfo(full).Length / 1024.0:0.#} KB";
+    }
+
+    private void UpdateRefs()
+    {
+        if (_cur == null || string.IsNullOrWhiteSpace(_cur.Id)) { _lblRefs.Text = "（IDを入れると、使われている場所が出ます）"; _lblRefs.ForeColor = UiTheme.TextMuted; return; }
+        var refs = FindReferences(_cur.Id);
+        _lblRefs.Text = refs.Count == 0 ? "どこにも割り当てられていません。\r\n「サウンド割り当て」で敵やギミックに結びつけると、ゲームで鳴ります。"
+            : string.Join("\r\n", refs.Take(14).Select(x => "・" + x)) + (refs.Count > 14 ? $"\r\n…ほか {refs.Count - 14} 件" : "");
+        _lblRefs.ForeColor = refs.Count == 0 ? UiTheme.TextMuted : UiTheme.TextMain;
+    }
+
+    // 入力の問題（未入力・重複）を、フォームの上に赤字で出す。
+    private void UpdateWarning()
+    {
+        if (_cur == null) return;
+        var msgs = new List<string>();
+        if (string.IsNullOrWhiteSpace(_cur.Id)) msgs.Add("⚠ ID が空です。ID がないと、ゲームからこの音を呼べません。");
+        else if (_rows.Count(r => r != _cur && r.Id == _cur.Id && (r.Category == _cur.Category || (r.Category != "BGM" && _cur.Category != "BGM"))) > 0)
+            msgs.Add("⚠ 同じ ID の音がほかにもあります。ID は一意にしてください。");
+        if (string.IsNullOrWhiteSpace(_cur.File)) msgs.Add("⚠ ファイルが選ばれていません。");
+        _warn.Text = string.Join("\r\n", msgs);
+        _warn.Visible = msgs.Count > 0;
+        _warn.Height = msgs.Count == 0 ? 0 : 20 * msgs.Count + 4;
+    }
+
+    // ── 操作 ────────────────────────────────────
     private void AddRow(string category)
     {
-        // BGMカテゴリの場合のみループ再生をデフォルトでONにしておく（BGMは基本的にループ再生される想定のため）。
-        int idx = _grid.Rows.Add("", "", "", category == "BGM", 1.0f, "📁選択", "▶試聴", "🗑削除");
-        _grid.Rows[idx].Tag = category;
-        ApplyFilter();
-        _grid.ClearSelection();
-        _grid.Rows[idx].Selected = true;
-        PushHistory();
+        var r = new SoundRow { Category = category, IsLoop = category == "BGM", Volume = 1f };
+        _rows.Add(r);
+        MarkDirty();
+        RebuildList();
+        Select(r);
+        CommitNow();
+        _txtId.Focus();
     }
 
-    // 選択中の行を複製する。IDが重複しないよう "_copy" を付与し、それでも重なる場合は連番を付けて回避する。
-    private void DuplicateSelected()
+    // 複製。ID が重ならないよう「_copy」を付け、それでも重なるときは連番にする。
+    private void Duplicate()
     {
-        if (_grid.SelectedRows.Count == 0) { MessageBox.Show("複製したい行を選択してください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-        var src = _grid.SelectedRows[0];
-        string category = src.Tag as string ?? "SE";
-        string baseId = (src.Cells["colId"].Value?.ToString() ?? "") + "_copy";
-        // 現在グリッドに存在する全IDを集めておき、重複しない新しいIDを探す。
-        var existingIds = new HashSet<string>(_grid.Rows.Cast<DataGridViewRow>().Where(r => !r.IsNewRow).Select(r => r.Cells["colId"].Value?.ToString() ?? ""));
-        string newId = baseId;
-        int n = 2;
-        while (existingIds.Contains(newId)) { newId = $"{baseId}{n}"; n++; }
-
-        int idx = _grid.Rows.Add(newId, src.Cells["colName"].Value, src.Cells["colFile"].Value, src.Cells["colLoop"].Value, src.Cells["colVolume"].Value, "📁選択", "▶試聴", "🗑削除");
-        _grid.Rows[idx].Tag = category;
-        ApplyFilter();
-        _grid.ClearSelection();
-        _grid.Rows[idx].Selected = true;
-        PushHistory();
+        if (_cur == null) { MessageBox.Show("複製したい音を、左の一覧から選んでください。", "未選択", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        string baseId = _cur.Id + "_copy";
+        var ids = new HashSet<string>(_rows.Select(r => r.Id));
+        string id = baseId; int n = 2;
+        while (ids.Contains(id)) id = $"{baseId}{n++}";
+        var c = new SoundRow { Category = _cur.Category, Id = id, Name = _cur.Name, File = _cur.File, IsLoop = _cur.IsLoop, Volume = _cur.Volume };
+        _rows.Insert(_rows.IndexOf(_cur) + 1, c);
+        MarkDirty();
+        RebuildList();
+        Select(c);
+        CommitNow();
     }
 
-    // ── Undo/Redo ──────────────────────────────
-    // 現在のグリッドの状態を履歴スタックに積む。セル編集・行の追加/削除/複製などの操作の直後に必ず呼び出す。
-    private void PushHistory()
+    // 削除。ほかの場所から使われているときは、先に警告して確認する（鳴るはずの音が無音になるのを防ぐ）。
+    private void DeleteCurrent()
     {
-        _history.Push(ReadRowsFromGrid());
-        UpdateUndoRedoButtons();
-    }
-
-    // 1つ前の状態に戻す。
-    private void SoundUndo()
-    {
-        if (!_history.CanUndo) return;
-        var restored = _history.Undo();
-        if (restored == null) return;
-        PopulateGrid(restored);
-        UpdateUndoRedoButtons();
-    }
-
-    // Undoで戻した操作をやり直す（1つ先の状態に進める）。
-    private void SoundRedo()
-    {
-        if (!_history.CanRedo) return;
-        var restored = _history.Redo();
-        if (restored == null) return;
-        PopulateGrid(restored);
-        UpdateUndoRedoButtons();
-    }
-
-    // Undo/Redoボタンの有効・無効状態を、現在の履歴の位置に合わせて更新する。
-    private void UpdateUndoRedoButtons()
-    {
-        // フォーム初期化中（ボタンがまだ生成されていない段階）に呼ばれた場合は何もしない。
-        if (_btnUndo == null! || _btnRedo == null!) return;
-        _btnUndo.Enabled = _history.CanUndo;
-        _btnRedo.Enabled = _history.CanRedo;
-    }
-
-    // ── セルボタンクリック ─────────────────────
-    // グリッド内の埋め込みボタン（ファイル選択／試聴／削除）が押されたときに呼ばれる共通ハンドラ。
-    // クリックされた列名で処理を振り分ける。
-    private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
-    {
-        if (e.RowIndex < 0) return; // ヘッダー部分のクリックは無視する
-        var row = _grid.Rows[e.RowIndex];
-        string colName = _grid.Columns[e.ColumnIndex].Name;
-
-        if (colName == "colBtnFile")
+        if (_cur == null) return;
+        if (!string.IsNullOrWhiteSpace(_cur.Id))
         {
-            SelectSoundFile(row);
-        }
-        else if (colName == "colBtnPlay")
-        {
-            PlayPreview(row);
-        }
-        else if (colName == "colBtnDel")
-        {
-            DeleteRow(row);
-        }
-    }
-
-    // 音声ファイルを選択し、プロジェクトのsoundフォルダにコピーしたうえで、そのファイルをこの行に紐づける。
-    private void SelectSoundFile(DataGridViewRow row)
-    {
-        using var dlg = new OpenFileDialog { Title = "音声ファイルを選択", Filter = "音声ファイル|*.wav;*.ogg;*.mp3|すべて|*.*" };
-        if (dlg.ShowDialog() != DialogResult.OK) return;
-
-        try
-        {
-            // sound フォルダがまだ存在しない場合に備えて作成しておく（既に存在していてもエラーにはならない）。
-            Directory.CreateDirectory(_soundsDir);
-            string dest = Path.Combine(_soundsDir, Path.GetFileName(dlg.FileName));
-            // 選択したファイルが既にコピー先と同じ場所にある場合は、無駄なコピーを避ける。
-            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase))
-                File.Copy(dlg.FileName, dest, overwrite: true);
-
-            // グリッドにはプロジェクトルートからの相対パス（"sound/xxx.wav" 形式）で保存する。
-            row.Cells["colFile"].Value = "sound/" + Path.GetFileName(dlg.FileName);
-            PushHistory();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("ファイルコピーに失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
-
-    // 試聴はWAVのみ対応している。これはSystem.Media.SoundPlayerというWindows標準クラスの制約によるもので、
-    // mp3/oggを再生するには新たに外部の音声ライブラリへの依存を追加する必要があるため、
-    // 今回の改修スコープでは対応を見送っている。
-    // なお、音量欄で設定した値は試聴再生には反映されない（SoundPlayerに音量を指定するAPIが存在しないため）。
-    // 実際の音量はあくまでゲーム本体（C++側）で再生されたときに適用される。
-    private void PlayPreview(DataGridViewRow row)
-    {
-        string relPath = row.Cells["colFile"].Value?.ToString() ?? "";
-        if (string.IsNullOrEmpty(relPath)) return;
-
-        string fullPath = Path.Combine(_projectRoot, relPath.Replace('/', '\\'));
-        if (!File.Exists(fullPath))
-        {
-            MessageBox.Show("ファイルが見つかりません:\n" + fullPath, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
-
-        // WAV以外の拡張子は試聴不可としてユーザーに知らせる（上記の制約による）。
-        if (Path.GetExtension(fullPath).ToLowerInvariant() != ".wav")
-        {
-            MessageBox.Show("WAVファイルのみプレビュー可能です", "プレビュー不可", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
-
-        try
-        {
-            // 前回再生していた音声が残っていれば停止・破棄してから、新しい音声を再生する。
-            _currentPlayer?.Stop();
-            _currentPlayer?.Dispose();
-            _currentPlayer = new SoundPlayer(fullPath);
-            _currentPlayer.Play();
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show("再生に失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
-    }
-
-    // Feature: サウンド・アセット管理の刷新
-    // 行を削除しようとしたとき、そのIDが敵・ギミック・アイテム・コモンイベントのどこかで
-    // 参照されていないかを事前にチェックし、参照されていれば警告する。
-    // これにより、削除した結果として「本来鳴るはずの音が鳴らなくなる」という参照切れバグを未然に防ぐ。
-    //
-    // 注意（既知の制限）: ステージごとのイベントトリガー（EventTrigger）で使われているサウンドは、
-    // このチェックの対象に含まれていない。ステージファイルは個別に読み込む必要があり、
-    // このダイアログの通常の呼び出し経路ではステージデータにアクセスできないためである。
-    private void DeleteRow(DataGridViewRow row)
-    {
-        string id = row.Cells["colId"].Value?.ToString() ?? "";
-        if (!string.IsNullOrWhiteSpace(id))
-        {
-            var refs = FindReferences(id);
+            var refs = FindReferences(_cur.Id);
             if (refs.Count > 0)
             {
-                // 参照元を最大10件まで列挙し、それを超える場合は残り件数をまとめて表示する。
-                string msg = $"ID「{id}」は以下から参照されています。削除すると無音になります:\n\n" +
-                    string.Join("\n", refs.Take(10)) + (refs.Count > 10 ? $"\n…他{refs.Count - 10}件" : "") +
-                    "\n\nこのまま削除しますか？";
+                string msg = $"ID「{_cur.Id}」は以下から使われています。削除すると無音になります:\n\n"
+                    + string.Join("\n", refs.Take(10)) + (refs.Count > 10 ? $"\n…ほか{refs.Count - 10}件" : "") + "\n\nこのまま削除しますか？";
                 if (MessageBox.Show(msg, "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
             }
         }
-        _grid.Rows.Remove(row);
-        PushHistory();
+        int i = _rows.IndexOf(_cur);
+        _rows.Remove(_cur);
+        _cur = null;
+        MarkDirty();
+        RebuildList();
+        if (_rows.Count > 0) Select(_rows[Math.Min(i, _rows.Count - 1)]); else ShowDetail(null);
+        CommitNow();
     }
 
-    // 指定したサウンドIDが、敵・ギミック・アイテム・コモンイベントのどこで使われているかを列挙する。
-    // 戻り値は「〇〇「xxx」の△△音」のような、ユーザーに見せてそのまま理解できる説明文のリスト。
+    // 音声ファイルを選び、プロジェクトの sound フォルダへコピーして、この音に結びつける。
+    private void PickFile()
+    {
+        if (_cur == null) return;
+        using var dlg = new OpenFileDialog { Title = "音声ファイルを選ぶ", Filter = "音声ファイル|*.wav;*.ogg;*.mp3|すべて|*.*" };
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+        try
+        {
+            Directory.CreateDirectory(_soundsDir);
+            string dest = Path.Combine(_soundsDir, Path.GetFileName(dlg.FileName));
+            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase)) File.Copy(dlg.FileName, dest, overwrite: true);
+            _cur.File = "sound/" + Path.GetFileName(dlg.FileName);
+            // ID・名前がまだ空なら、ファイル名から仮に入れておく（あとで直せる）。
+            string stem = Path.GetFileNameWithoutExtension(dlg.FileName);
+            if (string.IsNullOrWhiteSpace(_cur.Id)) _cur.Id = stem;
+            if (string.IsNullOrWhiteSpace(_cur.Name)) _cur.Name = stem;
+            MarkDirty();
+            ShowDetail(_cur);
+            RebuildList();
+            CommitNow();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("ファイルのコピーに失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    // 試聴は WAV のみ（Windows 標準の SoundPlayer の制約）。mp3 / ogg を聞くには外部の音声ライブラリが要るため、今回は見送り。
+    private void Play()
+    {
+        if (_cur == null || string.IsNullOrEmpty(_cur.File)) return;
+        string full = Path.Combine(_projectRoot, _cur.File.Replace('/', '\\'));
+        if (!File.Exists(full)) { MessageBox.Show("ファイルが見つかりません:\n" + full, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        if (!full.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) { MessageBox.Show("試聴できるのは WAV ファイルだけです。", "試聴できません", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+        try
+        {
+            _player?.Stop(); _player?.Dispose();
+            _player = new SoundPlayer(full);
+            _player.Play();
+        }
+        catch (Exception ex) { MessageBox.Show("再生に失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    // 指定IDの音が、敵・ギミック・アイテム・コモンイベントのどこで使われているか。
+    // ※ステージごとのイベントトリガーは対象外（ステージを個別に読む必要があるため）。
     private List<string> FindReferences(string id)
     {
         var refs = new List<string>();
         foreach (var en in _enemies)
         {
-            if (en.seSpawn == id) refs.Add($"敵「{en.id}」の出現音");
-            if (en.seAttack == id) refs.Add($"敵「{en.id}」の攻撃音");
-            if (en.seDamage == id) refs.Add($"敵「{en.id}」の被弾音");
-            if (en.seDeath == id) refs.Add($"敵「{en.id}」の死亡音");
+            string nm = en.name.Length > 0 ? en.name : en.id;
+            if (en.seSpawn == id) refs.Add($"敵「{nm}」の出現音");
+            if (en.seAttack == id) refs.Add($"敵「{nm}」の攻撃音");
+            if (en.seDamage == id) refs.Add($"敵「{nm}」の被弾音");
+            if (en.seDeath == id) refs.Add($"敵「{nm}」の死亡音");
         }
-        foreach (var gi in _gimmicks)
-        {
-            if (gi.seActivate == id) refs.Add($"ギミック「{gi.id}」の起動音");
-        }
-        foreach (var it in _items)
-        {
-            if (it.seCollect == id) refs.Add($"アイテム「{it.id}」の取得音");
-        }
+        foreach (var gi in _gimmicks) if (gi.seActivate == id) refs.Add($"ギミック「{(gi.name.Length > 0 ? gi.name : gi.id)}」の起動音");
+        foreach (var it in _items) if (it.seCollect == id) refs.Add($"アイテム「{(it.name.Length > 0 ? it.name : it.id)}」の取得音");
         foreach (var ce in _commonEvents)
-        {
             foreach (var act in ce.actions)
-            {
-                // コモンイベントのアクションのうち、BGM切り替え(ChangeBgm)またはSE再生(PlaySe)で
-                // このIDをパラメータに指定しているものを探す。
                 if ((act.action == "ChangeBgm" || act.action == "PlaySe") && act.param1 == id)
-                    refs.Add($"コモンイベント「{ce.id}」の{act.action}アクション");
-            }
-        }
+                    refs.Add($"コモンイベント「{ce.id}」の{(act.action == "ChangeBgm" ? "BGM切り替え" : "SE再生")}");
         return refs;
     }
 
-    // ── 保存 ──────────────────────────────────
-    // 「保存して閉じる」ボタンが押されたときの処理。入力内容を検証したうえで結果プロパティに反映し、
-    // ダイアログをOKで閉じる。
-    private void BtnSave_Click(object? sender, EventArgs e)
+    // ── 元に戻す／やり直し ───────────────────────
+    private List<SoundRow> Snapshot() => _rows.Select(r => new SoundRow
     {
-        var rows = ReadRowsFromGrid();
+        Category = r.Category, Id = r.Id, Name = r.Name, File = r.File, IsLoop = r.IsLoop, Volume = r.Volume,
+    }).ToList();
+
+    private void CommitNow()
+    {
+        _snapTimer.Stop();
+        _history.Push(Snapshot());
+        UpdateUndo();
+        if (_cur != null) UpdateRefs();
+    }
+
+    private void UpdateUndo() => UpdateUndoState(_history.CanUndo, _history.CanRedo);
+
+    private void Restore(List<SoundRow>? rows)
+    {
+        if (rows == null) return;
+        int idx = _cur == null ? 0 : _rows.IndexOf(_cur);
+        _rows = rows;
+        _keyOf.Clear(); _byKey.Clear();
+        _cur = _rows.Count > 0 ? _rows[Math.Clamp(idx, 0, _rows.Count - 1)] : null;
+        RebuildList();
+        if (_cur != null) Select(_cur); else ShowDetail(null);
+        UpdateUndo();
+    }
+
+    private void Undo() { _snapTimer.Stop(); CommitNowIfPending(); if (_history.CanUndo) Restore(_history.Undo()); }
+    private void Redo() { if (_history.CanRedo) Restore(_history.Redo()); }
+    private void CommitNowIfPending() { _history.Push(Snapshot()); }
+
+    // ── 保存 ────────────────────────────────────
+    protected override void OnSave()
+    {
+        // 使っていない空の行（IDもファイルも無い）は保存しない。
+        var rows = _rows.Where(r => !(string.IsNullOrWhiteSpace(r.Id) && string.IsNullOrWhiteSpace(r.File))).ToList();
         var bgm = rows.Where(r => r.Category == "BGM").ToList();
         var se = rows.Where(r => r.Category == "SE").ToList();
-        var uiSe = rows.Where(r => r.Category == "UI").ToList();
+        var ui = rows.Where(r => r.Category == "UI").ToList();
 
-        // まず各カテゴリ内での基本的な入力チェック（ID未設定・ファイル未設定・ID重複）を行う。
-        string? error = ValidateCategory("BGM", bgm) ?? ValidateCategory("SE", se) ?? ValidateCategory("UI音", uiSe);
+        string? error = Validate("BGM", bgm) ?? Validate("SE", se) ?? Validate("UI音", ui);
         if (error == null)
         {
-            // Feature: サウンド・アセット管理の刷新
-            // SEとUI音は、ゲームエンジン側では同じseMap（1つの辞書）に統合して格納される仕様のため、
-            // カテゴリをまたいでID重複があると片方のデータがもう片方に上書きされ、実際に再生できなくなる
-            // という実害のあるバグに繋がる。そのため保存前にカテゴリ間の重複もチェックする。
+            // SE と UI音は、ゲーム側では同じ辞書（seMap）に入る。カテゴリをまたぐ重複があると片方が上書きされて鳴らなくなる。
             var seIds = new HashSet<string>(se.Where(d => !string.IsNullOrWhiteSpace(d.Id)).Select(d => d.Id));
-            var crossDup = uiSe.Select(d => d.Id).FirstOrDefault(id => !string.IsNullOrWhiteSpace(id) && seIds.Contains(id));
-            if (crossDup != null)
-                error = $"ID「{crossDup}」がSEとUI音の両方に存在します。\nゲーム内ではSEとUI音は同じ名前空間で管理されるため、どちらか一方のIDを変更してください。";
+            var cross = ui.Select(d => d.Id).FirstOrDefault(id => !string.IsNullOrWhiteSpace(id) && seIds.Contains(id));
+            if (cross != null) error = $"ID「{cross}」が SE と UI音の両方にあります。\nゲーム内では同じ名前の置き場を共有するため、どちらかの ID を変えてください。";
         }
-        if (error != null)
-        {
-            MessageBox.Show(error, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
-        }
+        if (error != null) { MessageBox.Show(error, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
 
-        // 検証を通過したデータを公開プロパティにセットし、呼び出し元が受け取れるようにする。
         ResultBgm = bgm.Select(ToDef).ToList();
         ResultSe = se.Select(ToDef).ToList();
-        ResultUiSe = uiSe.Select(ToDef).ToList();
+        ResultUiSe = ui.Select(ToDef).ToList();
         DialogResult = DialogResult.OK;
         Close();
     }
 
-    // SoundRow（グリッド編集用）をSoundDef（保存用データ構造）へ変換するヘルパー。
-    private static SoundDef ToDef(SoundRow r) => new SoundDef { id = r.Id, name = r.Name, file = r.File, isLoop = r.IsLoop, volume = r.Volume };
-
-    // 1カテゴリ分のデータについて、保存前の入力チェックを行う。
-    // 問題があればエラーメッセージ（画面表示用の文字列）を返し、問題なければnullを返す。
-    private static string? ValidateCategory(string categoryLabel, List<SoundRow> defs)
+    private static string? Validate(string label, List<SoundRow> defs)
     {
-        var seenIds = new HashSet<string>();
+        var seen = new HashSet<string>();
         foreach (var d in defs)
         {
-            // ファイルは設定されているのにIDが空、というパターンは保存後にゲーム側から参照できなくなるため禁止する。
             if (string.IsNullOrWhiteSpace(d.Id) && !string.IsNullOrWhiteSpace(d.File))
-                return $"[{categoryLabel}] ファイル「{d.File}」にIDが設定されていません。\nIDが空のままだとゲーム側から一切参照できず、無効なデータとして保存されます。";
-            // 逆にIDはあるのにファイルが空、というパターンも不完全なデータとして禁止する。
+                return $"[{label}] ファイル「{d.File}」に ID がありません。\nID がないと、ゲームから呼べない無効なデータになります。";
             if (!string.IsNullOrWhiteSpace(d.Id) && string.IsNullOrWhiteSpace(d.File))
-                return $"[{categoryLabel}] ID「{d.Id}」にファイルが設定されていません。\n先に「📁選択」でファイルを指定してください。";
-            // 同一カテゴリ内でのID重複チェック（HashSet.Addは追加できなかった＝重複していたときfalseを返す性質を利用している）。
-            if (!string.IsNullOrWhiteSpace(d.Id) && !seenIds.Add(d.Id))
-                return $"[{categoryLabel}] ID「{d.Id}」が重複しています。\nIDは一意である必要があります。";
+                return $"[{label}] ID「{d.Id}」にファイルが選ばれていません。\n先に「📁 ファイルを選ぶ」で指定してください。";
+            if (!string.IsNullOrWhiteSpace(d.Id) && !seen.Add(d.Id))
+                return $"[{label}] ID「{d.Id}」が重複しています。ID は一意にしてください。";
         }
         return null;
     }
 
-    // フォームが閉じられるときに、再生中の試聴音声を確実に停止・破棄する
-    // （音声が鳴り続けたままフォームだけ閉じてしまうことを防ぐ）。
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        _currentPlayer?.Stop();
-        _currentPlayer?.Dispose();
+        _snapTimer.Dispose();
+        _player?.Stop(); _player?.Dispose();
         base.OnFormClosed(e);
     }
 }

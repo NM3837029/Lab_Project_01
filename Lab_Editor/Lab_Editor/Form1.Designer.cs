@@ -68,23 +68,19 @@ partial class Form1
 
     private System.Windows.Forms.Label lblCurrentStage = null!, lblStatus = null!, lblLayerInfo = null!;  // 編集中ステージ名／ステータスバー文言／現在レイヤー情報を表示するラベル群
 
-    // 右パネル (TabControl)
-    private System.Windows.Forms.TabControl tabRight = null!;       // 右側のタブコントロール本体
-    private System.Windows.Forms.TabPage tabTilePalette = null!;    // 「タイル」タブ（タイルパレット）
-    private System.Windows.Forms.TabPage tabEventPalette = null!;   // 「配置対象」タブ（敵/ギミック/アイテム/トリガー等の選択）
-    private System.Windows.Forms.TabPage tabEventList = null!;      // 「イベントリスト」タブ（配置済みオブジェクトの一覧）
-
-    private System.Windows.Forms.FlowLayoutPanel flpTiles = null!;  // タイルパレットのアイコンを流し込むパネル
-    private System.Windows.Forms.Button btnBulkFill = null!;        // 数値指定で範囲を一括配置するボタン
-
-    // イベントパレット（敵・ギミック・アイテム）
-    private System.Windows.Forms.ListBox lstEnemies = null!, lstGimmicks = null!, lstItems = null!;  // 敵/ギミック/アイテムの選択リスト
-
-    // イベントリスト (配置済み)
-    private System.Windows.Forms.ListBox lstPlacedEvents = null!;  // 現在のステージに配置済みの敵/ギミック/アイテム/トリガー一覧
+    // 右パネル（絵つきカードで作り直したもの。以前は TabControl＋ListBox＋色つきボタンだった）
+    private RightDockTabs tabRight = null!;                       // 右側の上部タブ（タイル／配置対象／イベントリスト）
+    private TilePalettePanel tilePanel = null!;                    // 「タイル」タブ（タイルの絵のカード一覧）
+    private PlacementPalettePanel placePanel = null!;              // 「配置対象」タブ（敵/ギミック/アイテムの絵のカード一覧）
+    private PlacedEventsPanel eventsPanel = null!;                 // 「イベントリスト」タブ（置いた物の一覧。クリックでマップへ飛ぶ）
+    // 以前のコード（tabRight.SelectedTab = tabTilePalette など）をそのまま使えるよう、タブ名の別名を残してある。
+    private System.Windows.Forms.Control tabTilePalette = null!, tabEventPalette = null!, tabEventList = null!;
+    // 一覧に出す小さな絵の作成・保管係（アセットを読み直すたびに Clear する）。
+    private AssetThumbs thumbs = null!;
 
     // プロパティ
     private System.Windows.Forms.PropertyGrid propertyGrid = null!;  // 選択中オブジェクトのプロパティを編集するグリッド
+    private System.Windows.Forms.Label lblInspector = null!;         // プロパティ表の上の見出し（いま何を選んでいるか）
 
     // フォーム上の全コントロールを生成し、イベントハンドラの購読・レイアウトの組み立てを行う初期化処理。
     // Visual Studioデザイナが自動生成する典型的な構造だが、本プロジェクトでは手書きで管理している。
@@ -360,65 +356,40 @@ partial class Form1
         tabLeft.Controls.Add(tabStages);
         tabLeft.Controls.Add(tabMapProps);
 
-        // ===== 右パネル (TabControl) =====
-        tabRight = new System.Windows.Forms.TabControl { Dock = System.Windows.Forms.DockStyle.Fill, Font = F };
-        tabTilePalette = new System.Windows.Forms.TabPage("タイル");
-        tabEventPalette = new System.Windows.Forms.TabPage("配置対象");
-        tabEventList = new System.Windows.Forms.TabPage("イベントリスト");
+        // ===== 右パネル（絵つきカードの一覧 3 つを、上部のタブで切り替える）=====
+        thumbs = new AssetThumbs(System.IO.Path.Combine(AppPaths.ProjectRoot, "assets"));
+        tilePanel = new TilePalettePanel();
+        placePanel = new PlacementPalettePanel();
+        eventsPanel = new PlacedEventsPanel();
+        tabTilePalette = tilePanel;
+        tabEventPalette = placePanel;
+        tabEventList = eventsPanel;
 
-        // タイルパレットタブ：タイルアイコンをFlowLayoutPanelで並べ、下部に一括配置ボタンを配置する。
-        flpTiles = new System.Windows.Forms.FlowLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight, AutoScroll = true };
-        // Feature: UI改善（友人フィードバック対応）— 数値指定で行・列の範囲を一括配置するボタン。
-        // Dock=Fillのflptilesを先にAddし、Dock=Bottomのパネルを後からAddする安全な順序を守る。
-        var pnlBulkFill = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Bottom, Height = 34 };
-        btnBulkFill = new System.Windows.Forms.Button { Text = "🔢 数値指定で一括配置", Dock = System.Windows.Forms.DockStyle.Fill, FlatStyle = System.Windows.Forms.FlatStyle.Flat };
-        btnBulkFill.Click += BtnBulkFill_Click;
-        pnlBulkFill.Controls.Add(btnBulkFill);
-        tabTilePalette.Controls.Add(flpTiles);
-        tabTilePalette.Controls.Add(pnlBulkFill);
+        // 各パネルの操作を、Form1 側の処理へつなぐ。
+        tilePanel.TilePicked += TilePanel_TilePicked;
+        tilePanel.BulkFillClicked += () => BtnBulkFill_Click(null, EventArgs.Empty);
+        placePanel.AssetPicked += PlacePanel_AssetPicked;
+        placePanel.PickCleared += PlacePanel_PickCleared;
+        eventsPanel.ItemPicked += EventsPanel_ItemPicked;
+        eventsPanel.ItemActivated += EventsPanel_ItemActivated;
+        eventsPanel.DeleteRequested += EventsPanel_DeleteRequested;
 
-        // イベント配置パレット：敵/ギミック/アイテムの選択リストと、汎用トリガー/開始位置/ゴールの配置モード選択。
-        var lblEn = new System.Windows.Forms.Label { Text = "👾 敵", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(185, 18) };
-        lstEnemies = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 25), Size = new System.Drawing.Size(200, 70) };
-        lstEnemies.SelectedIndexChanged += lstEnemies_SelectedIndexChanged;
-
-        var lblGi = new System.Windows.Forms.Label { Text = "🔧 ギミック", Font = FB, Location = new System.Drawing.Point(5, 100), Size = new System.Drawing.Size(185, 18) };
-        lstGimmicks = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 120), Size = new System.Drawing.Size(200, 70) };
-        lstGimmicks.SelectedIndexChanged += lstGimmicks_SelectedIndexChanged;
-
-        var lblIt = new System.Windows.Forms.Label { Text = "💎 アイテム", Font = FB, Location = new System.Drawing.Point(5, 195), Size = new System.Drawing.Size(185, 18) };
-        lstItems = new System.Windows.Forms.ListBox { Location = new System.Drawing.Point(5, 215), Size = new System.Drawing.Size(200, 60) };
-        lstItems.SelectedIndexChanged += lstItems_SelectedIndexChanged;
-
-        // トリガー・プレイヤー開始位置・ゴールは、以前はここのラジオボタンで配置モードを切り替えていたが、
-        // 範囲選択（左ドラッグ）と操作が重なるため、ステージ上の右クリック／右ドラッグへ移した。使い方をここに書いておく。
-        var lblEventHelp = new System.Windows.Forms.Label
-        {
-            Text = "⚡ トリガー・開始位置・ゴールは、ステージ上で右ボタンを使います。\r\n"
-                 + "・何も無い所を右ボタンでドラッグ：トリガーの範囲を作る\r\n"
-                 + "・何も無い所を右クリック：ここにトリガー／開始位置／ゴール\r\n"
-                 + "・トリガーを右クリック：編集・削除",
-            Location = new System.Drawing.Point(5, 285),
-            Size = new System.Drawing.Size(200, 110),
-            ForeColor = System.Drawing.Color.DimGray,
-            Font = new System.Drawing.Font("Meiryo UI", 8f),
-        };
-
-        tabEventPalette.Controls.AddRange(new System.Windows.Forms.Control[] { lblEn, lstEnemies, lblGi, lstGimmicks, lblIt, lstItems, lblEventHelp });
-
-        // イベントリスト (配置済み)：現在のステージに配置されているオブジェクトの一覧をリスト表示する。
-        lstPlacedEvents = new System.Windows.Forms.ListBox { Dock = System.Windows.Forms.DockStyle.Fill };
-        lstPlacedEvents.SelectedIndexChanged += LstPlacedEvents_SelectedIndexChanged;
-        lstPlacedEvents.DoubleClick += LstPlacedEvents_DoubleClick;
-        tabEventList.Controls.Add(lstPlacedEvents);
-
-        tabRight.Controls.Add(tabTilePalette);
-        tabRight.Controls.Add(tabEventPalette);
-        tabRight.Controls.Add(tabEventList);
+        tabRight = new RightDockTabs { Dock = System.Windows.Forms.DockStyle.Fill, Font = F };
+        tabRight.AddPage("🧱 タイル", tilePanel);
+        tabRight.AddPage("👾 配置対象", placePanel);
+        tabRight.AddPage("📋 イベント", eventsPanel);
 
         // ===== 共通プロパティグリッド =====
         // 選択中オブジェクトのプロパティを編集するグリッド。ヘルプ欄・ツールバーは非表示にしてコンパクトに使う。
         propertyGrid = new System.Windows.Forms.PropertyGrid { Dock = System.Windows.Forms.DockStyle.Fill, HelpVisible = false, ToolbarVisible = false, Font = F };
+        // プロパティ表の上の見出し。何を選んでいる最中かを、表のスクロールに関係なく常に見せる。
+        lblInspector = new System.Windows.Forms.Label
+        {
+            Dock = System.Windows.Forms.DockStyle.Top, Height = 30, Font = FB,
+            TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new System.Windows.Forms.Padding(8, 0, 0, 0),
+            BackColor = System.Drawing.Color.White, ForeColor = System.Drawing.Color.FromArgb(32, 36, 42),
+            Text = "プロパティ — 何も選んでいません",
+        };
 
         // ===== 情報ラベル =====
         // 編集中のステージ名を表示するラベル（濃い青字）。
@@ -471,7 +442,9 @@ partial class Form1
         // 右側: タイル/配置タブ(上) | プロパティグリッド(下)
         splitRightVertical = new System.Windows.Forms.SplitContainer { Dock = System.Windows.Forms.DockStyle.Fill, Orientation = System.Windows.Forms.Orientation.Horizontal, SplitterWidth = 6 };
         splitRightVertical.Panel1.Controls.Add(tabRight);
+        // Dock=Fill のプロパティ表を先に、Dock=Top の見出しを後に Add する（このコードベースの決まり）。
         splitRightVertical.Panel2.Controls.Add(propertyGrid);
+        splitRightVertical.Panel2.Controls.Add(lblInspector);
 
         // 中央: キャンバスエリア | 右パネル
         splitCenterRight = new System.Windows.Forms.SplitContainer { Dock = System.Windows.Forms.DockStyle.Fill, Orientation = System.Windows.Forms.Orientation.Vertical, SplitterWidth = 6 };
@@ -490,8 +463,10 @@ partial class Form1
             // フォーム表示後、各SplitContainerの実際の幅・高さを基準に分割位置を計算して設定する。
             // 最小値（Math.Max側）を設けることで、極端に小さいウィンドウでもパネルが潰れきらないようにしている。
             splitOuter.SplitterDistance = System.Math.Max(160, (int)(splitOuter.Width * 0.18));
-            splitCenterRight.SplitterDistance = System.Math.Max(400, splitCenterRight.Width - 230);
-            splitRightVertical.SplitterDistance = System.Math.Max(280, splitRightVertical.Height - 210);
+            // 右パネルは、絵つきカードを3列ほど並べられる幅（約320px）を既定にする。以前は230pxで、カードが1〜2列しか入らなかった。
+            // プロパティ表は、よく触る項目が見える高さ（約230px）を確保する。どちらも境界線をドラッグして変えられる。
+            splitCenterRight.SplitterDistance = System.Math.Max(400, splitCenterRight.Width - 330);
+            splitRightVertical.SplitterDistance = System.Math.Max(240, splitRightVertical.Height - 230);
         };
 
         // Form 設定：初期クライアントサイズ・最小サイズ・コントロールの追加順（Dockの重なり順に影響する）を設定する。

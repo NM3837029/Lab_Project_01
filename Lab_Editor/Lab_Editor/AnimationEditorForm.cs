@@ -1,552 +1,463 @@
-using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Windows.Forms;
-
 namespace Lab_Editor;
 
 // ───────────────────────────────────────────────
-//  AnimationEditorForm
-//  アニメーションクリップを編集するフォーム
-//  スプライトシート画像から複数フレームを切り出し、名前・フレーム範囲・再生速度・ループ有無を
-//  DataGridViewの行として一覧管理できるようにする。プレビュー欄でクリップの再生確認も可能。
+//  AnimationEditorForm - スプライトシート（コマが並んだ1枚絵）からアニメーションを作る画面
+//
+//  以前は name / sprite / FCX / FCY / start / end / fps / loop の表で、数字を打ち込んでからでないと
+//  どんな動きになるのか分からなかった。今回は次の作りに改めた。
+//    左   : クリップ（「歩く」「攻撃」など1つの動き）の一覧。先頭コマの絵が見える
+//    中央 : 選んだクリップの動くプレビューと、スプライトシート全体（コマの格子と、使うコマの範囲を重ねて表示）
+//           シートのコマをクリックすると開始コマ、右クリックすると終了コマになる
+//    右   : 日本語の項目名の設定（名前・画像・コマの分け方・範囲・速さ・ループ）
+//  呼び出し側との約束（コンストラクタの引数と ResultSet）は以前のまま。
 // ───────────────────────────────────────────────
-public class AnimationEditorForm : Form
+public class AnimationEditorForm : EditorFormBase
 {
-    // ── 公開プロパティ ──────────────────────────
-    // 保存ボタン押下時に確定した編集結果（呼び出し元がDialogResult.OKを見て取得する）。
     public AnimationSet ResultSet { get; private set; } = null!;
 
-    // ── フィールド ─────────────────────────────
-    // プロジェクトのルートフォルダ（スプライト画像の絶対パス解決に使う）。
     private readonly string _projectRoot;
-    // スプライト画像を格納するフォルダ（プロジェクトルート配下の"img"）。
     private readonly string _imgDir;
+    private readonly List<AnimationClip> _clips = new();
+    private AnimationClip? _cur;
+    private readonly Dictionary<AnimationClip, string> _keyOf = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, AnimationClip> _byKey = new();
+    private int _keySeq;
+    private bool _sync;
 
-    private TextBox      _txtAssetId    = null!;  // 編集対象のアセットIDを入力するテキストボックス
-    private DataGridView _grid          = null!;  // アニメーションクリップの一覧を編集するグリッド
-    private PictureBox   _preview       = null!;  // 選択中クリップのプレビュー表示欄
-    private Label        _lblFrameInfo  = null!;  // 現在のフレーム番号などの情報を表示するラベル
-    private Button       _btnPreview    = null!;  // プレビュー再生/停止ボタン
-    private Button       _btnAdd        = null!;  // 新規クリップ行を追加するボタン
-    private Button       _btnSave       = null!;  // 編集内容を確定して閉じるボタン
-    private Button       _btnCancel     = null!;  // 編集を破棄して閉じるボタン
+    // 画像の記憶（パス → シート全体の絵）
+    private readonly Dictionary<string, Bitmap?> _sheets = new();
 
-    // アニメーション再生用
-    private System.Windows.Forms.Timer _animTimer = null!;  // プレビュー再生のフレーム送りに使うタイマー
-    private Bitmap?  _spriteSheet;   // 現在選択中クリップのスプライトシート全体画像（未読み込み時はnull）
-    private int      _currentFrame;  // プレビュー再生中の現在フレーム番号
-    private bool     _isPlaying;     // プレビュー再生中かどうか
+    // 画面の部品
+    private readonly TextBox _txtAssetId = new() { Font = UiTheme.Base };
+    private readonly CardListView _list = new() { Dock = DockStyle.Fill, LayoutMode = CardLayout.Rows };
+    private readonly ImageViewport _anim = new() { Dock = DockStyle.Fill, Placeholder = "クリップを選ぶと、ここで動きます" };
+    private readonly ImageViewport _sheetView = new() { Dock = DockStyle.Fill, Placeholder = "スプライトシートが未設定です" };
+    private readonly Label _lblFrame = new() { AutoSize = true, ForeColor = UiTheme.TextMuted, Font = UiTheme.Small };
+    private Button _btnPlay = null!;
+    private readonly FieldStack _form = new() { Dock = DockStyle.Fill };
+    private readonly Label _empty = new()
+    {
+        Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = UiTheme.TextMuted, BackColor = UiTheme.CardBack,
+        Text = "左の一覧からクリップを選ぶか、\r\n「＋ クリップを追加」で作ってください。",
+    };
 
-    // 現在選択中クリップの情報（グリッドの選択行から読み込んだキャッシュ値）
-    private int _frameCountX;  // スプライトシートの横方向フレーム数
-    private int _frameCountY;  // スプライトシートの縦方向フレーム数
-    private int _startFrame;   // 再生開始フレーム番号
-    private int _endFrame;     // 再生終了フレーム番号
+    private readonly TextBox _txtName = new() { Font = UiTheme.Base };
+    private readonly Label _lblSprite = new() { AutoSize = true, Font = UiTheme.Base };
+    private readonly NumericUpDown _fcx = Kit.Num(1, 64, 0, 1, 90);
+    private readonly NumericUpDown _fcy = Kit.Num(1, 64, 0, 1, 90);
+    private readonly NumericUpDown _start = Kit.Num(0, 4095, 0, 1, 90);
+    private readonly NumericUpDown _end = Kit.Num(0, 4095, 0, 1, 90);
+    private readonly SliderField _fps = new(1, 60, 1, 0, "ゆっくり", "はやい");
+    private readonly CheckBox _loop = new() { Text = "最後のコマまで行ったら最初に戻る（ループ）", AutoSize = true, Font = UiTheme.Base };
 
-    // ── コンストラクタ ─────────────────────────
-    // projectRoot : プロジェクトのルートパス（img フォルダの位置解決に使用）
-    // animSet     : 編集対象として渡される既存のアニメーションセット（新規時は空のクリップリストを想定）
+    // 再生
+    private readonly System.Windows.Forms.Timer _timer = new();
+    private int _frame;
+    private bool _playing;
+    private bool _held;   // ループなしで最後のコマに着いて止まっている
+
     public AnimationEditorForm(string projectRoot, AnimationSet animSet)
+        : base("アニメーションエディタ", "スプライトシートのコマを選んで、動きを作ります。シートのコマをクリックすると、使う範囲を決められます。",
+               new Size(1280, 760), new Size(1040, 640))
     {
         _projectRoot = projectRoot;
-        _imgDir      = Path.Combine(projectRoot, "img");
-
-        InitializeComponent();
-
-        // コピーを作成して編集（渡されたanimSetを直接書き換えず、グリッドの行データとして展開する）
+        _imgDir = Path.Combine(projectRoot, "img");
+        foreach (var c in animSet.clips ?? new List<AnimationClip>())
+            _clips.Add(new AnimationClip
+            {
+                name = c.name, sprite = c.sprite, frameCountX = c.frameCountX, frameCountY = c.frameCountY,
+                startFrame = c.startFrame, endFrame = c.endFrame, fps = c.fps, loop = c.loop,
+            });
         _txtAssetId.Text = animSet.assetId ?? "";
-        PopulateGrid(animSet.clips ?? new List<AnimationClip>());
+
+        BuildUi();
+        _timer.Tick += Tick;
+        RebuildList();
+        if (_clips.Count > 0) Select(_clips[0]); else ShowForm(null);
     }
 
-    // ── UI 構築 ────────────────────────────────
-    // フォーム上の全コントロール（テキストボックス・グリッド・プレビュー・ボタン等）を生成し配置する。
-    // WinFormsデザイナを使わず手書きで構築しているため、座標・サイズ指定がすべて明示的に書かれている。
-    private void InitializeComponent()
+    // ── 画面の組み立て ───────────────────────────
+    private void BuildUi()
     {
-        Text            = "アニメーションエディタ";
-        Size            = new Size(900, 540);
-        Font            = UiTheme.Base;
-        StartPosition   = FormStartPosition.CenterParent;
-        // 共通テーマ設定：リサイズ可能な枠やタイトルバーの見た目を統一する。
-        UiTheme.ApplyResizableChrome(this);
+        // 左: アセットID + クリップ一覧
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.PanelBack };
+        var idHost = new Panel { Dock = DockStyle.Top, Height = 62, Padding = new Padding(10, 6, 10, 0) };
+        idHost.Controls.Add(Kit.Field("対象のアセットID", _txtAssetId));
+        _txtAssetId.TextChanged += (s, e) => MarkDirty();
+        left.Controls.Add(_list);
+        left.Controls.Add(idHost);
+        _list.ItemClicked += (s, item) => { if (_byKey.TryGetValue(item.Key, out var c)) { _cur = c; ShowForm(c); } };
 
-        // ── 上部：assetId ───────────────────────
-        var lblAsset = new Label
+        // 中央: プレビュー(上) + シート(下)
+        var center = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterWidth = 6, BackColor = UiTheme.CardBorder };
+        var previewHost = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        var pvBar = new Panel { Dock = DockStyle.Bottom, Height = 40, BackColor = UiTheme.CardBack };
+        _btnPlay = Kit.Btn("⏸ 止める", TogglePlay);
+        _btnPlay.Location = new Point(10, 6);
+        _lblFrame.Location = new Point(110, 12);
+        pvBar.Controls.Add(_btnPlay);
+        pvBar.Controls.Add(_lblFrame);
+        previewHost.Controls.Add(_anim);
+        previewHost.Controls.Add(pvBar);
+        center.Panel1.Controls.Add(previewHost);
+
+        var sheetHost = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        var shCap = new Label
         {
-            Text     = "assetId:",
-            Location = new Point(10, 12),
-            AutoSize = true,
+            Dock = DockStyle.Top, Height = 26, Text = "  スプライトシート（クリック＝開始コマ ／ 右クリック＝終了コマ。青い枠が使うコマ）",
+            Font = UiTheme.Small, ForeColor = UiTheme.TextMuted, TextAlign = ContentAlignment.MiddleLeft, BackColor = UiTheme.PanelBack,
         };
-        _txtAssetId = new TextBox
-        {
-            Location = new Point(70, 10),
-            Width    = 220,
-        };
-        Controls.Add(lblAsset);
-        Controls.Add(_txtAssetId);
+        sheetHost.Controls.Add(_sheetView);
+        sheetHost.Controls.Add(shCap);
+        center.Panel2.Controls.Add(sheetHost);
+        _sheetView.Overlay = DrawSheetOverlay;
+        _sheetView.MouseDown += SheetMouseDown;
 
-        // ── 右パネル（プレビュー） ───────────────
-        var pnlRight = new Panel
-        {
-            Location  = new Point(638, 40),
-            Size      = new Size(240, 420),
-        };
+        // 右: フォーム
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        right.Controls.Add(_form);
+        right.Controls.Add(_empty);
+        BuildForm();
 
-        // 選択中クリップのフレーム画像を表示するプレビューボックス（黒背景でズーム表示）。
-        _preview = new PictureBox
-        {
-            Location  = new Point(10, 10),
-            Size      = new Size(180, 180),
-            SizeMode  = PictureBoxSizeMode.Zoom,
-            BackColor = Color.Black,
-            BorderStyle = BorderStyle.FixedSingle,
-        };
+        // 3分割（左｜中央｜右）。外側で左を、内側で右を分ける。
+        var outer = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 6, FixedPanel = FixedPanel.Panel1, BackColor = UiTheme.CardBorder };
+        var inner = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 6, FixedPanel = FixedPanel.Panel2, BackColor = UiTheme.CardBorder };
+        outer.Panel1.Controls.Add(left);
+        inner.Panel1.Controls.Add(center);
+        inner.Panel2.Controls.Add(right);
+        outer.Panel2.Controls.Add(inner);
+        Body.Controls.Add(outer);
+        SplitWhenReady(outer, 240, 600, 280);
+        inner.HandleCreated += (s, e) => SplitLayout.Apply(inner, 360, 320, Math.Max(361, inner.Width - 360));
+        inner.SizeChanged += (s, e) => { if (inner.Panel2.Width < 320 || inner.Panel2MinSize == 0) SplitLayout.Apply(inner, 360, 320, Math.Max(361, inner.Width - 360)); };
+        center.HandleCreated += (s, e) => SplitLayout.Apply(center, 120, 120, Math.Max(121, (int)(center.Height * 0.52)));
+        center.SizeChanged += (s, e) => { if (center.Panel1MinSize == 0) SplitLayout.Apply(center, 120, 120, Math.Max(121, (int)(center.Height * 0.52))); };
 
-        // 現在のフレーム番号・フレーム数を表示するラベル。
-        _lblFrameInfo = new Label
-        {
-            Location  = new Point(10, 198),
-            Size      = new Size(200, 40),
-            Text      = "フレーム情報",
-            ForeColor = Color.DimGray,
-        };
-
-        // プレビュー再生/停止を切り替えるトグルボタン。
-        _btnPreview = new Button
-        {
-            Text     = "▶ プレビュー",
-            Location = new Point(10, 246),
-            Size     = new Size(120, 30),
-        };
-        _btnPreview.Click += BtnPreview_Click;
-
-        pnlRight.Controls.AddRange(new Control[] { _preview, _lblFrameInfo, _btnPreview });
-        Controls.Add(pnlRight);
-
-        // ── DataGridView ────────────────────────
-        // クリップ一覧を編集するメインのグリッド。列構成はBuildGrid()で定義する。
-        _grid = BuildGrid();
-        _grid.Location = new Point(10, 40);
-        _grid.Size     = new Size(618, 390);
-        Controls.Add(_grid);
-
-        // ── タイマー ────────────────────────────
-        // プレビュー再生時のフレーム送りに使うタイマー。間隔はクリップのfps値に応じて選択時に再設定される。
-        _animTimer          = new System.Windows.Forms.Timer();
-        _animTimer.Interval = 100;
-        _animTimer.Tick    += AnimTimer_Tick;
-
-        // ── 下部ボタン ──────────────────────────
-        _btnAdd    = MakeButton("＋クリップ追加",    10,  470, 130);
-        _btnSave   = MakeButton("💾 保存して閉じる", 620, 470, 160);
-        _btnCancel = MakeButton("キャンセル",         788, 470, 100);
-
-        // 保存ボタンは強調表示、キャンセルボタンは控えめな配色にする（共通UIテーマ適用）。
-        UiTheme.StylePrimaryButton(_btnSave);
-        UiTheme.StyleSecondaryButton(_btnCancel);
-
-        _btnAdd.Click    += (_, _) => AddEmptyRow();
-        _btnSave.Click   += BtnSave_Click;
-        _btnCancel.Click += (_, _) =>
-        {
-            // キャンセル時はプレビュー再生を止めてから、変更を保存せずに閉じる。
-            StopPreview();
-            DialogResult = DialogResult.Cancel;
-            Close();
-        };
-
-        Controls.AddRange(new Control[] { _btnAdd, _btnSave, _btnCancel });
+        LeftBar.Controls.Add(Kit.Btn("＋ クリップを追加", AddClip));
+        LeftBar.Controls.Add(Kit.Btn("⧉ 複製", Duplicate));
+        LeftBar.Controls.Add(Kit.Btn("🗑 削除", Delete, danger: true));
     }
 
-    // ── DataGridView 生成 ──────────────────────
-    // クリップ一覧グリッドの列構成・表示設定を組み立てて返す。
-    private DataGridView BuildGrid()
+    private void BuildForm()
     {
-        var grid = new DataGridView
+        _form.AddItem(Kit.Field("クリップの名前", _txtName, "ゲームのスクリプトが、この名前で動きを呼び出します（例: Idle=待機、Walk=歩く）。"));
+        _form.AddItem(Kit.Heading("🖼 スプライトシート"));
+        _form.AddItem(_lblSprite);
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+        row.Controls.Add(Kit.Btn("📁 画像を選ぶ", PickSprite, primary: true));
+        _form.AddItem(row);
+
+        _form.AddItem(Kit.Heading("✂ コマの分け方"));
+        var cut = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        cut.Controls.Add(Kit.Field("横に何コマ", _fcx, null, 120));
+        cut.Controls.Add(new Panel { Width = 12, Height = 1 });
+        cut.Controls.Add(Kit.Field("縦に何コマ", _fcy, null, 120));
+        _form.AddItem(cut);
+        _form.AddItem(Kit.Hint("1枚の絵を、横×縦に等しく分けた1つ1つが「コマ」です。番号は左上が0で、右へ数えて、次の段へ続きます。"));
+
+        _form.AddItem(Kit.Heading("🎞 使うコマと速さ"));
+        var range = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        range.Controls.Add(Kit.Field("開始コマ", _start, null, 120));
+        range.Controls.Add(new Panel { Width = 12, Height = 1 });
+        range.Controls.Add(Kit.Field("終了コマ", _end, null, 120));
+        _form.AddItem(range);
+        _form.AddItem(Kit.Field("1秒に切り替えるコマ数", _fps, "数字が大きいほど速く動きます。歩きなら 8〜12、速い攻撃なら 16〜24 くらいが目安です。"));
+        _form.AddItem(_loop);
+
+        _txtName.TextChanged += (s, e) => Edit(c => c.name = _txtName.Text);
+        _fcx.ValueChanged += (s, e) => Edit(c => c.frameCountX = (int)_fcx.Value, reloadRange: true);
+        _fcy.ValueChanged += (s, e) => Edit(c => c.frameCountY = (int)_fcy.Value, reloadRange: true);
+        _start.ValueChanged += (s, e) => Edit(c => { c.startFrame = (int)_start.Value; if (c.endFrame < c.startFrame) c.endFrame = c.startFrame; }, reloadRange: true);
+        _end.ValueChanged += (s, e) => Edit(c => { c.endFrame = (int)_end.Value; if (c.startFrame > c.endFrame) c.startFrame = c.endFrame; }, reloadRange: true);
+        _fps.ValueChanged += (s, e) => Edit(c => c.fps = (float)_fps.Value, restart: false);
+        _loop.CheckedChanged += (s, e) => Edit(c => c.loop = _loop.Checked);
+    }
+
+    // 入力欄の変更を、選択中のクリップへ書き戻す。
+    private void Edit(Action<AnimationClip> apply, bool reloadRange = false, bool restart = true)
+    {
+        if (_sync || _cur == null) return;
+        apply(_cur);
+        MarkDirty();
+        if (reloadRange) { LoadRangeFields(_cur); }
+        RebuildList();
+        ApplyTimer();
+        if (restart) { _frame = Math.Max(0, _cur.startFrame); _held = false; }
+        if (!_playing) StartPlay();
+        _sheetView.Invalidate();
+        ShowFrame();
+    }
+
+    // ── 一覧 ────────────────────────────────────
+    private string KeyFor(AnimationClip c)
+    {
+        if (!_keyOf.TryGetValue(c, out var k)) { k = "c" + _keySeq++; _keyOf[c] = k; _byKey[k] = c; }
+        return k;
+    }
+
+    private Bitmap? Sheet(string rel)
+    {
+        if (string.IsNullOrEmpty(rel)) return null;
+        if (_sheets.TryGetValue(rel, out var b)) return b;
+        b = Kit.LoadBitmap(Path.Combine(_projectRoot, rel.Replace('/', '\\')));
+        _sheets[rel] = b;
+        return b;
+    }
+
+    // シートから、指定コマの絵を切り出す。範囲外・シートなしなら null。
+    private static Bitmap? CutFrame(Bitmap? sheet, AnimationClip c, int index)
+    {
+        if (sheet == null || c.frameCountX <= 0 || c.frameCountY <= 0) return null;
+        int cw = sheet.Width / c.frameCountX, ch = sheet.Height / c.frameCountY;
+        if (cw <= 0 || ch <= 0) return null;
+        int col = index % c.frameCountX, row = index / c.frameCountX;
+        if (row >= c.frameCountY || index < 0) return null;
+        var bmp = new Bitmap(cw, ch, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.DrawImage(sheet, new Rectangle(0, 0, cw, ch), new Rectangle(col * cw, row * ch, cw, ch), GraphicsUnit.Pixel);
+        return bmp;
+    }
+
+    private void RebuildList()
+    {
+        var items = new List<CardItem>();
+        foreach (var c in _clips)
         {
-            AutoSizeColumnsMode   = DataGridViewAutoSizeColumnsMode.None,
-            AllowUserToAddRows    = false,
-            AllowUserToDeleteRows = false,
-            RowHeadersWidth       = 30,
-            SelectionMode         = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect           = false,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-            ColumnHeadersHeight   = 28,
+            using var f0 = CutFrame(Sheet(c.sprite), c, c.startFrame);
+            int frames = Math.Max(1, c.endFrame - c.startFrame + 1);
+            items.Add(new CardItem
+            {
+                Key = KeyFor(c), Title = c.name.Length > 0 ? c.name : "（名前なし）",
+                Subtitle = $"{frames}コマ（{c.startFrame}〜{c.endFrame}） ・ {c.fps:0.#}fps ・ {(c.loop ? "ループ" : "1回")}",
+                Accent = UiTheme.KindTrigger, Icon = Kit.Thumb(f0, 40),
+                Tip = string.IsNullOrEmpty(c.sprite) ? "画像が未設定" : c.sprite,
+            });
+        }
+        _list.EmptyText = "クリップがありません";
+        _list.SetItems(items);
+        if (_cur != null) _list.SetSelectedKey(KeyFor(_cur), scrollIntoView: false);
+    }
+
+    private void Select(AnimationClip c)
+    {
+        _cur = c;
+        _list.SetSelectedKey(KeyFor(c));
+        ShowForm(c);
+    }
+
+    private void ShowForm(AnimationClip? c)
+    {
+        _empty.Visible = c == null;
+        _form.Visible = c != null;
+        _timer.Stop(); _playing = false;
+        if (c == null) { _anim.Image = null; _sheetView.Image = null; _lblFrame.Text = ""; return; }
+        _sync = true;
+        _txtName.Text = c.name;
+        _fcx.Value = Math.Clamp(c.frameCountX, 1, 64);
+        _fcy.Value = Math.Clamp(c.frameCountY, 1, 64);
+        LoadRangeFields(c);
+        _fps.Value = c.fps;
+        _loop.Checked = c.loop;
+        _sync = false;
+
+        var sheet = Sheet(c.sprite);
+        _lblSprite.Text = string.IsNullOrEmpty(c.sprite) ? "（画像が選ばれていません）"
+            : $"{c.sprite}" + (sheet == null ? "  ⚠ 見つかりません" : $"   {sheet.Width}×{sheet.Height}px");
+        _lblSprite.ForeColor = sheet == null && !string.IsNullOrEmpty(c.sprite) ? Color.Firebrick : UiTheme.TextMain;
+        _sheetView.Image = sheet;
+        _sheetView.Invalidate();
+        _form.ScrollToTop();
+
+        _frame = c.startFrame; _held = false;
+        ApplyTimer();
+        StartPlay();
+        ShowFrame();
+    }
+
+    // 開始・終了コマの入力欄の上限を、コマの総数に合わせる。
+    private void LoadRangeFields(AnimationClip c)
+    {
+        bool was = _sync; _sync = true;
+        int total = Math.Max(1, c.frameCountX * c.frameCountY);
+        _start.Maximum = total - 1; _end.Maximum = total - 1;
+        c.startFrame = Math.Clamp(c.startFrame, 0, total - 1);
+        c.endFrame = Math.Clamp(c.endFrame, c.startFrame, total - 1);
+        _start.Value = c.startFrame; _end.Value = c.endFrame;
+        _sync = was;
+    }
+
+    // ── 再生 ────────────────────────────────────
+    private void ApplyTimer()
+    {
+        if (_cur == null) return;
+        _timer.Interval = _cur.fps > 0 ? Math.Max(15, (int)(1000f / _cur.fps)) : 100;
+    }
+
+    private void StartPlay()
+    {
+        if (_cur == null || Sheet(_cur.sprite) == null) return;
+        _playing = true; _held = false;
+        _btnPlay.Text = "⏸ 止める";
+        _timer.Start();
+    }
+
+    private void TogglePlay()
+    {
+        if (_playing) { _timer.Stop(); _playing = false; _btnPlay.Text = "▶ 再生"; return; }
+        if (_cur != null && (_held || _frame >= _cur.endFrame)) _frame = _cur.startFrame;
+        StartPlay();
+    }
+
+    private void Tick(object? sender, EventArgs e)
+    {
+        if (_cur == null) return;
+        if (_cur.endFrame <= _cur.startFrame) { _frame = _cur.startFrame; ShowFrame(); return; }   // 1コマだけ＝止まった絵
+        _frame++;
+        if (_frame > _cur.endFrame)
+        {
+            if (_cur.loop) _frame = _cur.startFrame;
+            else { _frame = _cur.endFrame; _held = true; _timer.Stop(); _playing = false; _btnPlay.Text = "▶ もう一度"; }
+        }
+        ShowFrame();
+    }
+
+    private void ShowFrame()
+    {
+        if (_cur == null) return;
+        var old = _anim.Image;
+        _anim.Image = CutFrame(Sheet(_cur.sprite), _cur, _frame);
+        old?.Dispose();
+        _lblFrame.Text = _anim.Image == null ? "" : $"コマ {_frame}（{_cur.startFrame}〜{_cur.endFrame}）";
+        _sheetView.Invalidate();
+    }
+
+    // ── スプライトシートの重ね描きとクリック ──────
+    // コマの格子線、使うコマの範囲、いま表示中のコマの枠を、シートの上に重ねる。
+    private void DrawSheetOverlay(Graphics g, RectangleF r, float k)
+    {
+        if (_cur == null) return;
+        int fx = Math.Max(1, _cur.frameCountX), fy = Math.Max(1, _cur.frameCountY);
+        float cw = r.Width / fx, ch = r.Height / fy;
+        using var rangeBrush = new SolidBrush(Color.FromArgb(70, 0, 160, 255));
+        using var gridPen = new Pen(Color.FromArgb(120, 255, 255, 255));
+        using var curPen = new Pen(Color.FromArgb(255, 255, 200, 0), 2);
+        using var edgePen = new Pen(Color.FromArgb(255, 0, 150, 255), 2);
+        for (int i = _cur.startFrame; i <= _cur.endFrame && i < fx * fy; i++)
+            g.FillRectangle(rangeBrush, r.X + (i % fx) * cw, r.Y + (i / fx) * ch, cw, ch);
+        for (int x = 0; x <= fx; x++) g.DrawLine(gridPen, r.X + x * cw, r.Y, r.X + x * cw, r.Bottom);
+        for (int y = 0; y <= fy; y++) g.DrawLine(gridPen, r.X, r.Y + y * ch, r.Right, r.Y + y * ch);
+        if (_cur.startFrame < fx * fy) g.DrawRectangle(edgePen, r.X + (_cur.startFrame % fx) * cw, r.Y + (_cur.startFrame / fx) * ch, cw, ch);
+        if (_cur.endFrame < fx * fy) g.DrawRectangle(edgePen, r.X + (_cur.endFrame % fx) * cw, r.Y + (_cur.endFrame / fx) * ch, cw, ch);
+        if (_frame < fx * fy) g.DrawRectangle(curPen, r.X + (_frame % fx) * cw + 2, r.Y + (_frame / fx) * ch + 2, cw - 4, ch - 4);
+        // コマ番号
+        for (int i = 0; i < fx * fy && cw > 26 && ch > 18; i++)
+            TextRenderer.DrawText(g, i.ToString(), UiTheme.Small, new Point((int)(r.X + (i % fx) * cw + 3), (int)(r.Y + (i / fx) * ch + 1)), Color.White);
+    }
+
+    // シートのコマをクリック＝開始コマ、右クリック＝終了コマ。
+    private void SheetMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (_cur == null || _sheetView.Image == null || _sheetView.ImageRect.IsEmpty) return;
+        var r = _sheetView.ImageRect;
+        if (!r.Contains(e.Location)) return;
+        int fx = Math.Max(1, _cur.frameCountX), fy = Math.Max(1, _cur.frameCountY);
+        int col = Math.Clamp((int)((e.X - r.X) / (r.Width / fx)), 0, fx - 1);
+        int row = Math.Clamp((int)((e.Y - r.Y) / (r.Height / fy)), 0, fy - 1);
+        int idx = row * fx + col;
+        if (e.Button == MouseButtons.Right) { _cur.endFrame = idx; if (_cur.startFrame > idx) _cur.startFrame = idx; }
+        else if (e.Button == MouseButtons.Left) { _cur.startFrame = idx; if (_cur.endFrame < idx) _cur.endFrame = idx; }
+        else return;
+        MarkDirty();
+        LoadRangeFields(_cur);
+        _frame = _cur.startFrame; _held = false;
+        RebuildList();
+        if (!_playing) StartPlay();
+        ShowFrame();
+    }
+
+    // ── 操作 ────────────────────────────────────
+    private void AddClip()
+    {
+        // 直前のクリップと同じ画像・分け方から始めると、続けて作りやすい。
+        var c = new AnimationClip { name = $"clip{_clips.Count + 1}", fps = 12f };
+        if (_cur != null) { c.sprite = _cur.sprite; c.frameCountX = _cur.frameCountX; c.frameCountY = _cur.frameCountY; }
+        _clips.Add(c);
+        MarkDirty();
+        RebuildList();
+        Select(c);
+    }
+
+    private void Duplicate()
+    {
+        if (_cur == null) return;
+        var c = new AnimationClip
+        {
+            name = _cur.name + "_copy", sprite = _cur.sprite, frameCountX = _cur.frameCountX, frameCountY = _cur.frameCountY,
+            startFrame = _cur.startFrame, endFrame = _cur.endFrame, fps = _cur.fps, loop = _cur.loop,
         };
-        // セルの型変換エラー（不正な数値入力など）が発生してもダイアログを出さずに無視する。
-        grid.DataError += (_, e) => e.Cancel = true;
-
-        // name 列（クリップ名。任意の文字列）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colName", HeaderText = "name", Width = 100
-        });
-
-        // sprite 列（スプライトシートの相対パス。読み取り専用。📁選択ボタン経由でのみ変更可能）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colSprite", HeaderText = "sprite", Width = 140,
-            ReadOnly = true,
-            DefaultCellStyle = { BackColor = Color.WhiteSmoke }
-        });
-
-        // frameCountX 列（スプライトシートを横方向に何分割するか）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colFCX", HeaderText = "FCX", Width = 44,
-            ValueType = typeof(int)
-        });
-
-        // frameCountY 列（スプライトシートを縦方向に何分割するか）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colFCY", HeaderText = "FCY", Width = 44,
-            ValueType = typeof(int)
-        });
-
-        // startFrame 列（再生開始フレーム番号。0始まりの通し番号）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colStart", HeaderText = "start", Width = 46,
-            ValueType = typeof(int)
-        });
-
-        // endFrame 列（再生終了フレーム番号）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colEnd", HeaderText = "end", Width = 46,
-            ValueType = typeof(int)
-        });
-
-        // fps 列（再生速度。1秒あたりのフレーム数）
-        grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colFps", HeaderText = "fps", Width = 46,
-            ValueType = typeof(float)
-        });
-
-        // loop チェックボックス列（endFrameに達したらstartFrameへ戻ってループ再生するかどうか）
-        grid.Columns.Add(new DataGridViewCheckBoxColumn
-        {
-            Name = "colLoop", HeaderText = "loop", Width = 46
-        });
-
-        // ボタン列：📁選択（クリックでスプライトシートのファイル選択ダイアログを開く）
-        grid.Columns.Add(new DataGridViewButtonColumn
-        {
-            Name = "colBtnFile", HeaderText = "", Width = 64,
-            Text = "📁選択", UseColumnTextForButtonValue = true
-        });
-
-        grid.CellContentClick += Grid_CellContentClick;
-        grid.SelectionChanged  += Grid_SelectionChanged;
-
-        return grid;
+        _clips.Insert(_clips.IndexOf(_cur) + 1, c);
+        MarkDirty();
+        RebuildList();
+        Select(c);
     }
 
-    // ── データ流し込み ────────────────────────
-    // 渡されたクリップ一覧をグリッドに反映する（既存行はすべてクリアしてから追加し直す）。
-    private void PopulateGrid(List<AnimationClip> clips)
+    private void Delete()
     {
-        _grid.Rows.Clear();
-        foreach (var c in clips)
-            AddRow(c);
+        if (_cur == null) return;
+        if (MessageBox.Show($"クリップ「{_cur.name}」を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        int i = _clips.IndexOf(_cur);
+        _clips.Remove(_cur);
+        _cur = null;
+        MarkDirty();
+        RebuildList();
+        if (_clips.Count > 0) Select(_clips[Math.Min(i, _clips.Count - 1)]); else ShowForm(null);
     }
 
-    // グリッドに1行追加する。clipがnullの場合は既定値による空の新規行を追加する。
-    private void AddRow(AnimationClip? clip = null)
+    // スプライトシートの画像を選び、プロジェクトの img フォルダへコピーして設定する。
+    private void PickSprite()
     {
-        int idx = _grid.Rows.Add();
-        var row  = _grid.Rows[idx];
-
-        // 各セルへclipの値（またはnullの場合は既定値）を設定する。
-        row.Cells["colName"].Value   = clip?.name        ?? "";
-        row.Cells["colSprite"].Value = clip?.sprite      ?? "";
-        row.Cells["colFCX"].Value    = clip?.frameCountX ?? 1;
-        row.Cells["colFCY"].Value    = clip?.frameCountY ?? 1;
-        row.Cells["colStart"].Value  = clip?.startFrame  ?? 0;
-        row.Cells["colEnd"].Value    = clip?.endFrame    ?? 0;
-        row.Cells["colFps"].Value    = clip?.fps         ?? 12f;
-        row.Cells["colLoop"].Value   = clip?.loop        ?? true;
-    }
-
-    // 「＋クリップ追加」ボタンから呼ばれる、空の新規クリップ行を追加するショートカット。
-    private void AddEmptyRow() => AddRow(null);
-
-    // ── セルボタンクリック ─────────────────────
-    // グリッド内のボタン列（📁選択）がクリックされた時のハンドラ。
-    private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
-    {
-        // ヘッダー行のクリック（RowIndex < 0）は対象外。
-        if (e.RowIndex < 0) return;
-        if (_grid.Columns[e.ColumnIndex].Name == "colBtnFile")
-            SelectSpriteFile(e.RowIndex);
-    }
-
-    // ── ファイル選択 ──────────────────────────
-    // 指定した行のスプライトシート画像をファイル選択ダイアログから選ばせ、プロジェクトのimgフォルダへコピーする。
-    // rowIndex : 対象となるグリッドの行インデックス
-    private void SelectSpriteFile(int rowIndex)
-    {
-        using var dlg = new OpenFileDialog
-        {
-            Title  = "スプライトシートを選択",
-            Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*"
-        };
-
-        // ユーザーがキャンセルした場合は何もせず終了。
+        if (_cur == null) return;
+        using var dlg = new OpenFileDialog { Title = "スプライトシートを選ぶ", Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*" };
         if (dlg.ShowDialog() != DialogResult.OK) return;
-
         try
         {
-            // imgフォルダが存在しない場合は作成する（存在していてもエラーにはならない）。
             Directory.CreateDirectory(_imgDir);
             string dest = Path.Combine(_imgDir, Path.GetFileName(dlg.FileName));
-
-            // 選択したファイルが既にimgフォルダ内にある場合はコピー不要（同一パスへの上書きコピーを避ける）。
-            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase))
-                File.Copy(dlg.FileName, dest, overwrite: true);
-
-            // グリッドにはプロジェクトルートからの相対パス（"img/xxx.png"形式）を保存する。
-            string relPath = "img/" + Path.GetFileName(dlg.FileName);
-            _grid.Rows[rowIndex].Cells["colSprite"].Value = relPath;
+            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase)) File.Copy(dlg.FileName, dest, overwrite: true);
+            string rel = "img/" + Path.GetFileName(dlg.FileName);
+            if (_sheets.Remove(rel, out var old)) old?.Dispose();    // 同じ名前で差し替えたときのため、読み直す
+            _cur.sprite = rel;
+            MarkDirty();
+            RebuildList();
+            ShowForm(_cur);
         }
         catch (Exception ex)
         {
-            // コピー失敗時（アクセス権限がない等）はエラーメッセージを表示するのみで処理を中断する。
-            MessageBox.Show("ファイルコピーに失敗しました:\n" + ex.Message,
-                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("ファイルのコピーに失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    // ── 選択行変更 ────────────────────────────
-    // グリッドの選択行が変わった時、プレビューを選択中クリップの内容に切り替える。
-    private void Grid_SelectionChanged(object? sender, EventArgs e)
+    // ── 保存 ────────────────────────────────────
+    protected override void OnSave()
     {
-        // 前のクリップの再生を止めてから、新しい選択行の情報を読み込む。
-        StopPreview();
-        LoadSelectedClip();
-        // Feature: UI改善（提案書 AN-2）— クリップを選んだ瞬間に自動再生し、都度ボタンを押す手間を無くす
-        if (_spriteSheet != null) StartPreview();
-    }
-
-    // 現在グリッドで選択されている行の情報を読み込み、プレビュー用のフィールドに反映する。
-    private void LoadSelectedClip()
-    {
-        // 選択行がない場合は何もしない。
-        if (_grid.SelectedRows.Count == 0) return;
-        var row = _grid.SelectedRows[0];
-
-        string sprite = row.Cells["colSprite"].Value?.ToString() ?? "";
-        _frameCountX  = TryGetInt(row, "colFCX",   1);
-        _frameCountY  = TryGetInt(row, "colFCY",   1);
-        _startFrame   = TryGetInt(row, "colStart",  0);
-        _endFrame     = TryGetInt(row, "colEnd",    0);
-        float fps     = TryGetFloat(row, "colFps", 12f);
-
-        // fpsから1フレームあたりのタイマー間隔(ms)を逆算する。fpsが0以下の不正値なら既定の100msにフォールバック。
-        _animTimer.Interval = fps > 0 ? (int)(1000f / fps) : 100;
-        // 再生位置を開始フレームにリセットする。
-        _currentFrame = _startFrame;
-
-        LoadSpriteSheet(sprite);
-        DrawFrame();
-        UpdateFrameLabel();
-    }
-
-    // 指定された相対パスからスプライトシート画像を読み込み、_spriteSheetフィールドにセットする。
-    // relPath : プロジェクトルートからの相対パス（例: "img/enemy1.png"）
-    private void LoadSpriteSheet(string relPath)
-    {
-        // 前の画像リソースを確実に解放してから読み込み直す（メモリリーク防止）。
-        _spriteSheet?.Dispose();
-        _spriteSheet = null;
-
-        // パスが空であれば画像なしの状態で終了。
-        if (string.IsNullOrEmpty(relPath)) return;
-
-        string fullPath = Path.Combine(_projectRoot, relPath.Replace('/', '\\'));
-        // ファイルが実際に存在しない場合は読み込まずに終了（存在しないパスが指定されているクリップの保護）。
-        if (!File.Exists(fullPath)) return;
-
-        try
-        {
-            _spriteSheet = new Bitmap(fullPath);
-        }
-        catch
-        {
-            // 画像として読み込めない不正なファイルの場合はnullのままにしておく。
-            _spriteSheet = null;
-        }
-    }
-
-    // ── フレーム描画 ──────────────────────────
-    // 現在の_currentFrameに対応する矩形をスプライトシートから切り出し、プレビューに表示する。
-    private void DrawFrame()
-    {
-        // スプライトシートが未読み込み、またはフレーム分割数が不正な場合はプレビューを空にする。
-        if (_spriteSheet == null || _frameCountX <= 0 || _frameCountY <= 0)
-        {
-            _preview.Image = null;
-            return;
-        }
-
-        // スプライトシート全体のサイズを分割数で割って、1フレームあたりのセルサイズを求める。
-        int cellW = _spriteSheet.Width  / _frameCountX;
-        int cellH = _spriteSheet.Height / _frameCountY;
-
-        // 通し番号のフレームインデックスを、横方向の列番号・縦方向の行番号に変換する。
-        int col = _currentFrame % _frameCountX;
-        int row = _currentFrame / _frameCountX;
-
-        // 行番号が縦方向の分割数を超える場合（フレーム番号が範囲外）は表示せず終了。
-        if (row >= _frameCountY)
-        {
-            _preview.Image = null;
-            return;
-        }
-
-        // スプライトシート内の該当セル矩形を、同サイズの新しいビットマップへ切り出してコピーする。
-        var srcRect = new Rectangle(col * cellW, row * cellH, cellW, cellH);
-        var bmp     = new Bitmap(cellW, cellH);
-        using (var g = Graphics.FromImage(bmp))
-            g.DrawImage(_spriteSheet, new Rectangle(0, 0, cellW, cellH), srcRect, GraphicsUnit.Pixel);
-
-        // 古い画像を保持してから差し替え、差し替え後に古い方を破棄する（表示の一瞬の欠落を防ぐ順序）。
-        var old = _preview.Image;
-        _preview.Image = bmp;
-        old?.Dispose();
-    }
-
-    // 現在のフレーム番号・フレーム分割情報をラベルに反映する。
-    private void UpdateFrameLabel()
-    {
-        _lblFrameInfo.Text =
-            $"フレーム: {_currentFrame} / {_endFrame}\n" +
-            $"FCX:{_frameCountX} FCY:{_frameCountY}";
-    }
-
-    // ── タイマー Tick ─────────────────────────
-    // アニメーションタイマーが一定間隔で発火するたびに呼ばれ、フレームを1つ進めて再描画する。
-    private void AnimTimer_Tick(object? sender, EventArgs e)
-    {
-        // 終了フレームが開始フレーム以下（=再生範囲が無効）の場合は再生を止める。
-        if (_endFrame <= _startFrame)
-        {
-            StopPreview();
-            return;
-        }
-
-        _currentFrame++;
-        // 終了フレームを超えたら開始フレームへ戻ってループ再生する。
-        if (_currentFrame > _endFrame)
-            _currentFrame = _startFrame;
-
-        DrawFrame();
-        UpdateFrameLabel();
-    }
-
-    // ── プレビュー開始/停止 ───────────────────
-    // プレビューボタン押下時のハンドラ。再生中なら停止、停止中なら再生を開始するトグル動作。
-    private void BtnPreview_Click(object? sender, EventArgs e)
-    {
-        if (_isPlaying)
-        {
-            StopPreview();
-        }
-        else
-        {
-            // スプライトシートが未設定の場合は再生できないため、案内メッセージを出して終了する。
-            if (_spriteSheet == null)
-            {
-                MessageBox.Show("スプライトが設定されていません。",
-                    "プレビュー", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            StartPreview();
-        }
-    }
-
-    // プレビュー再生を開始する（タイマーを起動し、ボタン表示を「停止」に切り替える）。
-    private void StartPreview()
-    {
-        if (_spriteSheet == null) return;
-        _isPlaying = true;
-        _btnPreview.Text = "⏹ 停止";
-        // 再生開始時は必ず開始フレームから始める。
-        _currentFrame = _startFrame;
-        _animTimer.Start();
-    }
-
-    // プレビュー再生を停止する（タイマーを止め、ボタン表示を「再生」に戻す）。
-    private void StopPreview()
-    {
-        _animTimer.Stop();
-        _isPlaying       = false;
-        _btnPreview.Text = "▶ プレビュー";
-    }
-
-    // ── 保存 ──────────────────────────────────
-    // 保存ボタン押下時のハンドラ。グリッドの全行からAnimationClipのリストを組み立て、ResultSetとして確定する。
-    private void BtnSave_Click(object? sender, EventArgs e)
-    {
-        StopPreview();
-
-        var clips = new List<AnimationClip>();
-        foreach (DataGridViewRow row in _grid.Rows)
-        {
-            // DataGridViewが自動生成する「新規行プレースホルダ」はデータではないためスキップする。
-            if (row.IsNewRow) continue;
-            clips.Add(new AnimationClip
-            {
-                name        = row.Cells["colName"].Value?.ToString()   ?? "",
-                sprite      = row.Cells["colSprite"].Value?.ToString() ?? "",
-                frameCountX = TryGetInt(row, "colFCX",   1),
-                frameCountY = TryGetInt(row, "colFCY",   1),
-                startFrame  = TryGetInt(row, "colStart",  0),
-                endFrame    = TryGetInt(row, "colEnd",    0),
-                fps         = TryGetFloat(row, "colFps", 12f),
-                loop        = row.Cells["colLoop"].Value is bool b && b,
-            });
-        }
-
-        // 入力されたassetIdと組み立てたクリップ一覧をまとめて結果として確定する。
         ResultSet = new AnimationSet
         {
             assetId = _txtAssetId.Text,
-            clips   = clips,
+            clips = _clips.Select(c => new AnimationClip
+            {
+                name = c.name, sprite = c.sprite, frameCountX = c.frameCountX, frameCountY = c.frameCountY,
+                startFrame = c.startFrame, endFrame = c.endFrame, fps = c.fps, loop = c.loop,
+            }).ToList(),
         };
-
         DialogResult = DialogResult.OK;
         Close();
     }
 
-    // ── ヘルパー ──────────────────────────────
-    // 指定したセルの値を整数として解析する。解析に失敗した場合はfallback値を返す。
-    private static int TryGetInt(DataGridViewRow row, string col, int fallback)
-    {
-        return int.TryParse(row.Cells[col].Value?.ToString(), out int v) ? v : fallback;
-    }
-
-    // 指定したセルの値を浮動小数点数として解析する。解析に失敗した場合はfallback値を返す。
-    private static float TryGetFloat(DataGridViewRow row, string col, float fallback)
-    {
-        return float.TryParse(row.Cells[col].Value?.ToString(), out float v) ? v : fallback;
-    }
-
-    // 共通スタイルのボタンを生成するショートカット（位置・サイズのみ指定し、見た目はUiThemeに委ねる）。
-    private static Button MakeButton(string text, int x, int y, int w) =>
-        UiTheme.CreateButton(text, new Point(x, y), new Size(w, 30));
-
-    // フォームが閉じられる際、再生中のプレビューを止めて画像リソース・タイマーを確実に解放する。
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        StopPreview();
-        _spriteSheet?.Dispose();
-        _animTimer.Dispose();
-        _preview.Image?.Dispose();
+        _timer.Stop(); _timer.Dispose();
+        _anim.Image?.Dispose();
+        foreach (var b in _sheets.Values) b?.Dispose();
         base.OnFormClosed(e);
     }
 }

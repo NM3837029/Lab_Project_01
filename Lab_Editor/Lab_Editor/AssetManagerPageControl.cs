@@ -12,7 +12,7 @@ namespace Lab_Editor;
 /// ・type_enumごとのパラメータ説明
 /// ・ギミック・アイテムもフル編集
 /// </summary>
-public class AssetManagerPageControl : UserControl
+public partial class AssetManagerPageControl : UserControl
 {
     // このクラスはWinFormsの「UserControl」（Formそのものではなく、他のFormに埋め込んで使う部品）として作られている。
     // UserControlにはFormが持っているDialogResultプロパティやClose()メソッドが存在しないため、
@@ -54,25 +54,18 @@ public class AssetManagerPageControl : UserControl
     // 各セクション自体（中身のグリッドやリスト）は既存のものをそのまま流用しており、
     // データの読み書きロジック（保存/読み込み処理）は一切変更していない。
     // sectionEnemy等は「見出し＋中身のグリッド」をひとまとめにしたパネルで、タグボタンでVisibleを切り替える対象。
-    private Panel sectionEnemy = null!, sectionGimmick = null!, sectionItem = null!, sectionCommonEvent = null!;
     // 敵・ギミック・アイテムそれぞれの一覧を表示する表形式コントロール(DataGridView)
     private DataGridView dgvEnemies = null!, dgvGimmicks = null!, dgvItems = null!;
     // コモンイベント（複数のトリガーから呼び出せる共通処理）の一覧を表示するリストボックス
-    private ListBox lstCommonEvents = null!;
     // コモンイベート定義の実体を保持するリスト。保存時にassets.CommonEventsへ書き戻す
     private List<CommonEventDef> _commonEvents = new();
     // ID・名前で絞り込むための検索ボックス
-    private TextBox txtSearch = null!;
     // 選択中の行を複製するボタン（複製先の種別は選択されている行の種類に応じて自動判定する）
-    private Button btnDuplicate = null!;
     // 右側パネルに表示するスプライト画像のプレビュー用コントロール
-    private PictureBox pbPreview = null!;
     // プレビュー中の画像のファイルパスを表示するラベル
-    private Label lblPreviewPath = null!;
     // 保存ボタンと閉じる(キャンセル)ボタン
     private Button btnSave = null!, btnClose = null!;
     // 選択中の種別(敵/ギミック/アイテム/コモンイベント)のtype_enum一覧・説明文を表示するリッチテキストボックス
-    private RichTextBox rtbTypeHint = null!;
 
     // ==== 機能: 敵/ギミックごとに調整可能な挙動パラメータ (Configurable Behavior Parameters, 通称 M1) ====
     // 敵・ギミックのDataGridViewには「ID・名前・タイプ・HP」等の基本項目しか列として出していないが、
@@ -88,13 +81,10 @@ public class AssetManagerPageControl : UserControl
     // 子パーツの配列など）を、対応する行に紐づけて保持しておく必要があるため用意した辞書。
     private readonly Dictionary<DataGridViewRow, ItemDef> _itemParams = new();
     // 選択中の敵/ギミックの挙動パラメータ入力欄をまとめて表示するパネル（type_enumごとに中身を動的に作り直す）
-    private Panel pnlBehaviorParams = null!;
     // 右側パネルの見出しラベル。「📋 タイプ説明」または「⚙ 挙動パラメータ」のどちらかの文言に切り替わる
-    private Label lblTypeHintTitle = null!;
     // 挙動パラメータ欄(NumericUpDown)の値を「プログラム側から」書き換えている最中かどうかを示すフラグ。
     // trueの間はValueChangedイベント内の処理をスキップし、ユーザー未操作なのに値が上書きされる無限ループや
     // 意図しない書き込みを防ぐ（UpdateBehaviorParamsPanel参照）。
-    private bool _isUpdatingBehaviorPanel = false;
 
     // type_enum(敵のタイプ番号)ごとに表示する挙動パラメータ欄の定義一覧。
     // タプルの中身は (フィールド名: EnemyDefのプロパティ名, ラベル: 画面に表示する日本語名, 小数点以下桁数: NumericUpDownの表示桁数)。
@@ -284,6 +274,8 @@ public class AssetManagerPageControl : UserControl
         InitUI();
         // assetsの内容を各グリッド/リストへ流し込んで表示する
         LoadData();
+        RebuildCards();
+        _dirty = false;
     }
 
     // stagesフォルダに存在するステージJSONファイル名の一覧を返す。
@@ -301,277 +293,7 @@ public class AssetManagerPageControl : UserControl
             .ToList();
     }
 
-    // このページを構成する全コントロール（検索欄・タグボタン・プレビュー・各グリッド・ボタン類）を
-    // ここで一括して生成し、配置する。コンストラクタから一度だけ呼ばれる、いわば画面の組み立て工程。
-    private void InitUI()
-    {
-        // このUserControl自体を親(ホストFormやシェル画面)いっぱいに広げる
-        Dock = DockStyle.Fill;
-        // アプリ全体で統一されたフォント設定(UiTheme.Base)を適用する
-        Font = UiTheme.Base;
-
-        // ===== 上部: 検索ボックス + タグ絞り込みボタン =====
-        // 機能追加: UI改善 — 検索欄と、複数選択できる種別タグボタン（押し込み状態を持つボタン=Appearance.Button）を
-        // 1つのDock=Top(画面上端に張り付く)パネルにまとめている。タグはCheckBoxコントロールで実装しており、
-        // 押した状態(Checked=true)が「そのタグがON＝該当セクションを表示する」という意味になる。
-        // 機能追加: UI改善 — 検索欄とタグ行はウィンドウの横幅によっては折り返して2行以上になる可能性があるため、
-        // 高さを固定値にせず、AutoSize（中身に合わせて自動で高さが伸縮する設定）にしている。
-        // こうしないと、折り返した分の行が下段のグリッド等に隠れてはみ出してしまう。
-        var pnlTop = new Panel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-
-        // 検索アイコン・検索ボックス・複製ボタンを横に並べるツールバー
-        var pnlToolbar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
-        var lblSearch = new Label { Text = "🔍", AutoSize = true, Margin = new Padding(2, 6, 0, 0) };
-        txtSearch = new TextBox { Width = 240, Margin = new Padding(4, 3, 12, 0), PlaceholderText = "ID・名前で検索..." };
-        // 検索ボックスの文字が変わるたびに、即座に絞り込みを再適用する（ボタン押下等は不要）
-        txtSearch.TextChanged += (s, e) => ApplySearchFilter();
-        btnDuplicate = new Button { Text = "⧉ 選択行を複製", AutoSize = true, Padding = new Padding(6, 4, 6, 4), Margin = new Padding(4, 1, 0, 0) };
-        btnDuplicate.Click += BtnDuplicate_Click;
-        pnlToolbar.Controls.AddRange(new Control[] { lblSearch, txtSearch, btnDuplicate });
-
-        // 敵/ギミック/アイテム/コモンイベントの各セクションを表示するかどうかを切り替えるタグボタン群
-        var pnlTags = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4, 0, 4, 4) };
-        // 4つのタグボタンはすべて初期状態でChecked=true（＝すべてのセクションを表示した状態で開始する）
-        var chkTagEnemy = new CheckBox { Text = "👾 敵", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkTagGimmick = new CheckBox { Text = "🔧 ギミック", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkTagItem = new CheckBox { Text = "💎 アイテム", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkTagCommonEvent = new CheckBox { Text = "🔔 コモンイベント", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        // チェック状態が変わるたびに、対応するセクションパネルのVisibleを直接切り替える（単純なON/OFF連動）
-        chkTagEnemy.CheckedChanged += (s, e) => sectionEnemy.Visible = chkTagEnemy.Checked;
-        chkTagGimmick.CheckedChanged += (s, e) => sectionGimmick.Visible = chkTagGimmick.Checked;
-        chkTagItem.CheckedChanged += (s, e) => sectionItem.Visible = chkTagItem.Checked;
-        chkTagCommonEvent.CheckedChanged += (s, e) => sectionCommonEvent.Visible = chkTagCommonEvent.Checked;
-        pnlTags.Controls.AddRange(new Control[] { chkTagEnemy, chkTagGimmick, chkTagItem, chkTagCommonEvent });
-
-        // タグ行を先に追加し、その下にツールバー行を追加する（Dock=Topなので追加順=画面上での並び順になる）
-        pnlTop.Controls.Add(pnlTags);
-        pnlTop.Controls.Add(pnlToolbar);
-
-        // ===== 右サイドパネル（プレビュー・タイプ説明・挙動パラメータをまとめて表示） =====
-        var pnlRight = new Panel { Dock = DockStyle.Right, Width = 260, BorderStyle = BorderStyle.FixedSingle };
-        // 右サイドの中身は縦に並べるFlowLayoutPanel。AutoSizeで必要な高さぶんだけ伸びる
-        var flowRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(5) };
-
-        // スプライト画像のプレビュー表示エリア（黒背景の枠+マウスホイールでズーム可能）
-        var lblPrev = new Label { Text = "🖼 スプライトプレビュー（ホイールでズーム）", AutoSize = true, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 0, 0, 4) };
-        var pnlPreviewHost = new Panel { Width = 238, Height = 180, BorderStyle = BorderStyle.FixedSingle, BackColor = Color.Black, AutoScroll = true, Margin = new Padding(0, 0, 0, 2) };
-        pbPreview = new PictureBox { SizeMode = PictureBoxSizeMode.Normal, BackColor = Color.Black };
-        pnlPreviewHost.Controls.Add(pbPreview);
-        // プレビュー枠の上でマウスホイールを回すとズームイン/アウトする（PnlPreviewHost_MouseWheel参照）
-        pnlPreviewHost.MouseWheel += PnlPreviewHost_MouseWheel;
-        lblPreviewPath = new Label { Width = 238, Height = 40, Font = new Font("Meiryo UI", 7), ForeColor = Color.Gray, Text = "(選択なし)", Margin = new Padding(0, 0, 0, 4) };
-
-        // 「タイプ説明」パネル。選択中の種別のtype_enum一覧・平易な説明文をここに表示する
-        lblTypeHintTitle = new Label { Text = "📋 タイプ説明", Width = 238, Font = new Font("Meiryo UI", 9, FontStyle.Bold), Margin = new Padding(0, 4, 0, 2) };
-        rtbTypeHint = new RichTextBox
-        {
-            Width = 238,
-            Height = 330,
-            ReadOnly = true,
-            ScrollBars = RichTextBoxScrollBars.Vertical,
-            Font = new Font("Meiryo UI", 8),
-            BackColor = Color.FromArgb(250, 250, 250),
-            BorderStyle = BorderStyle.None
-        };
-
-        // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 選択中の敵/ギミック行のtype_enumに
-        // 応じて、挙動パラメータの入力欄(NumericUpDown群)を動的に組み立てて表示するためのパネル。
-        // rtbTypeHint（タイプ説明欄）と同じ場所に重ねて配置しておき、状況に応じてどちらか一方だけを
-        // Visible=trueにすることで、あたかも1つの枠の中身が切り替わっているように見せている。
-        pnlBehaviorParams = new Panel
-        {
-            Width = 238,
-            Height = 330,
-            AutoScroll = true,
-            Visible = false
-        };
-
-        // 右サイドパネルへ、上から順に「プレビュー見出し→プレビュー枠→パス表示→タイプ説明見出し→
-        // タイプ説明欄→挙動パラメータパネル」の順で追加する（FlowLayoutPanelなのでこの順に縦に並ぶ）
-        flowRight.Controls.Add(lblPrev);
-        flowRight.Controls.Add(pnlPreviewHost);
-        flowRight.Controls.Add(lblPreviewPath);
-        flowRight.Controls.Add(lblTypeHintTitle);
-        flowRight.Controls.Add(rtbTypeHint);
-        flowRight.Controls.Add(pnlBehaviorParams);
-        pnlRight.Controls.Add(flowRight);
-
-        // ===== 下部ボタン（右詰め=保存/キャンセル、左詰め=追加系ボタン群。FlowLayoutPanelで自動配置） =====
-        // 機能追加: UI改善 — 左詰め側はボタンの数が多く、ウィンドウが狭いとWrapContentsによって
-        // 複数行に折り返される。以前は下段パネルの高さを固定値にしていたため、折り返して増えた行
-        // （保存/キャンセルボタンを含む行）がパネルの外側にはみ出して見えなくなる不具合があった。
-        // そこでpnlBottom自体をAutoSizeにし、必要な行数ぶんだけ自動的に高さが伸びるようにしてある。
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-        // 保存ボタン・キャンセルボタンは右詰め(RightToLeft方向に並べる)ことで、右端から順に配置される
-        var flowBottomRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 6, 8, 2), AutoSize = true };
-        // 保存ボタン。目立つよう緑色の背景色にしている
-        btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 6, 10, 6), BackColor = Color.FromArgb(40, 167, 69), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Meiryo UI", 10, FontStyle.Bold) };
-        btnSave.Click += BtnSave_Click;
-        btnClose = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 6, 10, 6) };
-        // キャンセルボタンは保存処理を一切行わず、Cancelledイベントを発火してホスト側に後始末を任せるだけ
-        btnClose.Click += (s, e) => Cancelled?.Invoke(this, EventArgs.Empty);
-        flowBottomRight.Controls.Add(btnSave);
-        flowBottomRight.Controls.Add(btnClose);
-
-        // 敵/ギミック/アイテム/コモンイベントの「追加」ボタンと、パーツ編集・挙動スクリプト編集・
-        // タイプカード選択の各ボタンを左詰めで並べる行
-        var flowBottomLeft = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8, 2, 8, 6), AutoSize = true, WrapContents = true };
-        var btnAddEnemy = new Button { Text = "＋ 敵追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        // 押すと敵グリッドへ既定値(GetDefaultEnemyRow)の新規行を1行追加する
-        btnAddEnemy.Click += (s, e) => AddRow(dgvEnemies, GetDefaultEnemyRow());
-        // 複数のパーツで動く敵を「型」から1体まとめて作るボタン。タイプ・HP・大きさ・パーツ・スクリプトが入った状態で追加される。
-        var btnNewEnemyFromTemplate = new Button { Text = "✨ 敵をテンプレートから作る", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 244, 214) };
-        btnNewEnemyFromTemplate.Click += (s, e) => BtnNewEnemyFromTemplate_Click();
-        var btnAddGimmick = new Button { Text = "＋ ギミック追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddGimmick.Click += (s, e) => AddRow(dgvGimmicks, GetDefaultGimmickRow());
-        var btnAddItem = new Button { Text = "＋ アイテム追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddItem.Click += (s, e) => AddRow(dgvItems, GetDefaultItemRow());
-        var btnAddCommonEvent = new Button { Text = "＋ コモンイベント追加", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnAddCommonEvent.Click += (s, e) => AddCommonEvent();
-        // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — 敵/ギミック/アイテムのどのグリッドを
-        // 選択していても共通で使えるボタン。パーツは親オブジェクトのtype_enumとは独立して機能するため、
-        // 挙動スクリプト編集ボタンのような「特定タイプでなければ使えない」という制限は設けていない。
-        var btnPartsEditor = new Button { Text = "🧩 パーツを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnPartsEditor.Click += (s, e) => BtnPartsEditor_Click();
-        // 機能: ブロック(パズル)組み立て式の挙動スクリプティング (M4) — ブロックエディタ画面を開くボタン
-        var btnBehaviorScript = new Button { Text = "🧩 挙動スクリプトを編集", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnBehaviorScript.Click += (s, e) => BtnBehaviorScript_Click();
-        // 敵の動きを、日本語の項目名・単位・説明つきのスライダーと、プレビューで調整する画面を開くボタン
-        var btnEnemyTune = new Button { Text = "🎛 敵の動きを調整", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(232, 244, 255) };
-        btnEnemyTune.Click += (s, e) => BtnEnemyTune_Click();
-        // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— コンボボックスの中から数字と文字が
-        // 並んだ選択肢を選ぶのではなく、アイコン・名前・説明文が並んだカード一覧をクリックして
-        // type_enumを選べるようにするためのボタン
-        var btnTypeCardPicker = new Button { Text = "🔍 タイプをカードから選ぶ", AutoSize = true, Padding = new Padding(6, 5, 6, 5) };
-        btnTypeCardPicker.Click += (s, e) => BtnTypeCardPicker_Click();
-        // 色・明るさに関わる敵・ギミックを、設定済みの完成形から作るボタン
-        var btnEnemyPreset = new Button { Text = "🎨 色・明るさの敵プリセット", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 236, 244) };
-        btnEnemyPreset.Click += (s, e) => BtnNewEnemyFromPreset_Click();
-        var btnGimmickPreset = new Button { Text = "🎨 色・明るさのギミックプリセット", AutoSize = true, Padding = new Padding(6, 5, 6, 5), BackColor = Color.FromArgb(255, 236, 244) };
-        btnGimmickPreset.Click += (s, e) => BtnNewGimmickFromPreset_Click();
-        flowBottomLeft.Controls.AddRange(new Control[] { btnAddEnemy, btnNewEnemyFromTemplate, btnEnemyPreset, btnAddGimmick, btnGimmickPreset, btnAddItem, btnAddCommonEvent, btnPartsEditor, btnBehaviorScript, btnEnemyTune, btnTypeCardPicker });
-
-        pnlBottom.Controls.Add(flowBottomLeft);
-        pnlBottom.Controls.Add(flowBottomRight);
-
-        // ===== 中央: 敵/ギミック/アイテム/コモンイベントを1つの縦スクロールビューに集約 =====
-        // 機能追加: UI改善 — 以前はFlowLayoutPanel(AutoSize)の直接の子としてDock=Fillのグリッドを
-        // 置いていたが、これだと「親がAutoSizeで子のサイズから逆算しようとする」のに対して
-        // 「子はDock=Fillで親のサイズから逆算しようとする」という、お互いがお互いを基準にして
-        // サイズを決めようとする循環（無限ループのようなもの）に陥ってしまい、結果としてグリッドが
-        // 極端に狭く潰れて表示される不具合の原因になっていた。
-        // ここでは各セクションを「高さは固定値・幅だけウィンドウに合わせて可変(Dock=Top)」のPanelにし、
-        // その内部でグリッドをDock=Fillにする、という構成にしている。親の高さが確定しているため、
-        // 子のDock=Fillが安全に機能する。これにより、ウィンドウ幅の変化にもグリッドの横幅が正しく追従する。
-        var pnlSections = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-
-        // 敵セクション: グリッド生成＋見出し付きパネル化
-        dgvEnemies = CreateEnemyGrid();
-        sectionEnemy = BuildSection("👾 敵 (Enemies)", dgvEnemies, 300);
-
-        // ギミックセクション
-        dgvGimmicks = CreateGimmickGrid();
-        sectionGimmick = BuildSection("🔧 ギミック (Gimmicks)", dgvGimmicks, 300);
-
-        // アイテムセクション
-        dgvItems = CreateItemGrid();
-        sectionItem = BuildSection("💎 アイテム (Items)", dgvItems, 220);
-
-        // ===== コモンイベント (RPGツクールMZ風: 複数トリガーから呼び出せる共通処理) =====
-        lstCommonEvents = new ListBox { Font = new Font("Meiryo UI", 9) };
-        // ダブルクリックで選択中のコモンイベントを編集画面へ
-        lstCommonEvents.DoubleClick += (s, e) => EditSelectedCommonEvent();
-        // 選択が変わったら「今アクティブな種別」をコモンイベントに切り替え、他のグリッドの選択を解除する
-        lstCommonEvents.SelectedIndexChanged += (s, e) => { if (lstCommonEvents.SelectedIndex >= 0) ClearOtherSelections(AssetKind.CommonEvent); };
-        var pnlCommonEventContent = new Panel();
-        lstCommonEvents.Dock = DockStyle.Fill;
-        // リストの下に「編集」「削除」ボタンを並べる行
-        var flowCeButtons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 34, Padding = new Padding(2) };
-        var btnCeEdit = new Button { Text = "✎ 編集", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
-        btnCeEdit.Click += (s, e) => EditSelectedCommonEvent();
-        var btnCeDelete = new Button { Text = "🗑 削除", AutoSize = true, Padding = new Padding(6, 4, 6, 4) };
-        btnCeDelete.Click += (s, e) => DeleteSelectedCommonEvent();
-        flowCeButtons.Controls.AddRange(new Control[] { btnCeEdit, btnCeDelete });
-        pnlCommonEventContent.Controls.Add(lstCommonEvents);
-        pnlCommonEventContent.Controls.Add(flowCeButtons);
-        sectionCommonEvent = BuildSection("🔔 コモンイベント", pnlCommonEventContent, 240);
-
-        // Dock=Topの子コントロールは「先に追加したものほど画面の端(この場合は上)に近づく」性質があるため、
-        // ここでのControls.Add呼び出し順が、そのまま画面上でのセクションの表示順（敵→ギミック→アイテム→
-        // コモンイベントの順）になる。
-        pnlSections.Controls.Add(sectionEnemy);
-        pnlSections.Controls.Add(sectionGimmick);
-        pnlSections.Controls.Add(sectionItem);
-        pnlSections.Controls.Add(sectionCommonEvent);
-
-        // 最後にこのUserControl自身へ各パネルを追加する。WinFormsのDockでは後から追加したものが
-        // 優先的に外側（画面の端）を占有するため、Dock=Fillのpnlsectionsを最初に追加している。
-        Controls.Add(pnlSections);
-        Controls.Add(pnlRight);
-        Controls.Add(pnlBottom);
-        Controls.Add(pnlTop);
-        // コモンイベント一覧の初期表示を反映させる
-        RefreshCommonEventsList();
-        // 右側の「タイプ説明」欄の初期表示を反映させる（まだ何も選択されていない状態の表示）
-        UpdateTypeHint();
-    }
-
-    // 種別セクション1つぶんの「見出しラベル＋中身のコントロール」をひとまとめのPanelにする補助メソッド。
-    // title         : セクションの見出しに表示する文字列（例:「👾 敵 (Enemies)」）
-    // content       : 見出しの下に配置する中身のコントロール（グリッドやリスト等）
-    // contentHeight : 中身の高さ(px)。セクション全体の高さは、この値+見出しの高さ+上下マージンで決まる
-    //
-    // 機能追加: UI改善 — 高さを固定値にし、幅だけウィンドウに合わせて可変(Dock=Top)にすることで、
-    // 中身(グリッド等)側をDock=Fillにしても安全に働く（親の高さが確定しているため）。
-    // これにより、ウィンドウ幅の変化に応じて中身の横幅も正しく追従するようになる。
-    private Panel BuildSection(string title, Control content, int contentHeight)
-    {
-        // 見出しラベルの高さと、パネル上下の余白の大きさを定数として定義しておく
-        const int titleHeight = 24;
-        const int topMargin = 4, bottomMargin = 14;
-        // セクション全体のPanel。高さは「見出し+中身+上下マージン」の合計値で固定する
-        var section = new Panel
-        {
-            Dock = DockStyle.Top,
-            Height = titleHeight + contentHeight + topMargin + bottomMargin,
-            Padding = new Padding(4, topMargin, 4, bottomMargin),
-        };
-        // 見出しラベル。太字にして中身との区別をつけ、下揃え(BottomLeft)にして中身の直上にくっつける
-        var lbl = new Label { Dock = DockStyle.Top, Height = titleHeight, Text = title, Font = new Font(Font, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
-        // 中身(グリッド等)はパネルいっぱいに広げ、余白は持たせない
-        content.Dock = DockStyle.Fill;
-        content.Margin = new Padding(0);
-        // WinFormsのDockは「後から追加したコントロールほど優先的に外側の領域を占有する」性質があるため、
-        // Dock=Fillの中身を先に追加し、その後にDock=Topの見出しラベルを追加する（この順番でないと
-        // 見出しの分だけ中身が正しく縮まず、レイアウトが崩れる）。
-        section.Controls.Add(content);
-        section.Controls.Add(lbl);
-        return section;
-    }
-
-    // プレビュー枠(pnlPreviewHost)の上でマウスホイールが回された時に呼ばれる。
-    // ホイールを上に回す(Delta>0)と拡大、下に回すと縮小するようにズーム率を段階的に変化させる。
-    private void PnlPreviewHost_MouseWheel(object? sender, MouseEventArgs e)
-    {
-        // まだ画像が読み込まれていない場合は何もしない
-        if (pbPreview.Image == null) return;
-        // ホイール1段階につき約15%ずつ拡大/縮小する係数を求める
-        float factor = e.Delta > 0 ? 1.15f : 1f / 1.15f;
-        // ズーム率を現在値に係数を掛けた値にし、極端に小さく/大きくなりすぎないよう0.1倍～8倍の範囲に収める
-        _previewZoom = Math.Clamp(_previewZoom * factor, 0.1f, 8f);
-        // 実際にPictureBoxのサイズへ反映する
-        ApplyPreviewZoom();
-    }
-
-    // プレビュー画像の現在のズーム倍率(1.0が等倍)
-    private float _previewZoom = 1f;
-
-    // _previewZoomの値を元に、実際にプレビュー用PictureBoxの表示サイズを計算して適用する
-    private void ApplyPreviewZoom()
-    {
-        if (pbPreview.Image == null) return;
-        pbPreview.Size = new Size((int)(pbPreview.Image.Width * _previewZoom), (int)(pbPreview.Image.Height * _previewZoom));
-    }
+    // 画面（InitUI）は AssetManagerPageControl.Ui.cs に移した。
 
     // 敵一覧を表示するDataGridViewを新規に組み立てて返す。
     // 列構成: アイコン/ID/名前/タイプ(type_enum)/HP/幅/高さ/(非表示の当たり判定情報)/画像パス/各種操作ボタン
@@ -631,12 +353,10 @@ public class AssetManagerPageControl : UserControl
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
         // SelectionChanged: 行の選択が変わったら、他グリッドの選択解除・プレビュー更新・
         // 挙動パラメータパネル更新・タイプ説明欄更新をまとめて行う
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Enemy); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Enemy); UpdateTypeHint(); };
         // CurrentCellDirtyStateChanged: コンボボックス等、値が変わった瞬間にCommitEditしないと
         // CellValueChangedが即座には発火しない列があるため、変更中フラグが立ったら即コミットする
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
         // CellValueChanged: type_enum列の値が変わったら、挙動パラメータパネルとアイコン表示を更新する
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, AssetKind.Enemy); RefreshIconCell(dgv, e.RowIndex, isEnemy: true, isGimmick: false); } };
         return dgv;
     }
 
@@ -682,9 +402,7 @@ public class AssetManagerPageControl : UserControl
         // イベント配線はCreateEnemyGridとほぼ同様。DataErrorだけ追加で拾っており、
         // コンボボックスセルで想定外の値が入った際に詳細ログを残す(HandleDataError参照)。
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Gimmick); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Gimmick); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") { UpdateBehaviorParamsPanel(dgv, AssetKind.Gimmick); RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: true); } };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -732,9 +450,7 @@ public class AssetManagerPageControl : UserControl
         dgv.CellContentClick += (s, e) => HandleGridButton(dgv, e);
         // アイテムにも編集禁止フラグの欄を出すため、敵・ギミックと同じくパラメータパネルを更新する。
         // 以前はここを呼んでいなかったので、ItemDef に禁止フラグがあっても画面に出る場所が無かった。
-        dgv.SelectionChanged += (s, e) => { if (dgv.SelectedRows.Count > 0) ClearOtherSelections(AssetKind.Item); UpdatePreview(dgv); UpdateBehaviorParamsPanel(dgv, AssetKind.Item); UpdateTypeHint(); };
         dgv.CurrentCellDirtyStateChanged += (s, e) => { if (dgv.IsCurrentCellDirty) dgv.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        dgv.CellValueChanged += (s, e) => { if (dgv.Columns[e.ColumnIndex].Name == "type_enum") RefreshIconCell(dgv, e.RowIndex, isEnemy: false, isGimmick: false); };
         dgv.DataError += (s, e) => HandleDataError(dgv, e);
         return dgv;
     }
@@ -762,8 +478,8 @@ public class AssetManagerPageControl : UserControl
             // 開発環境ごとにフォルダ構成が変わったときにパスが壊れてしまうため）
             dgv.Rows[e.RowIndex].Cells["sprite"].Value = relPath;
             // 選んだ直後にそのままプレビューへ反映し、選び間違いにすぐ気付けるようにする
-            ShowPreview(Path.Combine(projectRoot, relPath.Replace('/', '\\')));
-            lblPreviewPath.Text = relPath;
+            _thumbs.Forget(relPath);
+            OnRowChanged(dgv, dgv.Rows[e.RowIndex]);
         }
         else if (colName == "btnHitbox")
         {
@@ -786,6 +502,7 @@ public class AssetManagerPageControl : UserControl
                 dgv.Rows[e.RowIndex].Cells["hitboxOffsetY"].Value = roy;
                 dgv.Rows[e.RowIndex].Cells["hitboxWidth"].Value = rw;
                 dgv.Rows[e.RowIndex].Cells["hitboxHeight"].Value = rh;
+                OnRowChanged(dgv, dgv.Rows[e.RowIndex]);
             });
         }
         else if (colName == "btnSize")
@@ -814,6 +531,7 @@ public class AssetManagerPageControl : UserControl
                     if (hasScale) row.Cells["scale"].Value = rScale;
                     row.Cells["hitboxWidth"].Value = rHbW;
                     row.Cells["hitboxHeight"].Value = rHbH;
+                    OnRowChanged(dgv, row);
                 });
         }
         else if (colName == "btnDel")
@@ -824,15 +542,14 @@ public class AssetManagerPageControl : UserControl
         }
     }
 
-    // 「＋◯◯追加」ボタン群から呼ばれる、グリッドへの新規行追加の共通処理。
-    // valuesは列の並び順どおりに渡された初期値の配列（GetDefaultEnemyRow等が組み立てる）。
-    // 追加した行を選択状態にし、さらにスクロール位置を追加行が見える位置まで自動で動かすことで、
-    // ユーザーが「今どの行が新しく増えたか」を見失わないようにしている。
+    // 「＋新しく作る」などから呼ばれる、新しい行の追加の共通処理。
+    // values は列の並び順どおりに渡された初期値の配列（GetDefaultEnemyRow 等が組み立てる）。
+    // 追加した行をそのまま選び、右の詳細フォームに出すので、続けて名前や画像を入れられる。
     private void AddRow(DataGridView dgv, object[] values)
     {
         dgv.Rows.Add(values);
-        dgv.Rows[dgv.Rows.Count - 1].Selected = true;
-        dgv.FirstDisplayedScrollingRowIndex = dgv.Rows.Count - 1;
+        _dirty = true;
+        SelectRow(dgv, dgv.Rows[dgv.Rows.Count - 1]);
     }
 
     // DataGridViewComboBoxColumn(type_enum列)に、コンボボックスの選択肢一覧に存在しない値が
@@ -913,56 +630,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         return new object[] { AssetIcons.ForItem(ItemTypes[0].type), newId, "新しいアイテム", ItemTypes[0].desc, "", "", "📁", "🗑" };
     }
 
-    // ===== プレビュー更新 =====
-    // 引数dgvの選択中の行(1行目のみ)からsprite列の値を読み取り、右側パネルのプレビュー画像を更新する。
-    // 敵/ギミック/アイテムのどのグリッドのSelectionChangedからも共通で呼ばれる想定のため、
-    // sprite列自体が存在しない(＝間違ったグリッドが渡された)場合にも安全に抜けるガードを入れている。
-    private void UpdatePreview(DataGridView dgv)
-    {
-        if (dgv.SelectedRows.Count == 0) return;
-        var row = dgv.SelectedRows[0];
-        if (!dgv.Columns.Contains("sprite")) return;
-        string sp = row.Cells["sprite"].Value?.ToString() ?? "";
-        // まだ画像パスが設定されていない行(新規追加直後など)は、プレビューを空にしてその旨を表示する
-        if (string.IsNullOrEmpty(sp)) { pbPreview.Image = null; lblPreviewPath.Text = "(画像なし)"; return; }
-        string fullPath = Path.Combine(projectRoot, sp.Replace('/', '\\'));
-        ShowPreview(fullPath);
-        lblPreviewPath.Text = sp;
-    }
-
-    // 指定したフルパスの画像ファイルを実際に読み込み、pbPreview(PictureBox)へ表示する。
-    // UpdatePreview（グリッド選択変更時）とHandleGridButton内のbtnSprite処理（画像を新しく選んだ直後）の
-    // 両方から呼ばれる共通の描画処理。
-    private void ShowPreview(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                // Image.FromFile()ではなくFileStream経由で読み込んでいるのは、Image.FromFile()だと
-                // 読み込んだ後もファイルへのロックが残ってしまい、同じ画像を別の場所からコピー/上書きしようと
-                // した際に失敗することがあるため。usingでストリームを確実に閉じることでロックを残さない。
-                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-                pbPreview.Image = Image.FromStream(fs);
-                // 機能追加: UI改善 — プレビューズーム。ドット絵など元の解像度が小さい画像(幅100px未満)は
-                // 等倍のままだと見づらいため、幅が160px相当になるようズーム率を自動計算して初期表示する
-                // （最大8倍まで。あまりに小さい画像で極端な倍率にならないよう上限を設けている）。
-                _previewZoom = 1f;
-                if (pbPreview.Image.Width > 0 && pbPreview.Image.Width < 100)
-                    _previewZoom = Math.Min(8f, 160f / pbPreview.Image.Width);
-                ApplyPreviewZoom();
-            }
-            else
-            {
-                // ファイルが移動/削除されている等、パスはあるが実体が見つからないケース
-                pbPreview.Image = null;
-                lblPreviewPath.Text = "⚠ ファイルが見つかりません";
-            }
-        }
-        // 画像として読み込めない壊れたファイル等、予期しない例外はプレビューを空にするだけで握りつぶす
-        // （プレビュー表示に失敗しても編集作業自体は続行できるようにするための意図的なフォールバック）
-        catch { pbPreview.Image = null; }
-    }
+    // プレビューは詳細フォーム（AssetManagerPageControl.Ui.cs）が出す。
 
     // ==== 機能: 敵/ギミックごとに調整可能な挙動パラメータ (Configurable Behavior Parameters, 通称 M1) ====
 
@@ -995,26 +663,13 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // 各グリッドのSelectionChangedで他を解除する。ClearOtherSelections参照）。
     private enum AssetKind { None = -1, Enemy = 0, Gimmick = 1, Item = 2, CommonEvent = 3 }
 
-    // 敵/ギミック/アイテムの各グリッドとコモンイベントのリストボックスを順番に見ていき、
-    // 実際に選択行(選択項目)が存在する最初の種別を「現在アクティブな種別」として返す。
-    // どれも選択されていなければAssetKind.Noneを返す。パーツ編集・挙動スクリプト編集・複製・
-    // タイプカード選択など、複数のボタンが「今どの種別を操作対象にすべきか」を判定するために使う。
+    // いま選んでいる物の種別を返す（何も選んでいなければ None）。
+    // 以前は4つの表・リストのどれに選択行があるかで判定していたが、いまは一覧のカードで選ぶので、選択状態を自分で持っている。
     private AssetKind GetActiveKind()
     {
-        if (dgvEnemies.SelectedRows.Count > 0) return AssetKind.Enemy;
-        if (dgvGimmicks.SelectedRows.Count > 0) return AssetKind.Gimmick;
-        if (dgvItems.SelectedRows.Count > 0) return AssetKind.Item;
-        if (lstCommonEvents.SelectedIndex >= 0) return AssetKind.CommonEvent;
-        return AssetKind.None;
-    }
-
-    // exceptを除く全ての種別の選択を解除する（1つの種別だけが選択状態を持つようにする）
-    private void ClearOtherSelections(AssetKind except)
-    {
-        if (except != AssetKind.Enemy) dgvEnemies.ClearSelection();
-        if (except != AssetKind.Gimmick) dgvGimmicks.ClearSelection();
-        if (except != AssetKind.Item) dgvItems.ClearSelection();
-        if (except != AssetKind.CommonEvent) lstCommonEvents.ClearSelected();
+        if (_curCe != null) return AssetKind.CommonEvent;
+        if (_curDgv == null || _curRow == null) return AssetKind.None;
+        return KindOf(_curDgv);
     }
 
     // 選択中の行のtype_enumを、そのグリッドのコンボボックス列から読み取る（ReadEnemies/ReadGimmicksと同じ判定方式）
@@ -1073,12 +728,12 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // 「🎛 敵の動きを調整」。選んでいる敵の挙動パラメータを、専用の画面で調整する。
     private void BtnEnemyTune_Click()
     {
-        if (dgvEnemies.SelectedRows.Count == 0)
+        if (SelRow(dgvEnemies) == null)
         {
             MessageBox.Show("調整したい敵の行を選んでから押してください。", "敵の動きを調整", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        var row = dgvEnemies.SelectedRows[0];
+        var row = SelRow(dgvEnemies)!;
         var def = GetOrCreateEnemyParams(row);
         int typeEnum = GetSelectedTypeEnum(row);
         EnemyTuneRequested?.Invoke($"敵: {row.Cells["id"].Value}", row.Cells["id"].Value?.ToString() ?? "", def, typeEnum, () =>
@@ -1093,7 +748,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         var kind = GetActiveKind();
         if (kind == AssetKind.Enemy)
         {
-            var row = dgvEnemies.SelectedRows[0];
+            var row = SelRow(dgvEnemies)!;
             if (GetSelectedTypeEnum(row) != CustomScriptEnemyType)
             {
                 MessageBox.Show("挙動スクリプトは、タイプが「20 = カスタムスクリプト」の敵にのみ設定できます。\nタイプ列で切り替えてからお試しください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1104,7 +759,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         else if (kind == AssetKind.Gimmick)
         {
-            var row = dgvGimmicks.SelectedRows[0];
+            var row = SelRow(dgvGimmicks)!;
             if (GetSelectedTypeEnum(row) != CustomScriptGimmickType)
             {
                 MessageBox.Show("挙動スクリプトは、タイプが「24 = カスタムスクリプト」のギミックにのみ設定できます。\nタイプ列で切り替えてからお試しください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1133,6 +788,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         using var dlg = new PartTemplatePickerForm(projectRoot, "", 32f, 32f, 0, createEnemyMode: true);
         if (dlg.ShowDialog(FindForm()) != DialogResult.OK || dlg.SelectedTemplate == null || dlg.Suggestion == null) return;
         CreateEnemyFromTemplate(dlg.SelectedTemplate, dlg.Suggestion, dlg.ResultParts, dlg.BodySpritePath);
+        ReselectCurrent();
     }
 
     // 型の結果から、敵の行を1つ作って一覧へ加える（ダイアログを使わずに呼べるよう、処理を分けてある）。
@@ -1253,9 +909,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         if (made.Count > 0)
         {
-            dgvGimmicks.ClearSelection();
-            made[0].Selected = true;
-            UpdateBehaviorParamsPanel(dgvGimmicks, AssetKind.Gimmick);
+            SelectRow(dgvGimmicks, made[0]);
         }
         return made;
     }
@@ -1281,7 +935,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         var kind = GetActiveKind();
         if (kind == AssetKind.Enemy)
         {
-            var row = dgvEnemies.SelectedRows[0];
+            var row = SelRow(dgvEnemies)!;
             var def = GetOrCreateEnemyParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             int et = GetSelectedTypeEnum(row);
@@ -1292,7 +946,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         else if (kind == AssetKind.Gimmick)
         {
-            var row = dgvGimmicks.SelectedRows[0];
+            var row = SelRow(dgvGimmicks)!;
             var def = GetOrCreateGimmickParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             int gt = GetSelectedTypeEnum(row);
@@ -1303,7 +957,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         }
         else if (kind == AssetKind.Item)
         {
-            var row = dgvItems.SelectedRows[0];
+            var row = SelRow(dgvItems)!;
             var def = GetOrCreateItemParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
             PartsEditRequested?.Invoke($"アイテム: {row.Cells["id"].Value}", def.parts, sprite,
@@ -1323,12 +977,12 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     {
         var kind = GetActiveKind();
         DataGridView? dgv = kind switch { AssetKind.Enemy => dgvEnemies, AssetKind.Gimmick => dgvGimmicks, AssetKind.Item => dgvItems, _ => null };
-        if (dgv == null || dgv.SelectedRows.Count == 0)
+        if (dgv == null || SelRow(dgv) == null)
         {
             MessageBox.Show("タイプ選択は「敵」「ギミック」「アイテム」のいずれかの行を選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        var row = dgv.SelectedRows[0];
+        var row = SelRow(dgv)!;
         // type_enum列がコンボボックス列でなければ(想定外の状況)、以降の処理を安全にあきらめる
         if (row.Cells["type_enum"] is not DataGridViewComboBoxCell combo) return;
 
@@ -1357,240 +1011,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         RefreshIconCell(dgv, row.Index, isEnemy: kind == AssetKind.Enemy, isGimmick: kind == AssetKind.Gimmick);
     }
 
-    // 選択中の敵/ギミック行のtype_enumに応じて、挙動パラメータの入力欄を動的に組み立てる。
-    // 該当タイプに調整可能なパラメータが無い場合は非表示にし、従来のタイプ一覧説明を見せる。
-    // EnemyParamFields/GimmickParamFields（クラス冒頭で定義した「どのtype_enumにどのフィールドを
-    // 表示するか」のテーブル）を元に、リフレクション(GetProperty/GetValue/SetValue)でEnemyDef/GimmickDef
-    // の該当プロパティへ直接読み書きするNumericUpDownをその場で動的に生成している。
-    // kind には Enemy / Gimmick / Item のいずれかを渡す。
-    // 以前は「敵かギミックか」の2択(bool)で、アイテムはこの経路をそもそも通っていなかった。
-    // 編集禁止フラグは3種類すべてに存在するため、アイテムも受けられる形へ広げてある。
-    private void UpdateBehaviorParamsPanel(DataGridView dgv, AssetKind kind)
-    {
-        // 何も選択されていなければパラメータパネルを隠し、タイプ説明欄を出す
-        if (dgv.SelectedRows.Count == 0) { pnlBehaviorParams.Visible = false; rtbTypeHint.Visible = true; return; }
-        var row = dgv.SelectedRows[0];
-        bool isEnemy = (kind == AssetKind.Enemy);
-        int typeEnum = GetSelectedTypeEnum(row);
-        // アイテムには挙動パラメータのテーブルが無い（調整項目そのものが無い）ので、
-        // 共通欄＝編集禁止フラグだけを出す。
-        var fieldMap = isEnemy ? EnemyParamFields
-                     : (kind == AssetKind.Gimmick ? GimmickParamFields
-                        : new Dictionary<int, (string, string, int)[]>());
-
-        // 選択中のtype_enumに対応する調整可能パラメータの定義。
-        //
-        // 【以前の不具合】ここで定義が無いと即 return していたため、
-        // 「全タイプ共通で出したい欄」(CommonEnemyParamFields 等) までいっしょに表示されなくなっていた。
-        // その結果、ParamFields に登録の無いタイプ（カスタムスクリプト等）では
-        // ignorePause が永久に画面へ出てこなかった。
-        // 共通欄だけでも出せるよう、定義が無い場合は空配列として先へ進む。
-        if (!fieldMap.TryGetValue(typeEnum, out var fields)) fields = System.Array.Empty<(string, string, int)>();
-
-        // 行に紐づくEnemyDef/GimmickDef本体（既に無ければ新規作成）を取得し、以降このオブジェクトの
-        // プロパティへ直接値を読み書きする
-        object paramsObj = kind == AssetKind.Enemy   ? GetOrCreateEnemyParams(row)
-                         : kind == AssetKind.Gimmick ? GetOrCreateGimmickParams(row)
-                         : (object)GetOrCreateItemParams(row);
-        // これから複数のNumericUpDownのValueをプログラム側から設定するため、その間はValueChangedの
-        // 中身をスキップさせるフラグを立てておく（フィールド宣言のコメント参照。無限ループ・誤書き込み防止）
-        _isUpdatingBehaviorPanel = true;
-        pnlBehaviorParams.SuspendLayout();
-        // 前回選択されていた行のパラメータ欄がまだ残っている可能性があるため、一旦すべて作り直す
-        pnlBehaviorParams.Controls.Clear();
-
-        // fields配列（(プロパティ名, ラベル文言, 小数点桁数)の並び）を1件ずつ、ラベル+NumericUpDownの
-        // ペアとして縦に並べていく。yはこのパネル内でのY座標（次の項目を配置する高さ）を表す
-        int y = 4;
-        // アイテムはゲーム内の編集ツールの選択対象になっていない（SELECT_ITEM が存在しない）。
-        // 設定は保存されるが今のところ効き目が無いので、そのことを画面に明記して誤解を防ぐ。
-        if (kind == AssetKind.Item)
-        {
-            var note = new Label
-            {
-                Text = "※ アイテムは今のところゲーム内の編集ツールで選択できないため、"
-                     + Environment.NewLine
-                     + "   以下の設定は保存されますが、まだ効果がありません。",
-                Location = new Point(4, y),
-                Size = new Size(236, 32),
-                Font = new Font("Meiryo UI", 7.5f),
-                ForeColor = Color.DimGray,
-            };
-            pnlBehaviorParams.Controls.Add(note);
-            y += 36;
-        }
-        // 敵の場合は、タイプ固有の項目の後ろに全タイプ共通の項目（一時停止無視など）を連結する
-        // タイプ固有の欄のうしろへ、全タイプ共通の欄を連結する。
-        // 編集禁止フラグは敵・ギミックどちらにもあるので、両方へ付ける。
-        var effectiveFields = isEnemy
-            ? fields.Concat(CommonEnemyParamFields).Concat(EditLockParamFields).ToArray()
-            : fields.Concat(EditLockParamFields).ToArray();
-        foreach (var (field, label, decimals) in effectiveFields)
-        {
-            // フィールド名の文字列からリフレクションでEnemyDef/GimmickDef側のプロパティ情報を取得する。
-            // こうすることで、type_enumごとに専用のUIコードを1件ずつ書かずに済んでいる。
-            var prop = paramsObj.GetType().GetProperty(field)!;
-
-            // bool型のパラメータ（例: ignorePause / radialFire）は数値入力欄では扱えないので、
-            // ラベル付きのチェックボックス1つに置き換える。
-            // NumericUpDownと違い、ラベルはチェックボックス自身のTextで兼ねられるため縦幅も詰められる。
-            if (prop.PropertyType == typeof(bool))
-            {
-                var chk = new CheckBox
-                {
-                    Text = label,
-                    Location = new Point(4, y + 3),
-                    Size = new Size(236, 20),
-                    Font = new Font("Meiryo UI", 7.5f),
-                    Checked = Convert.ToBoolean(prop.GetValue(paramsObj))
-                };
-                chk.CheckedChanged += (s, e) =>
-                {
-                    // NumericUpDownと同じ理由で、パネル構築中の初期値反映は書き戻さない
-                    if (_isUpdatingBehaviorPanel) return;
-                    prop.SetValue(paramsObj, chk.Checked);
-                };
-                pnlBehaviorParams.Controls.Add(chk);
-                y += 26;
-                continue;
-            }
-
-            var lbl = new Label { Text = label, Location = new Point(4, y + 3), Size = new Size(230, 15), Font = new Font("Meiryo UI", 7.5f) };
-
-            // ドラッグ移動の向きは、数字ではなく名前で選ばせる（0=自由 1=十字 2=X字）
-            if (field == "moveMode")
-            {
-                var cboMove = new ComboBox { Location = new Point(4, y + 18), Size = new Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Meiryo UI", 8.25f) };
-                cboMove.Items.AddRange(new object[] { "自由（どこへでも・従来）", "十字（上下左右だけ）", "X字（斜めだけ）" });
-                int curMove = Convert.ToInt32(prop.GetValue(paramsObj));
-                cboMove.SelectedIndex = curMove < 0 || curMove > 2 ? 0 : curMove;
-                cboMove.SelectedIndexChanged += (s, e) =>
-                {
-                    if (_isUpdatingBehaviorPanel) return;
-                    prop.SetValue(paramsObj, cboMove.SelectedIndex);
-                };
-                pnlBehaviorParams.Controls.Add(lbl);
-                pnlBehaviorParams.Controls.Add(cboMove);
-                y += 42;
-                continue;
-            }
-
-            // 補正スイッチ・補正ロック足場の「見る値」は、番号を覚えさせずに名前で選ばせる
-            if (field == "gradeChannel")
-            {
-                var cbo = new ComboBox { Location = new Point(4, y + 18), Size = new Size(200, 22), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Meiryo UI", 8.5f) };
-                cbo.Items.AddRange(new object[] { "0 = 明るさ", "1 = コントラスト", "2 = 彩度", "3 = 色相", "4 = 色温度", "5 = 色フィルタ (1赤/2緑/3青)", "6 = 拡大中 (Zキー、1.0=通常)", "7 = 縮小中 (Vキー、1.0=通常)" });
-                int cur = (int)Math.Round(Convert.ToSingle(prop.GetValue(paramsObj)));
-                cbo.SelectedIndex = cur < 0 || cur > 7 ? 0 : cur;
-                cbo.SelectedIndexChanged += (s, e) =>
-                {
-                    if (_isUpdatingBehaviorPanel) return;
-                    prop.SetValue(paramsObj, (float)cbo.SelectedIndex);
-                };
-                pnlBehaviorParams.Controls.Add(lbl);
-                pnlBehaviorParams.Controls.Add(cbo);
-                y += 42;
-                continue;
-            }
-            var nud = new NumericUpDown
-            {
-                Location = new Point(4, y + 18),
-                Size = new Size(140, 22),
-                DecimalPlaces = decimals,
-                // 小数点桁数が0(整数値)ならクリック1回で1ずつ、小数を持つ値ならその最小単位(例: 桁数2なら0.01)ずつ増減する
-                Increment = decimals > 0 ? (decimal)Math.Pow(10, -decimals) : 1m,
-                // 極端な値を防ぐための一律の上下限（挙動パラメータの種類ごとに個別の上下限は設けていない）
-                Minimum = -100000m,
-                Maximum = 100000m,
-                // paramsObjの現在値をfloat→decimalへ変換して初期表示する
-                Value = (decimal)Convert.ToSingle(prop.GetValue(paramsObj))
-            };
-            nud.ValueChanged += (s, e) =>
-            {
-                // プログラム側からValueを設定している最中(上のValue=...行が動いた瞬間)は無視する。
-                // ここを無視しないと、初期値を設定しただけなのに「ユーザーが値を変更した」と誤判定してしまう。
-                if (_isUpdatingBehaviorPanel) return;
-                // EnemyDef/GimmickDef側のプロパティの型(int or float)に合わせてキャストして書き戻す
-                if (prop.PropertyType == typeof(int)) prop.SetValue(paramsObj, (int)nud.Value);
-                else prop.SetValue(paramsObj, (float)nud.Value);
-            };
-            pnlBehaviorParams.Controls.Add(lbl);
-            pnlBehaviorParams.Controls.Add(nud);
-            // 次の項目はラベル+入力欄ぶんの高さ(42px)だけ下にずらして配置する
-            y += 42;
-        }
-
-        pnlBehaviorParams.ResumeLayout();
-        // 全ての初期値設定が終わったので、以降のユーザー操作によるValueChangedは正常に処理されるようフラグを戻す
-        _isUpdatingBehaviorPanel = false;
-
-        // タイプ説明欄を隠してパラメータパネルを表示し、見出しラベルの文言も切り替える
-        rtbTypeHint.Visible = false;
-        pnlBehaviorParams.Visible = true;
-        lblTypeHintTitle.Text = "⚙ 挙動パラメータ";
-    }
-
-    // 右サイドパネルの「📋 タイプ説明」欄(rtbTypeHint)の中身を、現在アクティブな種別(GetActiveKind)に応じて
-    // 丸ごと書き直す。RichTextBoxのSelectionFont/SelectionColorを使い、見出し部分は太字+種別ごとの色、
-    // 説明本文はグレーの小さめフォント、という体裁を種別ごとのdesc/detail一覧を1件ずつ流し込んで再現している。
-    private void UpdateTypeHint()
-    {
-        rtbTypeHint.Clear();
-        switch (GetActiveKind())
-        {
-            case AssetKind.Enemy:
-                rtbTypeHint.AppendText("【敵タイプ一覧】\n\n");
-                foreach (var (type, desc, detail) in EnemyTypes)
-                {
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 8, FontStyle.Bold);
-                    rtbTypeHint.SelectionColor = Color.DarkBlue;
-                    rtbTypeHint.AppendText(desc + "\n");
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
-                    rtbTypeHint.SelectionColor = Color.DarkGray;
-                    rtbTypeHint.AppendText(detail + "\n\n");
-                }
-                break;
-            case AssetKind.Gimmick:
-                rtbTypeHint.AppendText("【ギミックタイプ一覧】\n\n");
-                foreach (var (type, desc, detailG) in GimmickTypes)
-                {
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 8, FontStyle.Bold);
-                    rtbTypeHint.SelectionColor = Color.DarkGreen;
-                    rtbTypeHint.AppendText(desc + "\n");
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
-                    rtbTypeHint.SelectionColor = Color.DarkGray;
-                    rtbTypeHint.AppendText(detailG + "\n\n");
-                }
-                rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
-                rtbTypeHint.SelectionColor = Color.DarkGray;
-                rtbTypeHint.AppendText(
-                    "\n【param欄の使い方（マップ上に配置後、プロパティグリッドで編集）】\n" +
-                    "・色ロック足場: \"1\"=赤 / \"2\"=緑 / \"3\"=青（プレイヤーがTキーで切替する色フィルタと一致した時だけ実体化）\n" +
-                    "・明暗ロック足場: \"dark\"(既定)=画面が暗い時だけ実体化 / \"bright\"=明るい時だけ実体化\n" +
-                    "（プレイヤー側の操作: T=色フィルタ切替, Z=ズーム, X=暗転, C=明転, M=SEミュート）");
-                break;
-            case AssetKind.Item:
-                rtbTypeHint.AppendText("【アイテムタイプ一覧】\n\n");
-                foreach (var (type, desc, detailI) in ItemTypes)
-                {
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 8, FontStyle.Bold);
-                    rtbTypeHint.SelectionColor = Color.DarkRed;
-                    rtbTypeHint.AppendText(desc + "\n");
-                    rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
-                    rtbTypeHint.SelectionColor = Color.DarkGray;
-                    rtbTypeHint.AppendText(detailI + "\n\n");
-                }
-                rtbTypeHint.AppendText("\n【grant_ability フィールド】\n");
-                rtbTypeHint.AppendText("取得時にプレイヤーに付与する能力名を入力。\n例: canDoubleJump, canDash, canShootFireball\n");
-                break;
-            case AssetKind.CommonEvent:
-                rtbTypeHint.AppendText("【コモンイベントとは】\n\n");
-                rtbTypeHint.SelectionFont = new Font("Meiryo UI", 7.5f);
-                rtbTypeHint.SelectionColor = Color.DarkGray;
-                rtbTypeHint.AppendText("複数のトリガーから共通で呼び出せる一連のアクションです。\n\nトリガー編集画面のアクションで「CallCommonEvent」を選び、ここで定義したIDを指定すると呼び出せます。\n\n例: 「SE再生 → メッセージ表示 → アイテム付与」をまとめて1つのコモンイベントにし、複数の宝箱トリガーから使い回す。");
-                break;
-        }
-    }
+    // タイプごとの調整項目の画面は、AssetManagerPageControl.Ui.cs の BuildBehaviorSections が組み立てる。
 
     // ===== データ読み込み =====
     // コンストラクタから一度だけ呼ばれる。assets(コンストラクタで渡された既存の定義データ)の内容を
@@ -1717,6 +1138,7 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             "保存完了", MessageBoxButtons.OK, MessageBoxIcon.Information);
         // このUserControlはFormのClose()を持たないため、保存完了をホスト側に伝えるためのイベントを発火する
         // （クラス冒頭のコメント参照。ホスト側がこれを購読してForm.Close()やGoBack()を呼ぶ）
+        _dirty = false;
         Saved?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1862,28 +1284,11 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         => float.TryParse(row.Cells[col].Value?.ToString(), out var v) ? v : def;
 
     // ===== コモンイベント =====
-    // 機能追加: UI改善（提案書のAM-4という項目に対応）— 件数だけでなく「何をするイベントか」がタイトルだけで
-    // 一目で分かるよう、実行内容(アクション種別)を矢印でつないだ要約を添える。
-    // _commonEventsリストの内容を丸ごと読み直してlstCommonEventsの表示項目を作り直す（差分更新はしない）。
-    private void RefreshCommonEventsList()
-    {
-        lstCommonEvents.Items.Clear();
-        foreach (var ce in _commonEvents)
-        {
-            // アクションが1つも登録されていなければその旨を、そうでなければ先頭4件までのアクション名を
-            // 「→」でつないだ要約文字列を作る。5件以上ある場合は末尾に「…」を付けて省略を示す。
-            string summary = ce.actions.Count == 0
-                ? "(実行内容が未設定)"
-                : string.Join("→", ce.actions.Take(4).Select(a => a.action)) + (ce.actions.Count > 4 ? "…" : "");
-            lstCommonEvents.Items.Add($"🔔 {ce.id} : {ce.name}  【{summary}】");
-        }
-    }
+    // 一覧への表示は、ほかの物と同じカード一覧（RebuildCards）が行う。
+    private void RefreshCommonEventsList() => RebuildCards();
 
-    // 「＋コモンイベント追加」ボタンから呼ばれる。まず衝突しない連番のidを決めた上で空のCommonEventDefを作り、
-    // CommonEventEditRequestedイベント経由でホスト側に編集画面を開いてもらう。
-    // 敵/ギミック/アイテムの追加(AddRow)と違い即座にグリッドへ行を足すのではなく、先に編集画面を開かせて
-    // OKされた結果だけを_commonEventsへ追加する、という一手間多い流れになっている
-    // （コモンイベントはアクション列を持たないリスト表示のため、詳細内容は必ず専用の編集画面で組み立てる必要があるため）。
+    // 「＋ 新しく作る → コモンイベント」から呼ばれる。衝突しない連番のIDで空のコモンイベントを作り、
+    // 編集画面（ホスト側）を開いてもらう。OKされたときだけ一覧へ加える。
     private void AddCommonEvent()
     {
         int n = _commonEvents.Count + 1;
@@ -1894,74 +1299,38 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         CommonEventEditRequested?.Invoke(newEvent, result =>
         {
             _commonEvents.Add(result);
-            RefreshCommonEventsList();
+            _dirty = true;
+            _curDgv = null; _curRow = null;
+            RebuildCards();
+            SelectTarget(AssetKind.CommonEvent, null, null, result);
         });
     }
 
-    // リストボックスのダブルクリック、または「✎ 編集」ボタンから呼ばれる。
-    // 選択中のコモンイベントをホスト側の編集画面に渡し、OKされたら_commonEventsの該当要素を置き換える。
+    // 選んでいるコモンイベントの内容（アクション）を、編集画面で直す。
     private void EditSelectedCommonEvent()
     {
-        int idx = lstCommonEvents.SelectedIndex;
-        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("編集するコモンイベントを選択してください。"); return; }
-
+        if (_curCe == null) { MessageBox.Show("編集するコモンイベントを選んでください。"); return; }
+        int idx = _commonEvents.IndexOf(_curCe);
+        if (idx < 0) return;
         CommonEventEditRequested?.Invoke(_commonEvents[idx], result =>
         {
             _commonEvents[idx] = result;
-            RefreshCommonEventsList();
-            // リスト再構築で選択状態が失われるため、編集していた項目を選択したままにしておく
-            lstCommonEvents.SelectedIndex = idx;
+            _dirty = true;
+            RebuildCards();
+            SelectTarget(AssetKind.CommonEvent, null, null, result);
         });
     }
 
-    // 「🗑 削除」ボタンから呼ばれる。誤操作防止のため確認ダイアログを挟んでから_commonEventsリストから取り除く
+    // 選んでいるコモンイベントを、確認してから消す。
     private void DeleteSelectedCommonEvent()
     {
-        int idx = lstCommonEvents.SelectedIndex;
-        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("削除するコモンイベントを選択してください。"); return; }
-        if (MessageBox.Show($"コモンイベント「{_commonEvents[idx].id}」を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-        _commonEvents.RemoveAt(idx);
-        RefreshCommonEventsList();
-    }
-
-    // ===== 検索フィルタ (MZ風 ID/名前検索) =====
-    // 機能追加: UI改善 — タブ廃止により全種別が同時に画面上へ並ぶため、検索は表示中の全グリッド/一覧へ横断的に適用する。
-    // txtSearchのTextChangedイベントから呼ばれ、入力するたびリアルタイムに絞り込みを更新する。
-    private void ApplySearchFilter()
-    {
-        string q = txtSearch.Text.Trim();
-        FilterGrid(dgvEnemies, q);
-        FilterGrid(dgvGimmicks, q);
-        FilterGrid(dgvItems, q);
-        FilterCommonEventsList(q);
-    }
-
-    // 敵/ギミック/アイテムのいずれかのグリッドに対し、id列またはname列にqueryを含まない行を非表示(Visible=false)にする。
-    // 行そのものを削除するわけではないため、検索欄を空にすればすぐに全件表示へ戻せる。
-    private static void FilterGrid(DataGridView dgv, string query)
-    {
-        foreach (DataGridViewRow row in dgv.Rows)
-        {
-            if (row.IsNewRow) continue;
-            // 検索文字列が空なら絞り込みなし（全行表示）
-            if (string.IsNullOrEmpty(query)) { row.Visible = true; continue; }
-            string id = row.Cells["id"].Value?.ToString() ?? "";
-            string name = dgv.Columns.Contains("name") ? row.Cells["name"].Value?.ToString() ?? "" : "";
-            row.Visible = id.Contains(query, StringComparison.OrdinalIgnoreCase) || name.Contains(query, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    // コモンイベントのリストボックス用の絞り込み。DataGridViewのように行単位でVisibleを切り替える仕組みが
-    // ListBoxには無いため、こちらは該当する項目だけを毎回作り直して再表示する方式にしている
-    // （RefreshCommonEventsListとほぼ同じ表示処理だが、絞り込み後は簡易表示（要約文なし・件数表示のみ）になる）。
-    private void FilterCommonEventsList(string query)
-    {
-        lstCommonEvents.Items.Clear();
-        var filtered = string.IsNullOrEmpty(query)
-            ? _commonEvents
-            : _commonEvents.Where(c => c.id.Contains(query, StringComparison.OrdinalIgnoreCase) || c.name.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
-        foreach (var ce in filtered)
-            lstCommonEvents.Items.Add($"{ce.id} : {ce.name} ({ce.actions.Count}件)");
+        if (_curCe == null) return;
+        if (MessageBox.Show($"コモンイベント「{_curCe.id}」を削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        _commonEvents.Remove(_curCe);
+        _curCe = null;
+        _dirty = true;
+        RebuildCards();
+        ShowDetailEmpty();
     }
 
     // ===== 選択行の複製 (MZ風: 似た定義を素早く量産) =====
@@ -1999,8 +1368,8 @@ Exception.StackTrace: {e.Exception.StackTrace}";
     // 片方を編集するともう片方も変わってしまうため）。
     private void DuplicateEnemyRow()
     {
-        if (dgvEnemies.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
-        var r = dgvEnemies.SelectedRows[0];
+        if (SelRow(dgvEnemies) == null) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = SelRow(dgvEnemies)!;
         string newId = MakeUniqueId(dgvEnemies, r.Cells["id"].Value?.ToString() ?? "enemy");
         AddRow(dgvEnemies, new object[]
         {
@@ -2016,13 +1385,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // JSON経由での往復変換（クラス冒頭のコメント参照）を使うことで、参照を共有しない独立したコピーを作れる。
         var srcDef = GetOrCreateEnemyParams(r);
         _enemyParams[dgvEnemies.Rows[dgvEnemies.Rows.Count - 1]] = JsonConvert.DeserializeObject<EnemyDef>(JsonConvert.SerializeObject(srcDef))!;
+        ReselectCurrent();
     }
 
     // ギミックグリッドで選択中の行を複製する。考え方はDuplicateEnemyRowと同じ
     private void DuplicateGimmickRow()
     {
-        if (dgvGimmicks.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
-        var r = dgvGimmicks.SelectedRows[0];
+        if (SelRow(dgvGimmicks) == null) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = SelRow(dgvGimmicks)!;
         string newId = MakeUniqueId(dgvGimmicks, r.Cells["id"].Value?.ToString() ?? "gimmick");
         AddRow(dgvGimmicks, new object[]
         {
@@ -2035,13 +1405,14 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // 機能: 敵/ギミックごとに調整可能な挙動パラメータ (M1) — 挙動パラメータもディープコピーして複製する
         var srcDef = GetOrCreateGimmickParams(r);
         _gimmickParams[dgvGimmicks.Rows[dgvGimmicks.Rows.Count - 1]] = JsonConvert.DeserializeObject<GimmickDef>(JsonConvert.SerializeObject(srcDef))!;
+        ReselectCurrent();
     }
 
     // アイテムグリッドで選択中の行を複製する。考え方はDuplicateEnemyRowと同じ
     private void DuplicateItemRow()
     {
-        if (dgvItems.SelectedRows.Count == 0) { MessageBox.Show("複製する行を選択してください。"); return; }
-        var r = dgvItems.SelectedRows[0];
+        if (SelRow(dgvItems) == null) { MessageBox.Show("複製する行を選択してください。"); return; }
+        var r = SelRow(dgvItems)!;
         string newId = MakeUniqueId(dgvItems, r.Cells["id"].Value?.ToString() ?? "item");
         AddRow(dgvItems, new object[]
         {
@@ -2054,15 +1425,15 @@ Exception.StackTrace: {e.Exception.StackTrace}";
         // 機能: 複数パーツからなる複合オブジェクト (Parts-M7) — parts等の非グリッド項目も複製する
         var srcDef = GetOrCreateItemParams(r);
         _itemParams[dgvItems.Rows[dgvItems.Rows.Count - 1]] = JsonConvert.DeserializeObject<ItemDef>(JsonConvert.SerializeObject(srcDef))!;
+        ReselectCurrent();
     }
 
     // コモンイベントリストで選択中の項目を複製する。グリッド系と違いDataGridViewRowを使わないため、
     // JSONシリアライズではなくactionsリストの要素を1件ずつ新しいEventActionEntryへコピーする方式にしている。
     private void DuplicateCommonEvent()
     {
-        int idx = lstCommonEvents.SelectedIndex;
-        if (idx < 0 || idx >= _commonEvents.Count) { MessageBox.Show("複製するコモンイベントを選択してください。"); return; }
-        var src = _commonEvents[idx];
+        if (_curCe == null) { MessageBox.Show("複製するコモンイベントを選択してください。"); return; }
+        var src = _curCe;
         var existing = new HashSet<string>(_commonEvents.Select(c => c.id), StringComparer.OrdinalIgnoreCase);
         string newId = src.id + "_copy";
         int n = 2;
@@ -2074,7 +1445,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             name = src.name + "のコピー",
             actions = src.actions.Select(a => new EventActionEntry { action = a.action, param1 = a.param1, param2 = a.param2, delay = a.delay }).ToList()
         });
-        RefreshCommonEventsList();
+        _curCe = _commonEvents[^1];
+        _dirty = true;
+        RebuildCards();
+        SelectTarget(AssetKind.CommonEvent, null, null, _curCe);
     }
 }
 

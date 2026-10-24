@@ -26,6 +26,34 @@ public static class UiTheme
     // 区切り線（セパレーター）の色
     public static readonly Color SeparatorColor = Color.Silver;
 
+    // ── 新UI（右パネルの作り直しから使う共通配色）──
+    // 今後ほかの画面を作り替えるときも、この配色を共通で使う。
+    // 一覧やパネルの地の色
+    public static readonly Color PanelBack = Color.FromArgb(244, 245, 247);
+    // カード（1項目の四角）の通常時の背景・枠線
+    public static readonly Color CardBack = Color.White;
+    public static readonly Color CardBorder = Color.FromArgb(218, 222, 228);
+    // カードにマウスを乗せたときの背景
+    public static readonly Color CardHover = Color.FromArgb(234, 241, 251);
+    // 選ばれているカードの背景
+    public static readonly Color CardSelectedBack = Color.FromArgb(220, 235, 252);
+    // 強調色（選択枠・タブの下線・主要ボタン）
+    public static readonly Color Accent = Color.FromArgb(0, 120, 212);
+    // 文字色（本文・補足）
+    public static readonly Color TextMain = Color.FromArgb(32, 36, 42);
+    public static readonly Color TextMuted = Color.FromArgb(110, 118, 128);
+    // 種類ごとの目印の色（カードの角の点・行の左端の帯に使う）
+    public static readonly Color KindEnemy = Color.FromArgb(214, 69, 65);
+    public static readonly Color KindGimmick = Color.FromArgb(52, 120, 214);
+    public static readonly Color KindItem = Color.FromArgb(222, 160, 0);
+    public static readonly Color KindTrigger = Color.FromArgb(140, 90, 200);
+    public static readonly Color KindSpecial = Color.FromArgb(46, 160, 100);
+    public static readonly Color KindTile = Color.FromArgb(120, 130, 140);
+
+    // 画面の拡大率（Windowsの表示スケール）に合わせて、96dpi基準の寸法を実寸へ換算する。
+    // 自前描画の部品は、固定ピクセルで描くと拡大表示の環境で小さく潰れるため、必ずこれを通す。
+    public static int S(Control c, int v) => (int)System.Math.Round(v * c.DeviceDpi / 96.0);
+
     // ── フォント (フォームごとの new Font(...) 重複生成を避けて共有する) ──
     private const string FontFamily = "Meiryo UI";
     // 通常テキスト用のフォント

@@ -1,486 +1,413 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Windows.Forms;
+﻿using System.Media;
 using Newtonsoft.Json;
 
 namespace Lab_Editor;
 
 // ======================================================
-// SoundAssignmentForm - サウンドカタログのIDを敵/ギミック/アイテム/ステージへ割り当てる専用画面
-// Feature: サウンド・アセット管理の刷新
+// SoundAssignmentForm - 登録した音を、鳴らしたい場面へ割り当てる画面
 //
-// SoundManagerForm(カタログ管理)では音声ファイルをID登録するだけで、そのIDを実際に
-// 「敵のダメージ音」等として割り当てるUIがどこにも無かった。このフォームはその欠落を埋める。
-// 敵/ギミック/アイテムはclone-and-return方式（PartsEditorForm等と同じ）で編集する。
-// clone-and-return方式とは：元データを直接書き換えるのではなく、まず複製（クローン）を作って
-// それを編集し、最後にOK（保存）されたときだけ複製後の結果を呼び出し元に返す方式。
-// これにより、キャンセルされた場合は元データが一切汚れないことが保証される。
+// 「サウンド管理」で登録した BGM / SE の ID を、実際に鳴らす場面（敵の被弾音、ジャンプの音、ステージの BGM …）へ結びつける。
+// 以前は敵・ギミック・アイテム・プレイヤー・編集ツール…ごとに別々の表が縦に並び、何十行もスクロールして探す作りだった。
+// 今回は次の作りに改めた。
+//    左 : 「割り当て先」の一覧（絵つき。敵・ギミック・アイテム・ステージ・プレイヤー操作・編集ツール・タイトル/リザルト）
+//         各行に「設定済み 2/4」のように進み具合が出るので、まだ音を付けていない物がすぐ分かる
+//    右 : 選んだ割り当て先の「場面ごとの音」（出現音・攻撃音…）。音の名前で選び、その場で試聴できる
+// 呼び出し側との約束（コンストラクタの引数と Result 系プロパティ）は以前のまま。
+// 敵・ギミック・アイテム・設定は複製を編集し、保存したときだけ結果を返す（キャンセルすれば元は汚れない）。
 // ======================================================
-public class SoundAssignmentForm : Form
+public class SoundAssignmentForm : EditorFormBase
 {
-    // 保存確定後の敵一覧（各敵のSE割り当てを反映済み）。呼び出し元はこれを使って元データを更新する
     public List<EnemyDef> ResultEnemies { get; private set; } = new();
-    // 保存確定後のギミック一覧（起動音の割り当てを反映済み）
     public List<GimmickDef> ResultGimmicks { get; private set; } = new();
-    // 保存確定後のアイテム一覧（取得音の割り当てを反映済み）
     public List<ItemDef> ResultItems { get; private set; } = new();
-    // ステージが読み込まれていない場合はnullのまま（呼び出し側はBgmIdを一切更新しない）
+    // ステージが開かれていないときは null のまま（呼び出し側は BGM を一切更新しない）
     public string? ResultStageBgmId { get; private set; }
-    // 保存確定後のゲーム全体設定（プレイヤー操作音・編集ツール音・UI音を反映済み）。
-    // これらはアセットではなく game_config.json 側の設定なので、別枠で返す。
+    // プレイヤー操作音・編集ツール音・UI音を反映済みのゲーム全体設定
     public GameConfig ResultGameConfig { get; private set; } = new();
 
-    // 編集中の敵/ギミック/アイテムのデータ（コンストラクタで渡された元データの複製）
     private List<EnemyDef> _enemies;
     private List<GimmickDef> _gimmicks;
     private List<ItemDef> _items;
-    // 現在開いているステージ名。nullの場合はステージが未選択であることを示し、
-    // ステージBGMの割り当てセクションでは編集不可の案内を表示する
+    private GameConfig _config;
     private readonly string? _currentStageName;
+    private string _stageBgmId;
 
-    // 敵/ギミック/アイテムそれぞれのSE割り当てを表形式で編集するグリッド
-    private DataGridView _gridEnemy = null!, _gridGimmick = null!, _gridItem = null!;
-    // プレイヤー操作・編集ツール・UIのSE割り当てグリッド。
-    // 「項目名 / 効果音ID」の2列だけの単純な表で、行の並びは下の *Rows 配列が決める。
-    private DataGridView _gridPlayer = null!, _gridEdit = null!, _gridMeta = null!;
-    private Panel _sectionPlayer = null!, _sectionEdit = null!, _sectionMeta = null!;
-    // 編集中のゲーム全体設定
-    private readonly GameConfig _config;
+    // 音の候補（IDと表示名）。SE はふつうの効果音と UI 音を合わせたもの。
+    private readonly List<SoundDef> _se, _bgm;
+    private readonly Dictionary<string, string> _fileOf = new();   // 音ID → 音声ファイル（試聴用）
+    private readonly Dictionary<string, string> _nameOf = new();   // 音ID → 表示名
 
-    // 各グリッドの行定義：(表示ラベル, GameConfig側のプロパティ名)。
-    // プロパティ名をキーにしてリフレクションで読み書きするので、
-    // 項目を増やすときはここへ1行足すだけで済む。
+    // 行定義：(表示ラベル, GameConfig 側のプロパティ名)。項目を増やすときはここへ1行足すだけ。
     private static readonly (string Label, string Prop)[] PlayerSeRows =
     {
-        ("ジャンプ", "jump"), ("着地", "land"), ("ダッシュ", "dash"),
-        ("射撃", "shoot"), ("被弾", "damage"), ("力尽きる", "death"),
+        ("ジャンプ", "jump"), ("着地", "land"), ("ダッシュ", "dash"), ("射撃", "shoot"), ("被弾", "damage"), ("力尽きる", "death"),
     };
     private static readonly (string Label, string Prop)[] EditSeRows =
     {
-        ("巻き戻し", "rewind"), ("拡大縮小を確定", "scale"), ("回転を確定", "rotate"),
-        ("移動を確定", "move"), ("向きを反転", "flip"), ("編集をリセット", "reset"),
-        ("コマ送り", "step"), ("一時停止/解除", "pause"), ("早送り切替", "fast_forward"),
-        ("色フィルタ切替", "color_filter"), ("カット確定", "cut"),
-        ("操作できない", "denied"), ("編集ゲージ切れ", "cost_empty"),
+        ("巻き戻し", "rewind"), ("拡大縮小を確定", "scale"), ("回転を確定", "rotate"), ("移動を確定", "move"), ("向きを反転", "flip"),
+        ("編集をリセット", "reset"), ("コマ送り", "step"), ("一時停止／解除", "pause"), ("早送り切替", "fast_forward"),
+        ("色フィルタ切替", "color_filter"), ("カット確定", "cut"), ("操作できない", "denied"), ("編集ゲージ切れ", "cost_empty"),
     };
     private static readonly (string Label, string Prop)[] MetaSeRows =
     {
-        ("カーソル移動", "cursor"), ("決定", "decide"), ("戻る", "cancel"),
-        ("ステージクリア", "clear"), ("ゲームオーバー", "gameover"),
+        ("カーソル移動", "cursor"), ("決定", "decide"), ("戻る", "cancel"), ("ステージクリア", "clear"), ("ゲームオーバー", "gameover"),
     };
-    // ステージBGMを選択するプルダウン
-    private ComboBox _cmbStageBgm = null!;
-    // 各カテゴリの表示/非表示を切り替えるためのセクションパネル（タグの絞り込みチェックボックスと連動）
-    private Panel _sectionEnemy = null!, _sectionGimmick = null!, _sectionItem = null!, _sectionStage = null!;
 
-    // Undo/Redo用の履歴管理。編集操作のたびにスナップショットを積み、Ctrl+Z/Ctrl+Yで巻き戻し/やり直しできるようにする
-    private readonly HistoryManager<Snapshot> _history = new();
-    private Button _btnUndo = null!, _btnRedo = null!;
+    // 割り当て先1つ分。Slots は「場面ごとの音」の取り出し口と書き込み口。
+    private sealed class Slot
+    {
+        public string Label = "";
+        public bool IsBgm;
+        public Func<string> Get = () => "";
+        public Action<string> Set = _ => { };
+    }
+    private sealed class Target
+    {
+        public string Key = "";
+        public string Group = "";
+        public string Title = "";
+        public string Kind = "";        // enemy / gimmick / item / stage / player / edit / meta
+        public Image? Icon;
+        public string Note = "";        // 右の見出しの下に出す説明
+        public List<Slot> Slots = new();
+    }
 
-    // Undo/Redoの1単位として保存する、ある時点でのすべての割り当て状態のスナップショット
-    private class Snapshot
+    private List<Target> _targets = new();
+    private Target? _cur;
+
+    // 履歴（元に戻す）1件ぶん。設定オブジェクトも JSON にして持つ。
+    public class Snapshot
     {
         public List<EnemyDef> Enemies { get; set; } = new();
         public List<GimmickDef> Gimmicks { get; set; } = new();
         public List<ItemDef> Items { get; set; } = new();
         public string StageBgmId { get; set; } = "";
+        public string ConfigJson { get; set; } = "";
+    }
+    private readonly HistoryManager<Snapshot> _history = new();
+
+    private readonly AssetThumbs _thumbs = new(Path.Combine(AppPaths.ProjectRoot, "assets"));
+    private SoundPlayer? _player;
+
+    private readonly TextBox _txtSearch = new() { Dock = DockStyle.Fill, PlaceholderText = "🔍 名前・IDで探す", BorderStyle = BorderStyle.FixedSingle };
+    private readonly ChipBar _chips = new();
+    private readonly CardListView _list = new() { Dock = DockStyle.Fill, LayoutMode = CardLayout.Rows };
+    private readonly FieldStack _detail = new() { Dock = DockStyle.Fill };
+
+    private sealed class Choice
+    {
+        public string Id = ""; public string Text = "";
+        public override string ToString() => Text;
     }
 
     public SoundAssignmentForm(List<EnemyDef> enemies, List<GimmickDef> gimmicks, List<ItemDef> items,
         List<SoundDef> se, List<SoundDef> uiSe, List<SoundDef> bgm,
         string? currentStageName, string currentStageBgmId, GameConfig config)
+        : base("サウンド割り当て", "登録した音を、鳴らしたい場面に結びつけます。空欄は「鳴らさない」です。",
+               new Size(1180, 740), new Size(940, 600))
     {
-        // 元データを直接編集しないよう、まず複製を作ってから編集対象とする（clone-and-return方式）
         _enemies = CloneList(enemies);
         _gimmicks = CloneList(gimmicks);
         _items = CloneList(items);
         _currentStageName = currentStageName;
-        // ゲーム全体設定も同じ理由で複製する。丸ごとJSON経由で複製すれば
-        // [JsonExtensionData] に入っている未知のキーも失わずに持ち越せる。
+        _stageBgmId = currentStageBgmId ?? "";
+        // 設定は JSON 経由で複製する（未知のキーも失わずに持ち越せる）。
         _config = JsonConvert.DeserializeObject<GameConfig>(JsonConvert.SerializeObject(config)) ?? new GameConfig();
 
-        // 「未設定（鳴らさない）」を選べるよう、先頭に空文字の選択肢を追加した候補配列を作る。
-        // SE候補は通常の効果音カタログとUI用効果音カタログの両方を結合したもの
-        string[] seChoices = new[] { "" }.Concat(se.Select(s => s.id)).Concat(uiSe.Select(s => s.id)).ToArray();
-        string[] bgmChoices = new[] { "" }.Concat(bgm.Select(b => b.id)).ToArray();
+        _se = se.Concat(uiSe).ToList();
+        _bgm = bgm.ToList();
+        foreach (var d in _se.Concat(_bgm)) { _fileOf[d.id] = d.file; _nameOf[d.id] = d.name; }
 
-        InitUI(seChoices, bgmChoices, currentStageBgmId);
-        // 初期状態を履歴の最初の1件として積んでおく（これがないと最初の変更でUndoしたときに戻る先がなくなる）
-        PushHistory();
+        BuildUi();
+        RebuildTargets();
+        _history.Push(TakeSnapshot());
+        InitUndo(Undo, Redo);
+        UpdateUndoState(_history.CanUndo, _history.CanRedo);
+        RebuildList();
+        var first = _targets.FirstOrDefault();
+        if (first != null) Select(first);
     }
 
-    // JSONを介したシリアライズ/デシリアライズにより、リストの完全なディープコピーを作るヘルパー。
-    // 参照を共有しない独立したコピーが必要な場面（元データの保護、Undo用スナップショットの保存）で使う。
     private static List<T> CloneList<T>(List<T> src) =>
         JsonConvert.DeserializeObject<List<T>>(JsonConvert.SerializeObject(src)) ?? new List<T>();
 
-    // ── UI 構築 ────────────────────────────────
-    private void InitUI(string[] seChoices, string[] bgmChoices, string currentStageBgmId)
+    // ── 画面の組み立て ───────────────────────────
+    private void BuildUi()
     {
-        Text = "🔊 サウンド割り当て";
-        Size = new System.Drawing.Size(920, 700);
-        MinimumSize = new System.Drawing.Size(700, 480);
-        Font = new System.Drawing.Font("Meiryo UI", 9f);
-        StartPosition = FormStartPosition.CenterParent;
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.PanelBack };
+        var searchHost = new Panel { Dock = DockStyle.Top, Height = UiTheme.S(this, 36), Padding = new Padding(8, 8, 8, 4) };
+        searchHost.Controls.Add(_txtSearch);
+        _txtSearch.TextChanged += (s, e) => RebuildList();
+        _chips.SelectionChanged += (s, e) => RebuildList();
+        left.Controls.Add(_list);
+        left.Controls.Add(_chips);
+        left.Controls.Add(searchHost);
+        _list.ItemClicked += (s, item) => { var t = _targets.FirstOrDefault(x => x.Key == item.Key); if (t != null) Select(t); };
 
-        // 画面上部：この画面の使い方を説明する案内文
-        var lblHint = new Label
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        right.Controls.Add(_detail);
+
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 6, FixedPanel = FixedPanel.Panel1, BackColor = UiTheme.CardBorder };
+        split.Panel1.Controls.Add(left);
+        split.Panel2.Controls.Add(right);
+        Body.Controls.Add(split);
+        SplitWhenReady(split, 280, 480, 360);
+
+        LeftBar.Controls.Add(new Label
         {
-            Dock = DockStyle.Top,
-            Height = 36,
-            Padding = new Padding(8, 6, 8, 0),
-            Text = "サウンド管理で登録したBGM/SEのIDを、実際に鳴らしたい場面へ割り当てます。空欄は「未設定（鳴らさない）」です。",
-            Font = new System.Drawing.Font(Font.FontFamily, 8f),
-            ForeColor = System.Drawing.Color.DarkSlateGray,
-        };
+            Text = "💡 音は「サウンド管理」で登録します。選ぶとすぐ試聴できます（WAVのみ）。",
+            AutoSize = true, ForeColor = UiTheme.TextMuted, Font = UiTheme.Small, Margin = new Padding(0, 8, 0, 0),
+        });
+    }
 
-        // ── タグ絞り込み ──
-        // カテゴリ（敵/ギミック/アイテム/ステージ）ごとのトグルボタン。
-        // チェックを外すとそのカテゴリのセクションが非表示になり、編集したい項目だけに画面を絞り込める
-        var pnlTags = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(4) };
-        var chkEnemy = new CheckBox { Text = "👾 敵SE", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkGimmick = new CheckBox { Text = "🔧 ギミックSE", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkItem = new CheckBox { Text = "💎 アイテムSE", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        var chkStage = new CheckBox { Text = "🎮 ステージBGM", Appearance = Appearance.Button, Checked = true, AutoSize = true, Padding = new Padding(8, 4, 8, 4), Margin = new Padding(0, 0, 4, 0) };
-        chkEnemy.CheckedChanged += (s, e) => _sectionEnemy.Visible = chkEnemy.Checked;
-        chkGimmick.CheckedChanged += (s, e) => _sectionGimmick.Visible = chkGimmick.Checked;
-        chkItem.CheckedChanged += (s, e) => _sectionItem.Visible = chkItem.Checked;
-        chkStage.CheckedChanged += (s, e) => _sectionStage.Visible = chkStage.Checked;
-        pnlTags.Controls.AddRange(new Control[] { chkEnemy, chkGimmick, chkItem, chkStage });
+    // 割り当て先の一覧を、現在のデータから作り直す。
+    private void RebuildTargets()
+    {
+        _targets = new List<Target>();
+        int px = UiTheme.S(this, 40);
 
-        // ── 下部ボタン ──
-        // 画面下部にキャンセル/保存ボタンとUndo/Redoボタンをまとめて配置するエリア
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink };
-        // 右寄せ：キャンセル・保存ボタン（保存が最も右＝目立つ位置に来るよう右から順に追加）
-        var flowRight = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 6, 8, 2), AutoSize = true };
-        var btnCancel = new Button { Text = "キャンセル", AutoSize = true, Padding = new Padding(10, 5, 10, 5) };
-        // キャンセル時は結果を確定せずCancelを返して閉じる（呼び出し元は変更を反映しない）
-        btnCancel.Click += (s, e) => { DialogResult = DialogResult.Cancel; Close(); };
-        var btnSave = new Button { Text = "💾 保存して閉じる", AutoSize = true, Padding = new Padding(10, 6, 10, 6), BackColor = System.Drawing.Color.FromArgb(40, 167, 69), ForeColor = System.Drawing.Color.White, FlatStyle = FlatStyle.Flat };
-        btnSave.Click += BtnSave_Click;
-        flowRight.Controls.Add(btnCancel);
-        flowRight.Controls.Add(btnSave);
+        if (_currentStageName != null)
+            _targets.Add(new Target
+            {
+                Key = "stage", Group = "🎮 ステージ", Title = $"ステージのBGM（{_currentStageName}）", Kind = "stage",
+                Icon = _thumbs.ForEmoji("🎵", UiTheme.KindTrigger, px),
+                Note = "いま開いているステージで流す BGM です。",
+                Slots = { new Slot { Label = "BGM", IsBgm = true, Get = () => _stageBgmId, Set = v => _stageBgmId = v } },
+            });
+        else
+            _targets.Add(new Target
+            {
+                Key = "stage", Group = "🎮 ステージ", Title = "ステージのBGM", Kind = "stage",
+                Icon = _thumbs.ForEmoji("🎵", Color.Gray, px),
+                Note = "先にメイン画面でステージを開いてください。ステージが未選択のため、ここでは設定できません。",
+            });
 
-        // 左寄せ：Undo/Redoボタン
-        var flowLeft = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(8, 6, 8, 6), AutoSize = true };
-        _btnUndo = new Button { Text = "↩ 元に戻す (Ctrl+Z)", AutoSize = true, Padding = new Padding(6, 5, 6, 5), Enabled = false };
-        _btnUndo.Click += (s, e) => AssignUndo();
-        _btnRedo = new Button { Text = "↪ やり直す (Ctrl+Y)", AutoSize = true, Padding = new Padding(6, 5, 6, 5), Enabled = false };
-        _btnRedo.Click += (s, e) => AssignRedo();
-        flowLeft.Controls.AddRange(new Control[] { _btnUndo, _btnRedo });
+        _targets.Add(MakeConfigTarget("player", "🎮 プレイヤー・システム", "プレイヤー操作の音", "🏃", PlayerSeRows, _config.player_se,
+            "ジャンプ・着地・被弾など、プレイヤーを動かすときの音です。"));
+        _targets.Add(MakeConfigTarget("edit", "🎮 プレイヤー・システム", "編集ツールの音", "✏️", EditSeRows, _config.edit_se,
+            "巻き戻し・拡大縮小・カットなど、編集操作を行うときの音です。"));
+        _targets.Add(MakeConfigTarget("meta", "🎮 プレイヤー・システム", "タイトル・リザルトの音", "🏁", MetaSeRows, _config.meta_se,
+            "メニュー操作や、ステージクリア・ゲームオーバーの音です。"));
 
-        pnlBottom.Controls.Add(flowRight);
-        pnlBottom.Controls.Add(flowLeft);
-
-        // ── 中央: スクロール可能な複数セクション ──
-        // 敵/ギミック/アイテム/ステージの各セクションを縦に並べ、画面に収まらない分はスクロールで見られるようにする
-        var pnlScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-
-        // 敵のSE割り当てグリッド：ID/名前は読み取り専用、出現音・攻撃音・被弾音・死亡音は編集可能な列
-        _gridEnemy = BuildGrid(new[]
-        {
-            ("id", "ID", 90, true), ("name", "名前", 110, true),
-            ("seSpawn", "出現音", 110, false), ("seAttack", "攻撃音", 110, false),
-            ("seDamage", "被弾音", 110, false), ("seDeath", "死亡音", 110, false),
-        }, seChoices);
         foreach (var en in _enemies)
-            _gridEnemy.Rows.Add(en.id, en.name, en.seSpawn, en.seAttack, en.seDamage, en.seDeath);
-        // セルの値が変わるたびに履歴へスナップショットを積み、Undo/Redoの対象にする
-        _gridEnemy.CellValueChanged += (s, e) => PushHistory();
-        _sectionEnemy = BuildSection("👾 敵のSE割り当て", _gridEnemy, 220);
-
-        // ギミックのSE割り当てグリッド：起動音のみ編集可能
-        _gridGimmick = BuildGrid(new[]
         {
-            ("id", "ID", 110, true), ("name", "名前", 140, true), ("seActivate", "起動音", 140, false),
-        }, seChoices);
-        foreach (var gi in _gimmicks)
-            _gridGimmick.Rows.Add(gi.id, gi.name, gi.seActivate);
-        _gridGimmick.CellValueChanged += (s, e) => PushHistory();
-        _sectionGimmick = BuildSection("🔧 ギミックのSE割り当て", _gridGimmick, 180);
-
-        // アイテムのSE割り当てグリッド：取得音のみ編集可能
-        _gridItem = BuildGrid(new[]
-        {
-            ("id", "ID", 110, true), ("name", "名前", 140, true), ("seCollect", "取得音", 140, false),
-        }, seChoices);
-        foreach (var it in _items)
-            _gridItem.Rows.Add(it.id, it.name, it.seCollect);
-        _gridItem.CellValueChanged += (s, e) => PushHistory();
-        _sectionItem = BuildSection("💎 アイテムのSE割り当て", _gridItem, 180);
-
-        _sectionStage = BuildStageSection(bgmChoices, currentStageBgmId);
-
-        // プレイヤー操作・編集ツール・UIのSE。
-        // これらは従来 DrawPixel.cpp にリテラルで直書きされていて、この画面から触れなかった。
-        _gridPlayer = BuildKeyValueGrid(PlayerSeRows, _config.player_se, seChoices);
-        _sectionPlayer = BuildSection("🎮 プレイヤー操作のSE", _gridPlayer, 200);
-        _gridEdit = BuildKeyValueGrid(EditSeRows, _config.edit_se, seChoices);
-        _sectionEdit = BuildSection("✏️ 編集ツールのSE", _gridEdit, 330);
-        _gridMeta = BuildKeyValueGrid(MetaSeRows, _config.meta_se, seChoices);
-        _sectionMeta = BuildSection("🏁 タイトル・リザルトのSE", _gridMeta, 180);
-
-        // 表示順（上から）：アイテム→ギミック→敵→プレイヤー→編集ツール→UI→ステージ
-        pnlScroll.Controls.Add(_sectionStage);
-        pnlScroll.Controls.Add(_sectionMeta);
-        pnlScroll.Controls.Add(_sectionEdit);
-        pnlScroll.Controls.Add(_sectionPlayer);
-        pnlScroll.Controls.Add(_sectionItem);
-        pnlScroll.Controls.Add(_sectionGimmick);
-        pnlScroll.Controls.Add(_sectionEnemy);
-
-        Controls.Add(pnlScroll);
-        Controls.Add(pnlBottom);
-        Controls.Add(pnlTags);
-        Controls.Add(lblHint);
-    }
-
-    // フォーム全体でCtrl+Z（元に戻す）とCtrl+Y（やり直す）のショートカットキーを受け付ける。
-    // グリッドなど個別コントロールにフォーカスがあっても、フォームレベルでこのキー入力を捕まえて処理する。
-    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
-    {
-        if (keyData == (Keys.Control | Keys.Z)) { AssignUndo(); return true; }
-        if (keyData == (Keys.Control | Keys.Y)) { AssignRedo(); return true; }
-        return base.ProcessCmdKey(ref msg, keyData);
-    }
-
-    // ── ヘルパー: セクション（タイトル+中身、固定高さでDock=Topに積む） ──
-    // タイトルラベルと中身のコントロールをまとめた1つのセクションパネルを作る。
-    // 複数のセクションをDockStyle.Topで縦に積み重ねられるよう、高さを固定値として計算する。
-    private Panel BuildSection(string title, Control content, int contentHeight)
-    {
-        const int titleHeight = 24;
-        const int topMargin = 4, bottomMargin = 14;
-        var section = new Panel { Dock = DockStyle.Top, Height = titleHeight + contentHeight + topMargin + bottomMargin, Padding = new Padding(4, topMargin, 4, bottomMargin) };
-        var lbl = new Label { Dock = DockStyle.Top, Height = titleHeight, Text = title, Font = new System.Drawing.Font(Font, System.Drawing.FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft };
-        content.Dock = DockStyle.Fill;
-        content.Margin = new Padding(0);
-        section.Controls.Add(content);
-        section.Controls.Add(lbl);
-        return section;
-    }
-
-    // 敵/ギミック/アイテムの割り当てグリッドを共通ロジックで組み立てるヘルパー。
-    // cols: (列名, 見出し, 幅の割合, 読み取り専用か) のタプル配列。
-    // readOnly=falseの列はSE選択用のコンボボックス列として作成される。
-    private DataGridView BuildGrid((string name, string header, int width, bool readOnly)[] cols, string[] seChoices)
-    {
-        var grid = new DataGridView
-        {
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-            AllowUserToAddRows = false,
-            AllowUserToDeleteRows = false,
-            RowHeadersWidth = 30,
-            SelectionMode = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect = false,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-            ColumnHeadersHeight = 28,
-            Font = new System.Drawing.Font("Meiryo UI", 9),
-        };
-        // 敵/ギミック/アイテムのSEフィールドが、カタログに存在しない古いIDを保持している場合でも
-        // コンボボックス列がフォーマットエラーで落ちないようにする（値はそのまま保持し、表示のみ許容）
-        grid.DataError += (s, e) => e.Cancel = true;
-        foreach (var (name, header, width, readOnly) in cols)
-        {
-            if (readOnly)
+            var e = en;
+            _targets.Add(new Target
             {
-                // ID/名前などの参照専用列は、編集不可のテキスト列として作り、背景色を薄灰色にして区別する
-                grid.Columns.Add(new DataGridViewTextBoxColumn { Name = name, HeaderText = header, FillWeight = width, ReadOnly = true, DefaultCellStyle = { BackColor = System.Drawing.Color.WhiteSmoke } });
-            }
-            else
-            {
-                // SE割り当て用の列はプルダウンから選択できるコンボボックス列として作る
-                var combo = new DataGridViewComboBoxColumn { Name = name, HeaderText = header, FillWeight = width, DropDownWidth = 160 };
-                combo.Items.AddRange(seChoices);
-                grid.Columns.Add(combo);
-            }
+                Key = "enemy:" + e.id, Group = "👾 敵", Title = e.name.Length > 0 ? e.name : e.id, Kind = "enemy",
+                Icon = _thumbs.ForEnemy(e, px), Note = $"ID: {e.id}",
+                Slots =
+                {
+                    new Slot { Label = "出現したとき", Get = () => e.seSpawn, Set = v => e.seSpawn = v },
+                    new Slot { Label = "攻撃するとき", Get = () => e.seAttack, Set = v => e.seAttack = v },
+                    new Slot { Label = "ダメージを受けたとき", Get = () => e.seDamage, Set = v => e.seDamage = v },
+                    new Slot { Label = "倒されたとき", Get = () => e.seDeath, Set = v => e.seDeath = v },
+                },
+            });
         }
-        return grid;
+        foreach (var gi in _gimmicks)
+        {
+            var g = gi;
+            _targets.Add(new Target
+            {
+                Key = "gimmick:" + g.id, Group = "🔧 ギミック", Title = g.name.Length > 0 ? g.name : g.id, Kind = "gimmick",
+                Icon = _thumbs.ForGimmick(g, px), Note = $"ID: {g.id}",
+                Slots = { new Slot { Label = "作動したとき", Get = () => g.seActivate, Set = v => g.seActivate = v } },
+            });
+        }
+        foreach (var it in _items)
+        {
+            var i = it;
+            _targets.Add(new Target
+            {
+                Key = "item:" + i.id, Group = "💎 アイテム", Title = i.name.Length > 0 ? i.name : i.id, Kind = "item",
+                Icon = _thumbs.ForItem(i, px), Note = $"ID: {i.id}",
+                Slots = { new Slot { Label = "取ったとき", Get = () => i.seCollect, Set = v => i.seCollect = v } },
+            });
+        }
     }
 
-    // 「項目名 / 効果音ID」の2列だけのグリッドを組み立てる。
-    //
-    // 敵やギミックのように1行が1アセットではなく、1行が1つの設定項目になる形。
-    // 値の読み書きは rows で指定したプロパティ名を使ったリフレクションで行うので、
-    // 項目が増えても Read 側に対応する処理を書き足す必要が無い。
-    private DataGridView BuildKeyValueGrid((string Label, string Prop)[] rows, object target, string[] seChoices)
+    // GameConfig の項目群（プレイヤー・編集・メタ）を、プロパティ名のリフレクションで読み書きする割り当て先にする。
+    private Target MakeConfigTarget(string key, string group, string title, string emoji, (string Label, string Prop)[] rows, object target, string note)
     {
-        var grid = BuildGrid(new[]
+        var t = new Target
         {
-            ("label", "項目", 180, true), ("value", "効果音ID", 180, false),
-        }, seChoices);
+            Key = key, Group = group, Title = title, Kind = key, Note = note,
+            Icon = _thumbs.ForEmoji(emoji, UiTheme.KindSpecial, UiTheme.S(this, 40)),
+        };
         foreach (var (label, prop) in rows)
         {
-            string cur = target.GetType().GetProperty(prop)?.GetValue(target) as string ?? "";
-            // カタログに無いIDが設定されていた場合、コンボボックスへ入れると例外になるので空に落とす
-            // （DataError は握り潰される設定だが、値が消えたことに気づけるよう空表示で揃える）
-            if (!seChoices.Contains(cur)) cur = "";
-            grid.Rows.Add(label, cur);
+            var pi = target.GetType().GetProperty(prop);
+            if (pi == null) continue;
+            t.Slots.Add(new Slot
+            {
+                Label = label,
+                Get = () => pi.GetValue(target) as string ?? "",
+                Set = v => pi.SetValue(target, v),
+            });
         }
-        grid.CellValueChanged += (s, e) => PushHistory();
-        return grid;
+        return t;
     }
 
-    // 「項目名 / 効果音ID」グリッドの内容を、対応する設定オブジェクトへ書き戻す。
-    private static void ApplyKeyValueGrid(DataGridView grid, (string Label, string Prop)[] rows, object target)
+    // ── 一覧 ────────────────────────────────────
+    private void RebuildList()
     {
-        for (int i = 0; i < rows.Length && i < grid.Rows.Count; i++)
+        string q = _txtSearch.Text.Trim();
+        string chip = _chips.SelectedValue;
+        _chips.SetChips(new[]
         {
-            var prop = target.GetType().GetProperty(rows[i].Prop);
-            if (prop == null) continue;
-            prop.SetValue(target, grid.Rows[i].Cells["value"].Value?.ToString() ?? "");
+            ("all", "すべて"), ("enemy", $"👾 敵 {_targets.Count(t => t.Kind == "enemy")}"),
+            ("gimmick", $"🔧 {_targets.Count(t => t.Kind == "gimmick")}"), ("item", $"💎 {_targets.Count(t => t.Kind == "item")}"),
+            ("sys", "🎮 システム"),
+        }, chip.Length > 0 ? chip : "all");
+        chip = _chips.SelectedValue;
+
+        var items = new List<CardItem>();
+        foreach (var t in _targets)
+        {
+            bool isSys = t.Kind is "stage" or "player" or "edit" or "meta";
+            if (chip == "enemy" && t.Kind != "enemy") continue;
+            if (chip == "gimmick" && t.Kind != "gimmick") continue;
+            if (chip == "item" && t.Kind != "item") continue;
+            if (chip == "sys" && !isSys) continue;
+            if (q.Length > 0 && !t.Title.Contains(q, StringComparison.OrdinalIgnoreCase) && !t.Key.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
+
+            int filled = t.Slots.Count(s => !string.IsNullOrEmpty(s.Get()));
+            string sub = t.Slots.Count == 0 ? "（ステージ未選択）" : filled == t.Slots.Count ? $"✔ すべて設定済み（{filled}）" : filled == 0 ? $"未設定（0/{t.Slots.Count}）" : $"設定 {filled}/{t.Slots.Count}";
+            items.Add(new CardItem
+            {
+                Key = t.Key, Title = t.Title, Subtitle = sub, Group = t.Group, Icon = t.Icon,
+                Accent = t.Kind switch { "enemy" => UiTheme.KindEnemy, "gimmick" => UiTheme.KindGimmick, "item" => UiTheme.KindItem, _ => UiTheme.KindSpecial },
+            });
         }
+        _list.EmptyText = "該当する割り当て先がありません";
+        _list.SetItems(items);
+        if (_cur != null) _list.SetSelectedKey(_cur.Key, scrollIntoView: false);
     }
 
-    // ステージBGM割り当てセクションを組み立てる。
-    // ステージが開かれていない場合は編集不可の案内メッセージを、開かれている場合はBGM選択プルダウンを表示する。
-    private Panel BuildStageSection(string[] bgmChoices, string currentStageBgmId)
+    private void Select(Target t)
     {
-        var content = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, AutoSize = false, Padding = new Padding(8) };
-        if (_currentStageName == null)
-        {
-            // ステージ未選択の場合：ここでは何も編集できないことを利用者に伝える案内文のみ表示する
-            var lbl = new Label { Text = "先にメイン画面でステージを開いてください（ステージ未選択のため、ここでは設定できません）。", AutoSize = true, ForeColor = System.Drawing.Color.Gray, Margin = new Padding(4, 8, 4, 4) };
-            content.Controls.Add(lbl);
-        }
-        else
-        {
-            // ステージが開かれている場合：現在のBGM割り当てをプルダウンの初期選択として反映する
-            var lbl = new Label { Text = $"現在のステージ「{_currentStageName}」のBGM:", AutoSize = true, Margin = new Padding(4, 8, 6, 4) };
-            _cmbStageBgm = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220, Margin = new Padding(0, 4, 4, 4) };
-            _cmbStageBgm.Items.AddRange(bgmChoices);
-            // 現在のBGM IDが候補の中に見つからない場合は先頭（＝未設定）を選択する
-            int idx = Array.IndexOf(bgmChoices, currentStageBgmId ?? "");
-            _cmbStageBgm.SelectedIndex = idx >= 0 ? idx : 0;
-            _cmbStageBgm.SelectedIndexChanged += (s, e) => PushHistory();
-            content.Controls.Add(lbl);
-            content.Controls.Add(_cmbStageBgm);
-        }
-        return BuildSection("🎮 ステージのBGM割り当て", content, 50);
+        _cur = t;
+        _list.SetSelectedKey(t.Key);
+        ShowDetail(t);
     }
 
-    // ── Undo/Redo ──────────────────────────────
-    // 現在の画面状態（各グリッドとステージBGMプルダウンの内容）をスナップショットとして切り出す
-    private Snapshot CaptureSnapshot() => new Snapshot
+    // ── 詳細（場面ごとの音） ─────────────────────
+    private void ShowDetail(Target t)
     {
-        Enemies = ReadEnemiesFromGrid(),
-        Gimmicks = ReadGimmicksFromGrid(),
-        Items = ReadItemsFromGrid(),
-        StageBgmId = _currentStageName != null ? (_cmbStageBgm.SelectedItem as string ?? "") : "",
+        _detail.SuspendLayout();
+        _detail.ClearItems();
+
+        var head = new Panel { Height = 56, Margin = new Padding(0, 0, 0, 6) };
+        var pic = new PictureBox { Image = t.Icon, SizeMode = PictureBoxSizeMode.Zoom, Dock = DockStyle.Left, Width = 56 };
+        var title = new Label { Text = t.Title, Dock = DockStyle.Top, Height = 28, Font = new Font("Meiryo UI", 12f, FontStyle.Bold), TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(8, 0, 0, 0) };
+        var note = new Label { Text = t.Note, Dock = DockStyle.Fill, Font = UiTheme.Small, ForeColor = UiTheme.TextMuted, Padding = new Padding(8, 2, 0, 0) };
+        head.Controls.Add(note);
+        head.Controls.Add(title);
+        head.Controls.Add(pic);
+        _detail.AddItem(head);
+
+        foreach (var slot in t.Slots)
+            _detail.AddItem(MakeSlotRow(slot));
+
+        _detail.ResumeLayout(true);
+        _detail.ScrollToTop();
+    }
+
+    // 1つの場面ぶん：項目名 ＋ 音の選択 ＋ 試聴 ＋ 解除。
+    private Control MakeSlotRow(Slot slot)
+    {
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Font = UiTheme.Base, DropDownWidth = 360 };
+        var list = slot.IsBgm ? _bgm : _se;
+        combo.Items.Add(new Choice { Id = "", Text = "（未設定：鳴らさない）" });
+        foreach (var d in list) combo.Items.Add(new Choice { Id = d.id, Text = $"{(d.name.Length > 0 ? d.name : d.id)}   〔{d.id}〕" });
+        string cur = slot.Get() ?? "";
+        int idx = combo.Items.Cast<Choice>().ToList().FindIndex(c => c.Id == cur);
+        if (idx < 0 && cur.Length > 0)
+        {
+            // カタログに無い古い ID が入っているときは、消さずに残して警告表示にする。
+            combo.Items.Add(new Choice { Id = cur, Text = $"⚠ {cur}（登録されていません）" });
+            idx = combo.Items.Count - 1;
+        }
+        combo.SelectedIndex = Math.Max(0, idx);
+
+        var btnPlay = Kit.Btn("▶", () => Play(slot.Get()));
+        btnPlay.AutoSize = false; btnPlay.Size = new Size(36, 28); btnPlay.Padding = new Padding(0);
+        var btnClear = Kit.Btn("✕", () => { combo.SelectedIndex = 0; });
+        btnClear.AutoSize = false; btnClear.Size = new Size(36, 28); btnClear.Padding = new Padding(0);
+
+        combo.SelectedIndexChanged += (s, e) =>
+        {
+            if (combo.SelectedItem is not Choice c) return;
+            if (slot.Get() == c.Id) return;
+            slot.Set(c.Id);
+            MarkDirty();
+            _history.Push(TakeSnapshot());
+            UpdateUndoState(_history.CanUndo, _history.CanRedo);
+            RebuildList();
+            // 選んだらすぐ聞けるよう、WAVなら自動で鳴らす。
+            if (c.Id.Length > 0) Play(c.Id);
+        };
+
+        var row = new Panel { Height = 30 };
+        combo.Dock = DockStyle.Fill;
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Right, Width = 86, WrapContents = false, Padding = new Padding(6, 0, 0, 0) };
+        btnPlay.Margin = new Padding(0, 0, 4, 0); btnClear.Margin = new Padding(0);
+        buttons.Controls.Add(btnPlay);
+        buttons.Controls.Add(btnClear);
+        row.Controls.Add(combo);
+        row.Controls.Add(buttons);
+        return Kit.Field(slot.Label, row);
+    }
+
+    private void Play(string id)
+    {
+        if (string.IsNullOrEmpty(id) || !_fileOf.TryGetValue(id, out var rel) || string.IsNullOrEmpty(rel)) return;
+        string full = Path.Combine(AppPaths.ProjectRoot, rel.Replace('/', '\\'));
+        if (!File.Exists(full) || !full.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) return;   // WAV 以外は黙って何もしない
+        try { _player?.Stop(); _player?.Dispose(); _player = new SoundPlayer(full); _player.Play(); }
+        catch { /* 試聴の失敗は編集を止めない */ }
+    }
+
+    // ── 元に戻す／やり直し ───────────────────────
+    private Snapshot TakeSnapshot() => new()
+    {
+        Enemies = CloneList(_enemies), Gimmicks = CloneList(_gimmicks), Items = CloneList(_items),
+        StageBgmId = _stageBgmId, ConfigJson = JsonConvert.SerializeObject(_config),
     };
 
-    // 履歴から取り出したスナップショットの内容を、内部データとグリッド表示の両方に復元する。
-    // グリッドはいったん全行クリアしてから、復元後のデータで作り直す。
-    private void RestoreSnapshot(Snapshot snap)
+    private void Restore(Snapshot? s)
     {
-        _enemies = snap.Enemies;
-        _gimmicks = snap.Gimmicks;
-        _items = snap.Items;
-
-        _gridEnemy.Rows.Clear();
-        foreach (var en in _enemies) _gridEnemy.Rows.Add(en.id, en.name, en.seSpawn, en.seAttack, en.seDamage, en.seDeath);
-        _gridGimmick.Rows.Clear();
-        foreach (var gi in _gimmicks) _gridGimmick.Rows.Add(gi.id, gi.name, gi.seActivate);
-        _gridItem.Rows.Clear();
-        foreach (var it in _items) _gridItem.Rows.Add(it.id, it.name, it.seCollect);
-
-        // ステージが選択されている場合のみ、BGMプルダウンの選択状態も復元する
-        if (_currentStageName != null)
-        {
-            int idx = _cmbStageBgm.Items.IndexOf(snap.StageBgmId);
-            _cmbStageBgm.SelectedIndex = idx >= 0 ? idx : 0;
-        }
+        if (s == null) return;
+        _enemies = s.Enemies; _gimmicks = s.Gimmicks; _items = s.Items; _stageBgmId = s.StageBgmId;
+        _config = JsonConvert.DeserializeObject<GameConfig>(s.ConfigJson) ?? new GameConfig();
+        string? key = _cur?.Key;
+        RebuildTargets();
+        RebuildList();
+        var t = _targets.FirstOrDefault(x => x.Key == key) ?? _targets.FirstOrDefault();
+        if (t != null) Select(t);
+        UpdateUndoState(_history.CanUndo, _history.CanRedo);
     }
 
-    // 現在の状態を履歴に1件積み、Undo/Redoボタンの有効/無効状態を最新化する。
-    // 何らかの編集操作（セル変更・BGM変更）が行われるたびに呼ばれる。
-    private void PushHistory()
-    {
-        _history.Push(CaptureSnapshot());
-        UpdateUndoRedoButtons();
-    }
+    private void Undo() { if (_history.CanUndo) Restore(_history.Undo()); }
+    private void Redo() { if (_history.CanRedo) Restore(_history.Redo()); }
 
-    // 元に戻す（Ctrl+Z）。戻せる履歴がなければ何もしない。
-    private void AssignUndo()
+    // ── 保存 ────────────────────────────────────
+    protected override void OnSave()
     {
-        if (!_history.CanUndo) return;
-        var restored = _history.Undo();
-        if (restored == null) return;
-        RestoreSnapshot(restored);
-        UpdateUndoRedoButtons();
-    }
-
-    // やり直す（Ctrl+Y）。やり直せる履歴がなければ何もしない。
-    private void AssignRedo()
-    {
-        if (!_history.CanRedo) return;
-        var restored = _history.Redo();
-        if (restored == null) return;
-        RestoreSnapshot(restored);
-        UpdateUndoRedoButtons();
-    }
-
-    // Undo/Redoボタンの有効/無効を、現在の履歴の状態（これ以上戻せる/進めるか）に合わせて更新する。
-    // ボタンがまだ生成されていない（コンストラクタ処理中など）タイミングで呼ばれた場合は何もしない。
-    private void UpdateUndoRedoButtons()
-    {
-        if (_btnUndo == null! || _btnRedo == null!) return;
-        _btnUndo.Enabled = _history.CanUndo;
-        _btnRedo.Enabled = _history.CanRedo;
-    }
-
-    // ── グリッド → データモデルへの反映 ──
-    // 敵グリッドの各行から現在の入力値を読み取り、複製した敵データへ書き戻す。
-    // 行数がデータ数より少ない場合に備え、両方の件数の小さい方までしかループしない。
-    private List<EnemyDef> ReadEnemiesFromGrid()
-    {
-        var list = CloneList(_enemies);
-        for (int i = 0; i < list.Count && i < _gridEnemy.Rows.Count; i++)
-        {
-            var row = _gridEnemy.Rows[i];
-            list[i].seSpawn = row.Cells["seSpawn"].Value?.ToString() ?? "";
-            list[i].seAttack = row.Cells["seAttack"].Value?.ToString() ?? "";
-            list[i].seDamage = row.Cells["seDamage"].Value?.ToString() ?? "";
-            list[i].seDeath = row.Cells["seDeath"].Value?.ToString() ?? "";
-        }
-        return list;
-    }
-
-    // ギミックグリッドの各行から起動音の入力値を読み取り、複製したギミックデータへ書き戻す。
-    private List<GimmickDef> ReadGimmicksFromGrid()
-    {
-        var list = CloneList(_gimmicks);
-        for (int i = 0; i < list.Count && i < _gridGimmick.Rows.Count; i++)
-            list[i].seActivate = _gridGimmick.Rows[i].Cells["seActivate"].Value?.ToString() ?? "";
-        return list;
-    }
-
-    // アイテムグリッドの各行から取得音の入力値を読み取り、複製したアイテムデータへ書き戻す。
-    private List<ItemDef> ReadItemsFromGrid()
-    {
-        var list = CloneList(_items);
-        for (int i = 0; i < list.Count && i < _gridItem.Rows.Count; i++)
-            list[i].seCollect = _gridItem.Rows[i].Cells["seCollect"].Value?.ToString() ?? "";
-        return list;
-    }
-
-    // ── 保存 ──────────────────────────────────
-    // 保存ボタンが押されたときの処理。各グリッドの最新内容をResult系プロパティへ確定し、
-    // DialogResult.OKを設定してフォームを閉じる（呼び出し元はこのOK/Resultプロパティを見て反映する）。
-    private void BtnSave_Click(object? sender, EventArgs e)
-    {
-        ResultEnemies = ReadEnemiesFromGrid();
-        ResultGimmicks = ReadGimmicksFromGrid();
-        ResultItems = ReadItemsFromGrid();
-        // ステージが選択されていない場合はnullのままにし、呼び出し側にBGM未変更であることを伝える
-        ResultStageBgmId = _currentStageName != null ? (_cmbStageBgm.SelectedItem as string ?? "") : null;
-        // プレイヤー操作・編集ツール・UIのSEを設定オブジェクトへ書き戻して返す
-        ApplyKeyValueGrid(_gridPlayer, PlayerSeRows, _config.player_se);
-        ApplyKeyValueGrid(_gridEdit, EditSeRows, _config.edit_se);
-        ApplyKeyValueGrid(_gridMeta, MetaSeRows, _config.meta_se);
+        ResultEnemies = CloneList(_enemies);
+        ResultGimmicks = CloneList(_gimmicks);
+        ResultItems = CloneList(_items);
+        ResultStageBgmId = _currentStageName != null ? _stageBgmId : null;
         ResultGameConfig = _config;
         DialogResult = DialogResult.OK;
         Close();
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _player?.Stop(); _player?.Dispose();
+        _thumbs.Dispose();
+        base.OnFormClosed(e);
     }
 }

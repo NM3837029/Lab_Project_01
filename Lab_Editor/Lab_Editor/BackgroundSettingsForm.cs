@@ -1,621 +1,372 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.IO;
-using System.Windows.Forms;
-
-namespace Lab_Editor;
+﻿namespace Lab_Editor;
 
 // ───────────────────────────────────────────────
-//  BackgroundSettingsForm
-//  ステージの視差背景レイヤーを設定するフォーム
-//  「背景レイヤー」とは、遠景・中景・近景のようにカメラ移動に対して異なる速度で
-//  スクロールする画像の層のことで、drawOrder（重ね順）・sprite（画像パス）・
-//  scrollRate（カメラに対するスクロール速度の比率）・loop（横方向に繰り返すか）・
-//  offsetX/offsetY（初期表示位置のずらし量）の各パラメータをDataGridViewで一覧編集し、
-//  右側のパララックスプレビューで実際の見え方を確認しながら調整できるようにしている。
+//  BackgroundSettingsForm - ステージの背景レイヤーを設定する画面
+//
+//  「背景レイヤー」は、遠景・中景・近景のように、カメラが動いたとき違う速さで流れる画像の層。
+//  以前は drawOrder / scrollRate / offsetX… という英語の列が並んだ表だったが、
+//  今回は次の作りに改めた。
+//    左   : レイヤーの一覧（手前のものが上。絵のサムネイルと「速さ・ループ」を1行で見せる）
+//    右上 : 全レイヤーを重ねて自動で流す、大きなパララックスプレビュー（つまみを動かすとその場で変わる）
+//    右下 : 選んだレイヤーの設定（画像・単色・動き・位置）を、日本語の項目名のフォームで編集
+//  呼び出し側との約束（コンストラクタの引数と ResultLayers）は以前のまま。
 // ───────────────────────────────────────────────
-public class BackgroundSettingsForm : Form
+public class BackgroundSettingsForm : EditorFormBase
 {
-    // ── 公開プロパティ ──────────────────────────
-    // 「保存して閉じる」が押された時点でのレイヤー一覧。呼び出し元はShowDialog()が
-    // DialogResult.OKで返ってきた後にこのプロパティを読み取り、ステージデータへ反映する。
+    // 「保存して閉じる」が押された時点でのレイヤー一覧。呼び出し元は OK で返ってきた後にこれを読み、ステージへ反映する。
     public List<BackgroundLayer> ResultLayers { get; private set; } = new();
 
-    // ── フィールド ─────────────────────────────
-    // プロジェクトのルートフォルダ（背景画像の相対パスを解決する際の基準になる）
     private readonly string _projectRoot;
-    // 背景画像をコピーして格納する "img" サブフォルダのフルパス
     private readonly string _imgDir;
+    // 編集中のレイヤー（渡された一覧の複製。キャンセルしても元は汚れない）
+    private readonly List<BackgroundLayer> _layers = new();
+    private BackgroundLayer? _cur;
+    // 一覧の行 ↔ レイヤー（参照の同一性で対応づける）
+    private readonly Dictionary<string, BackgroundLayer> _byKey = new();
+    private readonly Dictionary<BackgroundLayer, string> _keyOf = new(ReferenceEqualityComparer.Instance);
+    private int _keySeq;
 
-    // レイヤー一覧を表示・編集するためのグリッド
-    private DataGridView _grid       = null!;
-    // 選択中の行に対応するスプライト画像を表示するプレビュー用ピクチャーボックス
-    private PictureBox   _preview    = null!;
-    private Button       _btnAdd     = null!;
-    private Button       _btnSave    = null!;
-    private Button       _btnCancel  = null!;
+    private readonly CardListView _list = new() { Dock = DockStyle.Fill, LayoutMode = CardLayout.Rows };
+    private readonly Panel _preview = new() { Dock = DockStyle.Top, Height = 180, BackColor = Color.FromArgb(140, 190, 230) };
+    private readonly Panel _detailHost = new() { Dock = DockStyle.Fill };
+    private readonly FieldStack _detail = new() { Dock = DockStyle.Fill };
+    private readonly Label _empty = new()
+    {
+        Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = UiTheme.TextMuted, BackColor = UiTheme.CardBack,
+        Text = "左の一覧からレイヤーを選ぶか、\r\n「＋ 背景を追加」で新しいレイヤーを作ってください。",
+    };
 
-    // Feature: UI改善（提案書 SD-2）— scrollRateの数値だけでは奥行きの出方が分からないため、
-    // 全レイヤーを合成して自動スクロールさせるミニプレビューを追加する。
-    // 以下の4つはそのミニプレビュー機能専用のフィールド。
-    // 実際にカメラが動いているように見せるための描画専用パネル（Paintイベントで自前描画する）
-    private Panel _parallaxPreview = null!;
-    // プレビューを一定間隔で再描画してアニメーションさせるためのタイマー
-    private System.Windows.Forms.Timer? _parallaxTimer;
-    // プレビュー内で「カメラがどこまで進んだか」を表す仮想的なX座標（実ゲームのカメラとは別物）
-    private float _simCameraX = 0f;
-    // プレビュー描画のたびにファイルから画像を読み込み直すと重いため、
-    // 一度読み込んだ画像をパスをキーにキャッシュしておく辞書
-    private readonly Dictionary<string, Image?> _parallaxImgCache = new();
+    // 詳細フォームの部品
+    private readonly ImageViewport _imgView = new() { Height = 120, Placeholder = "画像は未設定（単色だけのレイヤー）" };
+    private readonly Label _lblFile = new() { AutoSize = true, ForeColor = UiTheme.TextMuted, Font = UiTheme.Small };
+    private readonly ColorField _color = new();
+    private readonly SliderField _rate = new(0, 2, 0.05, 2, "0 ＝ 動かない（遠景）", "1 ＝ 手前と同じ速さ");
+    private readonly CheckBox _loop = new() { Text = "横にくり返し並べる（ループ）", AutoSize = true, Font = UiTheme.Base };
+    private readonly NumericUpDown _order = Kit.Num(-99, 99, 0, 1, 90);
+    private readonly NumericUpDown _offX = Kit.Num(-9999, 9999, 0, 1, 100);
+    private readonly NumericUpDown _offY = Kit.Num(-9999, 9999, 0, 1, 100);
+    private bool _sync;
 
-    // ── コンストラクタ ─────────────────────────
-    // 引数 projectRoot : プロジェクトのルートフォルダ（画像パスの解決や保存先の基準に使う）
-    // 引数 layers      : 編集対象として渡される既存の背景レイヤー一覧（呼び出し元の現在の設定）
+    // 一覧のサムネイルと、プレビュー用に読み込んだ画像の記憶
+    private readonly Dictionary<string, Image?> _imgCache = new();
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 30 };
+    private float _simCameraX;
+
     public BackgroundSettingsForm(string projectRoot, List<BackgroundLayer> layers)
+        : base("背景レイヤー設定", "遠景・中景・近景を重ねて、奥行きのある背景を作ります。右上のプレビューで見え方を確かめながら調整できます。",
+               new Size(1180, 720), new Size(960, 600))
     {
         _projectRoot = projectRoot;
-        _imgDir      = Path.Combine(projectRoot, "img");
-
-        // UI部品を組み立ててから、渡された既存レイヤーをグリッドへ流し込む
-        InitializeComponent();
-        PopulateGrid(layers);
-    }
-
-    // ── UI 構築 ────────────────────────────────
-    // フォーム全体のレイアウト（グリッド・右側プレビュー・下部ボタン）を一括で組み立てる。
-    // コンストラクタから一度だけ呼ばれる初期化処理。
-    private void InitializeComponent()
-    {
-        Text            = "背景レイヤー設定";
-        Size            = new Size(1060, 540);
-        Font            = UiTheme.Base;
-        StartPosition   = FormStartPosition.CenterParent;
-        // ウィンドウのリサイズ挙動や外観をアプリ共通のテーマに合わせる（UiTheme側で定義）
-        UiTheme.ApplyResizableChrome(this);
-
-        // ── 右パネル（プレビュー） ───────────────
-        // 静止画プレビューとパララックス（自動スクロール）プレビューをまとめて置く領域
-        var pnlRight = new Panel
-        {
-            Dock  = DockStyle.Right,
-            Width = 220,
-        };
-
-        // 「スプライトプレビュー」の見出しラベル
-        var lblPreview = new Label
-        {
-            Text     = "スプライトプレビュー",
-            Dock     = DockStyle.Top,
-            Height   = 24,
-            TextAlign = ContentAlignment.MiddleCenter,
-        };
-
-        // 選択中の行のスプライト画像をそのまま表示する静止画プレビュー
-        _preview = new PictureBox
-        {
-            Size      = new Size(200, 200),
-            Location  = new Point(10, 30),
-            SizeMode  = PictureBoxSizeMode.Zoom,
-            BackColor = Color.Black,
-            BorderStyle = BorderStyle.FixedSingle,
-        };
-
-        // 「パララックスプレビュー」の見出しラベル
-        var lblParallax = new Label
-        {
-            Text = "🎬 パララックスプレビュー（自動スクロール）",
-            Location = new Point(10, 238),
-            Size = new Size(200, 16),
-            Font = UiTheme.Small,
-        };
-        // 全レイヤーを合成して自動スクロールさせる、自前描画のプレビュー領域。
-        // BackColorは空を模した水色にしており、レイヤー画像が無い部分の背景として見える。
-        _parallaxPreview = new Panel
-        {
-            Location = new Point(10, 256),
-            Size = new Size(200, 130),
-            BorderStyle = BorderStyle.FixedSingle,
-            BackColor = Color.FromArgb(140, 190, 230),
-        };
-        // 実際の描画処理はParallaxPreview_Paintに委譲する
-        _parallaxPreview.Paint += ParallaxPreview_Paint;
-
-        // 30ms間隔（約33fps相当）でカメラ位置を進め、プレビューパネルの再描画を要求するタイマー。
-        // フォーム生成と同時に開始し、常にアニメーションし続ける。
-        _parallaxTimer = new System.Windows.Forms.Timer { Interval = 30 };
-        _parallaxTimer.Tick += (s, e) => { _simCameraX += 1.5f; _parallaxPreview.Invalidate(); };
-        _parallaxTimer.Start();
-
-        // 右パネルへ、見出し・静止画プレビュー・パララックス見出し・パララックスプレビューの順に追加する
-        pnlRight.Controls.Add(lblPreview);
-        pnlRight.Controls.Add(_preview);
-        pnlRight.Controls.Add(lblParallax);
-        pnlRight.Controls.Add(_parallaxPreview);
-
-        // ── DataGridView ────────────────────────
-        // 背景レイヤーの一覧を行として表示・編集するメイングリッド
-        _grid = new DataGridView
-        {
-            Dock                  = DockStyle.Fill,
-            AutoSizeColumnsMode   = DataGridViewAutoSizeColumnsMode.None,
-            // 新規行の自動追加・行削除はグリッド標準の機能ではなく、
-            // 専用ボタン(＋背景追加／🗑削除)経由でのみ行わせるため両方とも無効化する
-            AllowUserToAddRows    = false,
-            AllowUserToDeleteRows = false,
-            RowHeadersWidth       = 30,
-            SelectionMode         = DataGridViewSelectionMode.FullRowSelect,
-            MultiSelect           = false,
-            ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing,
-            ColumnHeadersHeight   = 28,
-        };
-
-        // drawOrder 列（レイヤーの重ね順。数値が小さいほど奥、大きいほど手前に描画される想定）
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colOrder", HeaderText = "drawOrder", Width = 78,
-            ValueType = typeof(int)
-        });
-
-        // sprite 列（読み取り専用。値は「📁選択」ボタン経由でのみ設定され、直接入力はさせない）
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colSprite", HeaderText = "sprite", Width = 160,
-            ReadOnly = true,
-            DefaultCellStyle = { BackColor = Color.WhiteSmoke }
-        });
-
-        // color 列（画像を使わず単色で塗るときの色。"#RRGGBB" と直接入力するか、右の🎨ボタンから選ぶ）。
-        //
-        // 【不具合の修正】コードの側（AddRow・保存・プレビュー・🎨ボタンの処理）は colColor / colBtnColor を
-        // 参照していたのに、この2つの列を作る処理が抜けていた。そのため背景設定を開いて
-        // レイヤーを表示する（AddRow が row.Cells["colColor"] を引く）たびに
-        // 「colColor という名前の列が見つかりません」で例外になり、画面がまともに動かなかった。
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colColor", HeaderText = "color", Width = 82,
-        });
-
-        // ボタン列：🎨（クリックした行の color を色選択ダイアログで決める）
-        _grid.Columns.Add(new DataGridViewButtonColumn
-        {
-            Name = "colBtnColor", HeaderText = "", Width = 38,
-            Text = "🎨", UseColumnTextForButtonValue = true
-        });
-
-        // scrollRate 列（カメラ移動量に対するこのレイヤーのスクロール速度の比率。
-        // 1.0で前景と同じ速度、0に近いほど遠景のようにゆっくり動く）
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colScrollRate", HeaderText = "scrollRate", Width = 80,
-            ValueType = typeof(float)
-        });
-
-        // loop チェックボックス列（trueなら画像を横方向に敷き詰めて繰り返し表示する）
-        _grid.Columns.Add(new DataGridViewCheckBoxColumn
-        {
-            Name = "colLoop", HeaderText = "loop", Width = 50
-        });
-
-        // offsetX 列（画像の初期表示位置を横方向にずらすオフセット量）
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colOffsetX", HeaderText = "offsetX", Width = 70,
-            ValueType = typeof(float)
-        });
-
-        // offsetY 列（画像の初期表示位置を縦方向にずらすオフセット量）
-        _grid.Columns.Add(new DataGridViewTextBoxColumn
-        {
-            Name = "colOffsetY", HeaderText = "offsetY", Width = 70,
-            ValueType = typeof(float)
-        });
-
-        // ボタン列：📁選択（クリックした行に対して画像ファイル選択ダイアログを開く）
-        _grid.Columns.Add(new DataGridViewButtonColumn
-        {
-            Name = "colBtnFile", HeaderText = "", Width = 64,
-            Text = "📁選択", UseColumnTextForButtonValue = true
-        });
-
-        // ボタン列：🗑削除（クリックした行をグリッドから削除する）
-        _grid.Columns.Add(new DataGridViewButtonColumn
-        {
-            Name = "colBtnDel", HeaderText = "", Width = 60,
-            Text = "🗑削除", UseColumnTextForButtonValue = true
-        });
-
-        // 各列のボタンクリック・行選択変更・不正な値入力（DataError）に対するイベントハンドラを登録する
-        _grid.CellContentClick     += Grid_CellContentClick;
-        // color 列の値が変わるたびに、セルの背景へその色を出す（#RRGGBB の文字だけでは色が分からない）
-        _grid.CellValueChanged     += (_, e) =>
-        {
-            if (e.RowIndex >= 0 && _grid.Columns[e.ColumnIndex].Name == "colColor") RefreshColorSwatch(_grid.Rows[e.RowIndex]);
-        };
-        _grid.SelectionChanged     += Grid_SelectionChanged;
-        // 型に合わない値が入力された場合でも例外で落ちないよう、エラーを握りつぶす（e.Cancel=true）
-        _grid.DataError            += (_, e) => e.Cancel = true;
-
-        // ── 下部パネル ──────────────────────────
-        // 「＋背景追加」「💾 保存して閉じる」「キャンセル」の3ボタンを配置する領域
-        var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 44 };
-
-        _btnAdd    = MakeButton("＋背景追加",       12,  6, 110);
-        _btnSave   = MakeButton("💾 保存して閉じる", 740, 6, 160);
-        _btnCancel = MakeButton("キャンセル",        910, 6, 100);
-        // ウィンドウを広げ縮めしても、保存・キャンセルが右端に付いてくるようにする。
-        // Anchor（右固定）にしないのは、ボタンを置いた時点では下部パネルの幅がまだ確定しておらず、
-        // 右端からの距離が負の値で記録されて、パネルが広がった瞬間に画面の外へ飛んでしまうため。
-        // 幅が決まったあと（Resize）に、毎回右端から数えて置き直す。
-        pnlBottom.Resize += (_, _) =>
-        {
-            _btnCancel.Left = pnlBottom.ClientSize.Width - _btnCancel.Width - 16;
-            _btnSave.Left   = _btnCancel.Left - _btnSave.Width - 10;
-        };
-
-        // 保存ボタンは「主要な操作」として緑系の強調スタイルを、
-        // キャンセルボタンは「副次的な操作」としてフラットのみのスタイルを適用する
-        UiTheme.StylePrimaryButton(_btnSave);
-        UiTheme.StyleSecondaryButton(_btnCancel);
-
-        // 各ボタンのクリック時の動作を登録する
-        _btnAdd.Click    += (_, _) => AddEmptyRow();
-        _btnSave.Click   += BtnSave_Click;
-        // キャンセル時はDialogResultをCancelにしてから閉じる（呼び出し元はResultLayersを見ない）
-        _btnCancel.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
-
-        pnlBottom.Controls.AddRange(new Control[] { _btnAdd, _btnSave, _btnCancel });
-
-        // グリッドをDock.Fillで先に追加し、右パネル・下部パネルをその後に追加することで、
-        // 右パネルと下部パネルが優先的に確保され、残りをグリッドが埋める配置になる
-        Controls.Add(_grid);
-        Controls.Add(pnlRight);
-        Controls.Add(pnlBottom);
-    }
-
-    // ── データ流し込み ────────────────────────
-    // 引数 layers : 表示したい背景レイヤーの一覧
-    // グリッドを一旦空にしてから、渡されたレイヤーを1件ずつ行として追加し直す。
-    private void PopulateGrid(List<BackgroundLayer> layers)
-    {
-        _grid.Rows.Clear();
+        _imgDir = Path.Combine(projectRoot, "img");
         foreach (var l in layers)
-            AddRow(l);
-    }
-
-    // グリッドに1行追加する。
-    // 引数 layer : 行の初期値として使うレイヤーデータ。nullの場合は「＋背景追加」ボタンから
-    //              呼ばれた新規行の追加であり、各項目にデフォルト値（drawOrder=0, scrollRate=0.5等）を設定する。
-    private void AddRow(BackgroundLayer? layer = null)
-    {
-        int idx = _grid.Rows.Add();
-        var row  = _grid.Rows[idx];
-
-        // layerがnullの場合は、BackgroundLayer の既定値（ゲームが JSON から読むときの既定値と同じ）を使う。
-        // 以前は scrollRate=0.5・loop=false と、モデルの既定(0.3・true)と食い違っていて、
-        // 追加しただけの行がゲーム側の既定とは別物になっていた。
-        layer ??= new BackgroundLayer();
-        row.Cells["colOrder"].Value      = layer.drawOrder;
-        row.Cells["colSprite"].Value     = layer.sprite;
-        row.Cells["colColor"].Value      = layer.color;
-        row.Cells["colScrollRate"].Value = layer.scrollRate;
-        row.Cells["colLoop"].Value       = layer.loop;
-        row.Cells["colOffsetX"].Value    = layer.offsetX;
-        row.Cells["colOffsetY"].Value    = layer.offsetY;
-        RefreshColorSwatch(row);
-    }
-
-    // color 列のセルの背景を、その行の色にする（読めない・空のときは通常の色へ戻す）。
-    // 文字は背景の明るさに応じて白か黒にして、どんな色でも読めるようにする。
-    private static void RefreshColorSwatch(DataGridViewRow row)
-    {
-        var cell = row.Cells["colColor"];
-        string hex = cell.Value?.ToString() ?? "";
-        if (hex.Length == 7 && hex[0] == '#')
-        {
-            try
+            _layers.Add(new BackgroundLayer
             {
-                var c = ColorTranslator.FromHtml(hex);
-                cell.Style.BackColor = c;
-                cell.Style.SelectionBackColor = c;
-                bool dark = (c.R * 299 + c.G * 587 + c.B * 114) / 1000 < 140;
-                cell.Style.ForeColor = dark ? Color.White : Color.Black;
-                cell.Style.SelectionForeColor = cell.Style.ForeColor;
-                return;
-            }
-            catch { /* 読めない値は下で通常の色へ戻す */ }
-        }
-        cell.Style.BackColor = Color.Empty;
-        cell.Style.SelectionBackColor = Color.Empty;
-        cell.Style.ForeColor = Color.Empty;
-        cell.Style.SelectionForeColor = Color.Empty;
+                drawOrder = l.drawOrder, sprite = l.sprite, color = l.color, scrollRate = l.scrollRate,
+                loop = l.loop, offsetX = l.offsetX, offsetY = l.offsetY,
+            });
+
+        BuildUi();
+        RebuildList();
+        if (_layers.Count > 0) Select(_layers.OrderByDescending(l => l.drawOrder).First());
+        else ShowDetail(null);
+
+        _timer.Tick += (s, e) => { _simCameraX += 1.5f; _preview.Invalidate(); };
+        _timer.Start();
     }
 
-    // 「＋背景追加」ボタン用のショートカット。引数なしでAddRowを呼び、空の新規行を1つ追加する。
-    private void AddEmptyRow() => AddRow(null);
-
-    // ── セルボタンクリック ─────────────────────
-    // グリッド内のボタン列（📁選択／🗑削除）がクリックされたときの処理を振り分ける。
-    private void Grid_CellContentClick(object? sender, DataGridViewCellEventArgs e)
+    // ── 画面の組み立て ───────────────────────────
+    private void BuildUi()
     {
-        // 列ヘッダー部分のクリックはRowIndexが-1になるため無視する
-        if (e.RowIndex < 0) return;
-        var colName = _grid.Columns[e.ColumnIndex].Name;
-
-        if (colName == "colBtnFile")
+        // 左: 一覧
+        var left = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.PanelBack };
+        var leftHead = new Label
         {
-            // 画像ファイル選択ダイアログを開き、選ばれた画像をこの行に設定する
-            SelectImageFile(e.RowIndex);
-        }
-        else if (colName == "colBtnColor")
-        {
-            // 単色背景の色を選ぶ。#RRGGBB の文字列としてセルへ入れる
-            // （タイル定義エディタの色選択と同じ扱い方に揃えてある）。
-            using var dlg = new ColorDialog { FullOpen = true };
-            string cur = _grid.Rows[e.RowIndex].Cells["colColor"].Value?.ToString() ?? "";
-            if (cur.Length == 7 && cur[0] == '#')
-            {
-                try { dlg.Color = ColorTranslator.FromHtml(cur); } catch { /* 読めない値は既定色のまま */ }
-            }
-            if (dlg.ShowDialog() == DialogResult.OK)
-            {
-                _grid.Rows[e.RowIndex].Cells["colColor"].Value =
-                    $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
-                RefreshColorSwatch(_grid.Rows[e.RowIndex]);
-                _parallaxPreview.Invalidate();
-            }
-        }
-        else if (colName == "colBtnDel")
-        {
-            // 対象行をグリッドから削除し、削除した行が選択中だった場合に備えて
-            // 静止画プレビューもクリアしておく
-            _grid.Rows.RemoveAt(e.RowIndex);
-            _preview.Image = null;
-        }
-    }
-
-    // ── ファイル選択 ──────────────────────────
-    // 画像ファイル選択ダイアログを開き、選択された画像をプロジェクトのimgフォルダへコピーした上で、
-    // 指定行のsprite列にプロジェクトルートからの相対パスを設定する。
-    // 引数 rowIndex : 画像を設定する対象行のインデックス
-    private void SelectImageFile(int rowIndex)
-    {
-        using var dlg = new OpenFileDialog
-        {
-            Title  = "画像ファイルを選択",
-            Filter = "画像ファイル|*.png;*.jpg;*.bmp;*.gif|すべて|*.*"
+            Dock = DockStyle.Top, Height = 30, Text = "  レイヤー（上ほど手前）", Font = UiTheme.Bold,
+            TextAlign = ContentAlignment.MiddleLeft, ForeColor = UiTheme.TextMuted,
         };
+        left.Controls.Add(_list);
+        left.Controls.Add(leftHead);
+        _list.ItemClicked += (s, item) => { if (_byKey.TryGetValue(item.Key, out var l)) { _cur = l; ShowDetail(l); } };
+        _list.EmptyText = "レイヤーがありません";
 
-        // ダイアログがキャンセルされた場合は何もせず終了する
-        if (dlg.ShowDialog() != DialogResult.OK) return;
-
-        try
+        // 右: プレビュー(上) + 設定(下)
+        var right = new Panel { Dock = DockStyle.Fill, BackColor = UiTheme.CardBack };
+        var previewCap = new Label
         {
-            // imgフォルダがまだ存在しない場合に備えて、コピー前に必ず作成しておく
-            Directory.CreateDirectory(_imgDir);
-            string dest = Path.Combine(_imgDir, Path.GetFileName(dlg.FileName));
+            Dock = DockStyle.Top, Height = 26, Text = "  🎬 プレビュー（自動で右へ進みます。奥のレイヤーほどゆっくり流れます）", Font = UiTheme.Small,
+            TextAlign = ContentAlignment.MiddleLeft, BackColor = UiTheme.PanelBack, ForeColor = UiTheme.TextMuted,
+        };
+        _preview.Paint += Preview_Paint;
+        _detailHost.Controls.Add(_detail);
+        _detailHost.Controls.Add(_empty);
+        // Dock の決まり：Fill を先に、あとから足したものが外側（上）。見出しをプレビューの上に置く。
+        right.Controls.Add(_detailHost);
+        right.Controls.Add(_preview);
+        right.Controls.Add(previewCap);
 
-            // 選択されたファイルが既にimgフォルダ内の同じファイルである場合はコピー不要。
-            // それ以外はimgフォルダへ上書きコピーし、プロジェクト内で完結するようにする。
-            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase))
-                File.Copy(dlg.FileName, dest, overwrite: true);
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterWidth = 6, FixedPanel = FixedPanel.Panel1, BackColor = UiTheme.CardBorder };
+        split.Panel1.Controls.Add(left);
+        split.Panel2.Controls.Add(right);
+        Body.Controls.Add(split);
+        SplitWhenReady(split, 260, 520, 320);
 
-            // 保存されるJSON等で使われる「img/ファイル名」形式の相対パスを組み立てて設定する
-            string relPath = "img/" + Path.GetFileName(dlg.FileName);
-            _grid.Rows[rowIndex].Cells["colSprite"].Value = relPath;
+        BuildDetailForm();
 
-            // 設定した画像を右側の静止画プレビューにも反映する
-            ShowPreview(relPath);
-        }
-        catch (Exception ex)
-        {
-            // ファイルコピーに失敗した場合（アクセス権限がない等）はエラーメッセージを表示するのみで、
-            // グリッドの内容には影響を与えない
-            MessageBox.Show("ファイルコピーに失敗しました:\n" + ex.Message,
-                "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        }
+        // 下の操作ボタン
+        LeftBar.Controls.Add(Kit.Btn("＋ 背景を追加", AddLayer));
+        LeftBar.Controls.Add(Kit.Btn("⧉ 複製", Duplicate));
+        LeftBar.Controls.Add(Kit.Btn("▲ 手前へ", () => MoveLayer(+1)));
+        LeftBar.Controls.Add(Kit.Btn("▼ 奥へ", () => MoveLayer(-1)));
+        LeftBar.Controls.Add(Kit.Btn("🗑 削除", Delete, danger: true));
     }
 
-    // ── 選択行変更→プレビュー更新 ─────────────
-    // グリッドの選択行が変わるたびに、その行のスプライト画像を静止画プレビューに反映する。
-    private void Grid_SelectionChanged(object? sender, EventArgs e)
+    private void BuildDetailForm()
     {
-        // 選択されている行が無い場合（全解除など）は何もしない
-        if (_grid.SelectedRows.Count == 0) return;
-        string sprite = _grid.SelectedRows[0].Cells["colSprite"].Value?.ToString() ?? "";
-        ShowPreview(sprite);
+        _detail.AddItem(Kit.Heading("🖼 画像"));
+        _detail.AddItem(_imgView);
+        var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0) };
+        row.Controls.Add(Kit.Btn("📁 画像を選ぶ", PickImage, primary: true));
+        row.Controls.Add(Kit.Btn("✕ 画像を外す", () => { if (_cur == null) return; _cur.sprite = ""; Changed(); LoadImage(); }));
+        _detail.AddItem(row);
+        _detail.AddItem(_lblFile);
+
+        _detail.AddItem(Kit.Heading("🎨 単色（下地）"));
+        _detail.AddItem(Kit.Field("色", _color, "画像がないレイヤーは、この色でいちめん塗られます。画像があるときは、画像の下に敷かれます。"));
+        _color.ValueChanged += (s, e) => { if (_sync || _cur == null) return; _cur.color = _color.Value; Changed(); };
+
+        _detail.AddItem(Kit.Heading("🏃 動き"));
+        _detail.AddItem(Kit.Field("流れる速さ（カメラに対する割合）", _rate,
+            "小さいほど遠くに見えます。空や山は 0.1〜0.3、手前の草むらは 0.8〜1.0 くらいが目安です。"));
+        _rate.ValueChanged += (s, e) => { if (_sync || _cur == null) return; _cur.scrollRate = (float)_rate.Value; Changed(); };
+        _detail.AddItem(_loop);
+        _loop.CheckedChanged += (s, e) => { if (_sync || _cur == null) return; _cur.loop = _loop.Checked; Changed(); };
+        _detail.AddItem(Kit.Hint("オフにすると、画像は1枚だけ流れていき、端まで行くと画面の外へ出ていきます。"));
+
+        _detail.AddItem(Kit.Heading("📍 重なりと位置"));
+        _detail.AddItem(Kit.Field("重ね順", _order, "数字が大きいほど手前に描かれます（一覧の上の方）。"));
+        _order.ValueChanged += (s, e) => { if (_sync || _cur == null) return; _cur.drawOrder = (int)_order.Value; Changed(rebuildList: true); };
+        var offs = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        offs.Controls.Add(Kit.Field("ずらし 横 (px)", _offX, null, 130));
+        offs.Controls.Add(new Panel { Width = 16, Height = 1 });
+        offs.Controls.Add(Kit.Field("ずらし 縦 (px)", _offY, null, 130));
+        _detail.AddItem(offs);
+        _detail.AddItem(Kit.Hint("画像の初期位置を動かします。プラスで右・下へずれます。"));
+        _offX.ValueChanged += (s, e) => { if (_sync || _cur == null) return; _cur.offsetX = (float)_offX.Value; Changed(); };
+        _offY.ValueChanged += (s, e) => { if (_sync || _cur == null) return; _cur.offsetY = (float)_offY.Value; Changed(); };
     }
 
-    // 指定された相対パスの画像を読み込み、静止画プレビュー(_preview)に表示する。
-    // 引数 relPath : プロジェクトルートからの相対パス（例: "img/sky.png"）
-    private void ShowPreview(string relPath)
+    // ── 一覧 ────────────────────────────────────
+    private string KeyFor(BackgroundLayer l)
     {
-        // パスが空の場合（未設定の行など）はプレビューをクリアする
-        if (string.IsNullOrEmpty(relPath))
-        {
-            _preview.Image = null;
-            return;
-        }
-
-        // "/" 区切りの相対パスをWindowsのパス区切り"\"に変換してからフルパスを組み立てる
-        string fullPath = Path.Combine(_projectRoot, relPath.Replace('/', '\\'));
-
-        // ファイルが実在しない場合（移動・削除された等）もプレビューをクリアする
-        if (!File.Exists(fullPath))
-        {
-            _preview.Image = null;
-            return;
-        }
-
-        try
-        {
-            var bmp = new Bitmap(fullPath);
-            // 差し替え前の古い画像を先に変数へ退避してから新しい画像を設定し、
-            // その後で古い画像を破棄することで、表示が途切れる隙をなくしつつメモリリークも防ぐ
-            var old = _preview.Image;
-            _preview.Image = bmp;
-            old?.Dispose();
-        }
-        catch
-        {
-            // 画像として読み込めない壊れたファイル等の場合は、プレビューを空にするだけで済ませる
-            _preview.Image = null;
-        }
+        if (!_keyOf.TryGetValue(l, out var k)) { k = "bg" + _keySeq++; _keyOf[l] = k; _byKey[k] = l; }
+        return k;
     }
 
-    // ── パララックスプレビュー ─────────────────
-    // _parallaxPreviewパネルのPaintイベントで呼ばれる、全レイヤー合成のカスタム描画処理。
-    // 現在のグリッドの内容から各レイヤーを読み取り、_simCameraXに基づいてスクロールさせながら
-    // drawOrderの昇順（奥から手前）で重ねて描画することで、実際の視差スクロールの見た目を再現する。
-    private void ParallaxPreview_Paint(object? sender, PaintEventArgs e)
+    // 画像のフルパス（相対パス→絶対パス）
+    private string Full(string rel) => Path.Combine(_projectRoot, rel.Replace('/', '\\'));
+
+    private Image? GetImage(string rel)
     {
-        var g = e.Graphics;
-
-        // 新規行のプレースホルダ行(IsNewRow)を除いた行だけを対象にする
-        var rows = new List<DataGridViewRow>();
-        foreach (DataGridViewRow row in _grid.Rows) if (!row.IsNewRow) rows.Add(row);
-        // drawOrderの小さい順（奥にあるレイヤーから先）に並べ替えることで、
-        // 後から描画される手前のレイヤーが正しく上に重なるようにする
-        rows.Sort((a, b) => GetInt(a, "colOrder").CompareTo(GetInt(b, "colOrder")));
-
-        foreach (var row in rows)
-        {
-            // 単色指定があれば、まずその色でプレビュー全面を塗る（ゲーム側と同じく色が下地になる）。
-            string colorHex = row.Cells["colColor"].Value?.ToString() ?? "";
-            if (colorHex.Length == 7 && colorHex[0] == '#')
-            {
-                try
-                {
-                    using var fill = new SolidBrush(ColorTranslator.FromHtml(colorHex));
-                    g.FillRectangle(fill, 0, 0, _parallaxPreview.Width, _parallaxPreview.Height);
-                }
-                catch { /* 色として読めない文字列は無視する */ }
-            }
-
-            // 画像パスが未設定の行は、ここから先（画像の描画）は行わない。
-            // 単色だけのレイヤーはこのパスを通る。
-            string sprite = row.Cells["colSprite"].Value?.ToString() ?? "";
-            if (string.IsNullOrEmpty(sprite)) continue;
-            // キャッシュ経由で画像を取得。読み込みに失敗している場合(null)もスキップする
-            var img = LoadParallaxImage(sprite);
-            if (img == null) continue;
-
-            float scrollRate = GetFloat(row, "colScrollRate", 0.5f);
-            bool loop = row.Cells["colLoop"].Value is bool lb && lb;
-            float offsetX = GetFloat(row, "colOffsetX", 0f);
-            float offsetY = GetFloat(row, "colOffsetY", 0f);
-
-            // 画像の高さをプレビューパネルの高さに合わせて拡大縮小率を決め、幅もその比率で揃える
-            float scale = (float)_parallaxPreview.Height / img.Height;
-            int drawW = Math.Max(1, (int)(img.Width * scale));
-            int drawH = _parallaxPreview.Height;
-
-            // 0.3f はプレビュー画面内で動きが分かりやすくなるよう調整した表示用の速度係数（実機の速度そのものではない）
-            // シミュレーション上のカメラ位置(_simCameraX)にscrollRateを掛けて「このレイヤーがどれだけ動くか」を求め、
-            // 表示スケール・速度係数を掛けて実際の描画上の移動量(scrollPx)に変換する。
-            //
-            // 【不具合の修正】offsetX は「初期表示位置のずらし量」なので、ゲームでは描画位置へそのまま足している
-            // （プラスなら右へずれる）。以前のプレビューは offsetX をスクロール量へ足していたため、
-            // ずれる向きがゲームと逆で、プレビューで合わせた位置が実機ではずれていた。
-            float scrollPx = (_simCameraX * scrollRate) * scale * 0.3f;
-            int offX = (int)(offsetX * scale);
-
-            if (loop)
-            {
-                // loop=trueの場合は、drawW（1枚分の幅）で割った余りでタイル状に無限スクロールさせ、
-                // パネル幅を覆い尽くすまで画像を横に並べて繰り返し描画する
-                int baseX = -(int)(scrollPx % drawW) + offX;
-                // 画像の先頭がパネルの内側から始まると左端に隙間ができるので、隙間が出ないところまで左へ戻す
-                while (baseX > 0) baseX -= drawW;
-                for (int x = baseX; x < _parallaxPreview.Width; x += drawW)
-                    g.DrawImage(img, x, (int)(offsetY * scale), drawW, drawH);
-            }
-            else
-            {
-                // loop=falseの場合は繰り返さず、1枚だけをスクロールに合わせて動かす（端まで行ったら画面の外へ出ていく）。
-                // ゲームも同じ動きにそろえてある。
-                g.DrawImage(img, -(int)scrollPx + offX, (int)(offsetY * scale), drawW, drawH);
-            }
-        }
-    }
-
-    // パララックスプレビュー用に画像をキャッシュ付きで読み込む。
-    // 引数 relPath : プロジェクトルートからの相対パス
-    // 戻り値       : 読み込めた場合はImage、パスが存在しない・読み込みに失敗した場合はnull
-    private Image? LoadParallaxImage(string relPath)
-    {
-        // 既に一度読み込み済み（失敗してnullが入っている場合も含む）ならキャッシュをそのまま返す
-        if (_parallaxImgCache.TryGetValue(relPath, out var cached)) return cached;
-        string full = Path.Combine(_projectRoot, relPath.Replace('/', '\\'));
-        Image? img = null;
-        if (File.Exists(full)) { try { img = Image.FromFile(full); } catch { img = null; } }
-        // 成功・失敗にかかわらず結果をキャッシュしておくことで、
-        // 存在しないファイルを毎フレーム探しに行くような無駄を避ける
-        _parallaxImgCache[relPath] = img;
+        if (string.IsNullOrEmpty(rel)) return null;
+        if (_imgCache.TryGetValue(rel, out var img)) return img;
+        img = Kit.LoadBitmap(Full(rel));
+        _imgCache[rel] = img;
         return img;
     }
 
-    // セルの文字列値をintとして読み取るヘルパー。変換できない場合は0を返す。
-    private static int GetInt(DataGridViewRow row, string col) => int.TryParse(row.Cells[col].Value?.ToString(), out int v) ? v : 0;
-    // セルの文字列値をfloatとして読み取るヘルパー。変換できない場合はfallbackを返す。
-    private static float GetFloat(DataGridViewRow row, string col, float fallback) => float.TryParse(row.Cells[col].Value?.ToString(), out float v) ? v : fallback;
-
-    // ── 保存 ──────────────────────────────────
-    // 「💾 保存して閉じる」ボタンのクリック処理。
-    // グリッドの現在の内容をBackgroundLayerのリストに変換してResultLayersへ格納し、
-    // DialogResult.OKを設定してフォームを閉じる。呼び出し元はこの後ResultLayersを読み取る。
-    private void BtnSave_Click(object? sender, EventArgs e)
+    private void RebuildList()
     {
-        ResultLayers.Clear();
-        foreach (DataGridViewRow row in _grid.Rows)
+        var items = new List<CardItem>();
+        int n = _layers.Count;
+        foreach (var l in _layers.OrderByDescending(x => x.drawOrder))
         {
-            // グリッド末尾の「新規行入力用プレースホルダ」は実データではないためスキップする
-            if (row.IsNewRow) continue;
-
-            // 指定列の値をfloatとして取り出すローカル関数。変換できない場合はfallbackを返す
-            float TryFloat(string colName, float fallback = 0f)
+            var col = Kit.ParseHex(l.color);
+            string name = string.IsNullOrEmpty(l.sprite) ? (col != null ? $"単色 {l.color}" : "（空のレイヤー）") : Path.GetFileName(l.sprite);
+            items.Add(new CardItem
             {
-                return float.TryParse(row.Cells[colName].Value?.ToString(), out float v) ? v : fallback;
-            }
-            // 指定列の値をintとして取り出すローカル関数。変換できない場合はfallbackを返す
-            int TryInt(string colName, int fallback = 0)
-            {
-                return int.TryParse(row.Cells[colName].Value?.ToString(), out int v) ? v : fallback;
-            }
-
-            // 各セルの値からBackgroundLayerを1件組み立ててResultLayersに追加する
-            ResultLayers.Add(new BackgroundLayer
-            {
-                drawOrder  = TryInt("colOrder"),
-                sprite     = row.Cells["colSprite"].Value?.ToString()       ?? "",
-                color      = row.Cells["colColor"].Value?.ToString()        ?? "",
-                scrollRate = TryFloat("colScrollRate", 0.5f),
-                loop       = row.Cells["colLoop"].Value is bool b && b,
-                offsetX    = TryFloat("colOffsetX"),
-                offsetY    = TryFloat("colOffsetY"),
+                Key = KeyFor(l), Title = name,
+                Subtitle = $"重ね順 {l.drawOrder} ・ 速さ ×{l.scrollRate:0.##} ・ {(l.loop ? "ループ" : "1枚")}",
+                Accent = UiTheme.KindGimmick, Icon = Kit.Thumb(GetImage(l.sprite), 40, col),
+                Tip = string.IsNullOrEmpty(l.sprite) ? name : l.sprite,
             });
         }
+        _list.SetItems(items);
+        if (_cur != null) _list.SetSelectedKey(KeyFor(_cur), scrollIntoView: false);
+        _ = n;
+    }
 
+    private void Select(BackgroundLayer l)
+    {
+        _cur = l;
+        _list.SetSelectedKey(KeyFor(l));
+        ShowDetail(l);
+    }
+
+    // 選んだレイヤーの内容をフォームへ映す（映している最中は変更イベントを無視する）。
+    private void ShowDetail(BackgroundLayer? l)
+    {
+        _empty.Visible = l == null;
+        _detail.Visible = l != null;
+        if (l == null) return;
+        _sync = true;
+        _color.Value = l.color ?? "";
+        _rate.Value = l.scrollRate;
+        _loop.Checked = l.loop;
+        Kit.SetNum(_order, l.drawOrder);
+        Kit.SetNum(_offX, (decimal)l.offsetX);
+        Kit.SetNum(_offY, (decimal)l.offsetY);
+        _sync = false;
+        LoadImage();
+        _detail.ScrollToTop();
+    }
+
+    private void LoadImage()
+    {
+        if (_cur == null) return;
+        _imgView.Image = GetImage(_cur.sprite);
+        _lblFile.Text = string.IsNullOrEmpty(_cur.sprite) ? "" : $"ファイル: {_cur.sprite}" + (_imgView.Image == null ? "  ⚠ 見つかりません" : $"  （{_imgView.Image.Width}×{_imgView.Image.Height}px）");
+        _preview.Invalidate();
+    }
+
+    // 設定が変わったとき。一覧の1行（名前・補足）とプレビューを更新する。
+    private void Changed(bool rebuildList = true)
+    {
+        MarkDirty();
+        if (rebuildList) RebuildList();
+        _preview.Invalidate();
+    }
+
+    // ── 操作 ────────────────────────────────────
+    private void AddLayer()
+    {
+        // 新しいレイヤーは、いちばん手前（最大の重ね順+1）へ置く。
+        var l = new BackgroundLayer { drawOrder = _layers.Count == 0 ? 0 : _layers.Max(x => x.drawOrder) + 1 };
+        _layers.Add(l);
+        MarkDirty();
+        RebuildList();
+        Select(l);
+    }
+
+    private void Duplicate()
+    {
+        if (_cur == null) return;
+        var c = new BackgroundLayer
+        {
+            drawOrder = _layers.Max(x => x.drawOrder) + 1, sprite = _cur.sprite, color = _cur.color, scrollRate = _cur.scrollRate,
+            loop = _cur.loop, offsetX = _cur.offsetX, offsetY = _cur.offsetY,
+        };
+        _layers.Add(c);
+        MarkDirty();
+        RebuildList();
+        Select(c);
+    }
+
+    private void Delete()
+    {
+        if (_cur == null) return;
+        if (MessageBox.Show("このレイヤーを削除しますか？", "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        var ordered = _layers.OrderByDescending(x => x.drawOrder).ToList();
+        int i = ordered.IndexOf(_cur);
+        _layers.Remove(_cur);
+        _cur = null;
+        MarkDirty();
+        RebuildList();
+        var next = _layers.OrderByDescending(x => x.drawOrder).Skip(Math.Max(0, i - 1)).FirstOrDefault();
+        if (next != null) Select(next); else ShowDetail(null);
+    }
+
+    // 重ね順を、隣のレイヤーと入れ替える。dir=+1で手前へ、-1で奥へ。
+    private void MoveLayer(int dir)
+    {
+        if (_cur == null) return;
+        var ordered = _layers.OrderBy(x => x.drawOrder).ToList();
+        int i = ordered.IndexOf(_cur);
+        int j = i + dir;
+        if (j < 0 || j >= ordered.Count) return;
+        var other = ordered[j];
+        // 同じ重ね順どうしのときは、入れ替えても変わらないので、1つずらして順序をはっきりさせる。
+        if (other.drawOrder == _cur.drawOrder) _cur.drawOrder += dir;
+        else (other.drawOrder, _cur.drawOrder) = (_cur.drawOrder, other.drawOrder);
+        MarkDirty();
+        RebuildList();
+        ShowDetail(_cur);
+    }
+
+    // 画像ファイルを選び、プロジェクトの img フォルダへコピーして、そのレイヤーに設定する。
+    private void PickImage()
+    {
+        if (_cur == null) return;
+        using var dlg = new OpenFileDialog { Title = "背景の画像を選ぶ", Filter = "画像ファイル|*.png;*.jpg;*.bmp;*.gif|すべて|*.*" };
+        if (dlg.ShowDialog() != DialogResult.OK) return;
+        try
+        {
+            Directory.CreateDirectory(_imgDir);
+            string dest = Path.Combine(_imgDir, Path.GetFileName(dlg.FileName));
+            if (!string.Equals(dlg.FileName, dest, StringComparison.OrdinalIgnoreCase)) File.Copy(dlg.FileName, dest, overwrite: true);
+            string rel = "img/" + Path.GetFileName(dlg.FileName);
+            _imgCache.Remove(rel);          // 同じ名前で絵を差し替えたときのため、記憶を捨てて読み直す
+            _cur.sprite = rel;
+            Changed();
+            LoadImage();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("ファイルのコピーに失敗しました:\n" + ex.Message, "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    // ── パララックスプレビュー ──────────────────
+    // 全レイヤーを、重ね順の小さい（奥の）ものから順に描く。ゲームと同じく、色が下地・画像がその上。
+    private void Preview_Paint(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        int pw = _preview.Width, ph = _preview.Height;
+        foreach (var l in _layers.OrderBy(x => x.drawOrder))
+        {
+            if (Kit.ParseHex(l.color) is Color c)
+            {
+                using var fill = new SolidBrush(c);
+                g.FillRectangle(fill, 0, 0, pw, ph);
+            }
+            var img = GetImage(l.sprite);
+            if (img == null) continue;
+
+            float scale = (float)ph / img.Height;
+            int drawW = Math.Max(1, (int)(img.Width * scale));
+            // 0.3 は、プレビュー内で動きが分かりやすいよう調整した表示用の速度係数（実機そのものの速さではない）。
+            float scrollPx = _simCameraX * l.scrollRate * scale * 0.3f;
+            int offX = (int)(l.offsetX * scale);
+            int offY = (int)(l.offsetY * scale);
+            if (l.loop)
+            {
+                int baseX = -(int)(scrollPx % drawW) + offX;
+                while (baseX > 0) baseX -= drawW;
+                for (int x = baseX; x < pw; x += drawW) g.DrawImage(img, x, offY, drawW, ph);
+            }
+            else g.DrawImage(img, -(int)scrollPx + offX, offY, drawW, ph);
+        }
+        if (_layers.Count == 0)
+            TextRenderer.DrawText(g, "レイヤーを追加すると、ここに背景が出ます", UiTheme.Base, new Rectangle(0, 0, pw, ph), Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
+
+    // ── 保存 ────────────────────────────────────
+    protected override void OnSave()
+    {
+        ResultLayers = _layers.OrderBy(l => l.drawOrder).Select(l => new BackgroundLayer
+        {
+            drawOrder = l.drawOrder, sprite = l.sprite ?? "", color = l.color ?? "", scrollRate = l.scrollRate,
+            loop = l.loop, offsetX = l.offsetX, offsetY = l.offsetY,
+        }).ToList();
         DialogResult = DialogResult.OK;
         Close();
     }
 
-    // ── ヘルパー ──────────────────────────────
-    // UiTheme.CreateButtonへ座標・サイズをまとめて渡すだけの簡易ラッパー。
-    // 呼び出し側の記述を(text, x, y, width)という短い形にするための糖衣関数。
-    private static Button MakeButton(string text, int x, int y, int w) =>
-        UiTheme.CreateButton(text, new Point(x, y), new Size(w, 30));
-
-    // フォームが閉じられた後始末。画像やタイマーなどの管理外リソースを確実に解放する。
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
-        // 静止画プレビューに残っている画像を破棄する
-        _preview.Image?.Dispose();
-        // パララックスアニメーション用タイマーを停止・破棄する（止め忘れるとフォーム破棄後も動き続けてしまう）
-        _parallaxTimer?.Stop();
-        _parallaxTimer?.Dispose();
-        // パララックスプレビュー用に読み込んでキャッシュしていた画像も、まとめて破棄する
-        foreach (var img in _parallaxImgCache.Values) img?.Dispose();
+        _timer.Stop();
+        _timer.Dispose();
+        foreach (var i in _imgCache.Values) i?.Dispose();
         base.OnFormClosed(e);
     }
 }

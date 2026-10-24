@@ -38,10 +38,6 @@ public partial class Form1 : Form
     // 現在押されているキーの集合。矢印キー同時押しでゲーム起動するショートカット判定などに使う。
     private HashSet<Keys> pressedKeys = new();
 
-    // イベントリスト(Layer 4)の各行 ↔ 実オブジェクトの対応。"START"/"GOAL" は特別扱い。
-    // （lstPlacedEvents の行インデックスと同じ順序で、対応する実体（トリガー/敵/ギミック/アイテム、
-    // またはスタート/ゴールを表す文字列）を保持しておくためのリスト）
-    private List<object?> _placedEventRefs = new();
 
     // コンストラクタ。各種パスを組み立て、UIコンポーネントを初期化する。
     public Form1()
@@ -241,9 +237,7 @@ public partial class Form1 : Form
             numMapW.Value = currentStage.MapW;
             numMapH.Value = currentStage.MapH;
 
-            // 画面上部の情報バーに、現在編集中のステージ名・サイズ・配置数のサマリを表示する。
-            lblCurrentStage.Text = $"編集中: {currentStageFile}  ({currentStage.MapW}×{currentStage.MapH}) | 敵:{currentStage.Enemies.Count} ギミック:{currentStage.Gimmicks.Count} トリガー:{currentStage.Triggers.Count}";
-            // 配置済みイベント一覧（Layer 4のリスト）を最新の内容に更新する。
+            // 配置済みイベント一覧（右パネルの「イベント」）と、画面上部の情報バー（ステージ名・サイズ・配置数）を最新の内容に更新する。
             RefreshPlacedEvents();
         }
         // 読み込み処理が終わったら（例外が出た場合も含めて）必ず読み込み中フラグを下ろす。
@@ -275,105 +269,35 @@ public partial class Form1 : Form
     { mapCanvas.ScrollY = e.NewValue; mapCanvas.Invalidate(); }
 
     // ===== パレット（タイル・敵・ギミック・アイテム）=====
-    // アセット定義（assets）の内容をもとに、右側パレットのタイルボタン群・敵/ギミック/アイテムの
-    // リストボックスの中身をすべて作り直す処理。アセット管理画面で追加/変更/削除が行われた後に呼ばれる。
+    // アセット定義（assets）の内容をもとに、右側パネルの3つの一覧（タイル／配置対象／イベント）を作り直す処理。
+    // アセット管理画面で追加/変更/削除が行われた後にも呼ばれる。
+    // 絵を差し替えた直後でも古い絵が残らないよう、サムネイルの記憶はここで必ず捨てる。
     private void RefreshPalette()
     {
-        // 既存のタイルボタンを全部消してから作り直す。
-        flpTiles.Controls.Clear();
-        foreach (var t in assets.Tiles)
-        {
-            // タイルの色情報（HTMLカラー文字列）をColorに変換する。変換に失敗した場合はグレーで代用する。
-            Color c;
-            try { c = ColorTranslator.FromHtml(t.color); } catch { c = Color.Gray; }
-            // タイル1つにつき1つのボタンを生成する。ボタンの背景色をタイルの色に合わせ、
-            // 文字色は背景の明るさに応じて白/黒を自動選択して視認性を確保する。
-            var btn = new Button
-            {
-                Text = $"{t.id}:{t.name}",
-                Tag = t.id,
-                Size = new Size(104, 34),
-                BackColor = c,
-                ForeColor = c.GetBrightness() < 0.5f ? Color.White : Color.Black,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Meiryo UI", 7),
-                TextAlign = ContentAlignment.MiddleRight,
-                Padding = new Padding(0, 0, 3, 0),
-            };
-            // Feature: UI改善（提案書 MP-1）— タイルボタンが単色の四角のみで見た目が分からなかったため、
-            // スプライトが設定されていれば実際の画像を小さいアイコンとして添える（無ければ従来通り色のみ）。
-            var icon = LoadTileIcon(t.sprite, 24);
-            if (icon != null)
-            {
-                // アイコン画像が読み込めた場合は、ボタンの左側に画像・その右にテキストを並べて表示する。
-                btn.Image = icon;
-                btn.ImageAlign = ContentAlignment.MiddleLeft;
-                btn.TextImageRelation = TextImageRelation.ImageBeforeText;
-            }
-            btn.Click += TileBtn_Click;
-            flpTiles.Controls.Add(btn);
-        }
-
-        // 敵・ギミック・アイテムの一覧も、それぞれのリストボックスへ名前だけを表示する形で作り直す。
-        lstEnemies.Items.Clear();
-        foreach (var e in assets.Enemies) lstEnemies.Items.Add($"{e.name}");
-
-        lstGimmicks.Items.Clear();
-        foreach (var g in assets.Gimmicks) lstGimmicks.Items.Add($"{g.name}");
-
-        lstItems.Items.Clear();
-        foreach (var i in assets.Items) lstItems.Items.Add($"{i.name}");
+        thumbs.Clear();
+        tilePanel.Bind(assets, thumbs, mapCanvas.SelectedTileId);
+        placePanel.Bind(assets, thumbs);
+        eventsPanel.Bind(assets, thumbs);
     }
 
-    // タイルのスプライト画像ファイルを読み込み、指定サイズの正方形アイコン（Bitmap）として返す。
-    // spritePath : assetsフォルダからの相対パス（例: "assets/sprites/grass.png"）。
-    // size       : 生成するアイコンの一辺のピクセル数。
-    // 画像が存在しない・読み込みに失敗した場合は null を返し、呼び出し側は色のみの表示にフォールバックする。
-    private static Image? LoadTileIcon(string spritePath, int size)
+    // タイルのカードが選ばれたときの処理。選ばれたタイルを「現在選択中のタイル」に設定する。
+    private void TilePanel_TilePicked(int id)
     {
-        if (string.IsNullOrEmpty(spritePath)) return null;
-        // 相対パスをプロジェクトルート基準の絶対パスに変換する（スラッシュ区切りをWindowsのバックスラッシュに直す）。
-        string full = Path.Combine(AppPaths.ProjectRoot, spritePath.Replace('/', '\\'));
-        if (!File.Exists(full)) return null;
-        try
-        {
-            // ファイルを読み取り専用・共有ありで開く（エディタが動いている間に他プロセスから読まれても問題ないように）。
-            using var fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var src = Image.FromStream(fs);
-            // 元画像を指定サイズの正方形ビットマップへ縮小描画する。ドット絵の輪郭がぼやけないように
-            // 補間モードを「最近傍（NearestNeighbor）」にしてピクセルをくっきり保つ。
-            var bmp = new Bitmap(size, size);
-            using var g = Graphics.FromImage(bmp);
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-            g.DrawImage(src, 0, 0, size, size);
-            return bmp;
-        }
-        catch { return null; }
-    }
-
-    // タイルパレットのボタンがクリックされたときの処理。クリックされたタイルを「現在選択中のタイル」に設定する。
-    private void TileBtn_Click(object? sender, EventArgs e)
-    {
-        if (sender is Button btn && btn.Tag is int id)
-        {
-            // 現在アクティブなレイヤーモードを保持しつつタイル選択。
-            // 遠景/近景レイヤー編集中にタイルを選んでも、その専用レイヤーへの配置モードを維持し、
-            // それ以外（メインレイヤー編集中など）の場合のみ通常のTileモードに切り替える。
-            // フィルのとき、およびタイルの選択範囲があるときの「選択」ツールは、ツールを切り替えない
-            // （範囲を作ってからタイルを選び、「選択範囲を塗る」を押す使い方を、パレットを触っただけで壊さないため）。
-            bool keepTool = mapCanvas.CurrentMode == MapCanvas.EditMode.Fill
-                         || (mapCanvas.CurrentMode == MapCanvas.EditMode.Select && mapCanvas.HasTileSelection);
-            if (!keepTool &&
-                mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerBack &&
-                mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerFront)
-                mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
-            mapCanvas.SelectedTileId = id;
-            // パレットからタイルを選んだので、ツールバー側の表示も必ず「ペン」に同期させる（下記コメント参照）。
-            if (!keepTool) SyncToolButtonsToPen();
-            // 選択されたボタンだけ見た目を「押し込まれた状態(Standard)」にし、他は通常のフラット表示に戻す。
-            foreach (Control c in flpTiles.Controls)
-                if (c is Button b) b.FlatStyle = b == btn ? FlatStyle.Standard : FlatStyle.Flat;
-        }
+        // 現在アクティブなレイヤーモードを保持しつつタイル選択。
+        // 遠景/近景レイヤー編集中にタイルを選んでも、その専用レイヤーへの配置モードを維持し、
+        // それ以外（メインレイヤー編集中など）の場合のみ通常のTileモードに切り替える。
+        // フィルのとき、およびタイルの選択範囲があるときの「選択」ツールは、ツールを切り替えない
+        // （範囲を作ってからタイルを選び、「選択範囲を塗る」を押す使い方を、パレットを触っただけで壊さないため）。
+        bool keepTool = mapCanvas.CurrentMode == MapCanvas.EditMode.Fill
+                     || (mapCanvas.CurrentMode == MapCanvas.EditMode.Select && mapCanvas.HasTileSelection);
+        if (!keepTool &&
+            mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerBack &&
+            mapCanvas.CurrentMode != MapCanvas.EditMode.DecoLayerFront)
+            mapCanvas.CurrentMode = MapCanvas.EditMode.Tile;
+        mapCanvas.SelectedTileId = id;
+        // パレットからタイルを選んだので、ツールバー側の表示も必ず「ペン」に同期させる（下記コメント参照）。
+        if (!keepTool) SyncToolButtonsToPen();
+        UpdateLayerInfo();
     }
 
     // Feature: UI改善（友人フィードバック対応）— 行・列数を数値指定して矩形範囲を一括でタイル埋めする。
@@ -406,44 +330,30 @@ public partial class Form1 : Form
         SaveCurrentStage();
     }
 
-    // 敵リストの選択項目が変わったときの処理。選ばれた敵を「マップに配置するアセット」として選択状態にする。
-    private void lstEnemies_SelectedIndexChanged(object? sender, EventArgs e)
+    // 「配置対象」のカードが選ばれたときの処理。選ばれた敵・ギミック・アイテムを「マップに配置するアセット」にする。
+    // 敵・ギミック・アイテムは同時に1種類しか配置できない（パネル側が1つしか選ばせない）。
+    private void PlacePanel_AssetPicked(AssetKind kind, string id)
     {
-        if (lstEnemies.SelectedIndex >= 0 && lstEnemies.SelectedIndex < assets.Enemies.Count)
+        mapCanvas.CurrentMode = kind switch
         {
-            mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
-            mapCanvas.SelectedAssetId = assets.Enemies[lstEnemies.SelectedIndex].id;
-            // 敵・ギミック・アイテムは同時に1種類しか配置できないため、他の2つの選択は解除しておく。
-            lstGimmicks.ClearSelected(); lstItems.ClearSelected();
-            SyncToolButtonsToPen();
-            UpdateLayerInfo();
-        }
+            AssetKind.Enemy => MapCanvas.EditMode.Enemy,
+            AssetKind.Gimmick => MapCanvas.EditMode.Gimmick,
+            _ => MapCanvas.EditMode.Item,
+        };
+        mapCanvas.SelectedAssetId = id;
+        SyncToolButtonsToPen();
+        UpdateLayerInfo();
     }
 
-    // ギミックリストの選択項目が変わったときの処理。選ばれたギミックを配置対象アセットに設定する。
-    private void lstGimmicks_SelectedIndexChanged(object? sender, EventArgs e)
+    // 「配置対象」で選択を解除したときの処理。置くモードを抜けて、選択モードへ戻す。
+    private void PlacePanel_PickCleared()
     {
-        if (lstGimmicks.SelectedIndex >= 0 && lstGimmicks.SelectedIndex < assets.Gimmicks.Count)
-        {
-            mapCanvas.CurrentMode = MapCanvas.EditMode.Gimmick;
-            mapCanvas.SelectedAssetId = assets.Gimmicks[lstGimmicks.SelectedIndex].id;
-            lstEnemies.ClearSelected(); lstItems.ClearSelected();
-            SyncToolButtonsToPen();
-            UpdateLayerInfo();
-        }
-    }
-
-    // アイテムリストの選択項目が変わったときの処理。選ばれたアイテムを配置対象アセットに設定する。
-    private void lstItems_SelectedIndexChanged(object? sender, EventArgs e)
-    {
-        if (lstItems.SelectedIndex >= 0 && lstItems.SelectedIndex < assets.Items.Count)
-        {
-            mapCanvas.CurrentMode = MapCanvas.EditMode.Item;
-            mapCanvas.SelectedAssetId = assets.Items[lstItems.SelectedIndex].id;
-            lstEnemies.ClearSelected(); lstGimmicks.ClearSelected();
-            SyncToolButtonsToPen();
-            UpdateLayerInfo();
-        }
+        mapCanvas.SelectedAssetId = null;
+        if (mapCanvas.CurrentMode is MapCanvas.EditMode.Enemy or MapCanvas.EditMode.Gimmick or MapCanvas.EditMode.Item)
+            mapCanvas.CurrentMode = MapCanvas.EditMode.Select;
+        tsbPen.Checked = false; tsbEraser.Checked = false; tsbFill.Checked = false;
+        tsbSelect.Checked = true;
+        UpdateLayerInfo();
     }
 
     // ===== Undo / Redo =====
@@ -530,7 +440,7 @@ public partial class Form1 : Form
     }
 
     // Bugfix: タイル/敵/ギミック/アイテムをパレットから選ぶと mapCanvas.CurrentMode が
-    // 配置モードへ強制的に切り替わる（TileBtn_Click・lstEnemies/lstGimmicks/lstItems_SelectedIndexChanged）が、
+    // 配置モードへ強制的に切り替わる（TilePanel_TilePicked・PlacePanel_AssetPicked）が、
     // ツールバーの 消しゴム/選択 ボタンはチェックされたまま残っていた。そのため「消しゴムを選んだのに
     // パレットを触った後クリックすると消えずに置かれる（＝消しゴムが効かないように見える）」という
     // 状態不整合が発生していた。パレット選択時は必ずペンツールへ表示上も同期させる。
@@ -560,81 +470,75 @@ public partial class Form1 : Form
         // 優先順位: 敵選択中 → ギミック選択中 → アイテム選択中。
         // どれにも該当しなければ「選択モード」をデフォルトとする。
         // （トリガー・開始位置・ゴールは、ステージ上の右クリック／右ドラッグで作るので、左クリックのモードには無い）
-        if (lstEnemies.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Enemy;
-        else if (lstGimmicks.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Gimmick;
-        else if (lstItems.SelectedIndex >= 0) mapCanvas.CurrentMode = MapCanvas.EditMode.Item;
+        if (placePanel.Current is { } cur)
+        {
+            mapCanvas.SelectedAssetId = cur.id;
+            mapCanvas.CurrentMode = cur.kind switch
+            {
+                AssetKind.Enemy => MapCanvas.EditMode.Enemy,
+                AssetKind.Gimmick => MapCanvas.EditMode.Gimmick,
+                _ => MapCanvas.EditMode.Item,
+            };
+        }
         else mapCanvas.CurrentMode = MapCanvas.EditMode.Select; // デフォルト
         UpdateLayerInfo();
     }
 
     // ===== 配置済みイベントリスト (Layer 4) =====
-    // 現在のステージに配置されているスタート/ゴール/トリガー/敵/ギミック/アイテムをすべて洗い出し、
-    // 画面右側の「イベントリスト」タブに一覧表示する。あわせて _placedEventRefs にも同じ順序で
-    // 実体（またはSTART/GOALを表す文字列）を積んでおき、リストの行と実オブジェクトを対応付けられるようにする。
+    // 現在のステージの置いた物（スタート/ゴール/トリガー/敵/ギミック/アイテム）を、右パネルの「イベント」タブへ映し直す。
+    // 以前は読み込み・元に戻す・やり直しのときしか呼ばれず、物を置いたり消したりしても一覧が古いままだった。
+    // いまは、編集が1回終わるたび・プロパティ表で値を変えるたび・トリガーを編集するたびに呼ぶ。
     private void RefreshPlacedEvents()
     {
-        lstPlacedEvents.Items.Clear();
-        _placedEventRefs.Clear();
+        eventsPanel.SetStage(currentStage);
+        // マップで選んでいる物は、作り直したあとも一覧で強調したままにする。
+        eventsPanel.SetSelection(mapCanvas.SelectedObjects);
+        UpdateStageSummary();
+    }
+
+    // 画面上部の情報バー（ステージ名・大きさ・置いた数）を更新する。
+    private void UpdateStageSummary()
+    {
         if (currentStage == null) return;
-
-        // スタート位置は常に1つ存在するので、必ず先頭に表示する。
-        lstPlacedEvents.Items.Add($"🚶 Start ({currentStage.PlayerStartX}, {currentStage.PlayerStartY})");
-        _placedEventRefs.Add("START");
-
-        // ゴールは未設定の場合(-1)があるので、設定されている時だけ表示する。
-        if (currentStage.GoalX >= 0)
-        {
-            lstPlacedEvents.Items.Add($"🏁 Goal ({currentStage.GoalX}, {currentStage.GoalY})");
-            _placedEventRefs.Add("GOAL");
-        }
-
-        // 続けてトリガー・敵・ギミック・アイテムを種類ごとにまとめて列挙する。
-        // それぞれ絵文字アイコンを頭に付け、座標も一緒に表示することで一覧性を高めている。
-        foreach (var t in currentStage.Triggers) { lstPlacedEvents.Items.Add($"⚡ {t.id} ({t.x},{t.y})"); _placedEventRefs.Add(t); }
-        foreach (var e in currentStage.Enemies) { lstPlacedEvents.Items.Add($"👾 {e.Id} ({e.X},{e.Y})"); _placedEventRefs.Add(e); }
-        foreach (var g in currentStage.Gimmicks) { lstPlacedEvents.Items.Add($"🔧 {g.Id} ({g.X},{g.Y})"); _placedEventRefs.Add(g); }
-        foreach (var i in currentStage.Items) { lstPlacedEvents.Items.Add($"💎 {i.Id} ({i.X},{i.Y})"); _placedEventRefs.Add(i); }
+        lblCurrentStage.Text = $"編集中: {currentStageFile}  ({currentStage.MapW}×{currentStage.MapH}) | 敵:{currentStage.Enemies.Count} ギミック:{currentStage.Gimmicks.Count} アイテム:{currentStage.Items.Count} トリガー:{currentStage.Triggers.Count}";
     }
 
-    // イベントリストの選択項目が変わったときの処理。現状は空実装。
-    private void LstPlacedEvents_SelectedIndexChanged(object? sender, EventArgs e)
+    // イベントリストの項目が1回クリックされたとき。マップをその物へ飛ばして選択する
+    // (MZの「リスト選択で該当イベントの編集画面に直接ジャンプ」に相当)。
+    // target : 配置物そのもの。スタート／ゴールは "START" / "GOAL" の文字列。
+    private void EventsPanel_ItemPicked(object target)
     {
-        // リストで選択したらキャンバス上でも選択状態にする処理をここに入れる（拡張用の空フック）。
-    }
-
-    // イベントリスト(Layer 4)をダブルクリックすると、該当オブジェクトへキャンバスをジャンプさせて選択する
-    // (MZの「リスト選択で該当イベントの編集画面に直接ジャンプ」に相当)。トリガーは編集ダイアログも開く。
-    private void LstPlacedEvents_DoubleClick(object? sender, EventArgs e)
-    {
-        int idx = lstPlacedEvents.SelectedIndex;
-        if (currentStage == null || idx < 0 || idx >= _placedEventRefs.Count) return;
-
-        // 選択されている行に対応する実体の種類によって、ジャンプ先座標の取得元とその後の挙動を分岐する。
-        switch (_placedEventRefs[idx])
+        if (currentStage == null) return;
+        switch (target)
         {
             case "START":
                 // スタート位置には実オブジェクトが無いので target は null のまま座標だけ渡す。
                 SelectAndScrollTo(null, currentStage.PlayerStartX, currentStage.PlayerStartY);
                 break;
             case "GOAL":
-                // ゴールが未設定(-1)の場合は何もしない。
                 if (currentStage.GoalX >= 0) SelectAndScrollTo(null, currentStage.GoalX, currentStage.GoalY);
                 break;
-            case EventTrigger t:
-                // トリガーの場合はキャンバス上へジャンプするだけでなく、編集ダイアログも自動的に開く。
-                SelectAndScrollTo(t, t.x, t.y);
-                OpenTriggerEditor(t);
-                break;
-            case PlacedEnemy en:
-                SelectAndScrollTo(en, en.X, en.Y);
-                break;
-            case PlacedGimmick g:
-                SelectAndScrollTo(g, g.X, g.Y);
-                break;
-            case PlacedItem it:
-                SelectAndScrollTo(it, it.X, it.Y);
-                break;
+            case EventTrigger t: SelectAndScrollTo(t, t.x, t.y); break;
+            case PlacedEnemy en: SelectAndScrollTo(en, en.X, en.Y); break;
+            case PlacedGimmick g: SelectAndScrollTo(g, g.X, g.Y); break;
+            case PlacedItem it: SelectAndScrollTo(it, it.X, it.Y); break;
         }
+        UpdateInspectorTitle();
+    }
+
+    // イベントリストの項目がダブルクリック（Enter）されたとき。トリガーだけは、編集画面も開く。
+    private void EventsPanel_ItemActivated(object target)
+    {
+        EventsPanel_ItemPicked(target);
+        if (target is EventTrigger t) OpenTriggerEditor(t);
+    }
+
+    // イベントリストからの削除。マップ側の「選んだ物を削除」と同じ処理を通すので、保存・元に戻す履歴・一覧の更新まで一度に行われる。
+    private void EventsPanel_DeleteRequested(object target)
+    {
+        if (target is string) return;     // スタート・ゴールは消せない
+        mapCanvas.SelectedObject = target;
+        mapCanvas.DeleteSelection();
     }
 
     // キャンバス上の指定オブジェクトへスクロールして選択状態にする。
@@ -704,6 +608,9 @@ public partial class Form1 : Form
     {
         var sel = mapCanvas.SelectedObjects;
         _multiIds.Clear();
+        // マップで選んだ物を、右パネルのイベントリストでも強調し、プロパティ表の見出しも合わせる。
+        eventsPanel.SetSelection(sel);
+        UpdateInspectorTitle();
         if (sel.Count == 0)
         {
             propertyGrid.SelectedObject = null;
@@ -732,6 +639,22 @@ public partial class Form1 : Form
             lblStatus.ForeColor = Color.DimGray;
             lblStatus.Text = $"ℹ {sel.Count}個を選択中：ドラッグで移動 ／ Delete で削除 ／ 右クリックで大きさ・編集の可否を同時に編集";
         }
+    }
+
+    // プロパティ表の上の見出しを、いま選んでいる物に合わせる（「👾 ドッスン（敵）」のように、名前と種類を出す）。
+    private void UpdateInspectorTitle()
+    {
+        var sel = mapCanvas.SelectedObjects;
+        if (sel.Count == 0) { lblInspector.Text = "プロパティ — 何も選んでいません"; return; }
+        if (sel.Count > 1) { lblInspector.Text = $"プロパティ — {sel.Count}個を選択中"; return; }
+        lblInspector.Text = sel[0] switch
+        {
+            PlacedEnemy e => $"👾 {assets.Enemies.FirstOrDefault(d => d.id == e.Id)?.name ?? e.Id}（敵）",
+            PlacedGimmick g => $"🔧 {assets.Gimmicks.FirstOrDefault(d => d.id == g.Id)?.name ?? g.Id}（ギミック）",
+            PlacedItem i => $"💎 {assets.Items.FirstOrDefault(d => d.id == i.Id)?.name ?? i.Id}（アイテム）",
+            EventTrigger t => $"⚡ {t.id}（トリガー）",
+            _ => "プロパティ",
+        };
     }
 
     // 配置物のID（敵・ギミック・アイテム）。それ以外は空
@@ -768,6 +691,9 @@ public partial class Form1 : Form
             SaveCurrentStage();
             historyMgr.Push(currentStage);
         }
+        // ID・座標が変わると一覧の表示も変わる。
+        RefreshPlacedEvents();
+        UpdateInspectorTitle();
     }
 
     // StageModified はドラッグ中のタイル1マスごとに何度も発火するため、
@@ -784,6 +710,9 @@ public partial class Form1 : Form
             SaveCurrentStage();
             historyMgr.Push(currentStage);
         }
+        // 置く・消す・動かすなどで配置物が変わったので、右パネルのイベントリストも最新にする。
+        RefreshPlacedEvents();
+        UpdateInspectorTitle();
     }
 
     // Feature 4: ここからプレイ （マップクリックでテストプレイ開始位置確定）。
@@ -849,6 +778,7 @@ public partial class Form1 : Form
             }
             SaveCurrentStage();
             mapCanvas.Invalidate();
+            RefreshPlacedEvents();
         }
         else if (!isNew)
         {
@@ -859,6 +789,7 @@ public partial class Form1 : Form
                 currentStage?.Triggers.RemoveAll(t => t.id == trigger.id);
                 SaveCurrentStage();
                 mapCanvas.Invalidate();
+                RefreshPlacedEvents();
             }
         }
     }
@@ -1170,29 +1101,16 @@ public partial class Form1 : Form
     // Feature 2: アニメーションエディタ。敵/ギミック/アイテムのアニメーション（コマ送り設定）を編集する。
     private void btnAnimEditor_Click(object? sender, EventArgs e)
     {
-        // アセットIDを選択させるためのリスト。敵・ギミック・アイテムすべてのIDをまとめて1つのリストにする。
-        var ids = assets.Enemies.Select(x => x.id)
-            .Concat(assets.Gimmicks.Select(x => x.id))
-            .Concat(assets.Items.Select(x => x.id))
-            .ToList();
-
         // 編集対象になるアセットが1つも登録されていなければ、その旨を伝えて終了する。
-        if (ids.Count == 0) { MessageBox.Show("アセットが登録されていません。先にアセット管理でアセットを追加してください。"); return; }
+        if (assets.Enemies.Count + assets.Gimmicks.Count + assets.Items.Count == 0)
+        { MessageBox.Show("アセットが登録されていません。先にアセット管理でアセットを追加してください。"); return; }
 
-        // 簡易選択ダイアログ。専用フォームを作らず、その場でListBoxとOKボタンだけの小さなフォームを組み立てて表示する。
+        // アニメーションを付けるアセットを、絵つきのカードから選ばせる（以前はIDの文字だけのリストだった）。
         string? selectedId = null;
-        using var picker = new Form
+        using (var picker = new AssetPickerForm("アニメーションを編集するアセットを選ぶ", "アニメーションを付けたい敵・ギミック・アイテムを選んでください。", assets))
         {
-            Text = "アニメーション編集するアセットを選択", Size = new Size(360, 200),
-            StartPosition = FormStartPosition.CenterParent
-        };
-        var lb = new ListBox { Dock = DockStyle.Fill };
-        ids.ForEach(id => lb.Items.Add(id));
-        var btnOk = new Button { Text = "OK", Dock = DockStyle.Bottom, DialogResult = DialogResult.OK };
-        picker.Controls.AddRange(new Control[] { lb, btnOk });
-        picker.AcceptButton = btnOk;
-        if (picker.ShowDialog() == DialogResult.OK && lb.SelectedItem != null)
-            selectedId = lb.SelectedItem.ToString();
+            if (picker.ShowDialog(this) == DialogResult.OK) selectedId = picker.SelectedId;
+        }
 
         // 何も選ばれずに閉じられた場合は処理を打ち切る。
         if (string.IsNullOrEmpty(selectedId)) return;
@@ -1305,7 +1223,7 @@ public partial class Form1 : Form
         rootPage.CommonEventEditRequested += (ev, onSaved) => HandleCommonEventRequest(rootPage, ev, onSaved);
 
         // シェルの最初のページとしてルートページを表示する。
-        shell.NavigateTo(rootPage, "アセット管理", rootPage.PrimaryActionButton, rootPage.SecondaryActionButton);
+        shell.NavigateTo(rootPage, "アセット管理", null, rootPage.SecondaryActionButton);   // Enterキーで保存されてしまわないよう、決定ボタンは割り当てない
 
         // シェル全体をモーダル表示し、OKで閉じられた（＝どこかのページで保存された）場合のみ
         // アセット定義を読み直してパレット・マップキャンバスの表示を最新化する。

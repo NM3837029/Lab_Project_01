@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -28,9 +28,9 @@ public class WorkbenchShellForm : Form
     // 現在表示中のページを差し込む領域
     private readonly Panel _content = new() { Dock = DockStyle.Fill };
     // パンくずリスト（現在位置までの経路）を横並びで表示する領域
-    private readonly FlowLayoutPanel _breadcrumbRow = new() { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(12, 6, 0, 0) };
+    private readonly FlowLayoutPanel _breadcrumbRow = new() { AutoSize = true, WrapContents = false, FlowDirection = FlowDirection.LeftToRight, Margin = new Padding(12, 6, 0, 0), BackColor = UiTheme.CardBack };
     // 1つ前のページに戻るためのボタン（履歴が無いときは無効化する）
-    private readonly Button _btnBack = new() { Text = "← 戻る", AutoSize = true, Padding = new Padding(8, 3, 8, 3), Enabled = false };
+    private readonly Button _btnBack = new() { Text = "← 戻る", AutoSize = true, Padding = new Padding(8, 3, 8, 3), Enabled = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
     // これまでに辿ってきたページの履歴（戻るボタンで1つずつ復帰する）
     private readonly Stack<NavEntry> _backStack = new();
     // 現在表示中のページの情報（まだどのページも開いていない場合はnull）
@@ -39,6 +39,7 @@ public class WorkbenchShellForm : Form
     public WorkbenchShellForm()
     {
         Text = "アセット・ワークベンチ";
+        BackColor = UiTheme.PanelBack;
         Size = new Size(1160, 760);
         MinimumSize = new Size(900, 600);
         StartPosition = FormStartPosition.CenterParent;
@@ -48,12 +49,15 @@ public class WorkbenchShellForm : Form
         _btnBack.Click += (s, e) => GoBack();
 
         // 「戻る」ボタンとパンくずリストを横並びに配置するための行
-        var flowBar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false };
+        _btnBack.FlatAppearance.BorderColor = UiTheme.CardBorder;
+        var flowBar = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, BackColor = UiTheme.CardBack };
         flowBar.Controls.Add(_btnBack);
         flowBar.Controls.Add(_breadcrumbRow);
 
         // 画面上部に固定表示するパンくずバー全体を格納するパネル
-        var pnlBreadcrumb = new Panel { Dock = DockStyle.Top, Height = 34, Padding = new Padding(8, 4, 8, 4) };
+        var pnlBreadcrumb = new Panel { Dock = DockStyle.Top, Height = 42, Padding = new Padding(8, 6, 8, 4), BackColor = UiTheme.CardBack };
+        // 帯の下に、細い区切り線を引く
+        pnlBreadcrumb.Paint += (s, e) => { using var pen = new Pen(UiTheme.CardBorder); e.Graphics.DrawLine(pen, 0, pnlBreadcrumb.Height - 1, pnlBreadcrumb.Width, pnlBreadcrumb.Height - 1); };
         pnlBreadcrumb.Controls.Add(flowBar);
 
         // Dock=Fillのcontentを先にAddし、Dock=Topのパンくずを後からAddする
@@ -136,7 +140,7 @@ public class WorkbenchShellForm : Form
                 AutoSize = true,
                 Margin = new Padding(0, 3, 0, 0),
                 Font = isLast ? UiTheme.Bold : UiTheme.Base,
-                ForeColor = isLast ? Color.Black : Color.DimGray,
+                ForeColor = isLast ? UiTheme.TextMain : UiTheme.TextMuted,
             });
         }
 
