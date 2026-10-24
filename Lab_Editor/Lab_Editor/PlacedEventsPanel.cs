@@ -238,7 +238,9 @@ public sealed class PlacedEventsPanel : UserControl
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("🗑 削除", null, (s, e) => DeleteRequested?.Invoke(target));
         }
-        menu.Closed += (s, e) => menu.Dispose();
+        // メニューを閉じる処理の最中に Dispose すると、項目クリックの後始末が破棄済みのメニューを触って
+        // 「Cannot access a disposed object」になる。メッセージ処理が一巡してから捨てる。
+        menu.Closed += (s, e) => BeginInvoke(new Action(menu.Dispose));
         menu.Show(_list, location);
     }
 }

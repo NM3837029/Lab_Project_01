@@ -149,7 +149,9 @@ public partial class AssetManagerPageControl
         m.Items.Add("🔧 ギミック", null, (s, e) => { AddRow(dgvGimmicks, GetDefaultGimmickRow()); });
         m.Items.Add("💎 アイテム", null, (s, e) => { AddRow(dgvItems, GetDefaultItemRow()); });
         m.Items.Add("🔔 コモンイベント", null, (s, e) => AddCommonEvent());
-        m.Closed += (s, e) => m.Dispose();
+        // メニューを閉じる処理の最中に Dispose すると、項目クリックの後始末が破棄済みのメニューを触って
+        // 「Cannot access a disposed object」になる。メッセージ処理が一巡してから捨てる。
+        m.Closed += (s, e) => BeginInvoke(new Action(m.Dispose));
         m.Show(anchor, new Point(0, -m.GetPreferredSize(Size.Empty).Height));
     }
 
@@ -158,7 +160,9 @@ public partial class AssetManagerPageControl
         var m = new ContextMenuStrip { Font = UiTheme.Base };
         m.Items.Add("👾 色・明るさの敵プリセット", null, (s, e) => BtnNewEnemyFromPreset_Click());
         m.Items.Add("🔧 色・明るさのギミックプリセット", null, (s, e) => BtnNewGimmickFromPreset_Click());
-        m.Closed += (s, e) => m.Dispose();
+        // メニューを閉じる処理の最中に Dispose すると、項目クリックの後始末が破棄済みのメニューを触って
+        // 「Cannot access a disposed object」になる。メッセージ処理が一巡してから捨てる。
+        m.Closed += (s, e) => BeginInvoke(new Action(m.Dispose));
         m.Show(anchor, new Point(0, -m.GetPreferredSize(Size.Empty).Height));
     }
 
