@@ -9261,6 +9261,12 @@
       "y": 380.0,
       "patrol_left": 6144.0,
       "patrol_right": 6336.0
+    },
+    {
+      "id": "enemy_dossun_wide",
+      "x": 3328.0,
+      "y": 256.0,
+      "scale": 1.5
     }
   ],
   "gimmicks": [
@@ -9328,102 +9334,6 @@
       "id": "gimmick_checkpoint",
       "x": 2952.0,
       "y": 352.0
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3200.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3232.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3264.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3296.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3328.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3360.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3392.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
-    },
-    {
-      "id": "gim_spikes",
-      "x": 3424.0,
-      "y": 384.0,
-      "noScale": true,
-      "noRotate": false,
-      "noMove": true,
-      "noFlip": true,
-      "noPause": true,
-      "noRewind": true,
-      "noSpeed": true
     },
     {
       "id": "gimmick_checkpoint",
