@@ -37,8 +37,8 @@
     "cutCostPerTile": 0.1
   },
   "goal": {
-    "x": 1248.0,
-    "y": 288.0,
+    "x": 1312.0,
+    "y": 384.0,
     "sprite": "img/ゴール４.png"
   },
   "map": [
@@ -3750,7 +3750,13 @@
   ],
   "triggers": [],
   "enemies": [],
-  "gimmicks": [],
+  "gimmicks": [
+    {
+      "id": "gim_firebar_block",
+      "x": 480.0,
+      "y": 288.0
+    }
+  ],
   "items": [],
   "platforms": []
 }

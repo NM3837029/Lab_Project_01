@@ -279,7 +279,7 @@
     "maxDepthOffset": -1.0,
     "pushOutDistance": -1.0,
     "triggerWidthThreshold": -1.0,
-    "travelDistance": 160.0,
+    "travelDistance": 151.0,
     "oscillationSpeed": -1.0,
     "stepIncrement": 0.2,
     "standDelayFrames": -1.0,
@@ -2867,7 +2867,7 @@
     "id": "gim_firebar_block",
     "name": "ファイアバー（支点ブロックつき・回せる）",
     "type_enum": 3,
-    "sprite": "img/黒い石タイル.png",
+    "sprite": "img/ファイアバーの根本.png",
     "seActivate": "",
     "hitboxOffsetX": 0,
     "hitboxOffsetY": 0,
@@ -2917,7 +2917,7 @@
     "parts": [
       {
         "id": "fire0_1",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 22.0,
         "offsetY": 8.0,
         "width": 16,
@@ -2996,7 +2996,7 @@
       },
       {
         "id": "fire0_2",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 36.0,
         "offsetY": 8.0,
         "width": 16,
@@ -3075,7 +3075,7 @@
       },
       {
         "id": "fire0_3",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 50.0,
         "offsetY": 8.0,
         "width": 16,
@@ -3154,7 +3154,7 @@
       },
       {
         "id": "fire0_4",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 64.0,
         "offsetY": 8.0,
         "width": 16,
@@ -3233,7 +3233,7 @@
       },
       {
         "id": "fire0_5",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 78.0,
         "offsetY": 8.0,
         "width": 16,
@@ -3312,7 +3312,7 @@
       },
       {
         "id": "fire0_6",
-        "sprite": "img/弾2.png",
+        "sprite": "img/ファイアバーの棒.png",
         "offsetX": 92.0,
         "offsetY": 8.0,
         "width": 16,

@@ -3700,7 +3700,7 @@
     "consumePartOnAttack": false,
     "noScale": false,
     "noRotate": false,
-    "noMove": false,
+    "noMove": true,
     "noFlip": false,
     "noPause": false,
     "noRewind": false,
