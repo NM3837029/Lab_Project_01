@@ -3248,6 +3248,98 @@ void NoteBreakTooSmall(float x, float y, float need) {
     g_breakSizeHint.timer = 90.0f;
 }
 
+// ===== 壊せるブロックの目印 =====
+//
+// 壊せるブロック（ギミックの「壊せるブロック」と、破壊条件を持つタイル）は、これまで
+// 壊れない地形と見た目が同じで、ぶつかってみるまで壊せるのかどうか分からなかった。
+// そこで、次の物を重ねて描き、「これは壊せる」と一目で分かるようにする。
+//   1) ひび割れ  : ブロックごとに決まった模様（フレームごとには変わらない）。
+//   2) ふちの明滅: ゆっくり明るさが変わる縁取り。動くので、背景の地形の中でも目に入る。
+//   3) 壊し方の色の点: 壊し方が限られているときだけ、左下に小さく出す。
+//        橙＝ドッスンの落下 / 赤＝敵の体当たり / 黄＝弾 / 水色＝プレイヤーのクリック
+//      四つとも有効（何でも壊せる）ときは、点は出さない（ひび割れだけで十分伝わるため）。
+//   4) 必要な大きさ: breakMinScale があれば、右上に「x2」のように倍率を出す。
+//      （拡大しないと壊せない壁を、弾かれる前から分かるようにするため。弾かれたときの案内は別にある）
+// 壊したあとの絵は、ブロックが消えるだけなので、ここでは何もしない。
+enum BreakMarkBits { BM_SLAM = 1, BM_RAM = 2, BM_BULLET = 4, BM_PLAYER = 8 };
+
+// 引数: 画面上の左上(x,y)・幅高さ(w,h)、有効な壊し方の組み合わせ(BreakMarkBits)、
+//       必要な大きさ(0以下なら不問)、ひび割れの模様を決める数（同じ値なら同じ模様）。
+void DrawBreakableMark(int x, int y, int w, int h, int causeMask, float needScale, int seed) {
+    if (w <= 0 || h <= 0) return;
+
+    // ひび割れの模様。32x32の1マス分で、線分（x1,y1,x2,y2）を6本ずつ。3種類を、マスごとに使い分ける。
+    struct CrackSeg { short x1, y1, x2, y2; };
+    static const CrackSeg kCrack[3][6] = {
+        { {6, 0, 10, 8},  {10, 8, 7, 14},  {7, 14, 13, 22},  {13, 22, 10, 32}, {10, 8, 18, 10},  {13, 22, 21, 25} },
+        { {26, 0, 22, 9}, {22, 9, 27, 16},  {27, 16, 21, 24}, {21, 24, 24, 32}, {22, 9, 14, 12},  {27, 16, 31, 19} },
+        { {0, 18, 8, 17}, {8, 17, 12, 22},  {12, 22, 20, 20}, {20, 20, 26, 26}, {26, 26, 32, 25}, {12, 22, 14, 30} },
+    };
+
+    // ブロックが32pxより大きければ、32px四方ごとに繰り返す（小さければ、そのブロック全体で1マス分として伸縮する）。
+    int cellsX = w / 32 < 1 ? 1 : w / 32;
+    int cellsY = h / 32 < 1 ? 1 : h / 32;
+    float cellW = (float)w / (float)cellsX;
+    float cellH = (float)h / (float)cellsY;
+    float fx = cellW / 32.0f, fy = cellH / 32.0f;
+
+    // 1) ひび割れ。暗い線の斜め下に明るい線を重ねて、刻み目に見せる。
+    for (int pass = 0; pass < 2; pass++) {
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, pass == 0 ? 190 : 80);
+        unsigned int col = pass == 0 ? GetColor(28, 18, 14) : GetColor(255, 235, 210);
+        int off = pass == 0 ? 0 : 1;
+        for (int cy = 0; cy < cellsY; cy++) {
+            for (int cx = 0; cx < cellsX; cx++) {
+                int tpl = (seed + cx * 5 + cy * 11) % 3;
+                if (tpl < 0) tpl += 3;
+                float ox = (float)x + cx * cellW, oy = (float)y + cy * cellH;
+                for (const CrackSeg& sg : kCrack[tpl]) {
+                    DrawLine((int)(ox + sg.x1 * fx) + off, (int)(oy + sg.y1 * fy) + off,
+                             (int)(ox + sg.x2 * fx) + off, (int)(oy + sg.y2 * fy) + off, col);
+                }
+            }
+        }
+    }
+
+    // 2) ふちの明滅。壁になって並んだブロックが、いっせいに同じ調子で明滅する。
+    float pulse = 0.5f + 0.5f * sinf((float)GetNowCount() * 0.004f);
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 50 + (int)(110.0f * pulse));
+    DrawBox(x + 1, y + 1, x + w - 1, y + h - 1, GetColor(255, 236, 170), FALSE);
+
+    // 3) 壊し方の色の点（壊し方が限られているときだけ）
+    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    if ((causeMask & 15) != 15) {
+        static const unsigned int kBitCol[4][3] = { {255, 150, 40}, {230, 70, 70}, {255, 225, 80}, {90, 200, 255} };
+        int px = x + 3, py = y + h - 7;
+        for (int b = 0; b < 4; b++) {
+            if (!(causeMask & (1 << b))) continue;
+            DrawBox(px - 1, py - 1, px + 5, py + 5, GetColor(20, 20, 20), TRUE);
+            DrawBox(px, py, px + 4, py + 4, GetColor((int)kBitCol[b][0], (int)kBitCol[b][1], (int)kBitCol[b][2]), TRUE);
+            px += 7;
+        }
+    }
+
+    // 4) 必要な大きさ
+    if (needScale > 0.0f) {
+        char buf[16];
+        if (fabsf(needScale - roundf(needScale)) < 0.05f) sprintf_s(buf, sizeof(buf), "x%d", (int)roundf(needScale));
+        else sprintf_s(buf, sizeof(buf), "x%.1f", needScale);
+        // 32px四方のタイルを覆ってしまわないよう、文字を小さくして右上の角へ寄せる（描いたあと元の大きさへ戻す）
+        int oldFont = GetFontSize();
+        SetFontSize(11);
+        int tw = GetDrawStringWidth(buf, (int)strlen(buf));
+        DrawBox(x + w - tw - 3, y, x + w, y + 13, GetColor(30, 26, 24), TRUE);
+        DrawString(x + w - tw - 1, y, buf, GetColor(255, 210, 120));
+        SetFontSize(oldFont);
+    }
+}
+
+// タイルの破壊条件を、目印の壊し方の組み合わせへ直す。1つも壊し方が無ければ 0（壊せないタイル）。
+int BreakMaskOfTile(const TileDefinition& td) {
+    return (td.breakBySlam ? BM_SLAM : 0) | (td.breakByRam ? BM_RAM : 0)
+         | (td.breakByBullet ? BM_BULLET : 0) | (td.breakByPlayer ? BM_PLAYER : 0);
+}
+
 bool TryBreakGimmick(Gimmick& gim, BreakCause cause, float attackerScale) {
     if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) return false;
     // 定義が引けないブロックは「どの壊し方でも壊せる」従来どおりの挙動へ落とす。
@@ -13133,6 +13225,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int useHandle = gim.handle >= 0 ? gim.handle : breakableBlockHandle;
                 DrawGimmickRotated(gim, useHandle, cameraX, cameraY,
                                    gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
+                // 壊せることが見て分かるよう、ひび割れ・明滅・壊し方の点を重ねる。
+                // 傾けられているあいだは、四角い目印が絵とずれてしまうので出さない（倒れて崩れる寸前の姿をそのまま見せる）。
+                if (fabsf(NormalizeAngle(gim.angle)) < 0.05f) {
+                    const GimmickDef* bdef = FindGimmickDef(gim.assetId);
+                    // 定義が引けないブロックは、どの壊し方でも壊せる扱い（TryBreakGimmick と同じ決まり）
+                    int bm = (bdef == nullptr) ? 15
+                           : ((bdef->breakBySlam ? BM_SLAM : 0) | (bdef->breakByRam ? BM_RAM : 0)
+                            | (bdef->breakByBullet ? BM_BULLET : 0) | (bdef->breakByPlayer ? BM_PLAYER : 0));
+                    // 傾けて崩すことだけが有効なブロックにも、ひび割れは出す（壊せる物ではあるため）
+                    if (bm != 0 || (bdef != nullptr && bdef->breakByTip)) {
+                        DrawBreakableMark((int)(gim.x - cameraX), (int)(gim.y - cameraY),
+                                          (int)gim.spriteWidth, (int)gim.spriteHeight,
+                                          bm, bdef != nullptr ? bdef->breakMinScale : 0.0f,
+                                          (int)(gim.x / 32.0f) * 7 + (int)(gim.y / 32.0f) * 13);
+                    }
+                }
             }
             else if (gim.type == GIMMICK_FALLING_LIFT) {
                 // リフト画像を描画（カスタムスプライト優先）
@@ -13587,6 +13695,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     } else {
                         // 画像が無く色だけ指定されているタイルは、その色で1マスを塗る
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, tileDefs[tid].colorRGB, TRUE);
+                    }
+                    // 壊せるタイルには、ひび割れ・明滅・壊し方の点を重ねて、壊せることが見て分かるようにする
+                    if (int bm = BreakMaskOfTile(tileDefs[tid])) {
+                        DrawBreakableMark(drawX, drawY, TILE_SIZE, TILE_SIZE, bm, tileDefs[tid].breakMinScale, tx * 7 + ty * 13);
                     }
                     if (isDebugDrawMode && tileDefs[tid].isCollidable) {
                         DrawBox(drawX, drawY, drawX + TILE_SIZE, drawY + TILE_SIZE, GetColor(0, 255, 255), FALSE);
