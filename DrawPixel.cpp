@@ -2011,6 +2011,8 @@ const int PAUSE_BUTTON_X1 = WINDOW_WIDTH / 2 - 24;
 const int PAUSE_BUTTON_X2 = WINDOW_WIDTH / 2 + 24;
 const int PAUSE_BUTTON_Y1 = WINDOW_HEIGHT - 94;
 const int PAUSE_BUTTON_Y2 = WINDOW_HEIGHT - 66;
+// 編集ツールのアイコンバー（左）・時間操作ボタン（下）・ホバーの説明カード。PAUSE_BUTTON_* と UI素材の関数より後ろで読み込む。
+#include "EditToolbar.h"
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
 // ドッスン(FALLER)が落下フェーズに留まれる最大フレーム数。
 // 落下中は重力を切って軸方向へ加速させるため、着地判定を1回でも取り逃すと
@@ -6147,13 +6149,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             monitorW = (int)(SCREEN_WIDTH * viewScale); monitorH = (int)(SCREEN_HEIGHT * viewScale);
             monitorX = (WINDOW_WIDTH - monitorW) / 2; monitorY = (WINDOW_HEIGHT - monitorH) / 2;
         } else {
-            viewScale = 1.2f;
+            // 左は幅68pxのアイコンバー、右は幅250pxのインスペクター、下は高さ100pxのタイムライン。残りの領域へ収める。
+            // 以前は左パネルが250pxあったので倍率は1.2だった。左が狭くなった分、1.25倍（800x600）まで広げる。
+            viewScale = 1.25f;
             monitorW = (int)(SCREEN_WIDTH * viewScale); monitorH = (int)(SCREEN_HEIGHT * viewScale);
-            const int gapL = 250, gapR = WINDOW_WIDTH - 250, gapT = 0, gapB = WINDOW_HEIGHT - 100; // 左右・下の編集パネルを除いた領域
+            const int gapL = EditToolbar::LEFT_W, gapR = WINDOW_WIDTH - 250, gapT = 0, gapB = WINDOW_HEIGHT - 100; // 左右・下の編集パネルを除いた領域
             monitorX = gapL + ((gapR - gapL) - monitorW) / 2; monitorY = gapT + ((gapB - gapT) - monitorH) / 2;
         }
     };
     UpdateMonitorLayout();
+
+    // ズーム(Z)・縮小(V)・巻き戻し(R)は「押している間だけ」効くキー操作。ツールバーのボタンをクリックして
+    // 「入」にしたときも、キーを押し続けているのと同じに扱いたいので、キーの見方をここへ集約する（EditToolbar.h）。
+    auto KeyZ = [&]() { return CheckHitKey(KEY_INPUT_Z) != 0 || EditToolbar::S().zoomLatch; };
+    auto KeyV = [&]() { return CheckHitKey(KEY_INPUT_V) != 0 || EditToolbar::S().zoomOutLatch; };
+    auto KeyR = [&]() { return CheckHitKey(KEY_INPUT_R) != 0 || EditToolbar::S().rewindLatch; };
 
     GameScene currentScene = PLAY;
     // 前フレームのシーン。「PLAY からクリアへ移った瞬間」を検出してセーブするために持つ。
@@ -6603,6 +6613,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 死亡時にステージ全体を初期化し、ゲームの整合性を保証するラムダヘルパー
     auto ResetStage = [&]() {
         sizeThrows.clear(); sizeZones.clear(); // ステージのやり直しで、投げた物と範囲も消す
+        { auto& tbOff = EditToolbar::S(); tbOff.rewindLatch = false; tbOff.zoomLatch = false; tbOff.zoomOutLatch = false; }
         Logger::Info("System", "ResetStage", "Begin ResetStage");
 
         // Feature: タイル破壊 — 壊れた地形を元へ戻す。
@@ -7803,10 +7814,111 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             playerColorFilter = ColorGrade::JudgeFilter(cgState);
         }
 
+        // ===== 編集ツールバー（左のアイコンバーと、下の時間操作ボタン。EditToolbar.h）=====
+        // ボタンのクリックは、キー操作と同じ効果を持つ（ここは「押された」を受けて、既存の処理と同じことをするだけ）。
+        // カラー補正パネルと同じく、バーの上で押し始めたクリックは、離すまで背後の編集操作（選択・射撃など）へ回さない。
+        bool tbLocked[EditToolbar::COUNT] = { !objectEditOpEnabled, !screenEffectOpEnabled, !screenEffectOpEnabled, !screenEffectOpEnabled,
+                                              !rewindOpEnabled, !pauseOpEnabled, !fastForwardOpEnabled, !cutOpEnabled };
+        {
+            EditToolbar::State& tb = EditToolbar::S();
+            static bool tbLastRaw = false, tbHold = false;
+            const bool tbRaw = currentLeftClick;
+            const bool tbPressed = tbRaw && !tbLastRaw;
+            tbLastRaw = tbRaw;
+            const bool tbAvail = isEditMode && !bigView && currentScene == PLAY && !menu.isOpen && !isShowingMessage;
+
+            // 封印されたツールは、使えない（ラッチも解く）
+            if (!rewindOpEnabled) tb.rewindLatch = false;
+            if (!screenEffectOpEnabled) { tb.zoomLatch = false; tb.zoomOutLatch = false; }
+
+            bool detailAllowed[EditToolbar::COUNT];
+            for (int i = 0; i < EditToolbar::COUNT; i++) detailAllowed[i] = !tbLocked[i];
+
+            // 押し始めた場所がバー（ボタン・開いているカード）なら、離すまで背後へ回さない
+            const int preCard = tb.cardTool, preDetail = tb.detail;
+            if (tbPressed && tbAvail) {
+                bool onBar = EditToolbar::HitTool(mx, my) >= 0;
+                if (!onBar && preCard >= 0 && EditToolbar::CardRect((EditToolbar::Tool)preCard, false).Has(mx, my)) onBar = true;
+                if (!onBar && preDetail >= 0 && EditToolbar::CardRect((EditToolbar::Tool)preDetail, true).Has(mx, my)) onBar = true;
+                tbHold = onBar;
+            }
+            if (!tbRaw) tbHold = false;
+            if (tbHold) currentLeftClick = false;
+
+            int tbClicked = EditToolbar::Update(mx, my, tbPressed, tbAvail, detailAllowed);
+            switch (tbClicked) {
+                case EditToolbar::OBJ:
+                    // 物の編集は「押して発動」ではなく右クリックで選ぶ操作なので、押したら使い方（詳細）を開く
+                    if (tbLocked[EditToolbar::OBJ]) EditDeniedToggle(false, "物の編集");
+                    else { tb.detail = EditToolbar::OBJ; tb.leaveFrames = 0; }
+                    break;
+                case EditToolbar::ZOOM:
+                    if (!screenEffectOpEnabled) EditDeniedToggle(false, "ズーム");
+                    else if (tb.zoomLatch) tb.zoomLatch = false;
+                    else if (editCost > 0.0f) { tb.zoomLatch = true; tb.zoomOutLatch = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.colorFilter); }
+                    else EditDeniedToggle(true, "ズーム");
+                    break;
+                case EditToolbar::ZOOMOUT:
+                    if (!screenEffectOpEnabled) EditDeniedToggle(false, "縮小");
+                    else if (tb.zoomOutLatch) tb.zoomOutLatch = false;
+                    else if (editCost > 0.0f) { tb.zoomOutLatch = true; tb.zoomLatch = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.colorFilter); }
+                    else EditDeniedToggle(true, "縮小");
+                    break;
+                case EditToolbar::COLOR: {
+                    // Tキーと同じ：色フィルタを（なし→赤→緑→青→なし）と巡回する。「なし」へ戻す遷移は常に無料
+                    int nextFilter = (playerColorFilter + 1) % 4;
+                    bool turningOff = (playerColorFilter != 0 && nextFilter == 0);
+                    if (turningOff || (screenEffectOpEnabled && editCost >= currentEditCost.flatColorCycle)) {
+                        if (!turningOff) editCost -= currentEditCost.flatColorCycle;
+                        ColorGrade::SetQuickFilter(cgState, nextFilter);
+                        playerColorFilter = nextFilter;
+                        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.colorFilter);
+                    } else if (!screenEffectOpEnabled) {
+                        EditDeniedToggle(false, "画面エフェクト");
+                    } else {
+                        EditDeniedCost(currentEditCost.flatColorCycle);
+                    }
+                    break;
+                }
+                case EditToolbar::REWIND:
+                    if (!rewindOpEnabled) EditDeniedToggle(false, "巻き戻し");
+                    else if (tb.rewindLatch) tb.rewindLatch = false;
+                    else if (editCost > 0.0f) tb.rewindLatch = true;   // 入れたあとは、Rキーを押し続けているのと同じ（コストも同じように減る）
+                    else EditDeniedToggle(true, "巻き戻し");
+                    break;
+                case EditToolbar::PAUSE:
+                    // 既存の一時停止ボタン・Spaceキーと同じ。停止の解除は常に無料
+                    if (isPaused) { isPaused = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
+                    else if (pauseOpEnabled && editCost > 0.0f) { isPaused = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.pause); }
+                    else EditDeniedToggle(pauseOpEnabled, "時間停止");
+                    break;
+                case EditToolbar::FF:
+                    // Fキーと同じ。解除は常に無料
+                    if (isFastForward) { isFastForward = false; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.fastForward); }
+                    else if (fastForwardOpEnabled && editCost > 0.0f) { isFastForward = true; SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.fastForward); }
+                    else EditDeniedToggle(fastForwardOpEnabled, "早送り");
+                    break;
+                case EditToolbar::CUT:
+                    // カットは Ctrl＋クリックでタイムライン上に作る操作なので、押したらタイムラインの枠を光らせて場所と使い方を示す
+                    if (!cutOpEnabled) EditDeniedToggle(false, "カット");
+                    else { tb.cutPulse = 180; ShowEditToast("下のタイムラインを Ctrl＋クリック2回で、区間を飛ばします", 0); }
+                    break;
+                default: break;
+            }
+
+            // 詳細（[?]）を開いたあいだは、時間を止める。止めたのはこちらの都合なので、編集コストは消費しない。
+            // 閉じたら、こちらで止めた分だけ戻す（自分で止めていたなら、止めたまま）。
+            if (tb.detail >= 0 && preDetail < 0) {
+                if (!isPaused) { isPaused = true; tb.autoPaused = true; } else tb.autoPaused = false;
+            }
+            if (tb.detail < 0 && preDetail >= 0 && tb.autoPaused) { isPaused = false; tb.autoPaused = false; }
+            if (tb.detail >= 0 && tb.autoPaused) isPaused = true;   // Spaceキーなどで解かれても、開いている間は止め直す
+        }
+
         // Z を押したままホイール＝ズームの倍率。ホイールは物の拡縮（下の処理）にも使われるので、ここで使い切って競合させない。
         // Ctrl+Z（取り消し）は Z としては数えない。ズームが使えないとき（封印・コスト0）は、ホイールを今までどおり物の拡縮へ回す。
         if (wheelRot != 0 && currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f
-            && CheckHitKey(KEY_INPUT_Z) != 0 && !editCtrlHeld) {
+            && KeyZ() && !editCtrlHeld) {
             playerZoomLevel += (float)wheelRot * 0.1f;
             if (playerZoomLevel < 1.2f) playerZoomLevel = 1.2f;
             if (playerZoomLevel > 3.0f) playerZoomLevel = 3.0f;
@@ -7816,7 +7928,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         // V を押したままホイール＝ズームアウトの倍率（0.5〜0.9）。上へ回すほど等倍に近づく（Z のホイールと同じ向き）。
         if (wheelRot != 0 && currentScene == PLAY && screenEffectOpEnabled && editCost > 0.0f
-            && CheckHitKey(KEY_INPUT_V) != 0 && CheckHitKey(KEY_INPUT_Z) == 0 && !editCtrlHeld) {
+            && KeyV() && !KeyZ() && !editCtrlHeld) {
             playerZoomOutLevel += (float)wheelRot * 0.1f;
             if (playerZoomOutLevel < ZOOMOUT_MIN) playerZoomOutLevel = ZOOMOUT_MIN;
             if (playerZoomOutLevel > ZOOMOUT_MAX) playerZoomOutLevel = ZOOMOUT_MAX;
@@ -7830,7 +7942,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         float finalTimeScale = globalTimeScale;
 
         // 選択状態とRキーに基づくアクティブな巻き戻しフラグ
-        bool isRKeyPressed = (CheckHitKey(KEY_INPUT_R) && isEditMode && rewindOpEnabled && editCost > 0.0f);
+        bool isRKeyPressed = (KeyR() && isEditMode && rewindOpEnabled && editCost > 0.0f);
         bool isPlayerRewinding = player.isRewinding || (isRKeyPressed && !isRotating && (selectedType == SELECT_PLAYER || selectedType == SELECT_NONE));
 
         // 巻き戻しの音。押しっぱなしのあいだ鳴り続けないよう、押した瞬間だけ鳴らす。
@@ -8874,7 +8986,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // ズームアウト中（または押した瞬間）は、世界を余白付きの大きな画面へ描く。描き終えたあと（プレイ中HUDの状態更新の直前）で
         // gameScreen へ縮めて写す。drawOffX/Y は「大きな画面の中で、いつもの画面の左上が来る位置」、canvasW/H は描き先の大きさ。
         // 押した瞬間に1フレーム遅れて黒い縁が出ないよう、キーも直接見る（縮小の可否は下の処理で決まるが、使わないなら等倍で写すだけ）。
-        const bool zoomOutBig = (currentScene == PLAY && CheckHitKey(KEY_INPUT_V) != 0) || fxCurZoomOut < 0.999f;
+        const bool zoomOutBig = (currentScene == PLAY && KeyV()) || fxCurZoomOut < 0.999f;
         int drawOffX = 0, drawOffY = 0, canvasW = SCREEN_WIDTH, canvasH = SCREEN_HEIGHT;
         if (zoomOutBig) {
             SetDrawScreen(worldBigScreen);
@@ -12518,7 +12630,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 使えないのは、メッセージ表示中（世界もメッセージ窓も止まっている）と、リザルト画面だけ。
         if (currentScene == PLAY && !isShowingMessage) {
             // Ctrl+Z は取り消しなので、ズームの Z としては数えない（コストを使ってしまう）
-            zHeldThisFrame = (CheckHitKey(KEY_INPUT_Z) != 0) && !editCtrlHeld;
+            zHeldThisFrame = KeyZ() && !editCtrlHeld;
             bool canUseScreenFx = screenEffectOpEnabled && editCost > 0.0f;
             if (zHeldThisFrame && canUseScreenFx) {
                 Screen_SetZoom(playerZoomLevel);
@@ -12532,7 +12644,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 fxAnchorActive = true; fxAnchorHeld = true;
             }
             // ズームアウト（V）。Z（ズームイン）を押しているときは Z を優先する。見た目だけの操作なので、Z と同じく時間停止中も使える。
-            vHeldThisFrame = (CheckHitKey(KEY_INPUT_V) != 0) && !editCtrlHeld && !zHeldThisFrame;
+            vHeldThisFrame = KeyV() && !editCtrlHeld && !zHeldThisFrame;
             if (vHeldThisFrame && canUseScreenFx) {
                 fxTargetZoomOut = playerZoomOutLevel;
                 playerZoomOutOn = true;
@@ -12558,7 +12670,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 時間・画面の操作を、ステージ側が「やったら扉を開く」に使えるよう、イベントのスイッチ op_xxx に反映する（NoteEditOp）。
         // 押しているだけでなく、結果の状態で見る：パネルで暗くした場合も dark、色の輪で色を付けた場合も color になる。
         if (currentScene == PLAY) {
-            if (isPaused) NoteEditOp("pause");
+            if (isPaused && !EditToolbar::S().autoPaused) NoteEditOp("pause");
             if (isAnyRewindActive) NoteEditOp("rewind");
             if (isFastForward) NoteEditOp("ff");
             if (playerColorFilter != 0) NoteEditOp("color");
@@ -12574,7 +12686,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             const float perFrame = 1.0f / 60.0f;
             float drainPerSec = 0.0f;
             if (isAnyRewindActive)                drainPerSec += currentEditCost.drainRewindPerSec;
-            if (isPaused)                         drainPerSec += currentEditCost.drainPausePerSec;
+            if (isPaused && !EditToolbar::S().autoPaused) drainPerSec += currentEditCost.drainPausePerSec;   // 詳細を読むための自動停止は無料
             if (isFastForward)                    drainPerSec += currentEditCost.drainFastForwardPerSec;
             {
                 // 色変化の敵に書き換えられている間の色フィルタ（と、色の輪の色）は、自分で選んだ色ではないので、コストに数えない
@@ -12594,6 +12706,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (isFastForward) isFastForward = false;
                 if (playerColorFilter != 0) playerColorFilter = 0;
                 ColorGrade::Reset(cgState); // コストが尽きたら、パネルの補正もすべて外れる
+                { auto& tbOff = EditToolbar::S(); tbOff.rewindLatch = false; tbOff.zoomLatch = false; tbOff.zoomOutLatch = false; } // ツールバーで「入」にしたものも切る
                 if (player.isRewinding) player.isRewinding = false;
                 for (auto& e : enemies)  e.isRewinding = false;
                 for (auto& g : gimmicks) g.isRewinding = false;
@@ -14548,7 +14661,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 worldStopped = gestureFrozen || isPaused;
             }
             if (worldStopped) {
-                int frameCol = gestureFrozen ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
+                int frameCol = (gestureFrozen || EditToolbar::S().autoPaused) ? GetColor(120, 190, 255) : GetColor(255, 200, 80);
                 int th = (int)(3.0f * sc + 0.5f); if (th < 2) th = 2;
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
                 DrawBox(ox, oy, ox + ow, oy + th, frameCol, TRUE);
@@ -14635,7 +14748,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 std::vector<Badge> badges;
                 if (worldStopped) {
                     badges.push_back(gestureFrozen ? Badge{ "編集中：時間が止まっています", (unsigned int)GetColor(120, 190, 255) }
-                                                   : Badge{ "時間停止中　[Space]で再開", (unsigned int)GetColor(255, 200, 80) });
+                                                   : (EditToolbar::S().autoPaused
+                                                        ? Badge{ "ツール詳細を確認中：時間が止まっています", (unsigned int)GetColor(150, 200, 255) }
+                                                        : Badge{ "時間停止中　[Space]で再開", (unsigned int)GetColor(255, 200, 80) }));
                 }
                 if (playerColorFilter != 0) {
                     const char* filterName = playerColorFilter == 1 ? "赤" : playerColorFilter == 2 ? "緑" : "青";
@@ -14711,7 +14826,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // メッセージ窓が出ている間は、同じ場所に窓があるので出さない。
             if (!isShowingMessage) {
                 std::vector<std::string> mid;
-                if (isEditMode && isPaused) {
+                if (isEditMode && EditToolbar::S().autoPaused) {
+                    mid = { "ツール詳細を確認中", "カードの外をクリックで閉じる" };
+                } else if (isEditMode && isPaused) {
                     mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
                     if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
                 } else if (isEditMode && objectEditOpEnabled && selectedType != SELECT_NONE) {
@@ -14749,87 +14866,55 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         ClearDrawScreen();
         if (isEditMode) {
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(30, 30, 30), TRUE); // ワークスペース背景
-            if (!bigView) { // ← 拡大表示のあいだは、左・右・下の編集パネルを描かない（閉じるのは「モニタープレビューウィンドウ」の直前）
-            // UI素材化 — 左パネルを UIウィンドウ.png の9スライス枠で描く。
-            // 素材が明るいクリーム色なので、この中に載せる文字は全て暗いインク色(UiInk系)に統一する。
-            DrawUiWindow(0, 0, 250, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL);
-            
-            // パネルタイトルと、いま再生中か一時停止中かの表示。
-            // 「再生中/一時停止中」は文字だけでなく専用アイコン（UI再生中.png / UI一時停止中.png）でも示す。
-            DrawString(24, 22, "編集パネル", UiInkAccent()); // 英語の "STAGE EDITOR" は実在のステージエディタ（Lab_Editor）と紛らわしい
-            DrawUiIcon(38, 60, 26, isPaused ? uiPauseHandle : uiPlayHandle);
-            DrawString(60, 53, isPaused ? "時間停止中" : "プレイ中", isPaused ? UiInkWarn() : UiInkOk());
-
-            // 編集ツールの解禁・許可状況の一覧。
-            // ステージ側の封印(allowed_edit_tools)とアイテムによる恒久解禁の両方を踏まえた
-            // 「今このステージで実際に使えるか」を表示する。使えない操作をプレイヤーが
-            // 延々と試して詰まるのを防ぐためのガイドなので、判定は入力処理と同じ変数を参照している。
-            {
-                DrawString(24, 92, "いま使える編集（○＝使える）", UiInkSub());
-                struct { const char* label; bool on; } toolRows[] = {
-                    { "巻き戻し [R]",       rewindOpEnabled },
-                    { "時間停止 [Space]",   pauseOpEnabled },
-                    { "早送り [F]",         fastForwardOpEnabled },
-                    { "色・明暗 [T X C]",   screenEffectOpEnabled },
-                    { "ズーム [Z長押し]",   screenEffectOpEnabled },
-                    { "縮小 [V長押し]",     screenEffectOpEnabled },
-                    { "物の編集 [右クリック]", objectEditOpEnabled },
-                    { "カット [Ctrl]",      cutOpEnabled },
-                };
-                for (int ti = 0; ti < 8; ti++) {
-                    int rowY = 112 + ti * 17; // 8行をコストのゲージ（y=254）の上に収める
-                    DrawString(24, rowY, toolRows[ti].label, toolRows[ti].on ? UiInk() : UiInkSub());
-                    // ズームの行：拡大しているあいだは、倍率を出す
-                    if (ti == 4 && playerZoomOn) {
-                        char zv[16]; sprintf_s(zv, sizeof(zv), "×%.1f", playerZoomLevel);
-                        DrawString(158, rowY, zv, UiInkAccent());
-                    }
-                    // 縮小の行：縮めているあいだは、倍率を出す
-                    if (ti == 5 && playerZoomOutOn) {
-                        char zv[16]; sprintf_s(zv, sizeof(zv), "×%.1f", playerZoomOutLevel);
-                        DrawString(158, rowY, zv, UiInkAccent());
-                    }
-                    // 使える＝「○」、封印されている＝「封印」。ラベルの「[右クリック]」と同じ行に収めるため、使える側は1文字にする
-                    DrawString(toolRows[ti].on ? 222 : 206, rowY, toolRows[ti].on ? "○" : "封印", toolRows[ti].on ? UiInkOk() : UiInkSub());
+            // ツールバーの各ボタンを「いま効いている」状態で光らせるための判定（左のバーと下のボタンの両方で使う）
+            auto TbActive = [&](EditToolbar::Tool t) -> bool {
+                switch (t) {
+                    case EditToolbar::OBJ:     return selectedType != SELECT_NONE;
+                    case EditToolbar::ZOOM:    return playerZoomOn;
+                    case EditToolbar::ZOOMOUT: return playerZoomOutOn;
+                    case EditToolbar::COLOR:   return playerColorFilter != 0 || ColorGrade::BrightActive(cgState) || ColorGrade::TintActive(cgState);
+                    case EditToolbar::REWIND:  return isAnyRewindActive;
+                    case EditToolbar::PAUSE:   return isPaused && !EditToolbar::S().autoPaused;
+                    case EditToolbar::FF:      return isFastForward;
+                    case EditToolbar::CUT:     return tempCutStart >= 0.0f;
+                    default:                   return false;
                 }
-            }
-
-            // 残り編集コスト。下部のゲージと同じ情報だが、エディタ側でも常に見えるようにしておく。
+            };
+            if (!bigView) { // ← 拡大表示のあいだは、左・右・下の編集パネルを描かない（閉じるのは「モニタープレビューウィンドウ」の直前）
+            // ===== 左のアイコンバー（EditToolbar.h）=====
+            // 以前は幅250pxの文字パネルに「使える編集」「マウス操作」「キー操作」を並べていた。
+            // いまは、ツールをアイコンのボタンにして幅68pxへ収めた。各ツールの説明・キー・実演は、マウスを重ねたカードに出る。
+            // 「マウス操作」「キー操作」の一覧は、F1の操作一覧と、モニター下のヒントバーにある。
             {
-                float leftRatio = editCost / currentEditCost.maxCost;
-                if (leftRatio < 0.0f) leftRatio = 0.0f; if (leftRatio > 1.0f) leftRatio = 1.0f;
-                DrawUiIcon(38, 262, 30, energyHandle);
-                DrawBox(60, 254, 226, 272, UiGaugeBack(), TRUE);
-                DrawBox(60, 254, 60 + (int)(166 * leftRatio), 272, UiGaugeFill(), TRUE);
-                DrawBox(60, 254, 226, 272, UiInkAccent(), FALSE);
-                DrawFormatString(66, 255, GetColor(255, 255, 255), "コスト %d / %d", (int)editCost, (int)currentEditCost.maxCost);
-            }
+                const int lw = EditToolbar::LEFT_W, lh = WINDOW_HEIGHT - 100;
+                DrawBox(0, 0, lw, lh, GetColor(46, 42, 40), TRUE);                        // 暗い下地
+                DrawBox(lw - 3, 0, lw, lh, GetColor(84, 120, 176), TRUE);                 // モニター側の縁（枠の青と同系色）
 
-            // マウスでの編集操作の一覧。つまみ・ホイール・ダブルクリックは画面上に説明が出ないので、
-            // 知らないと辿り着けない。操作が使えない（オブジェクト編集が封印された）ステージでは灰色にする。
-            {
-                int gc = objectEditOpEnabled ? UiInk() : UiInkSub();
-                DrawString(24, 292, "マウス操作", UiInkSub());
-                DrawString(24, 314, "ホイール：拡大縮小", gc);
-                DrawString(24, 334, "Ctrl+ホイール：回転", gc);
-                DrawString(24, 354, "つまみ：引いて変形", gc);
-                DrawString(24, 374, "ダブルクリック：反転", gc);
-                DrawString(24, 394, "Ctrl+クリック：複数選択", gc);
-                DrawString(24, 414, "Ctrl+Z/Y：取り消し・戻す", gc);
-                // Z＋ホイールは、画面エフェクトの封印に従う（物の編集ではない）
-                DrawString(24, 434, "Z/V+ホイール：ズーム倍率", screenEffectOpEnabled ? UiInk() : UiInkSub());
-            }
+                // いま再生中か時間停止中か（アイコンで示す）
+                DrawUiIcon(lw / 2 - 1, 32, 30, isPaused ? uiPauseHandle : uiPlayHandle);
 
-            // キー操作の早見表。ヒントバー（モニター下端）は状況で内容が変わるので、
-            // 全体像はここでいつでも見られるようにしておく（詳しい一覧は F1）。
-            {
-                DrawString(24, 462, "キー操作", UiInkSub());
-                DrawString(24, 484, "A/D 移動　W ジャンプ", UiInk());
-                DrawString(24, 504, "Shift ダッシュ　Enter 弾", UiInk());
-                DrawString(24, 524, "R 巻き戻し　F 早送り", UiInk());
-                DrawString(24, 544, "Space 時間停止　M 消音", UiInk());
-                DrawString(24, 564, "F10 拡大　F11 全画面", UiInk());
-                DrawString(24, 584, "F1 一覧　Esc メニュー", UiInk());
+                // 画面・物のツール4つ（物の編集 / ズーム / 縮小 / 色・明暗）
+                for (int ti = 0; ti <= EditToolbar::COLOR; ti++) {
+                    EditToolbar::Tool t = (EditToolbar::Tool)ti;
+                    EditToolbar::DrawButton(t, uiWindowHandle, EditToolbar::S().hover == ti, TbActive(t), tbLocked[ti], isPaused);
+                }
+
+                // 残り編集コスト（縦のゲージ）。下のタイムライン側のゲージと同じ情報を、いつでも見えるようにしておく。
+                {
+                    float leftRatio = editCost / currentEditCost.maxCost;
+                    if (leftRatio < 0.0f) leftRatio = 0.0f;
+                    if (leftRatio > 1.0f) leftRatio = 1.0f;
+                    const int gx1 = 22, gx2 = 46, gy1 = 340, gy2 = lh - 40;
+                    DrawUiIcon(lw / 2 - 1, gy1 - 18, 26, energyHandle);
+                    DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
+                    int fillH = (int)((float)(gy2 - gy1) * leftRatio);
+                    DrawBox(gx1, gy2 - fillH, gx2, gy2, UiGaugeFill(), TRUE);
+                    DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
+                    char cb[16]; sprintf_s(cb, sizeof(cb), "%d", (int)editCost);
+                    int cw = GetDrawStringWidth(cb, (int)strlen(cb));
+                    DrawString(lw / 2 - cw / 2 - 1, gy2 + 5, cb, GetColor(235, 235, 235));
+                }
+                EditToolbar::DrawSmall(6, lh - 20, "[F1]一覧", GetColor(190, 190, 196), 11);
             }
 
             DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL); // 右パネル（インスペクター）
@@ -14960,7 +15045,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawString(50, WINDOW_HEIGHT - 86, "タイムライン　Ctrl+クリック2回でカット／右クリックで選択", UiInkSub());
             // カットのコスト式は、中央の一時停止ボタンより右側の空きスペースに出す。
             // 操作ヒントと同じ行に置くことで、下のタイムライン帯やコストプレビューと行がぶつからない。
-            DrawFormatString(760, WINDOW_HEIGHT - 86, UiInkSub(),
+            DrawFormatString(840, WINDOW_HEIGHT - 86, UiInkSub(),
                              "カットのコスト ＝ %.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
             }
 
@@ -15095,30 +15180,39 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH,
                              UiInk(), UiInkSub(), UiInkAccent(), UiGaugeBack(), UiInkOk(), UiInkWarn());
 
-            // 下部一時停止ボタン。
-            // UI素材化 — ボタンの下地を UIウィンドウ.png にし、
-            // 「押すとどうなるか」を再生/一時停止アイコンで示す
-            // （一時停止中は再生アイコン＝押せば再開、再生中は一時停止アイコン＝押せば止まる）。
+            // ===== 下の時間操作ボタンと、説明カード（EditToolbar.h）=====
+            // 巻き戻し・時間停止・早送りを中央に、カットを少し離して右に置く。時間停止は以前の一時停止ボタンの位置のまま。
             {
-                // アイコンだけのボタンにしたので、文字ぶんの横幅を詰めて正方形寄りにする。
-                // 矩形は PAUSE_BUTTON_* 定数を描画とクリック判定の両方で共有しているため、
-                // 見た目と当たり判定が食い違うことがない（以前はここだけ広げてズレていた）。
-                bool pbHover = (mx >= PAUSE_BUTTON_X1 && mx <= PAUSE_BUTTON_X2 && my >= PAUSE_BUTTON_Y1 && my <= PAUSE_BUTTON_Y2);
-                if (pbHover) SetDrawBright(255, 255, 255);
-                else         SetDrawBright(214, 209, 202);
-                DrawUiWindow(PAUSE_BUTTON_X1, PAUSE_BUTTON_Y1, PAUSE_BUTTON_X2, PAUSE_BUTTON_Y2, uiWindowHandle, GameCfg::UIK_PANEL);
-                SetDrawBright(255, 255, 255);
-                // 「押すとどうなるか」はアイコンだけで伝わるので、PAUSE/RESUMEの文字は出さない
-                DrawUiIcon((PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2, (PAUSE_BUTTON_Y1 + PAUSE_BUTTON_Y2) / 2,
-                           20, isPaused ? uiPlayHandle : uiPauseHandle);
-                // アイコンだけだと何のボタンか分からないので、マウスを重ねたときだけ名前を出す
-                if (pbHover) {
-                    const char* tip = isPaused ? "再開 [Space]" : "一時停止 [Space]";
-                    int tipW = GetDrawStringWidth(tip, (int)strlen(tip));
-                    int tipX = (PAUSE_BUTTON_X1 + PAUSE_BUTTON_X2) / 2 - tipW / 2;
-                    int tipY = PAUSE_BUTTON_Y1 - 26;
-                    DrawBox(tipX - 6, tipY - 2, tipX + tipW + 6, tipY + 22, GetColor(30, 26, 24), TRUE);
-                    DrawString(tipX, tipY, tip, GetColor(240, 240, 240));
+                EditToolbar::State& tbs = EditToolbar::S();
+                for (int ti = EditToolbar::REWIND; ti <= EditToolbar::CUT; ti++) {
+                    EditToolbar::Tool t = (EditToolbar::Tool)ti;
+                    EditToolbar::DrawButton(t, uiWindowHandle, tbs.hover == ti, TbActive(t), tbLocked[ti], isPaused);
+                }
+
+                // カットのボタンを押したあと、タイムラインの枠を光らせて「ここで操作する」ことを示す
+                if (tbs.cutPulse > 0) {
+                    float p = 0.5f + 0.5f * sinf(tbs.demoFrame * 0.2f);
+                    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 110 + (int)(130.0f * p));
+                    DrawBox(46, WINDOW_HEIGHT - 64, WINDOW_WIDTH - 46, WINDOW_HEIGHT - 36, GetColor(255, 230, 90), FALSE);
+                    DrawBox(47, WINDOW_HEIGHT - 63, WINDOW_WIDTH - 47, WINDOW_HEIGHT - 37, GetColor(255, 230, 90), FALSE);
+                    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                }
+
+                // 説明カード（マウスを重ねたとき／詳細を開いたとき）。消費コストの目安は、そのステージの設定値から作る。
+                int showTool = tbs.detail >= 0 ? tbs.detail : tbs.cardTool;
+                if (showTool >= 0) {
+                    char costBuf[128];
+                    switch (showTool) {
+                        case EditToolbar::OBJ:     sprintf_s(costBuf, sizeof(costBuf), "消費：操作ごとに少しずつ（一部は無料）"); break;
+                        case EditToolbar::ZOOM:
+                        case EditToolbar::ZOOMOUT: sprintf_s(costBuf, sizeof(costBuf), "消費：使っている間、毎秒 %.0f", currentEditCost.drainScreenEffectPerSec); break;
+                        case EditToolbar::COLOR:   sprintf_s(costBuf, sizeof(costBuf), "消費：色の切り替え1回 %.0f ＋ 使用中は毎秒 %.0f", currentEditCost.flatColorCycle, currentEditCost.drainScreenEffectPerSec); break;
+                        case EditToolbar::REWIND:  sprintf_s(costBuf, sizeof(costBuf), "消費：使っている間、毎秒 %.0f", currentEditCost.drainRewindPerSec); break;
+                        case EditToolbar::PAUSE:   sprintf_s(costBuf, sizeof(costBuf), "消費：止めている間、毎秒 %.0f（再開は無料）", currentEditCost.drainPausePerSec); break;
+                        case EditToolbar::FF:      sprintf_s(costBuf, sizeof(costBuf), "消費：使っている間、毎秒 %.0f（解除は無料）", currentEditCost.drainFastForwardPerSec); break;
+                        default:                   sprintf_s(costBuf, sizeof(costBuf), "消費：カット1本 %.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile); break;
+                    }
+                    EditToolbar::DrawCard((EditToolbar::Tool)showTool, tbLocked[showTool], costBuf, tbs.detail >= 0);
                 }
             }
 
@@ -15482,8 +15576,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 bool pointing = false;
                 {
                     // 1) 一時停止／再開ボタン（常に押せる。コスト不足なら拒否音が鳴るが押せることに変わりはない）
-                    if (!bigView && cmx >= PAUSE_BUTTON_X1 && cmx <= PAUSE_BUTTON_X2 &&
-                        cmy >= PAUSE_BUTTON_Y1 && cmy <= PAUSE_BUTTON_Y2) {
+                    if (!bigView && (EditToolbar::HitTool(cmx, cmy) >= 0 || EditToolbar::OverCardButton(cmx, cmy))) {
                         pointing = true;
                     }
                     // 2) 開いているコンテキストメニューの上
