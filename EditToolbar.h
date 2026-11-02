@@ -22,6 +22,7 @@
 // DrawPixel.cpp の「UI素材」関数（DrawUiWindow / UiInk 系）と PAUSE_BUTTON_* 定数より後ろで include すること。
 // ======================================================================
 
+#include "UiFont.h"
 #include <string>
 #include <cmath>
 #include <cstdio>
@@ -198,10 +199,7 @@ inline float Ease(float a) { if (a < 0) a = 0; if (a > 1) a = 1; return a * a * 
 
 // 小さな文字（キーのバッジなど）。描いたあとに元の大きさへ戻す。
 inline void DrawSmall(int x, int y, const char* str, unsigned int col, int size = 12) {
-    int old = GetFontSize();
-    SetFontSize(size);
-    DrawString(x, y, str, col);
-    SetFontSize(old);
+    UiFont::Draw(x, y, str, col, size); // SetFontSize は毎フレーム呼ぶと極端に重いので、サイズ別のフォントハンドルで描く
 }
 
 // 錠前（封印中の印）。cx,cy は錠前の中心。
@@ -290,11 +288,7 @@ inline void DrawToolIcon(Tool t, int cx, int cy, int s, unsigned int col, bool p
 
 // 小さな文字の横幅（指定の大きさで測る）
 inline int SmallWidth(const char* str, int size) {
-    int old = GetFontSize();
-    SetFontSize(size);
-    int w = GetDrawStringWidth(str, (int)strlen(str));
-    SetFontSize(old);
-    return w;
+    return UiFont::Width(str, size);
 }
 
 // ツール1つぶんのボタン（下地・アイコン・キーの小バッジ・状態の光・封印の錠前）。

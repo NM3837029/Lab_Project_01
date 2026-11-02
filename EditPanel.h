@@ -20,6 +20,7 @@
 // DxLib を include したあとで include すること。
 // ======================================================================
 
+#include "UiFont.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -46,19 +47,12 @@ inline unsigned int ColGroove()      { return GetColor(60, 62, 80); }     // ボ
 
 // 文字の横幅（指定の大きさで測る）
 inline int TextWidth(const char* s, int size) {
-    int old = GetFontSize();
-    SetFontSize(size);
-    int w = GetDrawStringWidth(s, (int)strlen(s));
-    SetFontSize(old);
-    return w;
+    return UiFont::Width(s, size);
 }
 
 // 指定の大きさで文字を描く（描いたあと、元の大きさへ戻す）
 inline void DrawText(int x, int y, const char* s, unsigned int col, int size) {
-    int old = GetFontSize();
-    SetFontSize(size);
-    DrawString(x, y, s, col);
-    SetFontSize(old);
+    UiFont::Draw(x, y, s, col, size);
 }
 
 // 幅 maxW に収まるまで末尾を削り、削ったときは「…」を付ける（UTF-8 の文字の途中では切らない）

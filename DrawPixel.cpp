@@ -51,6 +51,7 @@ bool isDedicatedEditorMode = false;
 #include "EventManager.h"
 #include "AnimationController.h"
 #include "BehaviorScript.h"
+#include "UiFont.h" // 小さな文字用のフォントキャッシュ（SetFontSize を毎フレーム呼ぶと極端に重い）
 #include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
 // マウス座標は、ウィンドウを拡大していても画面（1280x720）の座標で受け取る
 #define GetMousePoint(a, b) DisplayMode::GetMousePointFixed(a, b)
@@ -3351,12 +3352,10 @@ void DrawBreakableMark(int x, int y, int w, int h, int causeMask, float needScal
         if (fabsf(needScale - roundf(needScale)) < 0.05f) sprintf_s(buf, sizeof(buf), "x%d", (int)roundf(needScale));
         else sprintf_s(buf, sizeof(buf), "x%.1f", needScale);
         // 32px四方のタイルを覆ってしまわないよう、文字を小さくして右上の角へ寄せる（描いたあと元の大きさへ戻す）
-        int oldFont = GetFontSize();
-        SetFontSize(11);
-        int tw = GetDrawStringWidth(buf, (int)strlen(buf));
+        // SetFontSize は毎フレーム呼ぶと極端に重いので、サイズ別のフォントハンドルで描く（UiFont.h）
+        int tw = UiFont::Width(buf, 11);
         DrawBox(x + w - tw - 3, y, x + w, y + 13, GetColor(30, 26, 24), TRUE);
-        DrawString(x + w - tw - 1, y, buf, GetColor(255, 210, 120));
-        SetFontSize(oldFont);
+        UiFont::Draw(x + w - tw - 1, y, buf, GetColor(255, 210, 120), 11);
     }
 }
 
