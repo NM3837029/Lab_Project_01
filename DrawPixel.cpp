@@ -14943,7 +14943,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 右パネル（インスペクター＋カラー補正）。左のアイコンバーと同じ、暗い平らな下地とモニター側の青い縁
             DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, EditPanel::ColBack(), TRUE);
             DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH - Insp::PANEL_W + 3, WINDOW_HEIGHT - 100, EditPanel::ColEdge(), TRUE);
-            DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle, GameCfg::UIK_PANEL);        // 下部パネル（タイムライン）
+            // 下部パネル（タイムライン）。左のバー・右のパネルと同じ、暗い平らな下地と、モニター側（上辺）の青い縁
+            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, EditPanel::ColBack(), TRUE);
+            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT - 97, EditPanel::ColEdge(), TRUE);
 
             } // ← 編集パネル（左・右・下の枠と左パネルの中身）ここまで
 
@@ -15003,10 +15005,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Feature: カット機能の復活 — 下部パネルのタイムライン表示。
             // 帯の左端がステージ左端、右端がステージ右端に対応し、赤い縦棒が現在のプレイヤー位置（再生ヘッド）。
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
-            // 帯そのものは暗い溝にしておく。パネルがクリーム色になったので、
-            // 帯まで明るくすると「どこがタイムラインか」の輪郭が消えてしまう。
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiGaugeBack(), TRUE);
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, UiInkAccent(), FALSE);
+            // 見た目は動画編集ソフトのトラック：暗い溝に、10%ごとの目盛りを入れる（位置の見当がつくように）。
+            // パネルの下地も暗くしたので、溝は下地より一段濃くして、輪郭は明るい枠線で出す。
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(30, 30, 36), TRUE);
+            for (int tk = 1; tk < 10; tk++) {
+                int tx = 50 + (int)((float)(WINDOW_WIDTH - 100) * (float)tk / 10.0f);
+                DrawLine(tx, WINDOW_HEIGHT - 60, tx, WINDOW_HEIGHT - 54, GetColor(124, 134, 168));
+            }
+            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(124, 134, 168), FALSE);
             float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
             DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
 
@@ -15015,11 +15021,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (gim.type != GIMMICK_CUT_PORTAL || !gim.isTimelineCut) continue;
                 int cx1 = 50 + (int)(gim.val1 * (float)(WINDOW_WIDTH - 100));
                 int cx2 = 50 + (int)(gim.val2 * (float)(WINDOW_WIDTH - 100));
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 80);
-                DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, GetColor(200, 50, 50), TRUE);
+                // 暗い溝の上で目立つように、ほぼ不透明の赤いブロックにする（目盛りがうっすら透ける程度）
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 215);
+                DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, GetColor(184, 60, 60), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 bool isSel = (targetGimmick == &gim);
-                int edgeColor = isSel ? GetColor(255, 255, 255) : GetColor(255, 255, 0);
+                int edgeColor = isSel ? GetColor(255, 255, 255) : GetColor(255, 154, 154);
                 DrawLine(cx1, WINDOW_HEIGHT - 60, cx1, WINDOW_HEIGHT - 40, edgeColor);
                 DrawLine(cx2, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor);
                 if (isSel) DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor, FALSE);
@@ -15059,7 +15066,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (labelX < 50) labelX = 50;
                 if (labelX > WINDOW_WIDTH - 200) labelX = WINDOW_WIDTH - 200;
                 DrawFormatString(labelX, WINDOW_HEIGHT - 78,
-                                 affordable ? UiInkAccent() : UiInkWarn(),
+                                 affordable ? EditPanel::ColInkAccent() : EditPanel::ColInkWarn(),
                                  "カット %dタイル　コスト %.0f / 手持ち %.0f", spanTiles, previewCost, editCost);
             }
             // 操作ヒント。中央の一時停止ボタン(x 616..664)に文字がかぶらない長さに収めてある。
@@ -15067,11 +15074,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // コストのプレビューを出している間（1点目を打ってから2点目を打つまで）は、同じ行を使うので出さない
             // （以前は両方が重なって読めなかった）。
             if (tempCutStart < 0.0f) {
-            DrawString(50, WINDOW_HEIGHT - 86, "タイムライン　Ctrl+クリック2回でカット／右クリックで選択", UiInkSub());
-            // カットのコスト式は、中央の一時停止ボタンより右側の空きスペースに出す。
-            // 操作ヒントと同じ行に置くことで、下のタイムライン帯やコストプレビューと行がぶつからない。
-            DrawFormatString(840, WINDOW_HEIGHT - 86, UiInkSub(),
-                             "カットのコスト ＝ %.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
+            // 左から「タイムライン」の札・「カット」「選択」の操作の札。時間操作ボタン（x 552〜824）に重ならない長さに収めてある。
+            {
+                const unsigned int chipFg = EditPanel::ColInkSub(), chipBack = EditPanel::ColGroove(), chipEdge = GetColor(124, 134, 168);
+                const int cy = WINDOW_HEIGHT - 91;
+                int cx = EditPanel::DrawChip(50, cy, "タイムライン", EditPanel::ColInk(), chipBack, chipEdge, 12) + 6;
+                cx = EditPanel::DrawChip(cx, cy, "Ctrl＋クリック2回　カット", chipFg, chipBack, chipEdge, 12) + 6;
+                EditPanel::DrawChip(cx, cy, "右クリック　選択", chipFg, chipBack, chipEdge, 12);
+                // カットのコスト式は、時間操作ボタンより右の空きスペースの右端に、強調の札で出す。
+                // 操作ヒントと同じ行に置くことで、下のタイムライン帯やコストプレビューと行がぶつからない。
+                char cb[64];
+                sprintf_s(cb, sizeof(cb), "カットのコスト　%.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
+                EditPanel::DrawChip(WINDOW_WIDTH - 50 - (EditPanel::TextWidth(cb, 12) + 12), cy, cb,
+                                    EditPanel::ColInkAccent(), GetColor(28, 64, 118), GetColor(120, 190, 255), 12);
+            }
             }
 
             // 動的インスペクターパネルの描画（左のアイコンバーと同じ、暗い下地のカード）。
