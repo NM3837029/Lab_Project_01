@@ -2013,6 +2013,7 @@ const int PAUSE_BUTTON_Y1 = WINDOW_HEIGHT - 94;
 const int PAUSE_BUTTON_Y2 = WINDOW_HEIGHT - 66;
 // 編集ツールのアイコンバー（左）・時間操作ボタン（下）・ホバーの説明カード。PAUSE_BUTTON_* と UI素材の関数より後ろで読み込む。
 #include "EditToolbar.h"
+#include "EditPanel.h" // 右パネル（インスペクター）のカード・アイコン・チップ
 const float GRAVITY = 0.5f;      // 1フレームあたりの重力加速度（Y速度に毎フレーム加算される）
 // ドッスン(FALLER)が落下フェーズに留まれる最大フレーム数。
 // 落下中は重力を切って軸方向へ加速させるため、着地判定を1回でも取り逃すと
@@ -2872,18 +2873,41 @@ const char* EnemyTypeNameJa(EnemyType t) {
 // これまで行の y 座標が「描画」「クリック判定」「指差しカーソル」の3か所に数値で重複していて、
 // どれか1つだけ動かすと見た目と当たりがずれた（行間も 15px・20px と不揃いだった）。
 // 行の位置はここ1か所で決め、3か所はすべてここを見る。
+// 右パネルは左のアイコンバーと同じ「カード」の見た目に作り替えたので、行は文字の位置でなく矩形（RowBox）で持つ。
+// 一時停止と巻き戻しは左右に並べるため、当たり判定は y だけでなく x も見る（RowAt(mx, my)）。
 namespace Insp {
     enum Row { ROW_SCALE, ROW_ANGLE, ROW_SPEED, ROW_PAUSE, ROW_REWIND, ROW_TYPE, ROW_REACT, ROW_COUNT };
-    const int ROW_TOP   = 74;  // 先頭行（大きさ）の上端のy
-    const int ROW_PITCH = 22;  // 行の間隔
-    const int ROW_H     = 20;  // 行の高さ（クリックできる範囲）
-    inline int Left()  { return WINDOW_WIDTH - 250 + 12; }   // 文字の左端x（パネルの左端 + 余白）
-    inline int Right() { return WINDOW_WIDTH - 12; }          // 文字の右端x
-    inline int RowY(int row) { return ROW_TOP + row * ROW_PITCH; }
-    // マウスのyがどの行の上か（行の外なら -1）。値を操作できるのは ROW_REACT より前の行だけ
-    inline int RowAt(int my) {
+    const int PANEL_W   = 250; // パネルの幅（右端から）
+    const int HEAD_Y    = 8;   // 選んだ物の絵と名前の上端
+    const int HEAD_SIZE = 40;  // 絵の枠の一辺
+    const int CARD_H    = 22;  // カード1枚の高さ
+    inline int Left()  { return WINDOW_WIDTH - PANEL_W + 6; }   // カードの左端x（パネルの左端 + 余白）
+    inline int Right() { return WINDOW_WIDTH - 6; }              // カードの右端x
+    // 行ごとの上端y。値の行は 24px 間隔、一時停止と巻き戻しは同じ段に左右で並べる
+    inline int RowTop(int row) {
+        switch (row) {
+            case ROW_SCALE:  return 58;
+            case ROW_ANGLE:  return 82;
+            case ROW_SPEED:  return 106;
+            case ROW_PAUSE:
+            case ROW_REWIND: return 132;
+            case ROW_TYPE:   return 158;
+            default:         return 186; // ROW_REACT（反応のチップ。押せない）
+        }
+    }
+    inline EditPanel::Box RowBox(int row) {
+        const int L = Left(), R = Right();
+        const int half = (R - L - 6) / 2;
+        int y = RowTop(row);
+        if (row == ROW_PAUSE)  return { L, y, L + half, y + CARD_H };
+        if (row == ROW_REWIND) return { R - half, y, R, y + CARD_H };
+        if (row == ROW_REACT)  return { L, y, R, y + 20 };
+        return { L, y, R, y + CARD_H };
+    }
+    // マウスがどの行の上か（行の外なら -1）。値を操作できるのは ROW_REACT より前の行だけ
+    inline int RowAt(int mx, int my) {
         for (int r = 0; r < ROW_REACT; r++) {
-            if (my >= RowY(r) - 1 && my < RowY(r) - 1 + ROW_H + 2) return r;
+            if (EditPanel::HitBox(RowBox(r), mx, my)) return r;
         }
         return -1;
     }
@@ -8375,12 +8399,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
 
                 // インスペクターのドラッグと切り替え（選択されたすべてに適用）
-                if (!lastLeftClick && objectEditOpEnabled && !bigView && mx >= WINDOW_WIDTH - 240 && selectedType != SELECT_NONE) {
+                if (!lastLeftClick && objectEditOpEnabled && !bigView && mx >= WINDOW_WIDTH - Insp::PANEL_W && selectedType != SELECT_NONE) {
                     // 各行の target 系ポインタは「その対象では意味を持たない項目」の場合にnullptrになる
                     // （インスペクタ表示側は既にN/A表示で分岐している）。タイムラインカットのように
                     // 全項目がnullptrになる選択対象があるため、ドラッグ開始時も必ずnullチェックしてから参照する。
                     // 行の位置は Insp 名前空間の表を見る（描画・指差しカーソルと同じ表）
-                    int inspRow = Insp::RowAt(my);
+                    int inspRow = Insp::RowAt(mx, my);
                     if (inspRow == Insp::ROW_SCALE && InspRowUsable(inspRow)) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
                     else if (inspRow == Insp::ROW_ANGLE && InspRowUsable(inspRow)) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
                     else if (inspRow == Insp::ROW_SPEED && InspRowUsable(inspRow)) { isInspSpeed = true; lastMouseX = mx; baseSpeed = *targetSpeedScale; }
@@ -14917,7 +14941,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 EditToolbar::DrawSmall(6, lh - 20, "[F1]一覧", GetColor(190, 190, 196), 11);
             }
 
-            DrawUiWindow(WINDOW_WIDTH - 250, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, uiWindowHandle, GameCfg::UIK_PANEL); // 右パネル（インスペクター）
+            // 右パネル（インスペクター＋カラー補正）。左のアイコンバーと同じ、暗い平らな下地とモニター側の青い縁
+            DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, EditPanel::ColBack(), TRUE);
+            DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH - Insp::PANEL_W + 3, WINDOW_HEIGHT - 100, EditPanel::ColEdge(), TRUE);
             DrawUiWindow(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, uiWindowHandle, GameCfg::UIK_PANEL);        // 下部パネル（タイムライン）
 
             } // ← 編集パネル（左・右・下の枠と左パネルの中身）ここまで
@@ -15049,128 +15075,159 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                              "カットのコスト ＝ %.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
             }
 
-            // 動的インスペクターパネルの描画。
+            // 動的インスペクターパネルの描画（左のアイコンバーと同じ、暗い下地のカード）。
             // 行の位置は Insp 名前空間の表から決める（クリック判定・指差しカーソルと同じ表なので、見た目と当たりがずれない）。
-            // 物の編集が封印されたステージでは、値を動かせないので全体を灰色にして「触れない」ことを示す。
+            // 物の編集が封印されたステージでは、値を動かせないので全体を沈んだ色にして「触れない」ことを示す。
+            // 何も選んでいないときも、行は薄く並べて出す（「選ぶとここに値が出る」ことが位置で伝わり、選んだ瞬間に配置が動かない）。
             {
-                const int L = Insp::Left();
-                const int panelRight = Insp::Right();
+                const int L = Insp::Left(), R = Insp::Right();
                 const bool canEdit = objectEditOpEnabled;
-                auto Ink  = [&](bool active) { return !canEdit ? UiInkSub() : (active ? UiInkAccent() : UiInk()); };
+                const bool hasSel = (selectedType != SELECT_NONE);
+                const unsigned int inkMain = EditPanel::ColInk(), inkSub = EditPanel::ColInkSub(), inkDim = GetColor(120, 124, 140);
+                const unsigned int inkAcc = EditPanel::ColInkAccent();
 
-                DrawString(L, 22, "インスペクター", UiInkAccent());
-                if (selectedType == SELECT_NONE) {
-                    DrawString(L, 48, "物を選ぶと、ここに", UiInkSub());
-                    DrawString(L, 68, "値が出ます", UiInkSub());
-                    DrawString(L, 98, "右クリックで選択", UiInkSub());
-                } else {
+                // ---- 上段：選んだ物の絵と名前 ----
+                {
                     // 選択中の物の名前。敵・ギミックは定義ファイルの名前を引く（以前は8種しか引けず残りは UNKNOWN だった）
-                    char objName[96] = "選択中：不明";
+                    std::string nameStr = "何も選んでいません";
+                    std::string subStr  = "右クリックで選択";
+                    int thumbHandle = -1, thumbKind = 0;
                     size_t totalSelected = selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size();
-                    if (totalSelected > 1) {
-                        sprintf_s(objName, sizeof(objName), "選択中：%d個まとめて", (int)totalSelected);
-                    } else if (selectedType == SELECT_PLAYER) {
-                        sprintf_s(objName, sizeof(objName), "選択中：プレイヤー");
-                    } else if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
-                        const EnemyDef* ed = FindEnemyDef(targetEnemy->assetId);
-                        sprintf_s(objName, sizeof(objName), "選択中：%s", (ed && !ed->name.empty()) ? ed->name.c_str() : EnemyTypeNameJa(targetEnemy->type));
-                    } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
-                        // 同じCUT_PORTAL型でも、タイムラインカットとワールド配置のワープポータルは別物なので表示名を分ける
-                        if (targetGimmick->type == GIMMICK_CUT_PORTAL && targetGimmick->isTimelineCut) {
-                            sprintf_s(objName, sizeof(objName), "選択中：カット区間");
-                        } else {
-                            const GimmickDef* gd = FindGimmickDef(targetGimmick->assetId);
-                            sprintf_s(objName, sizeof(objName), "選択中：%s", (gd && !gd->name.empty()) ? gd->name.c_str() : "ギミック");
-                        }
-                    }
-                    // 名前が長いときは、パネルに収まる長さで打ち切る
-                    {
-                        std::string nm = objName;
-                        while (nm.size() > 12 && GetDrawStringWidth(nm.c_str(), (int)nm.size()) > panelRight - L) {
-                            // UTF-8 の文字境界（先頭バイトの位置）まで戻って1文字削る
-                            size_t cut = nm.size() - 1;
-                            while (cut > 0 && ((unsigned char)nm[cut] & 0xC0) == 0x80) cut--;
-                            nm.resize(cut);
-                        }
-                        if (nm != objName) nm += "…";
-                        DrawString(L, 46, nm.c_str(), UiInkAccent());
-                    }
-
-                    // 値の行。ドラッグ操作中の行はアクセント色にして「今つまんでいる項目」を示す。
-                    // 対象に無い項目は「—」を薄く出す（N/A の英字より、使えない項目だと一目で分かる）。
-                    char vb[64];
-                    if (targetScale != nullptr) {
-                        if (selectedType == SELECT_GIMMICK) sprintf_s(vb, sizeof(vb), "大きさ　幅 %.0f", *targetScale);
-                        else                                sprintf_s(vb, sizeof(vb), "大きさ　%.2f倍", *targetScale);
-                        DrawString(L, Insp::RowY(Insp::ROW_SCALE), vb, Ink(isInspScale));
-                    } else DrawString(L, Insp::RowY(Insp::ROW_SCALE), "大きさ　—", UiInkSub());
-
-                    if (targetAngle != nullptr) {
-                        // 内部はラジアンだが、遊ぶ人には度のほうが分かる（つまみで回している間の表示と同じ単位）
-                        sprintf_s(vb, sizeof(vb), "角度　%.0f度", WrapEditAngle(*targetAngle) * 180.0f / EDIT_KNOB_PI);
-                        DrawString(L, Insp::RowY(Insp::ROW_ANGLE), vb, Ink(isInspAngle));
-                    } else DrawString(L, Insp::RowY(Insp::ROW_ANGLE), "角度　—", UiInkSub());
-
-                    // 編集リアクション — ギミックもspeedScaleを持つ
-                    if (targetSpeedScale != nullptr) {
-                        sprintf_s(vb, sizeof(vb), "速さ　%.1f倍", *targetSpeedScale);
-                        DrawString(L, Insp::RowY(Insp::ROW_SPEED), vb, Ink(isInspSpeed));
-                    } else DrawString(L, Insp::RowY(Insp::ROW_SPEED), "速さ　—", UiInkSub());
-
-                    // 個別一時停止はアイコンでも示す（この対象だけ時間が止まっているかどうか）。パネルの右端に置く
-                    if (targetPaused != nullptr) {
-                        DrawUiIcon(panelRight - 10, Insp::RowY(Insp::ROW_PAUSE) + 9, 18, *targetPaused ? uiPauseHandle : uiPlayHandle);
-                        DrawString(L, Insp::RowY(Insp::ROW_PAUSE), *targetPaused ? "一時停止　している" : "一時停止　していない",
-                                   !canEdit ? UiInkSub() : (*targetPaused ? UiInkWarn() : UiInk()));
-                    } else DrawString(L, Insp::RowY(Insp::ROW_PAUSE), "一時停止　—", UiInkSub());
-
-                    if (targetRewind != nullptr) {
-                        DrawString(L, Insp::RowY(Insp::ROW_REWIND), *targetRewind ? "巻き戻し　している" : "巻き戻し　していない",
-                                   !canEdit ? UiInkSub() : (*targetRewind ? UiInkWarn() : UiInk()));
-                    } else DrawString(L, Insp::RowY(Insp::ROW_REWIND), "巻き戻し　—", UiInkSub());
-
-                    if (selectedType == SELECT_ENEMY && targetEnemyType != nullptr) {
-                        // 敵タイプ巡回編集の結果を確認する唯一の手段なので、全種を日本語で出す
-                        sprintf_s(vb, sizeof(vb), "動き　%s", EnemyTypeNameJa(*targetEnemyType));
-                        DrawString(L, Insp::RowY(Insp::ROW_TYPE), vb, !canEdit ? UiInkSub() : UiInkOk());
-                    } else DrawString(L, Insp::RowY(Insp::ROW_TYPE), "動き　—", UiInkSub());
-
-                    // 編集リアクション — 今この個体に効いている編集を1行で示す。
-                    // 「傾けたら照準が固定された」のような反応は、起きていることが読めなければ
-                    // パズルの手札として使いようがないため、UIでの可視化は機能の一部として必須。
-                    // プレイヤー選択時は反応という概念が無いので、行ごと出さない。
-                    {
-                        EditReaction ins;
-                        bool hasReact = false;
-                        if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
-                            ins = GetEnemyEditReaction(*targetEnemy, FindEnemyDef(targetEnemy->assetId));
-                            hasReact = true;
-                        } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && !targetGimmick->isTimelineCut) {
-                            ins = GetGimmickEditReaction(*targetGimmick);
-                            hasReact = true;
-                        }
-                        if (hasReact) {
-                            std::vector<const char*> tags;
-                            if (ins.enlarged)      tags.push_back("拡大");
-                            if (ins.shrunk)        tags.push_back("縮小");
-                            if (ins.tipped)        tags.push_back("横倒し");
-                            else if (ins.tilted)   tags.push_back("傾き");
-                            if (ins.frozen)        tags.push_back("停止");
-                            else if (ins.hastened) tags.push_back("加速");
-                            else if (ins.slowed)   tags.push_back("減速");
-                            if (ins.flipped)       tags.push_back("反転");
-                            if (ins.selfPaused)    tags.push_back("一時停止");
-                            if (ins.selfRewinding) tags.push_back("巻き戻し");
-                            if (ins.moved)         tags.push_back("移動");
-                            // パネルの幅に収まる分だけ並べ、入らない分は「…」で切る（以前は右端で切れていた）
-                            std::string reactStr = "反応　";
-                            if (tags.empty()) reactStr += "なし";
-                            for (size_t ti = 0; ti < tags.size(); ti++) {
-                                std::string next = reactStr + (ti ? "+" : "") + tags[ti];
-                                if (GetDrawStringWidth(next.c_str(), (int)next.size()) > panelRight - L) { reactStr += "…"; break; }
-                                reactStr = next;
+                    if (hasSel) {
+                        nameStr = "不明"; subStr = "";
+                        if (totalSelected > 1) {
+                            char nb[48]; sprintf_s(nb, sizeof(nb), "%d個まとめて", (int)totalSelected);
+                            nameStr = nb; subStr = "まとめて編集"; thumbKind = 2;
+                        } else if (selectedType == SELECT_PLAYER) {
+                            nameStr = "プレイヤー"; subStr = "自分"; thumbHandle = playerHandle;
+                        } else if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
+                            const EnemyDef* ed = FindEnemyDef(targetEnemy->assetId);
+                            nameStr = (ed && !ed->name.empty()) ? ed->name : EnemyTypeNameJa(targetEnemy->type);
+                            char sb[32];
+                            if (targetEnemy->hp > 0) sprintf_s(sb, sizeof(sb), "敵　HP %d", targetEnemy->hp); else sprintf_s(sb, sizeof(sb), "敵");
+                            subStr = sb; thumbHandle = targetEnemy->handle;
+                        } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
+                            // 同じCUT_PORTAL型でも、タイムラインカットとワールド配置のワープポータルは別物なので表示名を分ける
+                            if (targetGimmick->type == GIMMICK_CUT_PORTAL && targetGimmick->isTimelineCut) {
+                                nameStr = "カット区間"; subStr = "タイムライン"; thumbKind = 1;
+                            } else {
+                                const GimmickDef* gd = FindGimmickDef(targetGimmick->assetId);
+                                nameStr = (gd && !gd->name.empty()) ? gd->name : "ギミック";
+                                subStr = "ギミック"; thumbHandle = targetGimmick->handle; thumbKind = 1;
                             }
-                            DrawString(L, Insp::RowY(Insp::ROW_REACT), reactStr.c_str(), tags.empty() || !canEdit ? UiInkSub() : UiInkAccent());
+                        }
+                    }
+                    EditPanel::Box tb = { L, Insp::HEAD_Y, L + Insp::HEAD_SIZE, Insp::HEAD_Y + Insp::HEAD_SIZE };
+                    EditPanel::DrawThumb(tb, hasSel ? thumbHandle : -1, hasSel ? thumbKind : 0);
+                    const int tx = tb.x2 + 8, maxW = R - tx;
+                    std::string shown = EditPanel::FitText(nameStr, maxW, GetFontSize());
+                    DrawString(tx, Insp::HEAD_Y + 2, shown.c_str(), !hasSel ? inkSub : (canEdit ? inkMain : inkSub));
+                    if (!subStr.empty()) EditPanel::DrawText(tx, Insp::HEAD_Y + 26, EditPanel::FitText(subStr, maxW, 12).c_str(), inkSub, 12);
+                }
+
+                // ---- 行のカード ----
+                // その行を、いま操作できるか（封印されていない・何かを選んでいる・この対象に意味のある項目）
+                auto Usable = [&](int row) -> bool { return canEdit && hasSel && InspRowUsable(row); };
+                auto Hover  = [&](int row) -> bool { return EditPanel::HitBox(Insp::RowBox(row), mx, my); };
+
+                // 値の行（大きさ・角度・速さ）：アイコン＋項目名＋右に値。値を左右にドラッグして変える行は、つかんでいる間だけ青く光る
+                auto ValueRow = [&](int row, EditPanel::Icon icon, const char* label, const char* value, bool grabbed) {
+                    const bool usable = Usable(row);
+                    const EditPanel::Box b = Insp::RowBox(row);
+                    EditPanel::DrawCard(b, grabbed, Hover(row), usable);
+                    const unsigned int col = !usable ? inkDim : (grabbed ? inkAcc : inkMain);
+                    EditPanel::DrawIcon(icon, b.x1 + 15, (b.y1 + b.y2) / 2, !usable ? inkDim : (grabbed ? inkAcc : inkSub));
+                    DrawString(b.x1 + 32, b.y1 + 3, label, usable ? inkSub : inkDim);
+                    const char* v = (value != nullptr) ? value : "—";
+                    DrawString(b.x2 - 8 - GetDrawStringWidth(v, (int)strlen(v)), b.y1 + 3, v, (value != nullptr) ? col : inkDim);
+                };
+                char vb[64];
+                const char* vScale = nullptr; const char* vAngle = nullptr; const char* vSpeed = nullptr;
+                if (hasSel && targetScale != nullptr) {
+                    if (selectedType == SELECT_GIMMICK) sprintf_s(vb, sizeof(vb), "幅 %.0f", *targetScale);
+                    else                                sprintf_s(vb, sizeof(vb), "%.2f倍", *targetScale);
+                    vScale = vb;
+                }
+                char vb2[32], vb3[32];
+                // 内部はラジアンだが、遊ぶ人には度のほうが分かる（つまみで回している間の表示と同じ単位）
+                if (hasSel && targetAngle != nullptr) { sprintf_s(vb2, sizeof(vb2), "%.0f度", WrapEditAngle(*targetAngle) * 180.0f / EDIT_KNOB_PI); vAngle = vb2; }
+                // 編集リアクション — ギミックもspeedScaleを持つ
+                if (hasSel && targetSpeedScale != nullptr) { sprintf_s(vb3, sizeof(vb3), "%.1f倍", *targetSpeedScale); vSpeed = vb3; }
+                ValueRow(Insp::ROW_SCALE, EditPanel::ICON_SCALE, "大きさ", vScale, isInspScale);
+                ValueRow(Insp::ROW_ANGLE, EditPanel::ICON_ANGLE, "角度",   vAngle, isInspAngle);
+                ValueRow(Insp::ROW_SPEED, EditPanel::ICON_SPEED, "速さ",   vSpeed, isInspSpeed);
+
+                // 切り替えの行（一時停止・巻き戻し）：この対象だけ時間が止まっている／巻き戻っているときに青く光り、右に ON を出す。
+                // アイコンは「いまの状態」（止まっていれば停止の印、動いていれば再生の印）
+                auto ToggleRow = [&](int row, EditPanel::Icon onIcon, EditPanel::Icon offIcon, const char* label, bool* flag) {
+                    const bool usable = Usable(row);
+                    const bool on = usable && flag != nullptr && *flag;
+                    const EditPanel::Box b = Insp::RowBox(row);
+                    EditPanel::DrawCard(b, on, Hover(row), usable);
+                    const unsigned int col = !usable ? inkDim : (on ? inkAcc : inkSub);
+                    EditPanel::DrawIcon(on ? onIcon : offIcon, b.x1 + 15, (b.y1 + b.y2) / 2, col);
+                    EditPanel::DrawText(b.x1 + 30, b.y1 + 4, label, !usable ? inkDim : (on ? inkMain : inkSub), 14);
+                    if (on) EditPanel::DrawText(b.x2 - 22, b.y1 + 6, "ON", inkAcc, 11);
+                };
+                ToggleRow(Insp::ROW_PAUSE,  EditPanel::ICON_PAUSE,  EditPanel::ICON_PLAY, "一時停止", hasSel ? targetPaused : nullptr);
+                ToggleRow(Insp::ROW_REWIND, EditPanel::ICON_REWIND, EditPanel::ICON_REWIND, "巻き戻し", hasSel ? targetRewind : nullptr);
+
+                // 動きの行（敵だけ）：敵タイプ巡回編集の結果を確認する唯一の手段なので、全種を日本語で出す
+                {
+                    const bool usable = Usable(Insp::ROW_TYPE) && selectedType == SELECT_ENEMY;
+                    const EditPanel::Box b = Insp::RowBox(Insp::ROW_TYPE);
+                    EditPanel::DrawCard(b, false, usable && Hover(Insp::ROW_TYPE), usable);
+                    EditPanel::DrawIcon(EditPanel::ICON_MOVE, b.x1 + 15, (b.y1 + b.y2) / 2, usable ? inkSub : inkDim);
+                    DrawString(b.x1 + 32, b.y1 + 3, "動き", usable ? inkSub : inkDim);
+                    if (usable && targetEnemyType != nullptr) {
+                        std::string mv = EditPanel::FitText(EnemyTypeNameJa(*targetEnemyType), (b.x2 - b.x1) - 32 - 40 - 12, GetFontSize());
+                        DrawString(b.x2 - 8 - GetDrawStringWidth(mv.c_str(), (int)mv.size()), b.y1 + 3, mv.c_str(), EditPanel::ColInkOk());
+                    } else {
+                        DrawString(b.x2 - 8 - GetDrawStringWidth("—", 3), b.y1 + 3, "—", inkDim);
+                    }
+                }
+
+                // ---- 編集リアクション — 今この個体に効いている編集を、チップで並べて示す ----
+                // 「傾けたら照準が固定された」のような反応は、起きていることが読めなければ
+                // パズルの手札として使いようがないため、UIでの可視化は機能の一部として必須。
+                // プレイヤー選択時は反応という概念が無いので、行ごと出さない。
+                if (hasSel) {
+                    EditReaction ins;
+                    bool hasReact = false;
+                    if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
+                        ins = GetEnemyEditReaction(*targetEnemy, FindEnemyDef(targetEnemy->assetId));
+                        hasReact = true;
+                    } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && !targetGimmick->isTimelineCut) {
+                        ins = GetGimmickEditReaction(*targetGimmick);
+                        hasReact = true;
+                    }
+                    if (hasReact) {
+                        std::vector<const char*> tags;
+                        if (ins.enlarged)      tags.push_back("拡大");
+                        if (ins.shrunk)        tags.push_back("縮小");
+                        if (ins.tipped)        tags.push_back("横倒し");
+                        else if (ins.tilted)   tags.push_back("傾き");
+                        if (ins.frozen)        tags.push_back("停止");
+                        else if (ins.hastened) tags.push_back("加速");
+                        else if (ins.slowed)   tags.push_back("減速");
+                        if (ins.flipped)       tags.push_back("反転");
+                        if (ins.selfPaused)    tags.push_back("一時停止");
+                        if (ins.selfRewinding) tags.push_back("巻き戻し");
+                        if (ins.moved)         tags.push_back("移動");
+                        const EditPanel::Box rb = Insp::RowBox(Insp::ROW_REACT);
+                        EditPanel::DrawText(rb.x1 + 2, rb.y1 + 3, "反応", inkSub, 14);
+                        int cx = rb.x1 + 40;
+                        if (tags.empty()) {
+                            EditPanel::DrawText(cx, rb.y1 + 3, "なし", inkDim, 14);
+                        } else {
+                            // パネルの幅に収まる分だけ並べ、入らない分は「…」で切る
+                            for (size_t ti = 0; ti < tags.size(); ti++) {
+                                int need = EditPanel::TextWidth(tags[ti], 12) + 12 + 4;
+                                if (cx + need > rb.x2 - 14 && ti + 1 < tags.size()) { EditPanel::DrawText(cx, rb.y1 + 3, "…", inkSub, 14); break; }
+                                cx = EditPanel::DrawChip(cx, rb.y1, tags[ti],
+                                                         canEdit ? inkAcc : inkDim, canEdit ? (unsigned int)GetColor(28, 64, 118) : (unsigned int)GetColor(50, 50, 56),
+                                                         canEdit ? (unsigned int)GetColor(120, 190, 255) : (unsigned int)GetColor(84, 84, 92)) + 4;
+                            }
                         }
                     }
                 }
@@ -15178,7 +15235,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
             // 右パネルの下半分：カラー補正パネル（動画編集ソフトのカラー補正に近い操作。ColorGrade.h）
             ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH,
-                             UiInk(), UiInkSub(), UiInkAccent(), UiGaugeBack(), UiInkOk(), UiInkWarn());
+                             EditPanel::ColInk(), EditPanel::ColInkSub(), EditPanel::ColInkAccent(), EditPanel::ColGroove(),
+                             EditPanel::ColInkOk(), EditPanel::ColInkWarn());
 
             // ===== 下の時間操作ボタンと、説明カード（EditToolbar.h）=====
             // 巻き戻し・時間停止・早送りを中央に、カットを少し離して右に置く。時間停止は以前の一時停止ボタンの位置のまま。
@@ -15586,8 +15644,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 3) インスペクタの操作行。
                     // 対象ポインタがnullptrの行は「その対象では意味を持たない」＝押しても何も起きないので、
                     // クリック処理と同じくnullチェックを通ったものだけを押せる扱いにする。
-                    else if (!bigView && objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - 240 &&
-                             Insp::RowAt(cmy) >= 0 && InspRowUsable(Insp::RowAt(cmy))) {
+                    else if (!bigView && objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - Insp::PANEL_W &&
+                             Insp::RowAt(cmx, cmy) >= 0 && InspRowUsable(Insp::RowAt(cmx, cmy))) {
                         pointing = true;
                     }
                     // 4) 下部のタイムライン帯（カットの作成・選択ができるとき）

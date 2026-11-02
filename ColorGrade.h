@@ -460,12 +460,13 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
     const int px = PanelX(windowW);
     const int wcx = WheelCX(windowW);
 
-    // タイトル行
+    // 上のインスペクターとの区切り線と、タイトル行
+    DrawLine(px - 4, kTitleY - 8, windowW - 8, kTitleY - 8, GetColor(78, 76, 86));
     DrawString(px, kTitleY, "カラー補正", inkAccent);
     {
         Rect rr = ResetAllRect(px);
         DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, ui.flash > 0 ? inkAccent : groove, TRUE);
-        DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, inkAccent, FALSE);
+        DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, GetColor(124, 134, 168), FALSE);
         DrawString(rr.x1 + 7, rr.y1 + 2, "リセット", GetColor(255, 255, 255));
     }
 
@@ -498,8 +499,8 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         // 明るさだけは、ゲームがいま何と判定しているかをラベルの横へ出す
         if (i == 0) {
             int j = JudgeBright(v);
-            if (j < 0)      DrawString(px + 4 + 56, ry, "[暗い判定]", GetColor(60, 90, 190));
-            else if (j > 0) DrawString(px + 4 + 56, ry, "[明るい判定]", GetColor(200, 130, 20));
+            if (j < 0)      DrawString(px + 4 + 56, ry, "[暗い判定]", GetColor(120, 160, 255));
+            else if (j > 0) DrawString(px + 4 + 56, ry, "[明るい判定]", GetColor(255, 190, 80));
         }
         char vb[24];
         FormatValue(i, v, vb, sizeof(vb));
@@ -533,7 +534,7 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         DrawBox(tx0, ty, tx1, ty + 8, inkAccent, FALSE);
         int kx = tx0 + (int)((v - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
         DrawBox(kx - 4, ty - 4, kx + 4, ty + 12, GetColor(255, 255, 255), TRUE);
-        DrawBox(kx - 4, ty - 4, kx + 4, ty + 12, ink, FALSE);
+        DrawBox(kx - 4, ty - 4, kx + 4, ty + 12, GetColor(20, 20, 24), FALSE);
     }
 
     // 色の輪
@@ -559,7 +560,7 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         int dotx = wcx + (int)(cosf(st.tintHue * kPi / 180.0f) * r1);
         int doty = kWheelCY - (int)(sinf(st.tintHue * kPi / 180.0f) * r1);
         DrawCircle(dotx, doty, 6, GetColor(255, 255, 255), TRUE);
-        DrawCircle(dotx, doty, 6, ink, FALSE);
+        DrawCircle(dotx, doty, 6, GetColor(20, 20, 24), FALSE);
 
         // 右側：数値と判定、クイック選択
         int rx = px + 130;
