@@ -1060,6 +1060,10 @@ public class EnemyDef
     public bool rotateItems { get; set; } = true;            // 回転させる敵：アイテムを回すか
     public float sizeFactor { get; set; } = -1.0f;           // 範囲サイズ調整の敵：拡大するときの倍率（縮小はその逆数）
     public float zoneFrames { get; set; } = -1.0f;           // 範囲サイズ調整の敵：範囲が残るフレーム数
+    public float bubbleHeight { get; set; } = -1.0f;         // バブル：跳ぶ高さ(px)。頂点（最初に置いた位置）から底までの距離
+    public float bubbleRest { get; set; } = -1.0f;           // バブル：底で待つフレーム数
+    public float bubbleHang { get; set; } = -1.0f;           // バブル：頂点で止まるフレーム数
+    public bool bubbleFlipFall { get; set; } = true;         // バブル：落ちているあいだ絵を上下さかさまに描くか
 
     // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
     // C++側 EnemyDef と対応する。すべて -1 が「従来どおり」。ここに無いと保存し直した瞬間にJSONから消える。

@@ -390,6 +390,11 @@ struct EnemyDef {
     // SIZE_THROWER（範囲サイズ調整の敵）。投げる距離は triggerRange、投げる間隔は actionInterval、予兆は chargeTime、範囲の半径は effectRange
     float sizeFactor = -1.0f;        // 拡大するときの倍率（縮小するときは、その逆数）
     float zoneFrames = -1.0f;        // 範囲が残るフレーム数
+    // BUBBLE（バブル）。頂点は「最初に置いた位置」。底はそこから bubbleHeight だけ下。速さは moveSpeed（時間の進み方の倍率）
+    float bubbleHeight = -1.0f;      // 跳ぶ高さ(px)＝頂点から底までの距離。編集の拡大・縮小で伸び縮みする
+    float bubbleRest = -1.0f;        // 底で待つフレーム数
+    float bubbleHang = -1.0f;        // 頂点で止まるフレーム数
+    bool  bubbleFlipFall = true;     // 落ちているあいだ、絵を上下さかさまに描く（マリオの火の玉と同じ）
     // ==== 敵の細かい調整（Lab_Editor の「敵の動きを調整」）====
     // すべて -1 が「従来どおり」。型ごとの既定値は使う側で決めている（-1 のままなら以前と1ミリも変わらない）。
     float waveShape = -1.0f;         // 周期的な動きの波形（FLOATER/SIZE_SHIFTER/TEMPO_WARPER/ZOOM_DISRUPTOR）。-1/0=なめらか 1=三角 2=カクカク
@@ -843,6 +848,12 @@ void ApplyEnemyDefaultParams(EnemyDef& def) {
             fill(def.effectRange, 240.0f);
             fill(def.rotateSpeed, 60.0f);   // 度/秒。1秒で1/6回転ぶん（ゆっくり）
             break;
+        case 26: // BUBBLE（バブル）：置いた位置を頂点に、底までの往復を繰り返す
+            fill(def.bubbleHeight, 128.0f);  // 跳ぶ高さ(px)。4タイルぶん
+            fill(def.bubbleRest, 30.0f);     // 底で待つ時間（フレーム）
+            fill(def.bubbleHang, 6.0f);      // 頂点で止まる時間（フレーム）
+            fill(def.moveSpeed, 1.0f);       // 時間の進み方の倍率（2なら倍の速さで往復する）
+            break;
         case 25: // SIZE_THROWER（範囲サイズ調整の敵）：投げた先の範囲の中を、拡大⇔縮小と交互に変える
             fill(def.triggerRange, 340.0f);  // この距離にプレイヤーが入ると投げ始める
             fill(def.actionInterval, 300.0f);// 投げる間隔（フレーム）
@@ -1104,6 +1115,10 @@ void LoadAssetDefinitions() {
                     def.rotateItems = e.value("rotateItems", true);
                     def.sizeFactor = e.value("sizeFactor", -1.0f);
                     def.zoneFrames = e.value("zoneFrames", -1.0f);
+                    def.bubbleHeight = e.value("bubbleHeight", -1.0f);
+                    def.bubbleRest = e.value("bubbleRest", -1.0f);
+                    def.bubbleHang = e.value("bubbleHang", -1.0f);
+                    def.bubbleFlipFall = e.value("bubbleFlipFall", true);
                     def.waveShape = e.value("waveShape", -1.0f);
                     def.maxScale = e.value("maxScale", -1.0f);
                     def.tintColorR = e.value("tintColorR", -1.0f);
@@ -2151,6 +2166,7 @@ enum EnemyType {
 
     ENEMY_ROTATOR,            // 回転させる敵(24)：射程内のプレイヤー・敵・ギミック・アイテムを、ゆっくり回し続ける（回した角度は残り、編集の「回転」で直せる）
     ENEMY_SIZE_THROWER,       // 範囲サイズ調整の敵(25)：十字の矢印を投げ、着地点の範囲の中の物を「拡大⇔縮小」と交互に変える（変えた大きさは残る）
+    ENEMY_BUBBLE,             // バブル(26)：マリオの溶岩の火の玉のように、一定の高さまで跳び上がっては落ち、また跳び上がる。頂点は最初に置いた位置
 
     ENEMY_TYPE_COUNT          // 種別数の番兵。新しい敵タイプは必ずこの直前に追加すること
 };
@@ -2833,6 +2849,7 @@ const char* EnemyTypeName(EnemyType t) {
         case ENEMY_MULTI_ACTION:       return "MULTI_ACTION";
         case ENEMY_ROTATOR:            return "ROTATOR";
         case ENEMY_SIZE_THROWER:       return "SIZE_THROWER";
+        case ENEMY_BUBBLE:             return "BUBBLE";
         default:                       return "UNKNOWN";
     }
 }
@@ -2866,6 +2883,7 @@ const char* EnemyTypeNameJa(EnemyType t) {
         case ENEMY_MULTI_ACTION:       return "多彩行動";
         case ENEMY_ROTATOR:            return "回転させる";
         case ENEMY_SIZE_THROWER:       return "範囲サイズ変更";
+        case ENEMY_BUBBLE:             return "バブル";
         default:                       return "不明";
     }
 }
@@ -3149,6 +3167,9 @@ int GetEnemyActionPhase(const Enemy& e, const EnemyDef* edef) {
             return (e.aiState == 1) ? 1 : 0;
         case ENEMY_ROTATOR:        // 0何も回していない 2回しているあいだ
             return (e.auxState == 1) ? 2 : 0;
+        case ENEMY_BUBBLE:         // 0頂点で止まっている 1底で溜めている 2落ちている・跳び上がっている
+            if (e.aiState == 2) return 1;
+            return (e.aiState == 1 || e.aiState == 3) ? 2 : 0;
         case ENEMY_FALLER:       // 0待機 1(溜め→落下) 2クールダウン
             if (e.auxState == 1) return (e.customTimer > 0.0f) ? 1 : 2;
             if (e.auxState == 2) return 3;
@@ -11248,6 +11269,96 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             }
                             break;
                         }
+                        case ENEMY_BUBBLE: {
+                            // バブル：マリオの溶岩の火の玉のように、一定の高さまで跳び上がり、落ちて、また跳び上がる。
+                            // 頂点は「最初に置いた位置」。底は、そこから bubbleHeight だけ下。地形はすり抜ける（接触すればダメージ）。
+                            //
+                            // 動きは、段階の経過時間から位置を直接求める（重力の式 s = ½ g t² をそのまま使う）。
+                            //   aiState    : 0=頂点で止まる 1=落ちる 2=底で待つ 3=跳び上がる
+                            //   customTimer: その段階の経過フレーム
+                            //   auxF1      : 頂点にいるときの「足元（当たり判定の下端）」の y
+                            //   auxF2      : 頂点にいるときの「中心」の x
+                            //   auxFlag    : 頂点の位置を記録済みか
+                            // 位置が履歴（巻き戻し用）の値だけで決まるので、巻き戻しても自然に元の往復へ戻る。
+                            // 下端と中心を基準にするのは、拡大縮小が足元の中心を固定して行われるため（頂点の位置が動かない）。
+                            //
+                            // 編集リアクション：
+                            //  ・拡大／縮小 → 跳ぶ高さが伸び縮みする（頂点は動かず、底が下がる／上がる）。
+                            //  ・角度       → 往復の軸が傾き、斜めに跳ぶ。
+                            //  ・向き反転   → 上下が入れ替わる。置いた位置が「底」になり、そこから下へ跳ぶ。
+                            //  ・移動       → 往復の全体（頂点）が一緒に動く。
+                            //  ・速度       → 往復の速さが変わる（0で止まる）。
+                            const float bubbleG = GRAVITY;
+                            const float hullW = (float)enemy.hitboxWidth * enemy.scale;
+                            const float hullH = (float)enemy.hitboxHeight * enemy.scale;
+                            if (!enemy.auxFlag) {
+                                enemy.auxFlag = true;
+                                enemy.auxF1 = enemy.y + hullH;
+                                enemy.auxF2 = enemy.x + hullW * 0.5f;
+                                enemy.aiState = 0;
+                                enemy.customTimer = 0.0f;
+                            }
+                            // ドラッグで動かされたら、往復の頂点も同じだけ動かす。
+                            // 「動かした量」は、敵が途中の高さにいることもあるので、配置位置からのズレ(er.moved*)ではなく、
+                            // 直前のフレームに自分が置いた位置（履歴の最後）との差で測る。
+                            if (er.moved) {
+                                if (!enemy.history.empty()) {
+                                    const EnemyState& lastH = enemy.history.back();
+                                    enemy.auxF1 += (enemy.y + hullH) - (lastH.y + (float)enemy.hitboxHeight * lastH.scale);
+                                    enemy.auxF2 += (enemy.x + hullW * 0.5f) - (lastH.x + (float)enemy.hitboxWidth * lastH.scale * 0.5f);
+                                }
+                                enemy.editBaseX = enemy.x;
+                                enemy.editBaseY = enemy.y;
+                                enemy.editDirtyMask &= ~(unsigned int)EDIT_DIRTY_POS;
+                            }
+                            float jumpH = (edef ? edef->bubbleHeight : 128.0f) * er.scaleRatio;
+                            if (jumpH < 8.0f) jumpH = 8.0f;
+                            float timeSpd = edef ? edef->moveSpeed : 1.0f;
+                            if (timeSpd < 0.0f) timeSpd = 0.0f;
+                            const float restF = edef ? edef->bubbleRest : 30.0f;
+                            const float hangF = edef ? edef->bubbleHang : 6.0f;
+                            const float travelT = sqrtf(2.0f * jumpH / bubbleG); // 頂点から底まで落ちるのにかかる時間（重力どおり）
+
+                            enemy.customTimer += ets * timeSpd;
+                            if (enemy.aiState == 0 && enemy.customTimer >= hangF) {
+                                enemy.aiState = 1; enemy.customTimer = 0.0f;
+                            } else if (enemy.aiState == 1 && enemy.customTimer >= travelT) {
+                                enemy.aiState = 2; enemy.customTimer = 0.0f;
+                            } else if (enemy.aiState == 2 && enemy.customTimer >= restF) {
+                                enemy.aiState = 3; enemy.customTimer = 0.0f;
+                                // 跳び上がる瞬間の合図（効果音・パーツのモーション「ジャンプしたとき」）
+                                if (edef && !edef->seAttack.empty()) SoundManager::Get().PlaySe(edef->seAttack);
+                                enemy.actionSeq++;
+                                enemy.jumpSeq++;
+                            } else if (enemy.aiState == 3 && enemy.customTimer >= travelT) {
+                                enemy.aiState = 0; enemy.customTimer = 0.0f;
+                            }
+
+                            // 頂点からの距離 s（0＝頂点、jumpH＝底）
+                            float bt = enemy.customTimer;
+                            if (bt > travelT) bt = travelT;
+                            float sDown = 0.0f;
+                            switch (enemy.aiState) {
+                                case 0: sDown = 0.0f; break;
+                                case 1: sDown = 0.5f * bubbleG * bt * bt; break;                                   // 自由落下
+                                case 2: sDown = jumpH; break;
+                                default: sDown = jumpH - (bubbleG * travelT * bt - 0.5f * bubbleG * bt * bt); break; // 初速 g·T で上がり、頂点でちょうど止まる
+                            }
+                            if (sDown < 0.0f) sDown = 0.0f;
+                            if (sDown > jumpH) sDown = jumpH;
+
+                            const float dirSign = er.flipped ? -1.0f : 1.0f;
+                            const float tl = er.tilted ? er.tilt : 0.0f;
+                            const float offX = -sinf(tl) * sDown * dirSign;
+                            const float offY = cosf(tl) * sDown * dirSign;
+                            const float newX = enemy.auxF2 + offX - hullW * 0.5f;
+                            const float newY = enemy.auxF1 + offY - hullH;
+                            erTiltHandled = true; // 傾きは軸の向きとして自分で解釈する
+                            // 速度は「このフレームの移動量」として置く（地形をすり抜ける型なので、共通処理が x,y へ足すだけ）。
+                            enemy.vx = newX - enemy.x;
+                            enemy.vy = newY - enemy.y;
+                            break;
+                        }
                         case ENEMY_MULTI_ACTION: {
                             // 多彩行動：行動のリスト（EnemyDef.actions）を、順番／ランダム／重み付きで切り替える。
                             //
@@ -11829,7 +11940,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                     // X/Y方向の移動と衝突判定を共通化
                     // 幽霊は、地形・ギミック・足場・止まった敵、どれもすり抜ける（速度を足すだけで、衝突判定は行わない）。
-                    const bool enemyPhasesThrough = (enemy.type == ENEMY_MIMIC_GHOST);
+                    const bool enemyPhasesThrough = (enemy.type == ENEMY_MIMIC_GHOST || enemy.type == ENEMY_BUBBLE); // バブルも地形をすり抜けて往復する
                     bool enemyGrounded = false;
                     if (enemyPhasesThrough) {
                         enemy.x += enemy.vx;
@@ -14060,13 +14171,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     const EnemyDef* drawDef = FindEnemyDef(enemy.assetId);
                     if (drawDef != nullptr && drawDef->bodyIgnoresTilt) bodyAngle = enemy.bodyRestAngle;
                 }
+                // バブルは、落ちているあいだ絵を上下さかさまに描く（180度回して左右を反転すると、上下反転になる）。
+                // 本体の絵だけに掛け、パーツは今までどおり。向き反転の編集で上下が入れ替わっているときは、逆の段階でさかさまになる。
+                bool bodyFlipped = drawFlipped;
+                if (enemy.type == ENEMY_BUBBLE && (facingDef == nullptr || facingDef->bubbleFlipFall)) {
+                    const bool vertFlipped = (enemy.direction != enemy.editBaseDirection);
+                    if ((enemy.aiState == 1) != vertFlipped) { bodyAngle += 3.14159265f; bodyFlipped = !bodyFlipped; }
+                }
                 if (ghostDrawA < 0.999f) SetDrawBlendMode(DX_BLENDMODE_ALPHA, (int)(255.0f * ghostDrawA));
                 if (enemy.anim.HasClip(enemy.anim.currentClip)) {
                     // animations.jsonにこの敵のクリップが定義されていればスプライトシートアニメーションで描画
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
-                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, drawFlipped);
-                } else if (!drawFlipped) {
+                    enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, bodyFlipped);
+                } else if (!bodyFlipped) {
                     // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
                     DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE);
                 } else {

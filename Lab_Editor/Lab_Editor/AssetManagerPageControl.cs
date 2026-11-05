@@ -114,6 +114,7 @@ public partial class AssetManagerPageControl : UserControl
         [19] = new[] { ("effectRange", "寄せ始める距離(px)", 0), ("zoomAmplitude", "寄る強さ(追加の倍率)", 2), ("zoomLockFrames", "寄りきるまで(フレーム)", 0) }, // type_enum=19: ズーム固定敵(Zoom Lock)
         [24] = new[] { ("effectRange", "回す範囲(px)", 0), ("rotateSpeed", "回す速さ(度/秒)", 0), ("rotatePlayer", "プレイヤーを回す", 0), ("rotateEnemies", "ほかの敵を回す", 0), ("rotateGimmicks", "ギミックを回す", 0), ("rotateItems", "アイテムを回す", 0) }, // type_enum=24: 回転させる敵(Rotator)
         [25] = new[] { ("triggerRange", "投げ始める距離(px)", 0), ("actionInterval", "投げる間隔(フレーム)", 0), ("chargeTime", "予兆(フレーム)", 0), ("effectRange", "範囲の半径(px)", 0), ("zoneFrames", "範囲が残る時間(フレーム)", 0), ("sizeFactor", "拡大の倍率", 2) }, // type_enum=25: 範囲サイズ変更の敵(Size Thrower)
+        [26] = new[] { ("bubbleHeight", "跳ぶ高さ(px)", 0), ("bubbleRest", "底で待つ時間(フレーム)", 0), ("bubbleHang", "頂点で止まる時間(フレーム)", 0), ("moveSpeed", "往復の速さ係数", 2), ("bubbleFlipFall", "落ちている間、絵を上下さかさまにする", 0) }, // type_enum=26: バブル(Bubble)
         // type_enum=21: 飛びかかり(Pouncer)。項目名は突進(Dash Charger)と共通のものを流用しているが、
         // dashSpeedMult は「突進速度」ではなく「飛びかかりの水平初速」、dashDuration は滞空時間の上限を意味する。
         [22] = new[] { ("bounceSpeed", "飛ぶ速さ(px/フレーム)", 2), ("bounceRandomness", "跳ね返り角の乱れ(度)", 0), ("segmentGap", "胴体の節の間隔(px)", 0) }, // type_enum=22: 跳ね回る節足敵(Bouncing Worm)
@@ -208,6 +209,7 @@ public partial class AssetManagerPageControl : UserControl
         (23, "23 = 多彩行動 (Multi Action)", "待機・歩く・ジャンプ・突進・弾・瞬間移動・暗転・色変化・ズームの中から、好きな行動を好きな数だけ並べて、順番・ランダム・重み付きで切り替えながら繰り返します。「🎛 敵の動きを調整」で行動のリストを作ります。各行動の予兆・行動中・休みに合わせて、パーツを動かすこともできます。"),
         (24, "24 = 回転させる (Rotator)", "近くにいるプレイヤー・ほかの敵・ギミック・アイテムを、ゆっくり回し続けます。回した角度は残り、編集の「回転」か巻き戻しで直せます。「回転を禁止」された物は回しません。"),
         (25, "25 = 範囲サイズ変更 (Size Thrower)", "プレイヤーが近づくと、警告音のあと十字の矢印を投げます。着地した場所に円形の範囲ができ、中の物の大きさを、投げるたびに交互に拡大・縮小します（変わった大きさは残ります）。"),
+        (26, "26 = バブル (Bubble)", "マリオの溶岩の火の玉のように、一定の高さまで跳び上がり、落ちて、また跳び上がるのを繰り返します。跳び上がったときの頂点が、最初に置いた位置です（底は、そこから「跳ぶ高さ」だけ下）。地形はすり抜けます。拡大で高さが伸び、回転で斜めに跳び、向き反転で下向きに跳びます。"),
     };
     // 機能追加: UI改善（提案書のCUT-2/AM-1という項目に対応）— 敵タイプ(EnemyTypes)には元々あった
     // 「専門用語を使わない平易な説明文(detail)」を、ギミック/アイテムのタイプにも同じように用意した。

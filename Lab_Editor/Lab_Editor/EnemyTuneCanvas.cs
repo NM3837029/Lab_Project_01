@@ -440,6 +440,17 @@ public sealed class EnemyTuneCanvas : Panel
             case 13:
                 segs.Add(("無敵", Eff("shieldOnDuration"), Color.FromArgb(230, 200, 80)));
                 segs.Add(("攻撃が効く", Eff("shieldOffDuration"), Color.FromArgb(90, 150, 220))); break;
+            case 26:
+            {
+                // 重力（0.5/フレーム²）で、高さ H を落ちるのにかかる時間 √(2H/g)。速さの倍率で縮む
+                float spd = Math.Max(0.05f, Eff("moveSpeed"));
+                float travel = (float)Math.Sqrt(2.0 * Math.Max(8f, Eff("bubbleHeight")) / 0.5) / spd;
+                segs.Add(("頂点で止まる", Eff("bubbleHang") / spd, Color.FromArgb(230, 190, 60)));
+                segs.Add(("落ちる", travel, Color.FromArgb(230, 90, 80)));
+                segs.Add(("底で待つ", Eff("bubbleRest") / spd, Color.FromArgb(90, 110, 150)));
+                segs.Add(("跳び上がる", travel, Color.FromArgb(120, 200, 120)));
+                break;
+            }
             case 21:
                 segs.Add(("這って近づく", 60, Color.FromArgb(90, 150, 110)));
                 segs.Add(("溜め", Eff("chargeTime"), Color.FromArgb(230, 190, 60)));
