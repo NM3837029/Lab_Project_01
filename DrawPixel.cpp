@@ -14705,20 +14705,35 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 「何のカウンタか」は、コインとエネルギーの絵のアイコンと、文字のラベルの両方で示す。
             int collectedCoins = 0;
             for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
-            const int osdX1 = 8, osdY1 = 8, osdX2 = 232, osdY2 = 114; // 枠の縁（9スライスの角）が約14px食うので、中身はその内側へ置く
-            DrawUiWindow(X(osdX1), Y(osdY1), X(osdX2), Y(osdY2), uiWindowHandle, GameCfg::UIK_OSD);
+            const int osdX1 = 8, osdY1 = 8, osdX2 = 232, osdY2 = 114;
+            // 左のアイコンバー・右のパネル・下のタイムラインと同じ、暗い平らな下地と青い縁。
+            // 以前はクリーム色の窓枠（UIウィンドウ素材）で、編集パネルの暗い配色とちぐはぐだった。
+            // 少しだけ透かして、後ろのステージが完全には隠れないようにする。
+            const unsigned int hudInk = GetColor(238, 240, 250), hudInkSub = GetColor(178, 186, 210);
+            {
+                const int hx1 = X(osdX1), hy1 = Y(osdY1), hx2 = X(osdX2), hy2 = Y(osdY2);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 232);
+                DrawBox(hx1, hy1, hx2, hy2, GetColor(46, 42, 40), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawBox(hx1, hy1, hx2, hy2, GetColor(84, 120, 176), FALSE);
+                DrawBox(hx1 + 1, hy1 + 1, hx2 - 1, hy2 - 1, GetColor(84, 120, 176), FALSE);
+                // 行の区切り（コイン／体力／コスト）。細い線で、3段の見分けを付ける
+                const unsigned int sep = GetColor(78, 76, 86);
+                DrawLine(hx1 + 8, Y(48), hx2 - 8, Y(48), sep);
+                DrawLine(hx1 + 8, Y(74), hx2 - 8, Y(74), sep);
+            }
             {
                 // 1段目：コインの取得枚数
                 DrawUiIcon(X(34), Y(34), (int)(28.0f * sc), coinHandle);
                 char coinStr[48];
                 sprintf_s(coinStr, sizeof(coinStr), "コイン  %d / %d", collectedCoins, (int)items.size());
-                DrawTextPlain(X(54), TopFor(Y(34), fs), coinStr, UiInk(), fs);
+                DrawTextPlain(X(54), TopFor(Y(34), fs), coinStr, hudInk, fs);
 
                 // 2段目：体力。数字だけでなく、ハートの並びで残りを見せる（失った分は灰色）
                 {
                     const int heartY = Y(61);
                     const int r = (int)(8.0f * sc + 0.5f);
-                    DrawTextPlain(X(24), TopFor(heartY, fs), "HP", UiInkSub(), fs);
+                    DrawTextPlain(X(24), TopFor(heartY, fs), "HP", hudInkSub, fs);
                     auto Heart = [&](int cx, int cy, int rr, unsigned int col) {
                         int c = rr / 2;
                         DrawCircle(cx - c, cy - rr / 4, c + 1, col, TRUE);
@@ -14730,12 +14745,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     for (int hi = 0; hi < slots; hi++) {
                         int hcx = X(60.0f + hi * 22.0f);
                         bool full = hi < hpNow;
-                        Heart(hcx, heartY, r + 1, GetColor(70, 40, 40));
-                        Heart(hcx, heartY, r, full ? GetColor(235, 70, 80) : GetColor(170, 160, 150));
+                        // 暗い下地で、ハートの縁が溶けないよう縁は黒に近く、失った分は沈んだ灰色にする
+                        Heart(hcx, heartY, r + 1, GetColor(16, 14, 18));
+                        Heart(hcx, heartY, r, full ? GetColor(235, 70, 80) : GetColor(104, 100, 112));
                     }
                     if (hpNow > 6) {
                         char hb[16]; sprintf_s(hb, sizeof(hb), "× %d", hpNow);
-                        DrawTextPlain(X(60.0f + 18.0f), TopFor(heartY, fs), hb, UiInk(), fs);
+                        DrawTextPlain(X(60.0f + 18.0f), TopFor(heartY, fs), hb, hudInk, fs);
                     }
                 }
 
@@ -14749,12 +14765,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                                 : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
                                      : UiGaugeFill();
                 DrawUiIcon(X(34), Y(89), (int)(30.0f * sc), energyHandle);
-                // ゲージの器は暗い溝にしておく。残量が減ってバーが後退しても、
-                // 上に乗る白文字がクリーム色の枠内背景に溶けず常に読める。
+                // ゲージの器は、下地より一段濃い溝にする。残量が減ってバーが後退しても、上に乗る白文字が読める。
                 const int gx1 = X(54), gx2 = X(218), gy1 = Y(79), gy2 = Y(99);
-                DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
+                DrawBox(gx1, gy1, gx2, gy2, GetColor(30, 30, 36), TRUE);
                 DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
-                DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
+                DrawBox(gx1, gy1, gx2, gy2, GetColor(124, 134, 168), FALSE);
                 char editCostStr[48];
                 sprintf_s(editCostStr, sizeof(editCostStr), "コスト %d / %d", (int)editCost, (int)currentEditCost.maxCost);
                 DrawTextEdge(gx1 + (int)(6.0f * sc), TopFor((gy1 + gy2) / 2, fsm), editCostStr, GetColor(255, 255, 255), fsm);
