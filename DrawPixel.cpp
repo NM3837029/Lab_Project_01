@@ -2673,7 +2673,22 @@ struct Gimmick {
     unsigned int spawnDirtyMask = 0u;
 
     EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（ステージJSONの noMove 等）
+
+    // Feature: ギミックの「見た目」の編集。インスペクターの 色相／明るさ／透明度／上下反転 で変える。
+    // どれも描画だけに効く（当たり判定は変わらない）。0／false が「何も変えていない」状態で、
+    // 全部が既定値のギミックは従来どおりの描き方（画面外へ一度描いて加工する経路を通らない）。
+    // edit_reactions の "hueShift" / "dimmed" / "brightened" / "faded" / "flipV" から読めるので、見た目を変えたことを仕掛けにできる。
+    int  lookHue    = 0;     // 色相：0〜5（60度ずつ回す。0＝そのまま）
+    int  lookBright = 0;     // 明るさ：-2〜+2（0＝そのまま）
+    int  lookAlpha  = 0;     // 透明度：0〜3（0＝不透明、1＝75%、2＝50%、3＝25%の濃さ）
+    bool lookFlipV  = false; // 上下反転（そのギミックの中心を軸に、絵を上下に裏返す）
 };
+
+// ギミックの見た目の段階 → 実際の値。
+inline bool GimmickLookActive(const Gimmick& g) { return g.lookHue != 0 || g.lookBright != 0 || g.lookAlpha != 0 || g.lookFlipV; }
+inline int GimmickLookHueDeg(int step)    { int d = (step % 6) * 60; return d > 180 ? d - 360 : d; } // 色相フィルタは -180〜180
+inline int GimmickLookBright255(int step) { return step * 60; }                                        // HSBフィルタの明るさ（-255〜255）
+inline int GimmickLookAlpha255(int step)  { static const int a[4] = { 255, 190, 128, 64 }; return a[(step < 0 ? 0 : (step > 3 ? 3 : step))]; }
 
 // 弾1発分の実行時状態。
 struct Bullet {
@@ -3030,7 +3045,11 @@ const char* EnemyTypeNameJa(EnemyType t) {
 // 右パネルは左のアイコンバーと同じ「カード」の見た目に作り替えたので、行は文字の位置でなく矩形（RowBox）で持つ。
 // 一時停止と巻き戻しは左右に並べるため、当たり判定は y だけでなく x も見る（RowAt(mx, my)）。
 namespace Insp {
-    enum Row { ROW_SCALE, ROW_ANGLE, ROW_SPEED, ROW_PAUSE, ROW_REWIND, ROW_TYPE, ROW_REACT, ROW_COUNT };
+    // ROW_LOOK_* はギミックを選んだときだけ出る4つの小さなカード（敵の「動き」行と同じ段に置く）。
+    enum Row { ROW_SCALE, ROW_ANGLE, ROW_SPEED, ROW_PAUSE, ROW_REWIND, ROW_TYPE,
+               ROW_LOOK_HUE, ROW_LOOK_BRIGHT, ROW_LOOK_ALPHA, ROW_LOOK_FLIP, ROW_REACT, ROW_COUNT };
+    // いま選んでいるのがギミックか（true なら ROW_TYPE の段は見た目の4枚になる）。クリック・指差し・描画の前に毎回更新する
+    static bool lookMode = false;
     const int PANEL_W   = 250; // パネルの幅（右端から）
     const int HEAD_Y    = 8;   // 選んだ物の絵と名前の上端
     const int HEAD_SIZE = 40;  // 絵の枠の一辺
@@ -3045,7 +3064,8 @@ namespace Insp {
             case ROW_SPEED:  return 106;
             case ROW_PAUSE:
             case ROW_REWIND: return 132;
-            case ROW_TYPE:   return 158;
+            case ROW_TYPE:
+            case ROW_LOOK_HUE: case ROW_LOOK_BRIGHT: case ROW_LOOK_ALPHA: case ROW_LOOK_FLIP: return 158;
             default:         return 186; // ROW_REACT（反応のチップ。押せない）
         }
     }
@@ -3056,11 +3076,19 @@ namespace Insp {
         if (row == ROW_PAUSE)  return { L, y, L + half, y + CARD_H };
         if (row == ROW_REWIND) return { R - half, y, R, y + CARD_H };
         if (row == ROW_REACT)  return { L, y, R, y + 20 };
+        if (row >= ROW_LOOK_HUE && row <= ROW_LOOK_FLIP) {
+            const int gap = 4, qw = (R - L - gap * 3) / 4;
+            const int i = row - ROW_LOOK_HUE;
+            return { L + i * (qw + gap), y, L + i * (qw + gap) + qw, y + CARD_H };
+        }
         return { L, y, R, y + CARD_H };
     }
     // マウスがどの行の上か（行の外なら -1）。値を操作できるのは ROW_REACT より前の行だけ
     inline int RowAt(int mx, int my) {
         for (int r = 0; r < ROW_REACT; r++) {
+            const bool isLook = (r >= ROW_LOOK_HUE && r <= ROW_LOOK_FLIP);
+            if (r == ROW_TYPE && lookMode) continue; // ギミックでは同じ段が見た目の4枚
+            if (isLook && !lookMode) continue;
             if (EditPanel::HitBox(RowBox(r), mx, my)) return r;
         }
         return -1;
@@ -3088,6 +3116,11 @@ struct EditReaction {
     float movedX   = 0.0f;    // 配置位置からのXズレ
     float movedY   = 0.0f;    // 配置位置からのYズレ
     bool  angleIsAiOwned = false; // この型のangleはAIが握っており傾け編集を解釈しない
+    bool  hueShifted  = false; // 色相を回された（ギミックの見た目の編集）
+    bool  dimmed      = false; // 暗くされた
+    bool  brightened  = false; // 明るくされた
+    bool  faded       = false; // 半透明にされた
+    bool  flippedV    = false; // 上下を裏返された
 
     // 「拡大されたら鈍く、縮小されたら軽快に」という全型共通の重さの倍率。
     float MassMul() const { return (scaleRatio > 0.01f) ? (1.0f / scaleRatio) : 1.0f; }
@@ -3272,6 +3305,12 @@ EditReaction GetGimmickEditReaction(const Gimmick& g) {
     r.movedX = g.x - g.editBaseX;
     r.movedY = g.y - g.editBaseY;
     r.moved  = ((g.editDirtyMask & EDIT_DIRTY_POS) != 0u);
+
+    r.hueShifted = (g.lookHue != 0);
+    r.dimmed     = (g.lookBright < 0);
+    r.brightened = (g.lookBright > 0);
+    r.faded      = (g.lookAlpha != 0);
+    r.flippedV   = g.lookFlipV;
     return r;
 }
 
@@ -3706,11 +3745,12 @@ struct EditSnap {
     int direction = 0;
     bool paused = false, rewinding = false;
     unsigned int mask = 0u; // editDirtyMask
+    int lookHue = 0, lookBright = 0, lookAlpha = 0; bool lookFlipV = false; // ギミックのみ（見た目の編集）
 };
 // どの項目が変わったか（取り消し時に、変わった項目だけを戻すためのビット）
 enum EditField : unsigned int {
     EF_POS = 1u << 0, EF_SCALE = 1u << 1, EF_ANGLE = 1u << 2, EF_SPEED = 1u << 3, EF_DIR = 1u << 4,
-    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8
+    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8, EF_LOOK = 1u << 9
 };
 inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
     unsigned int f = 0;
@@ -3722,6 +3762,7 @@ inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
     if (a.paused != b.paused) f |= EF_PAUSE;
     if (a.rewinding != b.rewinding) f |= EF_REWIND;
     if (a.mask != b.mask) f |= EF_MASK;
+    if (a.lookHue != b.lookHue || a.lookBright != b.lookBright || a.lookAlpha != b.lookAlpha || a.lookFlipV != b.lookFlipV) f |= EF_LOOK;
     if (a.width != b.width || a.height != b.height || a.spriteWidth != b.spriteWidth
         || a.spriteHeight != b.spriteHeight || a.editBaseY != b.editBaseY) f |= EF_SIZE;
     return f;
@@ -3948,6 +3989,9 @@ int EnemyWeakColor(EnemyType t) { return ((int)t % 3) + 1; }
 //     "bright":      [ { "effect": "Harmless" } ],
 //     "color":       { "2": [ { "effect": "Vulnerable" } ] }
 //   }
+//   ギミックだけ、見た目の編集（インスペクターの色相・明るさ・透明度・上下反転）にも反応を書ける：
+//     "hueShift"（色相を回された）／"dimmed"（暗くされた）／"brightened"（明るくされた）／"faded"（半透明にされた）／"flipV"（上下を裏返された）
+//     例）"faded": [ { "effect": "Destroy" } ]
 //
 // "by" には数値のほか "scaleRatio" / "invScaleRatio" / "speedRatio" / "invSpeedRatio" /
 // "tilt" という変数名も書ける（そのフレームの編集差分がそのまま入る）。
@@ -4053,6 +4097,11 @@ DeclaredEffects EvalDeclaredReactions(const json& decl, const EditReaction& r) {
     if (r.selfPaused)     fire("pause");
     if (r.selfRewinding)  fire("rewind");
     if (r.moved)          fire("move");
+    if (r.hueShifted)     fire("hueShift");
+    if (r.dimmed)         fire("dimmed");
+    if (r.brightened)     fire("brightened");
+    if (r.faded)          fire("faded");
+    if (r.flippedV)       fire("flipV");
     if (g_screenFx.fastForward)        fire("fastForward");
     if (g_screenFx.brightness < 0.6f)  fire("dark");
     if (g_screenFx.brightness > 1.3f)  fire("bright");
@@ -4156,6 +4205,54 @@ bool EnemyIsBulletProof(const Enemy& e) {
 // 型ごとの描画側は「同じ絵」だけを描かないようにする（扉の開閉の絵など、型が足す演出は今までどおり出る）。
 // 抑止するのは、本体の絵と、切り替え先の絵（spriteAlt）のハンドル。ギミックの描画ループの中だけで有効にし、外へ出るときに必ず -1 へ戻す。
 static int g_hideBodyHandleA = -1, g_hideBodyHandleB = -1;
+
+// ---- ギミックの見た目の編集（色相・明るさ・透明度・上下反転）を描画へ反映する ----
+// そのギミックの絵とパーツを、いったん同じ大きさの画面（g_lookScrA）へ描かせ、加工してから元の画面へ重ねる。
+//   色相・明るさ … HSBフィルタ ／ 上下反転 … そのギミックの中心を軸にした裏返し ／ 透明度 … 重ねるときの濃さ（乗算済みαブレンド）
+// 重ねるのは乗算済みαブレンド(PMA)。αつきの画面を普通のαブレンドで濃さ付きに重ねると、色が濃さの2乗で薄くなる（実測）ため。
+// 透明にした絵の後ろは、ステージの背景レイヤーがそのまま透ける（背景が無いステージでは、透けた先が少し暗く出る）。
+// 見た目が既定値のギミックでは何もしない（描画の経路が従来と同じ）。
+// デストラクタで重ね戻すので、ループの途中で continue しても必ず元の画面へ戻る。
+static int  g_lookScrA = -1, g_lookScrB = -1, g_lookW = 0, g_lookH = 0;
+static bool g_lookFilterOk = true;
+struct GimLookScope {
+    const Gimmick& g;
+    float cy;               // ギミックの中心の画面Y（上下反転の軸）
+    bool on = false;        // 画面外へ描いていて、終わりに加工して重ねる
+    int prev = -1;
+    GimLookScope(const Gimmick& gim, float centerScreenY) : g(gim), cy(centerScreenY) {
+        if (!GimmickLookActive(gim)) return;
+        prev = GetDrawScreen();
+        int w = 0, h = 0;
+        GetDrawScreenSize(&w, &h);
+        if (w <= 0 || h <= 0) return;
+        if (g_lookScrA < 0 || g_lookScrB < 0 || w != g_lookW || h != g_lookH) {
+            if (g_lookScrA >= 0) DeleteGraph(g_lookScrA);
+            if (g_lookScrB >= 0) DeleteGraph(g_lookScrB);
+            g_lookScrA = MakeScreen(w, h, TRUE);
+            g_lookScrB = MakeScreen(w, h, TRUE);
+            g_lookW = w; g_lookH = h;
+        }
+        if (g_lookScrA < 0 || g_lookScrB < 0) return;
+        SetDrawScreen(g_lookScrA);
+        ClearDrawScreen();
+        on = true;
+    }
+    ~GimLookScope() {
+        if (!on) return;
+        int src = g_lookScrA;
+        const int hue = GimmickLookHueDeg(g.lookHue), br = GimmickLookBright255(g.lookBright);
+        if ((hue != 0 || br != 0) && g_lookFilterOk) {
+            if (GraphFilterBlt(g_lookScrA, g_lookScrB, DX_GRAPH_FILTER_HSB, 0, hue, 0, br) == 0) src = g_lookScrB;
+            else g_lookFilterOk = false; // 失敗したら加工なしで重ねるだけ（ゲームは止めない）
+        }
+        SetDrawScreen(prev);
+        SetDrawBlendMode(DX_BLENDMODE_PMA_ALPHA, GimmickLookAlpha255(g.lookAlpha));
+        if (g.lookFlipV) DrawExtendGraph(0, (int)(cy * 2.0f), g_lookW, (int)(cy * 2.0f) - g_lookH, src, TRUE);
+        else             DrawGraph(0, 0, src, TRUE);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    }
+};
 static inline bool GimBodyHidden(int h) { return h >= 0 && (h == g_hideBodyHandleA || h == g_hideBodyHandleB); }
 static inline int GimBodyDrawExtend(int x1, int y1, int x2, int y2, int h, int trans) {
     if (GimBodyHidden(h)) return 0;
@@ -5512,8 +5609,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             case Insp::ROW_PAUSE:  return targetPaused != nullptr;
             case Insp::ROW_REWIND: return targetRewind != nullptr;
             case Insp::ROW_TYPE:   return targetEnemyType != nullptr;
+            case Insp::ROW_LOOK_HUE: case Insp::ROW_LOOK_BRIGHT: case Insp::ROW_LOOK_ALPHA: case Insp::ROW_LOOK_FLIP:
+                return targetGimmick != nullptr && !targetGimmick->isTimelineCut; // 見た目の編集はギミックだけ
             default:               return false;
         }
+    };
+    // 選んでいるのがギミックなら、ROW_TYPE の段を見た目の4枚として扱う（クリック・指差し・描画の直前に呼ぶ）
+    auto SyncInspMode = [&]() {
+        Insp::lookMode = (selectedType == SELECT_GIMMICK && targetGimmick != nullptr && !targetGimmick->isTimelineCut);
     };
 
     // 今プレイしているステージの添字。大きさ変更の地形判定（SolidOverlapArea）が読むので、共通入口より前に置く。
@@ -5616,6 +5719,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             sn.paused = g.isPaused; sn.rewinding = g.isRewinding; sn.mask = g.editDirtyMask;
             sn.width = g.width; sn.height = g.height; sn.spriteWidth = g.spriteWidth; sn.spriteHeight = g.spriteHeight;
             sn.editBaseY = g.editBaseY;
+            sn.lookHue = g.lookHue; sn.lookBright = g.lookBright; sn.lookAlpha = g.lookAlpha; sn.lookFlipV = g.lookFlipV;
         }
         return sn;
     };
@@ -5700,6 +5804,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (f & EF_PAUSE)  g.isPaused = sn.paused;
                 if (f & EF_REWIND) g.isRewinding = sn.rewinding;
                 if (f & EF_MASK)   g.editDirtyMask = sn.mask;
+                if (f & EF_LOOK)   { g.lookHue = sn.lookHue; g.lookBright = sn.lookBright; g.lookAlpha = sn.lookAlpha; g.lookFlipV = sn.lookFlipV; }
             }
         }
     };
@@ -5783,6 +5888,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         add(EF_DIR, "反転");
         add(EF_PAUSE, "一時停止");
         add(EF_REWIND, "巻き戻し");
+        add(EF_LOOK, "見た目");
         if (s.empty()) s = "編集";
         return s;
     };
@@ -6135,6 +6241,33 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return true;
     };
 
+    // ギミックの見た目を1段階進める（0=色相 1=明るさ 2=透明度 3=上下反転）。選択中のギミックすべてへ、代表の次の値を入れる。
+    // 一周すると元に戻る。反転と同じ額のコストを払い、取り消し(Ctrl+Z)で全額戻る。
+    auto EditLookCycle = [&](int field) -> bool {
+        if (selectedGimmicks.empty()) return false;
+        const float cost = currentEditCost.flatDirectionFlip;
+        if (editCost < cost) { EditDeniedCost(cost); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= cost;
+        const Gimmick* rep = selectedGimmicks[0];
+        const int  nh = (rep->lookHue + 1) % 6;
+        const int  nb = (rep->lookBright >= 2) ? -2 : rep->lookBright + 1;
+        const int  na = (rep->lookAlpha + 1) % 4;
+        const bool nf = !rep->lookFlipV;
+        for (auto* g : selectedGimmicks) {
+            if (g->isTimelineCut) continue;
+            if (field == 0) g->lookHue = nh;
+            else if (field == 1) g->lookBright = nb;
+            else if (field == 2) g->lookAlpha = na;
+            else g->lookFlipV = nf;
+        }
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.flip);
+        PushUndo(undoBefore, cost, false);
+        NoteEditOp("look");
+        return true;
+    };
+
     // 配置時の値(editBase*)へ丸ごと戻す。
     // 以前は幅120・角度1.57079といった決め打ちだったため、120px以外のギミック
     // （gim_gate_doorは32x160、gim_edit_color_bridgeは224x24）がリセットのたびに別物のサイズへ化けていた。
@@ -6166,6 +6299,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->direction = 0;
             g->isPaused = false;
             g->isRewinding = false;
+            g->lookHue = 0; g->lookBright = 0; g->lookAlpha = 0; g->lookFlipV = false; // 見た目も元に戻す
             g->editDirtyMask = EDIT_DIRTY_NONE;
         }
         SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset); // 編集を戻せたときの音
@@ -8687,6 +8821,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // （インスペクタ表示側は既にN/A表示で分岐している）。タイムラインカットのように
                     // 全項目がnullptrになる選択対象があるため、ドラッグ開始時も必ずnullチェックしてから参照する。
                     // 行の位置は Insp 名前空間の表を見る（描画・指差しカーソルと同じ表）
+                    SyncInspMode();
                     int inspRow = Insp::RowAt(mx, my);
                     if (inspRow == Insp::ROW_SCALE && InspRowUsable(inspRow)) { isInspScale = true; lastMouseX = mx; baseScale = *targetScale; }
                     else if (inspRow == Insp::ROW_ANGLE && InspRowUsable(inspRow)) { isInspAngle = true; lastMouseX = mx; baseAngle = *targetAngle; }
@@ -8696,6 +8831,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     }
                     else if (inspRow == Insp::ROW_REWIND && InspRowUsable(inspRow)) {
                         EditToggleRewind();
+                    }
+                    else if (inspRow >= Insp::ROW_LOOK_HUE && inspRow <= Insp::ROW_LOOK_FLIP && InspRowUsable(inspRow)) {
+                        EditLookCycle(inspRow - Insp::ROW_LOOK_HUE); // ギミックの見た目：クリックで1段階ずつ進める
                     }
                     else if (inspRow == Insp::ROW_TYPE && InspRowUsable(inspRow)) {
                         // 旧: %3 固定で最初の3種類しか巡回できなかった。ENEMY_TYPE_COUNTで全種別を巡回対象にする
@@ -13709,6 +13847,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         || gim.type == GIMMICK_REWIND_GATE); // 逆行ゲートも、通れる間は半透明で位置を示す
             if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
+            // 見た目の編集（色相・明るさ・透明度・上下反転）を受けているギミックは、このあとの描画を画面外へ逃がし、イテレーションの終わりに加工して重ねる
+            GimLookScope lookScope(gim, gim.y + gim.spriteHeight * 0.5f - cameraY);
+
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
             // 本体パーツ：「画像を選ぶ」の絵を、パーツと同じ編集項目つきで描き、型ごとの描画では同じ絵を描かせない
@@ -15567,6 +15708,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // その行を、いま操作できるか（封印されていない・何かを選んでいる・この対象に意味のある項目）
                 auto Usable = [&](int row) -> bool { return canEdit && hasSel && InspRowUsable(row); };
                 auto Hover  = [&](int row) -> bool { return EditPanel::HitBox(Insp::RowBox(row), mx, my); };
+                SyncInspMode();
 
                 // 値の行（大きさ・角度・速さ）：アイコン＋項目名＋右に値。値を左右にドラッグして変える行は、つかんでいる間だけ青く光る
                 auto ValueRow = [&](int row, EditPanel::Icon icon, const char* label, const char* value, bool grabbed) {
@@ -15610,8 +15752,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 ToggleRow(Insp::ROW_PAUSE,  EditPanel::ICON_PAUSE,  EditPanel::ICON_PLAY, "一時停止", hasSel ? targetPaused : nullptr);
                 ToggleRow(Insp::ROW_REWIND, EditPanel::ICON_REWIND, EditPanel::ICON_REWIND, "巻き戻し", hasSel ? targetRewind : nullptr);
 
+                // 見た目の4枚（ギミックだけ）：色相・明るさ・透明度・上下反転。変えている項目は青く光り、短い名前と値になる
+                if (Insp::lookMode) {
+                    const Gimmick* lg = targetGimmick;
+                    auto LookCard = [&](int row, const char* idle, const char* shortName, const char* value, bool on) {
+                        const bool usable = Usable(row);
+                        const EditPanel::Box b = Insp::RowBox(row);
+                        EditPanel::DrawCard(b, on, Hover(row), usable);
+                        const unsigned int col = !usable ? inkDim : (on ? inkAcc : inkSub);
+                        if (!on) {
+                            const int w = EditPanel::TextWidth(idle, 12);
+                            EditPanel::DrawText((b.x1 + b.x2 - w) / 2, b.y1 + 5, idle, col, 12);
+                        } else {
+                            EditPanel::DrawText(b.x1 + 5, b.y1 + 5, shortName, col, 12);
+                            EditPanel::DrawText(b.x2 - 5 - EditPanel::TextWidth(value, 12), b.y1 + 5, value, !usable ? inkDim : inkMain, 12);
+                        }
+                    };
+                    char lh[16], lb[16], la[16];
+                    sprintf_s(lh, sizeof(lh), "%d°", lg ? lg->lookHue * 60 : 0);
+                    sprintf_s(lb, sizeof(lb), "%+d", lg ? lg->lookBright : 0);
+                    sprintf_s(la, sizeof(la), "%d%%", lg ? (int)(GimmickLookAlpha255(lg->lookAlpha) * 100 / 255.0f + 0.5f) : 100);
+                    LookCard(Insp::ROW_LOOK_HUE,    "色相",   "色", lh, lg && lg->lookHue != 0);
+                    LookCard(Insp::ROW_LOOK_BRIGHT, "明るさ", "明", lb, lg && lg->lookBright != 0);
+                    LookCard(Insp::ROW_LOOK_ALPHA,  "透明度", "透", la, lg && lg->lookAlpha != 0);
+                    LookCard(Insp::ROW_LOOK_FLIP,   "上下",   "上下", "ON", lg && lg->lookFlipV);
+                }
+
                 // 動きの行（敵だけ）：敵タイプ巡回編集の結果を確認する唯一の手段なので、全種を日本語で出す
-                {
+                if (!Insp::lookMode) {
                     const bool usable = Usable(Insp::ROW_TYPE) && selectedType == SELECT_ENEMY;
                     const EditPanel::Box b = Insp::RowBox(Insp::ROW_TYPE);
                     EditPanel::DrawCard(b, false, usable && Hover(Insp::ROW_TYPE), usable);
@@ -15649,6 +15817,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else if (ins.hastened) tags.push_back("加速");
                         else if (ins.slowed)   tags.push_back("減速");
                         if (ins.flipped)       tags.push_back("反転");
+                        if (ins.hueShifted)    tags.push_back("色替え");
+                        if (ins.dimmed)        tags.push_back("暗く");
+                        if (ins.brightened)    tags.push_back("明るく");
+                        if (ins.faded)         tags.push_back("半透明");
+                        if (ins.flippedV)      tags.push_back("上下反転");
                         if (ins.selfPaused)    tags.push_back("一時停止");
                         if (ins.selfRewinding) tags.push_back("巻き戻し");
                         if (ins.moved)         tags.push_back("移動");
@@ -16121,7 +16294,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 対象ポインタがnullptrの行は「その対象では意味を持たない」＝押しても何も起きないので、
                     // クリック処理と同じくnullチェックを通ったものだけを押せる扱いにする。
                     else if (!bigView && objectEditOpEnabled && selectedType != SELECT_NONE && cmx >= WINDOW_WIDTH - Insp::PANEL_W &&
-                             Insp::RowAt(cmx, cmy) >= 0 && InspRowUsable(Insp::RowAt(cmx, cmy))) {
+                             (SyncInspMode(), Insp::RowAt(cmx, cmy) >= 0) && InspRowUsable(Insp::RowAt(cmx, cmy))) {
                         pointing = true;
                     }
                     // 4) 下部のタイムライン帯（カットの作成・選択ができるとき）
