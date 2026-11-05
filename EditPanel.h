@@ -83,7 +83,9 @@ inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
 }
 
 // ---- アイコン（コードで描く）----
-enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE };
+// ICON_FAST 以降は、右クリックの扇形メニューで使う
+enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE,
+            ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL };
 
 // 円弧を細い線の連なりで描く。角度は度で、数学の向き（上が正）。
 inline void DrawArc(float cx, float cy, float r, float a0, float a1, unsigned int col, float th) {
@@ -136,6 +138,42 @@ inline void DrawIcon(Icon k, int cx, int cy, unsigned int col) {
         case ICON_REWIND: {
             DrawTriangle(cx + 1, cy - 6, cx + 1, cy + 6, cx - 7, cy, col, TRUE);
             DrawTriangle(cx + 8, cy - 6, cx + 8, cy + 6, cx, cy, col, TRUE);
+            break;
+        }
+        case ICON_FAST: {
+            // 右向きの三角を2つ（加速）
+            DrawTriangle(cx - 8, cy - 6, cx - 8, cy + 6, cx - 1, cy, col, TRUE);
+            DrawTriangle(cx, cy - 6, cx, cy + 6, cx + 7, cy, col, TRUE);
+            break;
+        }
+        case ICON_SLOW: {
+            // 右向きの三角を1つと、手前で止まる縦の棒（減速）
+            DrawTriangle(cx - 7, cy - 6, cx - 7, cy + 6, cx + 1, cy, col, TRUE);
+            DrawBox(cx + 4, cy - 6, cx + 6, cy + 6, col, TRUE);
+            break;
+        }
+        case ICON_FLIP: {
+            // 左右に向いた矢印と、真ん中の折り返しの線（反転）
+            DrawLine(cx - 8, cy, cx + 8, cy, col, 2);
+            DrawLine(cx - 8, cy, cx - 3, cy - 5, col, 2);
+            DrawLine(cx - 8, cy, cx - 3, cy + 5, col, 2);
+            DrawLine(cx + 8, cy, cx + 3, cy - 5, col, 2);
+            DrawLine(cx + 8, cy, cx + 3, cy + 5, col, 2);
+            DrawLine(cx, cy - 8, cx, cy + 8, col, 1);
+            break;
+        }
+        case ICON_RESET: {
+            // 左まわりに戻る矢印（リセット）
+            DrawArc((float)cx, (float)cy, 7.0f, 220.0f, 500.0f, col, 2.0f);
+            float ex = cx + cosf(220.0f * 3.14159265f / 180.0f) * 7.0f, ey = cy - sinf(220.0f * 3.14159265f / 180.0f) * 7.0f;
+            DrawLine((int)ex, (int)ey, (int)ex - 5, (int)ey - 1, col, 2);
+            DrawLine((int)ex, (int)ey, (int)ex - 1, (int)ey + 5, col, 2);
+            break;
+        }
+        case ICON_CUTDEL: {
+            // ×印（カット削除）
+            DrawLine(cx - 6, cy - 6, cx + 6, cy + 6, col, 3);
+            DrawLine(cx - 6, cy + 6, cx + 6, cy - 6, col, 3);
             break;
         }
         case ICON_MOVE: {
@@ -193,6 +231,31 @@ inline void DrawThumb(const Box& b, int handle, int kind) {
         }
     }
     DrawBox(b.x1, b.y1, b.x2, b.y2, GetColor(124, 134, 168), FALSE);
+}
+
+// ---- 扇形（パイ）の1枚 ----
+// 中心 (cx,cy) から、内側の半径 r0・外側の半径 r1 の間を、角度 a0〜a1（度。真上が0、時計回りが正）で塗る。
+// 右クリックの扇形メニューの1項目ぶん。塗りは細かい三角形の連なり（隣と隙間が出ないよう、端点は整数で共有する）、
+// 輪郭は AA の線で描く。a1-a0 が 360 のときは、輪っか全体を描く（放射状の縁は引かない）。
+inline void DrawPieSector(int cx, int cy, float r0, float r1, float a0, float a1,
+                          unsigned int fill, unsigned int edge, float edgeW) {
+    const float kPi = 3.14159265f;
+    auto PX = [&](float r, float a) { return cx + (int)lroundf(r * sinf(a * kPi / 180.0f)); };
+    auto PY = [&](float r, float a) { return cy - (int)lroundf(r * cosf(a * kPi / 180.0f)); };
+    int steps = (int)ceilf((a1 - a0) / 5.0f);
+    if (steps < 1) steps = 1;
+    for (int i = 0; i < steps; i++) {
+        float s = a0 + (a1 - a0) * (float)i / (float)steps;
+        float e = a0 + (a1 - a0) * (float)(i + 1) / (float)steps;
+        DrawTriangle(PX(r1, s), PY(r1, s), PX(r1, e), PY(r1, e), PX(r0, e), PY(r0, e), fill, TRUE);
+        DrawTriangle(PX(r1, s), PY(r1, s), PX(r0, e), PY(r0, e), PX(r0, s), PY(r0, s), fill, TRUE);
+        DrawLineAA((float)PX(r1, s), (float)PY(r1, s), (float)PX(r1, e), (float)PY(r1, e), edge, edgeW);
+        DrawLineAA((float)PX(r0, s), (float)PY(r0, s), (float)PX(r0, e), (float)PY(r0, e), edge, edgeW);
+    }
+    if (a1 - a0 < 359.0f) {
+        DrawLineAA((float)PX(r0, a0), (float)PY(r0, a0), (float)PX(r1, a0), (float)PY(r1, a0), edge, edgeW);
+        DrawLineAA((float)PX(r0, a1), (float)PY(r0, a1), (float)PX(r1, a1), (float)PY(r1, a1), edge, edgeW);
+    }
 }
 
 } // namespace EditPanel

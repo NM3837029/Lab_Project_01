@@ -3578,21 +3578,32 @@ struct EditUndoEntry {
 };
 
 // ============================================================================
-// 右クリックの円形メニュー
+// 右クリックの扇形（パイ）メニュー
 //
-// 6項目を、メニューを開いた位置（中心）のまわりに円形に並べる。項目は中心から見た「方向」で選ぶので、
+// 6項目を、メニューを開いた位置（中心）のまわりに、60度ずつの扇として並べる。項目は中心から見た「方向」で選ぶので、
 // 右ボタンを押したまま項目の方向へ動かして離すだけでも、離したあとに左クリックでも選べる。
+// 以前は6枚のカードを円形に置いていたが、カードより扇のほうが「向きで選ぶ」操作に合い、
+// 当たる面積も広い。左・右・下のパネルと同じ暗いデザインにそろえ、アイコン・状態・コストを1枚の扇に収めた。
 // 描画・判定・カーソル形状が同じ関数と定数を通るので、見えている位置と選べる位置は食い違わない。
 // ============================================================================
-const int   RADIAL_ITEM_W = 104, RADIAL_ITEM_H = 42; // 項目の大きさ(px)
+const float RADIAL_R_IN   = 30.0f;                    // 扇の内側の半径（この内側は、対象を隠さないよう抜いてある）
+const float RADIAL_R_OUT  = 118.0f;                   // 扇の外側の半径
+const float RADIAL_LABEL_R = 76.0f;                   // 項目の文字・アイコンを置く半径
 const float RADIAL_DEAD   = 24.0f;                    // 中心の不感帯の半径。この中では何も選ばない
-const float RADIAL_OUTER  = 170.0f;                   // これより外はメニューの外（クリックすると閉じる）
-const int   RADIAL_MARGIN_X = 150, RADIAL_MARGIN_Y = 125; // 画面の端からこれだけ内側へ寄せて開く（項目が見切れない）
-// 6項目の中心の、メニュー中心からのずれ。上から時計回り。
-const int   RADIAL_OFS[6][2] = { {0, -96}, {92, -48}, {92, 48}, {0, 96}, {-92, 48}, {-92, -48} };
+const float RADIAL_OUTER  = 170.0f;                   // これより外はメニューの外（クリックすると閉じる）。扇の外へ少しはみ出しても選べる
+const int   RADIAL_MARGIN_X = 170, RADIAL_MARGIN_Y = 148; // 画面の端からこれだけ内側へ寄せて開く（扇と、下の説明の帯が見切れない）
 
 // 項目1つぶんの表示と、押せるかどうか
-struct RadialItem { std::string label, sub; bool enabled = true; int id = 0; };
+//   state … 状態（ON/OFF・＋0.5 など。無ければ空）  cost … 消費するコスト  desc … 向けたときに出す説明
+//   why   … 押せないときの短い理由（扇の中に出す）  reason … 押せないときの説明（下の帯に出す）
+//   on    … いま入っている（トグルがONの）項目
+struct RadialItem {
+    std::string label, state, desc, why, reason;
+    float cost = 0.0f;
+    bool enabled = true, on = false;
+    int id = 0;
+    EditPanel::Icon icon = EditPanel::ICON_RESET;
+};
 
 // 中心(cx,cy)から見て、マウス(mx,my)がどの項目の方向を向いているか。不感帯の中・外側は -1。
 inline int RadialSectorAt(int cx, int cy, int mx, int my, int count) {
@@ -6000,44 +6011,40 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return (targetGimmick != nullptr && targetGimmick->isTimelineCut) ? 1 : 6;
     };
 
-    // 今の選択から、円形メニューの項目（表示と、押せるかどうか）を組み立てる。
+    // 今の選択から、扇形メニューの項目（表示と、押せるかどうか）を組み立てる。
     // 項目の順番は上から時計回り：巻き戻し／一時停止／加速／減速／反転／リセット。
     auto BuildRadialItems = [&](std::vector<RadialItem>& out) {
         out.clear();
-        char buf[48];
-        auto costStr = [&](float c) { sprintf_s(buf, sizeof(buf), "-%.0f", c); return std::string(buf); };
-        if (RadialCount() == 1) {
+        // 1項目を足す。applicable＝この対象に意味のある項目か。押せるのは「意味があって、コストが足りている」とき。
+        auto Add = [&](int id, const char* label, const char* state, const char* desc, EditPanel::Icon icon,
+                       bool applicable, float cost, bool on) {
             RadialItem it;
-            it.label = "カット削除"; it.sub = costStr(currentEditCost.flatMenuToggle);
-            it.enabled = (editCost >= currentEditCost.flatMenuToggle); it.id = 6;
+            it.id = id; it.label = label; it.state = state; it.desc = desc; it.icon = icon; it.cost = cost; it.on = on;
+            it.enabled = applicable && editCost >= cost;
+            if (!applicable) {
+                it.why = "使えない"; it.reason = "この物には使えません";
+            } else if (editCost < cost) {
+                char rb[64]; sprintf_s(rb, sizeof(rb), "コストが足りません（必要 %.0f）", cost);
+                it.why = "コスト不足"; it.reason = rb;
+            }
             out.push_back(it);
+        };
+        if (RadialCount() == 1) {
+            Add(6, "カット削除", "", "このカット区間を消す", EditPanel::ICON_CUTDEL, true, currentEditCost.flatMenuToggle, false);
             return;
         }
-        RadialItem it;
-        it = RadialItem(); it.id = 0; it.label = "巻き戻し";
-        it.sub = std::string((targetRewind && *targetRewind) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
-        it.enabled = targetRewind != nullptr && editCost >= currentEditCost.flatMenuToggle;
-        out.push_back(it);
-        it = RadialItem(); it.id = 1; it.label = "一時停止";
-        it.sub = std::string((targetPaused && *targetPaused) ? "ON " : "OFF ") + costStr(currentEditCost.flatMenuToggle);
-        it.enabled = targetPaused != nullptr && editCost >= currentEditCost.flatMenuToggle;
-        out.push_back(it);
-        it = RadialItem(); it.id = 2; it.label = "加速";
-        it.sub = "+0.5 " + costStr(currentEditCost.flatSpeedChange);
-        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
-        out.push_back(it);
-        it = RadialItem(); it.id = 3; it.label = "減速";
-        it.sub = "-0.5 " + costStr(currentEditCost.flatSpeedChange);
-        it.enabled = targetSpeedScale != nullptr && editCost >= currentEditCost.flatSpeedChange;
-        out.push_back(it);
-        it = RadialItem(); it.id = 4; it.label = "反転";
-        it.sub = costStr(currentEditCost.flatDirectionFlip);
-        it.enabled = targetDirection != nullptr && editCost >= currentEditCost.flatDirectionFlip;
-        out.push_back(it);
-        it = RadialItem(); it.id = 5; it.label = "リセット";
-        it.sub = costStr(currentEditCost.flatResetAll);
-        it.enabled = editCost >= currentEditCost.flatResetAll;
-        out.push_back(it);
+        Add(0, "巻き戻し", (targetRewind && *targetRewind) ? "ON" : "OFF", "この物だけ時間を戻す（すり抜け可）",
+            EditPanel::ICON_REWIND, targetRewind != nullptr, currentEditCost.flatMenuToggle, targetRewind && *targetRewind);
+        Add(1, "一時停止", (targetPaused && *targetPaused) ? "ON" : "OFF", "この物だけ時間を止める（踏み台にできる）",
+            EditPanel::ICON_PAUSE, targetPaused != nullptr, currentEditCost.flatMenuToggle, targetPaused && *targetPaused);
+        Add(2, "加速", "＋0.5", "この物の速さを 0.5倍ぶん上げる",
+            EditPanel::ICON_FAST, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false);
+        Add(3, "減速", "−0.5", "この物の速さを 0.5倍ぶん下げる",
+            EditPanel::ICON_SLOW, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false);
+        Add(4, "反転", "", "この物の向きを左右に反転する",
+            EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false);
+        Add(5, "リセット", "", "この物の編集をすべて元に戻す",
+            EditPanel::ICON_RESET, true, currentEditCost.flatResetAll, false);
     };
 
     // 項目 id を実行する（コスト・禁止の判定は、共通入口の中で行う）
@@ -15291,35 +15298,73 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
             } // ← 拡大表示で隠すパネルここまで
 
-            // 右クリックの円形メニュー。中心から見て、マウスが向いている項目を強調する。
+            // 右クリックの扇形（パイ）メニュー。中心から見て、マウスが向いている扇を強調する。
+            // 扇は、中心の対象を隠さないよう内側（半径 RADIAL_R_IN 未満）を抜いてある。
+            // 押せない扇は沈んだ色にして、扇の中に理由（使えない／コスト不足）を出す。詳しい説明は下の帯に出す。
             if (menu.isOpen) {
                 std::vector<RadialItem> ritems;
                 BuildRadialItems(ritems);
-                int hover = RadialSectorAt(menu.x, menu.y, mx, my, (int)ritems.size());
-                int accent = UiInkAccent();
-                // 中心の目印と不感帯。マウスが向いている項目へは線を引いて、どれが選ばれるかを見せる。
-                if (hover >= 0) {
-                    DrawLine(menu.x, menu.y, menu.x + RADIAL_OFS[hover][0], menu.y + RADIAL_OFS[hover][1], accent);
-                }
-                DrawCircle(menu.x, menu.y, (int)RADIAL_DEAD, accent, FALSE);
-                DrawCircle(menu.x, menu.y, 4, accent, TRUE);
-                for (int i = 0; i < (int)ritems.size(); i++) {
+                const int n = (int)ritems.size();
+                const int hover = RadialSectorAt(menu.x, menu.y, mx, my, n);
+                const float span = 360.0f / (float)n;
+                const unsigned int inkMain = GetColor(238, 240, 250), inkSub = GetColor(178, 186, 210), inkDim = GetColor(128, 130, 142);
+                const unsigned int inkCost = GetColor(255, 200, 80), inkOn = GetColor(143, 224, 160);
+                for (int i = 0; i < n; i++) {
                     const RadialItem& it = ritems[i];
-                    int x1 = menu.x + RADIAL_OFS[i][0] - RADIAL_ITEM_W / 2;
-                    int y1 = menu.y + RADIAL_OFS[i][1] - RADIAL_ITEM_H / 2;
-                    bool isHover = (i == hover);
-                    // 押せない項目は暗くして、文字も灰色にする（コスト不足・この対象では使えない）
-                    if (!it.enabled)  SetDrawBright(150, 148, 145);
-                    else if (isHover) SetDrawBright(255, 255, 255);
-                    else              SetDrawBright(214, 209, 202);
-                    DrawUiWindow(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, uiWindowHandle, GameCfg::UIK_RADIAL);
-                    SetDrawBright(255, 255, 255);
-                    int labelColor = !it.enabled ? UiInkSub() : (it.id == 6 ? UiInkWarn() : (isHover ? accent : UiInk()));
-                    int lw = GetDrawStringWidth(it.label.c_str(), (int)it.label.size());
-                    int sw = GetDrawStringWidth(it.sub.c_str(), (int)it.sub.size());
-                    DrawString(x1 + (RADIAL_ITEM_W - lw) / 2, y1 + 4, it.label.c_str(), labelColor);
-                    DrawString(x1 + (RADIAL_ITEM_W - sw) / 2, y1 + 22, it.sub.c_str(), it.enabled ? UiInkSub() : UiInkSub());
-                    if (isHover && it.enabled) DrawBox(x1, y1, x1 + RADIAL_ITEM_W, y1 + RADIAL_ITEM_H, accent, FALSE);
+                    const bool isHover = (i == hover);
+                    const float ca = (n == 1) ? 0.0f : span * (float)i; // 項目の中心の向き（真上が0、時計回り）
+                    const float a0 = (n == 1) ? 0.0f : ca - span * 0.5f + 1.2f;
+                    const float a1 = (n == 1) ? 360.0f : ca + span * 0.5f - 1.2f;
+                    unsigned int fill, edge;
+                    float edgeW = 1.2f;
+                    if (!it.enabled)  { fill = GetColor(44, 44, 50);  edge = isHover ? GetColor(140, 142, 156) : GetColor(84, 84, 92); }
+                    else if (isHover) { fill = GetColor(28, 64, 118); edge = GetColor(120, 190, 255); edgeW = 2.5f; }
+                    else if (it.on)   { fill = GetColor(34, 76, 66);  edge = GetColor(143, 224, 160); }
+                    else              { fill = GetColor(54, 52, 66);  edge = GetColor(124, 134, 168); }
+                    EditPanel::DrawPieSector(menu.x, menu.y, RADIAL_R_IN, RADIAL_R_OUT, a0, a1, fill, edge, edgeW);
+
+                    // 扇の中：アイコン／名前／状態とコスト
+                    const float rad = ca * 3.14159265f / 180.0f;
+                    const int lx = menu.x + (int)lroundf(RADIAL_LABEL_R * sinf(rad));
+                    const int ly = menu.y - (int)lroundf(RADIAL_LABEL_R * cosf(rad));
+                    const unsigned int iconCol = !it.enabled ? inkDim : (isHover ? GetColor(160, 220, 255) : inkSub);
+                    EditPanel::DrawIcon(it.icon, lx, ly - 17, iconCol);
+                    const unsigned int labelCol = !it.enabled ? inkDim : (it.id == 6 ? EditPanel::ColInkWarn() : inkMain);
+                    UiFont::Draw(lx - UiFont::Width(it.label.c_str(), 13) / 2, ly - 6, it.label.c_str(), labelCol, 13);
+                    // 2行目：押せるときは「状態　−コスト」、押せないときは理由
+                    if (!it.enabled) {
+                        UiFont::Draw(lx - UiFont::Width(it.why.c_str(), 11) / 2, ly + 11, it.why.c_str(), inkDim, 11);
+                    } else {
+                        char cb[24]; sprintf_s(cb, sizeof(cb), "−%.0f", it.cost);
+                        const int sw = it.state.empty() ? 0 : UiFont::Width(it.state.c_str(), 11);
+                        const int cw = UiFont::Width(cb, 11);
+                        const int gap = it.state.empty() ? 0 : 5;
+                        int x = lx - (sw + gap + cw) / 2;
+                        if (sw > 0) UiFont::Draw(x, ly + 11, it.state.c_str(), it.on ? inkOn : inkSub, 11);
+                        UiFont::Draw(x + sw + gap, ly + 11, cb, inkCost, 11);
+                    }
+                }
+                // 中心の目印と不感帯（この中では何も選ばない）
+                const int accent = (int)EditPanel::ColInkAccent();
+                DrawCircle(menu.x, menu.y, (int)RADIAL_DEAD, accent, FALSE);
+                DrawCircle(menu.x, menu.y, 3, accent, TRUE);
+
+                // 下の説明の帯。向けた項目の説明（押せないなら理由）を出す。何も向けていないときは、使い方を出す
+                {
+                    const int bw = 340, bh = 20, bx = menu.x - bw / 2, by = menu.y + (int)RADIAL_R_OUT + 4;
+                    DrawBox(bx, by, bx + bw, by + bh, EditPanel::ColBack(), TRUE);
+                    DrawBox(bx, by, bx + bw, by + bh, GetColor(124, 134, 168), FALSE);
+                    std::string msg;
+                    unsigned int msgCol = inkMain;
+                    if (hover >= 0) {
+                        const RadialItem& hi = ritems[hover];
+                        msg = hi.label + "　" + (hi.enabled ? hi.desc : hi.reason);
+                        if (!hi.enabled) msgCol = EditPanel::ColInkWarn();
+                    } else {
+                        msg = "押したまま向きへ動かして離す／クリックで選ぶ";
+                        msgCol = inkSub;
+                    }
+                    UiFont::Draw(bx + 8, by + 3, EditPanel::FitText(msg, bw - 16, 12).c_str(), msgCol, 12);
                 }
             }
 
