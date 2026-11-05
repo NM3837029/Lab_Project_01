@@ -943,8 +943,10 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             int et = GetSelectedTypeEnum(row);
             var eowner = new PartOwnerInfo { Kind = "enemy", TypeEnum = et, TypeName = ShortTypeName(EnemyTypes, et),
                 NoScale = def.noScale, NoRotate = def.noRotate, NoFlip = def.noFlip, NoPause = def.noPause, NoRewind = def.noRewind };
-            PartsEditRequested?.Invoke($"敵: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), eowner, parts => def.parts = parts);
+            int hw = IntCell(row, "hitboxWidth", 0), hh = IntCell(row, "hitboxHeight", 0);
+            // 敵の本体の絵は「絵を収める箱」(幅・高さ) に縦横比を保って収めて描く
+            OpenPartsEditor($"敵: {row.Cells["id"].Value}", def.parts, def.body, b => def.body = b, p => def.parts = p,
+                sprite, hw, hh, IntCell(row, "width", hw), IntCell(row, "height", hh), false, eowner);
         }
         else if (kind == AssetKind.Gimmick)
         {
@@ -954,21 +956,45 @@ Exception.StackTrace: {e.Exception.StackTrace}";
             int gt = GetSelectedTypeEnum(row);
             var gowner = new PartOwnerInfo { Kind = "gimmick", TypeEnum = gt, TypeName = ShortTypeName(GimmickTypes, gt),
                 NoScale = def.noScale, NoRotate = def.noRotate, NoFlip = def.noFlip, NoPause = def.noPause, NoRewind = def.noRewind };
-            PartsEditRequested?.Invoke($"ギミック: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), gowner, parts => def.parts = parts);
+            int hw = IntCell(row, "hitboxWidth", 0), hh = IntCell(row, "hitboxHeight", 0);
+            // ギミックの本体の絵は、置いた大きさいっぱいに縦横別倍率で伸ばして描く
+            OpenPartsEditor($"ギミック: {row.Cells["id"].Value}", def.parts, def.body, b => def.body = b, p => def.parts = p,
+                sprite, hw, hh, hw, hh, true, gowner);
         }
         else if (kind == AssetKind.Item)
         {
             var row = SelRow(dgvItems)!;
             var def = GetOrCreateItemParams(row);
             string sprite = row.Cells["sprite"].Value?.ToString() ?? "";
-            PartsEditRequested?.Invoke($"アイテム: {row.Cells["id"].Value}", def.parts, sprite,
-                IntCell(row, "hitboxWidth", 0), IntCell(row, "hitboxHeight", 0), new PartOwnerInfo { Kind = "item", TypeEnum = GetSelectedTypeEnum(row) }, parts => def.parts = parts);
+            int hw = IntCell(row, "hitboxWidth", 0), hh = IntCell(row, "hitboxHeight", 0);
+            OpenPartsEditor($"アイテム: {row.Cells["id"].Value}", def.parts, def.body, b => def.body = b, p => def.parts = p,
+                sprite, hw, hh, hw, hh, true, new PartOwnerInfo { Kind = "item", TypeEnum = GetSelectedTypeEnum(row) });
         }
         else
         {
             MessageBox.Show("パーツ編集は「敵」「ギミック」「アイテム」のいずれかを選択してからお使いください。", "対象外", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
+    }
+
+    // パーツ編集を開く。一覧の先頭に「★本体」（「画像を選ぶ」の絵）の行を足して渡し、
+    // 閉じたら本体の行と、ほかのパーツに分けて持ち主へ戻す（BodyPart.cs 参照）。
+    // 画像がまだ選ばれていないときは本体の行を出さない（動かす絵が無いため）。
+    private void OpenPartsEditor(string label, List<PartDef> storedParts, PartDef? storedBody, Action<PartDef?> setBody, Action<List<PartDef>> setParts,
+                                 string sprite, int hitW, int hitH, float boxW, float boxH, bool stretch, PartOwnerInfo owner)
+    {
+        bool offer = !string.IsNullOrWhiteSpace(sprite);
+        float hw = hitW > 0 ? hitW : (boxW > 0 ? boxW : 32f), hh = hitH > 0 ? hitH : (boxH > 0 ? boxH : 32f);
+        if (boxW <= 0) boxW = hw;
+        if (boxH <= 0) boxH = hh;
+        var list = new List<PartDef>();
+        if (offer) list.Add(BodyPart.ToEditRow(storedBody, sprite, hw, hh, boxW, boxH, stretch));
+        list.AddRange(storedParts);
+        PartsEditRequested?.Invoke(label, list, sprite, hitW, hitH, owner, edited =>
+        {
+            var (body, rest) = BodyPart.Split(edited, hw, hh, boxW, boxH);
+            setParts(rest);
+            if (offer) setBody(body);
+        });
     }
 
     // 機能追加: UI改善（提案書 CUT-2/AM-1という項目に対応）— コンボボックスの数字入り文字列から選ぶのではなく、

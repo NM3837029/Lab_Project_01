@@ -593,6 +593,23 @@ public partial class PartsEditorPageControl : UserControl
         return cms;
     }
 
+    // ==== 本体パーツ（「画像を選ぶ」の絵）の行 ====
+    // 一覧の先頭に「★本体」の行が入っているとき、パーツの番号（PartIndex・位相）は本体の分だけ1つずれる。
+    // 保存すると本体は parts から外れるので、番号を使う処理（ジェネレータ・プレビュー）は BodyShift ぶん引いて数える。
+    private int BodyShift => (parts.Count > 0 && BodyPart.IsBody(parts[0])) ? 1 : 0;
+    private bool HasBodyRow => BodyShift == 1;
+
+    // 選択から本体の行を外す（複製・反転複製など、本体に対して意味の無い操作の前に呼ぶ）。選択が空になったら false
+    private bool DropBodyFromSelection(string what)
+    {
+        if (_selected.RemoveWhere(i => i >= 0 && i < parts.Count && BodyPart.IsBody(parts[i])) > 0)
+        {
+            if (_selected.Count == 0) { Toast($"「★本体」は{what}できません。", warn: true); return false; }
+            if (selectedIndex < 0 || !_selected.Contains(selectedIndex)) selectedIndex = _selected.Min();
+        }
+        return true;
+    }
+
     // パーツ一覧グリッドの中身を、現在のpartsリストの内容で全面的に描き直す。
     // 一覧に変更を加える操作（追加/削除/並び替え等）は、最後に必ずこのメソッドを呼んで
     // 画面表示を最新状態に同期させている。
@@ -660,7 +677,9 @@ public partial class PartsEditorPageControl : UserControl
     private void DeleteSelected()
     {
         if (_selected.Count == 0) { Toast("削除するパーツを選んでください。", warn: true); return; }
-        var idxs = _selected.OrderByDescending(i => i).ToList();
+        // 「★本体」は消せない（「画像を選ぶ」で選んだ絵そのものなので）
+        var idxs = _selected.Where(i => i >= 0 && i < parts.Count && !BodyPart.IsBody(parts[i])).OrderByDescending(i => i).ToList();
+        if (idxs.Count == 0) { Toast("「★本体」は削除できません。絵を変えるときは、アセット管理の「画像を選ぶ」を使います。", warn: true); return; }
         int first = idxs.Last();
         foreach (int i in idxs)
         {
@@ -684,6 +703,8 @@ public partial class PartsEditorPageControl : UserControl
         int newIdx = selectedIndex + dir;
         // 移動先が一覧の範囲外（先頭より上、末尾より下）になる場合は何もしない。
         if (newIdx < 0 || newIdx >= parts.Count) return;
+        // 「★本体」は先頭に固定（動かせないし、本体を追い越すこともできない）
+        if (BodyPart.IsBody(parts[selectedIndex]) || BodyPart.IsBody(parts[newIdx])) { Toast("「★本体」は先頭に固定されています。", warn: true); return; }
         // タプルの分解代入を使い、選択中パーツと移動先のパーツの位置を入れ替える。
         (parts[selectedIndex], parts[newIdx]) = (parts[newIdx], parts[selectedIndex]);
         RefreshList();
@@ -695,7 +716,7 @@ public partial class PartsEditorPageControl : UserControl
     private void ChangeZOrder(int delta)
     {
         if (_selected.Count == 0) return;
-        foreach (int i in _selected) parts[i].zOrder = Math.Clamp(parts[i].zOrder + delta, -100, 100);
+        foreach (int i in _selected) { if (!BodyPart.IsBody(parts[i])) parts[i].zOrder = Math.Clamp(parts[i].zOrder + delta, -100, 100); }
         RefreshListCells();
         LoadDetailFromSelection();
         pnlComposer.Invalidate();
@@ -723,7 +744,7 @@ public partial class PartsEditorPageControl : UserControl
         var srcScript = (JArray)parts[selectedIndex].script.DeepClone();
         // 各パーツへは、それぞれ独立したインスタンスになるよう毎回改めてディープクローンして代入する
         // （同じJArrayインスタンスを複数パーツで共有すると、1パーツの編集が他パーツにも影響してしまうため）。
-        foreach (var p in parts) p.script = (JArray)srcScript.DeepClone();
+        foreach (var p in parts) { if (!BodyPart.IsBody(p)) p.script = (JArray)srcScript.DeepClone(); }
         PushHistory();
         LoadDetailFromSelection();
 
@@ -744,6 +765,7 @@ public partial class PartsEditorPageControl : UserControl
     private void DuplicateSelected()
     {
         if (_selected.Count == 0) { Toast("複製したいパーツを選んでください。", warn: true); return; }
+        if (!DropBodyFromSelection("複製")) return;
         var newIdx = new List<int>();
         // 後ろから挿入すると、前のパーツの添字がずれない
         foreach (int i in _selected.OrderByDescending(i => i))
@@ -807,6 +829,7 @@ public partial class PartsEditorPageControl : UserControl
     private void MirrorSelected()
     {
         if (_selected.Count == 0) { Toast("反転複製したいパーツを選んでください。", warn: true); return; }
+        if (!DropBodyFromSelection("反転複製")) return;
         // 左右反転の軸は「本体の中心」。本体の左右の幅の中央に対して、パーツの左右を入れ替える。
         var (bw, _) = BodySize();
         var newIdx = new List<int>();
@@ -1234,6 +1257,11 @@ public partial class PartsEditorPageControl : UserControl
             // 未選択の間は編集しても意味がないため、全ての入力コントロールを無効化してユーザーに
             // 「まずパーツを選んでください」という状態を視覚的に伝える。
             foreach (Control c in new Control[] { txtId, nudOffsetX, nudOffsetY, nudWidth, nudHeight, nudScale, nudHp, nudZOrder, chkDeadly, btnPartColor, chkAdditive, chkStretch }) c.Enabled = hasSel;
+            // 「★本体」は名前・HP・手前奥・接触ダメージを持たない（位置・大きさ・倍率・色・動き・画像の切り替えは、ほかのパーツと同じ）
+            if (hasSel && BodyPart.IsBody(parts[selectedIndex]))
+            {
+                foreach (Control c in new Control[] { txtId, nudHp, nudZOrder, chkDeadly }) c.Enabled = false;
+            }
             // 位置・大きさ・IDは主選択だけに効く。複数選択のときは、そのことを見出しで伝える。
             bool multi = _selected.Count >= 2;
             lblMultiNote.Visible = multi;
@@ -1300,6 +1328,7 @@ public partial class PartsEditorPageControl : UserControl
     private void PickSpriteForSelected()
     {
         if (selectedIndex < 0) { Toast("先にパーツを選んでください。", warn: true); return; }
+        if (BodyPart.IsBody(parts[selectedIndex])) { Toast("「★本体」の絵は、アセット管理の「画像を選ぶ」で変えます（ここで動かした位置・大きさ・動きは、絵を変えても残ります）。", warn: true); return; }
         using var ofd = new OpenFileDialog { Filter = "画像ファイル|*.png;*.jpg;*.bmp|すべて|*.*", Title = "パーツ画像を選択" };
         if (ofd.ShowDialog() != DialogResult.OK) return;
         // プロジェクト外のファイルを直接参照すると後で場所を移動された時に壊れるため、
@@ -1322,6 +1351,7 @@ public partial class PartsEditorPageControl : UserControl
     private void EditHitboxForSelected()
     {
         if (selectedIndex < 0) { Toast("先にパーツを選んでください。", warn: true); return; }
+        if (BodyPart.IsBody(parts[selectedIndex])) { Toast("「★本体」には当たり判定を持たせません。本体の当たり判定は、アセット管理の「🎯当たり判定」で決めます。", warn: true); return; }
         var p = parts[selectedIndex];
         string full = string.IsNullOrEmpty(p.sprite) ? "" : Path.Combine(projectRoot, p.sprite.Replace('/', '\\'));
         // 現在の当たり判定の値を渡して編集画面を開いてもらい、確定されたらコールバックで
@@ -1343,6 +1373,7 @@ public partial class PartsEditorPageControl : UserControl
     private void EditScriptForSelected()
     {
         if (selectedIndex < 0) { Toast("先にパーツを選んでください。", warn: true); return; }
+        if (BodyPart.IsBody(parts[selectedIndex])) { Toast("「★本体」には挙動スクリプトを付けられません。動かしたいときは「動き」を使ってください。", warn: true); return; }
         var p = parts[selectedIndex];
         BehaviorScriptEditRequested?.Invoke($"パーツ: {p.id}", p.script, script => { p.script = script; LoadDetailFromSelection(); PushHistory(); });
     }
@@ -1354,7 +1385,7 @@ public partial class PartsEditorPageControl : UserControl
     private void OpenTemplatePicker()
     {
         var (bw, bh) = BodySize();
-        using var dlg = new PartTemplatePickerForm(projectRoot, baseSpritePath, bw, bh, parts.Count);
+        using var dlg = new PartTemplatePickerForm(projectRoot, baseSpritePath, bw, bh, parts.Count - BodyShift);
         if (dlg.ShowDialog(FindForm()) != DialogResult.OK || dlg.ResultParts.Count == 0) return;
         AddGeneratedParts(dlg.ResultParts, dlg.ReplaceExisting, $"テンプレート「{dlg.ResultTemplateName}」");
         if (!string.IsNullOrEmpty(dlg.ResultNote)) Toast($"{dlg.ResultParts.Count}個のパーツを追加しました。{dlg.ResultNote}");
@@ -1367,8 +1398,8 @@ public partial class PartsEditorPageControl : UserControl
     {
         if (replaceExisting)
         {
-            foreach (var p in parts) InvalidatePartThumb(p);
-            parts.Clear();
+            foreach (var p in parts) { if (!BodyPart.IsBody(p)) InvalidatePartThumb(p); }
+            parts.RemoveAll(p => !BodyPart.IsBody(p)); // 「★本体」は残す（置き換えるのはほかのパーツだけ）
         }
         var existing = new HashSet<string>(parts.Select(p => p.id));
         foreach (var np in newParts)
@@ -1447,7 +1478,7 @@ public partial class PartsEditorPageControl : UserControl
         using var form = new RodGeneratorForm(projectRoot);
         if (form.ShowDialog() != DialogResult.OK) return;
 
-        var newParts = GenerateRodParts(form, parts.Count);
+        var newParts = GenerateRodParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「回転する棒」");
     }
 
@@ -1484,7 +1515,7 @@ public partial class PartsEditorPageControl : UserControl
 
         // 既存メンバーを削除してから同じパラメータ体系で再生成する（並び順は末尾に移動する）
         foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
-        var newParts = GenerateRodParts(form, parts.Count);
+        var newParts = GenerateRodParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「回転する棒」（更新）");
     }
 
@@ -1555,7 +1586,7 @@ public partial class PartsEditorPageControl : UserControl
         using var form = new PendulumGeneratorForm(projectRoot);
         if (form.ShowDialog() != DialogResult.OK) return;
 
-        var newParts = GeneratePendulumParts(form, parts.Count);
+        var newParts = GeneratePendulumParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「振り子」");
     }
 
@@ -1589,7 +1620,7 @@ public partial class PartsEditorPageControl : UserControl
         if (form.ShowDialog() != DialogResult.OK) return;
 
         foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
-        var newParts = GeneratePendulumParts(form, parts.Count);
+        var newParts = GeneratePendulumParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「振り子」（更新）");
     }
 
@@ -1653,7 +1684,7 @@ public partial class PartsEditorPageControl : UserControl
         using var form = new OrbitGeneratorForm(projectRoot);
         if (form.ShowDialog() != DialogResult.OK) return;
 
-        var newParts = GenerateOrbitParts(form, parts.Count);
+        var newParts = GenerateOrbitParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「公転」");
     }
 
@@ -1687,7 +1718,7 @@ public partial class PartsEditorPageControl : UserControl
         if (form.ShowDialog() != DialogResult.OK) return;
 
         foreach (var idx in group.Indices.OrderByDescending(i => i)) parts.RemoveAt(idx);
-        var newParts = GenerateOrbitParts(form, parts.Count);
+        var newParts = GenerateOrbitParts(form, parts.Count - BodyShift);
         AddGeneratedParts(newParts, false, "「公転」（更新）");
     }
 

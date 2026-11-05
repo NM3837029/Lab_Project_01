@@ -1153,6 +1153,12 @@ public class EnemyDef
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1体の敵を複数の画像パーツの組み合わせで構成したい場合のパーツ一覧（空なら単一画像のまま）。
     public List<PartDef> parts { get; set; } = new();
+
+    // 本体パーツ（「画像を選ぶ」で選んだ絵を、パーツ編集の「★本体」の行で動かす設定。BodyPart.cs 参照）。
+    // 【重要】C++側 DrawPixel.cpp の EnemyDef/GimmickDef/ItemDef.body と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    // 何も変えていないときは null＝JSON に出さないので、使っていない既存のアセットは1行も変わらない。
+    public PartDef? body { get; set; } = null;
+    public bool ShouldSerializebody() => body != null;
 }
 
 // ギミックの「種類」1つ分の定義。PlacedGimmickはこの定義を「どこに置くか」だけを持つ。
@@ -1253,6 +1259,12 @@ public class GimmickDef
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1つのギミックを複数の画像パーツの組み合わせで構成したい場合のパーツ一覧。
     public List<PartDef> parts { get; set; } = new();
+
+    // 本体パーツ（「画像を選ぶ」で選んだ絵を、パーツ編集の「★本体」の行で動かす設定。BodyPart.cs 参照）。
+    // 【重要】C++側 DrawPixel.cpp の EnemyDef/GimmickDef/ItemDef.body と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    // 何も変えていないときは null＝JSON に出さないので、使っていない既存のアセットは1行も変わらない。
+    public PartDef? body { get; set; } = null;
+    public bool ShouldSerializebody() => body != null;
 }
 
 // アイテムの「種類」1つ分の定義。PlacedItemはこの定義を「どこに置くか」だけを持つ。
@@ -1295,6 +1307,12 @@ public class ItemDef
     // Feature: Composite Multi-Part Objects (Parts-M7)
     // 1つのアイテムを複数の画像パーツの組み合わせで構成したい場合のパーツ一覧。
     public List<PartDef> parts { get; set; } = new();
+
+    // 本体パーツ（「画像を選ぶ」で選んだ絵を、パーツ編集の「★本体」の行で動かす設定。BodyPart.cs 参照）。
+    // 【重要】C++側 DrawPixel.cpp の EnemyDef/GimmickDef/ItemDef.body と対応する。ここに無いと、保存し直した瞬間にJSONから消える。
+    // 何も変えていないときは null＝JSON に出さないので、使っていない既存のアセットは1行も変わらない。
+    public PartDef? body { get; set; } = null;
+    public bool ShouldSerializebody() => body != null;
 }
 
 // ===== 複合オブジェクトのパーツ定義 (Feature: Composite Multi-Part Objects) =====

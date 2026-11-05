@@ -360,7 +360,7 @@ public partial class PartsEditorPageControl
             {
                 // 再生中は挙動スクリプトを現在時刻(_previewTime)とパーツ番号(i=PartIndex)で評価し、
                 // スクリプトが位置や角度を動的に変えている場合はその評価結果で上書きする。
-                var pose = ScriptPreviewEvaluator.Evaluate(p.script, _previewTime, i);
+                var pose = ScriptPreviewEvaluator.Evaluate(p.script, _previewTime, i - BodyShift);
                 if (pose.HasOffset) { ox = pose.OffsetX; oy = pose.OffsetY; }
                 if (pose.HasAngle) angleRad = pose.Angle;
             }
@@ -373,7 +373,7 @@ public partial class PartsEditorPageControl
                 _sim.ParentCenter = new PointF(bodyW / 2f, bodyH / 2f);
                 _sim.PlayerPos = new PointF(_sim.ParentCenter.X + (_simPlayerNear ? 60f : 500f), _sim.ParentCenter.Y + 20f);
                 var es = EffectivePartSize(p);
-                var res = PartMotionEvaluator.Evaluate(p.motions, i, _previewTime, _sim, new PointF(ox + es.w / 2f, oy + es.h / 2f), angleRad);
+                var res = PartMotionEvaluator.Evaluate(p.motions, i - BodyShift, _previewTime, _sim, new PointF(ox + es.w / 2f, oy + es.h / 2f), angleRad);
                 ox += res.DX; oy += res.DY; angleRad += res.Angle;
                 motionScale = res.Scale; motionAlpha = res.Alpha;
                 motionTR = res.TintR; motionTG = res.TintG; motionTB = res.TintB;
@@ -525,7 +525,8 @@ public partial class PartsEditorPageControl
         var tl = W2S(0, 0);
         var br = W2S(bw, bh);
         var bodyRect = new RectangleF(tl.X, tl.Y, br.X - tl.X, br.Y - tl.Y);
-        if (baseSprite != null)
+        // 「★本体」の行があるときは、本体の絵そのものをパーツとして描くので、薄い目印の絵は重ねない
+        if (baseSprite != null && !HasBodyRow)
         {
             if (_bodyAttr == null)
             {

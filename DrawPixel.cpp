@@ -274,6 +274,15 @@ struct PartInstance {
     float parentScaleX = 1.0f, parentScaleY = 1.0f; // 親の横・縦倍率
     float parentTilt    = 0.0f;                      // 親の配置時からの傾き（描画角度に加算する）
     float parentUniform = 1.0f;                      // パーツ自身の表示倍率・判定サイズに掛ける一様倍率
+
+    // ---- 本体パーツ（「画像を選ぶ」で選んだ絵そのものを、パーツと同じ項目で編集できるようにしたもの）----
+    // isBody のパーツは parts[] の最後に1つだけ入る（定義側の parts[i] と添字がずれないよう、先頭には置かない）。
+    // 当たり判定は持たず（接触・被弾・拾得の対象にならない）、描画は DrawBodyPart が受け持つ。
+    // 位置は「親の中心」が基準で、bodyDevX/Y が中心からのずれ（親の倍率・傾きを掛けて反映する）。
+    // bodyBaseW/H は「何も指定しなかったときの絵の箱」。width/height がこれと違えば、その比率で絵を伸縮する。
+    bool  isBody = false;
+    float bodyDevX = 0.0f, bodyDevY = 0.0f;
+    float bodyBaseW = 0.0f, bodyBaseH = 0.0f;
 };
 
 // ======================================================
@@ -497,6 +506,12 @@ struct EnemyDef {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
+
+    // 本体パーツ（「画像を選ぶ」の絵をパーツの編集項目で動かす設定）。JSON に "body" が無ければ hasBody=false で、従来どおりの描画になる。
+    // offsetX/Y は「親の中心からのずれ」、width/height は 0 なら素材の箱のまま、scale は絵の倍率。
+    // 当たり判定・hp・deadly・script・zOrder は本体では使わない（読み込んでも無視する）。
+    PartDef body;
+    bool hasBody = false;
 };
 
 // ギミック（回転する橋、沈むリフト、ワープ床など）1種類分の定義データ。gimmicks.jsonから読み込まれる。
@@ -588,6 +603,12 @@ struct GimmickDef {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
+
+    // 本体パーツ（「画像を選ぶ」の絵をパーツの編集項目で動かす設定）。JSON に "body" が無ければ hasBody=false で、従来どおりの描画になる。
+    // offsetX/Y は「親の中心からのずれ」、width/height は 0 なら素材の箱のまま、scale は絵の倍率。
+    // 当たり判定・hp・deadly・script・zOrder は本体では使わない（読み込んでも無視する）。
+    PartDef body;
+    bool hasBody = false;
 };
 
 std::vector<EnemyDef> enemyDefs;     // 読み込み済みの敵定義（enemies.json由来）を全種類分保持する一覧
@@ -686,6 +707,12 @@ struct ItemDef {
 
     // Feature: Composite Multi-Part Objects (Parts-M1)
     std::vector<PartDef> parts;
+
+    // 本体パーツ（「画像を選ぶ」の絵をパーツの編集項目で動かす設定）。JSON に "body" が無ければ hasBody=false で、従来どおりの描画になる。
+    // offsetX/Y は「親の中心からのずれ」、width/height は 0 なら素材の箱のまま、scale は絵の倍率。
+    // 当たり判定・hp・deadly・script・zOrder は本体では使わない（読み込んでも無視する）。
+    PartDef body;
+    bool hasBody = false;
 };
 
 // プレイヤーが現在使える能力（アイテムで解禁されるアクション）をまとめた構造体。
@@ -902,11 +929,8 @@ void ApplyGimmickDefaultParams(GimmickDef& def) {
 // parentObj（敵/ギミック/アイテム1件分のJSONオブジェクト）に"parts"配列があれば、その各要素を
 // PartDefへ変換してoutPartsに積んでいく。"parts"が無い/配列でない場合は何もしない
 // （＝既存のparts無し定義はこれまで通りの見た目・挙動を保つ）。
-void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts) {
-    if (!parentObj.contains("parts") || !parentObj["parts"].is_array()) return;
-    for (const auto& p : parentObj["parts"]) {
-        if (!p.is_object()) continue;
-        PartDef part;
+static void ParseOnePartDef(const json& p, PartDef& part) {
+    {
         // JSONの各キーをPartDefのフィールドへ読み込む。キーが存在しなければ第2引数の既定値を使う。
         part.id = p.value("id", "");
         part.sprite_path = p.value("sprite", "");
@@ -995,8 +1019,34 @@ void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts
                 if (part.hitboxHeight == 0) part.hitboxHeight = gh;
             }
         }
+    }
+}
+
+void ParsePartDefsFromJson(const json& parentObj, std::vector<PartDef>& outParts) {
+    if (!parentObj.contains("parts") || !parentObj["parts"].is_array()) return;
+    for (const auto& p : parentObj["parts"]) {
+        if (!p.is_object()) continue;
+        PartDef part;
+        ParseOnePartDef(p, part);
         outParts.push_back(part);
     }
+}
+
+// 本体パーツ（"body"）を読む。無ければ何もしない（hasBody=false のまま＝従来どおりの描画）。
+// 通常のパーツと同じ読み方なので、モーション・画像の切り替え・色・加算合成がそのまま使える。
+// 本体は「画像を選ぶ」の絵を使うため sprite は読まない（パスが書かれていても無視）。
+void ParseBodyDefFromJson(const json& parentObj, PartDef& outBody, bool& outHas) {
+    outHas = false;
+    if (!parentObj.contains("body") || !parentObj["body"].is_object()) return;
+    PartDef b;
+    ParseOnePartDef(parentObj["body"], b);
+    b.sprite_path = "";
+    b.graphHandle = -1;
+    b.hp = 0; b.deadly = false; b.zOrder = 0;
+    b.hitboxWidth = 0; b.hitboxHeight = 0; b.hitboxOffsetX = 0; b.hitboxOffsetY = 0;
+    b.script = json::array();
+    outBody = b;
+    outHas = true;
 }
 
 // ゲーム起動時（およびエディタ起動時）に1度だけ呼ばれ、assets/enemies.json・assets/items.json・
@@ -1179,6 +1229,7 @@ void LoadAssetDefinitions() {
                     ApplyEnemyDefaultParams(def);
                     // 複数パーツで構成される敵の場合、"parts"配列を読み込む
                     ParsePartDefsFromJson(e, def.parts);
+                    ParseBodyDefFromJson(e, def.body, def.hasBody);
                     enemyDefs.push_back(def);
                 }
             } else {
@@ -1223,6 +1274,7 @@ void LoadAssetDefinitions() {
                         }
                     }
                     ParsePartDefsFromJson(i, def.parts);
+                    ParseBodyDefFromJson(i, def.body, def.hasBody);
                     itemDefs.push_back(def);
                 }
             } else {
@@ -1314,6 +1366,7 @@ void LoadAssetDefinitions() {
                     if (g.contains("edit_reactions") && g["edit_reactions"].is_object()) def.editReactions = g["edit_reactions"];
                     ApplyGimmickDefaultParams(def);
                     ParsePartDefsFromJson(g, def.parts);
+                    ParseBodyDefFromJson(g, def.body, def.hasBody);
                     gimmickDefs.push_back(def);
                 }
             } else {
@@ -1379,6 +1432,34 @@ std::vector<PartInstance> BuildPartInstances(const std::vector<PartDef>& defs, f
         result.push_back(inst);
     }
     return result;
+}
+
+// 本体パーツのインスタンスを parts の末尾に1つ足す。
+//   handle … 「画像を選ぶ」で選んだ絵のハンドル（-1なら何もしない＝従来の描画）
+//   boxW/H … 何も指定しなかったときの絵の箱（敵は width/height、ギミック・アイテムは置いた大きさ）
+//   stretch … true なら箱いっぱいに縦横別倍率で伸ばす（ギミック・アイテムの描き方）。false なら縦横比を保って箱に収める（敵の描き方）
+void AppendBodyInstance(std::vector<PartInstance>& parts, const PartDef& body, int handle, float boxW, float boxH, bool stretch) {
+    if (handle < 0) return;
+    PartInstance inst;
+    inst.isBody = true;
+    inst.handle = handle;
+    inst.bodyBaseW = boxW; inst.bodyBaseH = boxH;
+    inst.width  = body.width  > 0 ? body.width  : (int)boxW;
+    inst.height = body.height > 0 ? body.height : (int)boxH;
+    inst.scale = body.scale;
+    inst.bodyDevX = body.offsetX; inst.bodyDevY = body.offsetY;
+    inst.localX = body.offsetX; inst.localY = body.offsetY;
+    inst.hp = 0; inst.isActive = true; inst.deadly = false;
+    inst.hitboxWidth = 0; inst.hitboxHeight = 0; // 当たり判定なし（接触・被弾・拾得の対象にしない）
+    inst.zOrder = 0;
+    inst.partIndex = -1; // 定義の parts[] には無い
+    inst.tintR = body.tintR; inst.tintG = body.tintG; inst.tintB = body.tintB;
+    inst.additive = body.additive;
+    inst.stretch = stretch;
+    inst.motions = body.motions;
+    inst.motionStates.assign(body.motions.size(), PartMotionState());
+    inst.spriteRules = body.spriteRules;
+    parts.push_back(inst);
 }
 
 // 新アセット移行対応 — 素材画像の実サイズを、定義側が意図した論理サイズへ収める表示倍率を求める。
@@ -1809,6 +1890,7 @@ void UpdatePartSprites(std::vector<PartInstance>& parts, const PartMotionCtx& ct
 void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float cameraY, bool wantBehindParent, float alphaMul = 1.0f, bool flipH = false) {
     for (const auto& part : parts) {
         if (!part.isActive) continue; // 破壊済みのパーツは描画しない
+        if (part.isBody) continue;    // 本体パーツは親の本体の位置で DrawBodyPart が描く
         // wantBehindParent==trueのパス呼び出し時はzOrder<0（親より奥）のパーツだけ、
         // wantBehindParent==falseの呼び出し時はzOrder>=0（親より手前）のパーツだけを描画する
         if ((part.zOrder < 0) != wantBehindParent) continue;
@@ -1862,6 +1944,59 @@ void DrawPartsPass(const std::vector<PartInstance>& parts, float cameraX, float 
         if (hasTint) SetDrawBright(255, 255, 255);
         if (needBlend || mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
+}
+
+// 本体パーツ（「画像を選ぶ」の絵）を描く。親の本体が描かれる位置・角度・向きに、パーツの編集項目を重ねる。
+//   cx, cy      … 親の中心の画面座標（敵は当たり判定の中心、ギミック・アイテムは絵の箱の中心）
+//   ownerScale  … 縦横比を保って描くとき（敵）の親の倍率
+//   ownerW/H    … 縦横別に伸ばして描くとき（ギミック・アイテム）の親の今の大きさ（px）
+//   angle       … 親の本体の絵に掛ける角度（敵は bodyAngle、ギミックは gim.angle）
+//   flipH       … 左右反転して描くか
+//   alphaMul    … 全体の不透明度（幽霊の濃さなど）
+// 何も編集していない本体（ずれ0・倍率1・色なし・モーションなし）は、従来の描き方と同じ結果になる。
+void DrawBodyPart(const PartInstance& part, float cx, float cy, float ownerScale, float ownerW, float ownerH,
+                  double angle, bool flipH, float alphaMul) {
+    const int ph = (part.drawHandle >= 0) ? part.drawHandle : part.handle;
+    if (ph < 0) return;
+    // 中心からのずれ：親の倍率を掛けて、親の傾きぶん回す。モーションの位置の上乗せも同じ空間
+    float ox = part.bodyDevX * part.parentScaleX, oy = part.bodyDevY * part.parentScaleY;
+    float mdx = 0.0f, mdy = 0.0f;
+    if (part.motionDX != 0.0f || part.motionDY != 0.0f) GetPartMotionWorldOffset(part, mdx, mdy);
+    const float tc = cosf(part.parentTilt), ts = sinf(part.parentTilt);
+    const int pcx = (int)(cx + ox * tc - oy * ts + mdx);
+    const int pcy = (int)(cy + ox * ts + oy * tc + mdy);
+    const double k = (double)part.scale * (double)part.motionScale;
+    const double ang = angle + part.angle + part.motionAngle;
+
+    const bool motionAlpha = (part.motionAlpha * alphaMul < 0.999f);
+    const float mulR = part.tintR * part.motionTintR, mulG = part.tintG * part.motionTintG, mulB = part.tintB * part.motionTintB;
+    const bool hasTint = (mulR != 1.0f || mulG != 1.0f || mulB != 1.0f);
+    const bool needBlend = motionAlpha || part.additive;
+    const int alphaI = (int)(255.0f * part.motionAlpha * alphaMul);
+    auto b255 = [](float v) { return (int)(v < 0.0f ? 0.0f : (v > 1.0f ? 255.0f : v * 255.0f)); };
+    auto drawIt = [&]() {
+        if (part.stretch) {
+            int iw = 0, ih = 0;
+            GetGraphSize(ph, &iw, &ih);
+            if (iw <= 0 || ih <= 0) return;
+            // 箱の大きさ（親の今の大きさ）に、指定した幅・高さの比を掛ける。比は「指定が無ければ1」
+            const double wf = (part.bodyBaseW > 0.0f) ? (double)part.width  / part.bodyBaseW : 1.0;
+            const double hf = (part.bodyBaseH > 0.0f) ? (double)part.height / part.bodyBaseH : 1.0;
+            DrawRotaGraph3(pcx, pcy, iw / 2, ih / 2, (double)ownerW / iw * wf * k, (double)ownerH / ih * hf * k, ang, ph, TRUE, flipH ? TRUE : FALSE);
+        } else {
+            DrawRotaGraph(pcx, pcy, ComputeFitScale(ph, (float)part.width, (float)part.height) * ownerScale * (float)k, ang, ph, TRUE, flipH ? TRUE : FALSE);
+        }
+    };
+    if (needBlend) SetDrawBlendMode(part.additive ? DX_BLENDMODE_ADD : DX_BLENDMODE_ALPHA, alphaI);
+    if (hasTint) SetDrawBright(b255(mulR), b255(mulG), b255(mulB));
+    drawIt();
+    if (mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) {
+        SetDrawBlendMode(DX_BLENDMODE_ADD, alphaI);
+        SetDrawBright(b255(mulR - 1.0f), b255(mulG - 1.0f), b255(mulB - 1.0f));
+        drawIt();
+    }
+    if (hasTint) SetDrawBright(255, 255, 255);
+    if (needBlend || mulR > 1.0f || mulG > 1.0f || mulB > 1.0f) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 }
 
 
@@ -4015,9 +4150,26 @@ bool EnemyIsBulletProof(const Enemy& e) {
 // トゲや扉のように「倒すと役割が変わる」型は、見た目が回らないと
 // 何が起きたのかプレイヤーに全く伝わらない。DrawExtendGraphの代わりにこれを使う。
 // x/y/w/h はワールド座標のまま渡す（カメラ補正はこの中で行う）。
+// ---- 本体パーツを持つギミックの、型ごとの絵の抑止 ----
+// ギミックの描画は型ごとに約20箇所で自前の DrawExtendGraph / DrawRotaGraph3 を呼んでいる。
+// 本体パーツ（「画像を選ぶ」の絵をパーツ編集で動かす設定）を持つギミックでは、その絵を DrawBodyPart が描くので、
+// 型ごとの描画側は「同じ絵」だけを描かないようにする（扉の開閉の絵など、型が足す演出は今までどおり出る）。
+// 抑止するのは、本体の絵と、切り替え先の絵（spriteAlt）のハンドル。ギミックの描画ループの中だけで有効にし、外へ出るときに必ず -1 へ戻す。
+static int g_hideBodyHandleA = -1, g_hideBodyHandleB = -1;
+static inline bool GimBodyHidden(int h) { return h >= 0 && (h == g_hideBodyHandleA || h == g_hideBodyHandleB); }
+static inline int GimBodyDrawExtend(int x1, int y1, int x2, int y2, int h, int trans) {
+    if (GimBodyHidden(h)) return 0;
+    return (DrawExtendGraph)(x1, y1, x2, y2, h, trans);
+}
+static inline int GimBodyDrawRota3(int x, int y, int cxp, int cyp, double exX, double exY, double ang, int h, int trans, int turn) {
+    if (GimBodyHidden(h)) return 0;
+    return (DrawRotaGraph3)(x, y, cxp, cyp, exX, exY, ang, h, trans, turn);
+}
+
 void DrawGimmickRotated(const Gimmick& gim, int handle, float camX, float camY,
                         float x, float y, float w, float h) {
     if (handle < 0) return;
+    if (GimBodyHidden(handle)) return; // 本体パーツが代わりに描いている絵は、型ごとの描画では描かない
     int imgW = 1, imgH = 1;
     GetGraphSize(handle, &imgW, &imgH);
     if (imgW <= 0) imgW = 1;
@@ -6744,6 +6896,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 enemy.height = matched->height > 0 ? matched->height : matched->hitboxHeight;
                 // Feature: Composite Multi-Part Objects (Parts-M1)
                 enemy.parts = BuildPartInstances(matched->parts, enemy.x, enemy.y);
+                // 本体パーツ：「画像を選ぶ」の絵を、パーツと同じ編集項目で動かす（定義に body があるときだけ）
+                if (matched->hasBody) AppendBodyInstance(enemy.parts, matched->body, enemy.handle, (float)enemy.width, (float)enemy.height, false);
             } else {
                 enemy.hp = 3;
                 enemy.parts.clear();
@@ -6781,6 +6935,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Feature: Composite Multi-Part Objects (Parts-M1)
             const ItemDef* idef = FindItemDef(item.assetId);
             item.parts = idef ? BuildPartInstances(idef->parts, item.x, item.y) : std::vector<PartInstance>();
+            if (idef && idef->hasBody) AppendBodyInstance(item.parts, idef->body, item.handle, item.spriteWidth, item.spriteHeight, true);
         }
 
         gimmicks = stage.gimmicks;
@@ -6794,6 +6949,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             // Feature: Composite Multi-Part Objects (Parts-M1)
             gim.parts = gdef ? BuildPartInstances(gdef->parts, gim.x, gim.y) : std::vector<PartInstance>();
+            if (gdef && gdef->hasBody) {
+                // 一方通行の壁は width/height（当たり判定の箱）で描くので、そちらを絵の箱にする
+                const bool oneWay = (gim.type == GIMMICK_ONEWAY_WALL);
+                AppendBodyInstance(gim.parts, gdef->body, gim.handle, oneWay ? gim.width : gim.spriteWidth, oneWay ? gim.height : gim.spriteHeight, true);
+            }
             // Feature: チェックポイント — テンプレートから作り直した直後はval1(発動済みフラグ)が消えるため、
             // 現在の復帰地点と座標が一致するチェックポイントだけ再度「発動済み」の見た目に戻す
             if (gim.type == GIMMICK_CHECKPOINT && checkpointX >= 0.0f && gim.x == checkpointX && gim.y == checkpointY) {
@@ -12212,7 +12372,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
                         for (const auto& part : item.parts) {
-                            if (!part.isActive) continue;
+                            if (!part.isActive || part.isBody) continue; // 本体パーツは当たり判定を持たない
                             float partHX, partHY, partW, partH;
                             // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
                             GetPartHitRect(part, partHX, partHY, partW, partH);
@@ -13159,7 +13319,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // Feature: Composite Multi-Part Objects (Parts-M4) — パーツごとの接触ダメージ判定
                         bool hitPart = false;
                         for (const auto& part : enemy.parts) {
-                            if (!part.isActive) continue;
+                            if (!part.isActive || part.isBody) continue; // 本体パーツは当たり判定を持たない
                             float partHX, partHY, partW, partH;
                             // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
                             GetPartHitRect(part, partHX, partHY, partW, partH);
@@ -13195,7 +13355,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (edef != nullptr && edef->consumePartOnAttack && !suppressConsume) {
                                     bool consumed = false;
                                     for (int pi = (int)enemy.parts.size() - 1; pi >= 0; pi--) {
-                                        if (enemy.parts[pi].isActive) {
+                                        if (enemy.parts[pi].isActive && !enemy.parts[pi].isBody) {
                                             enemy.parts[pi].isActive = false;
                                             consumed = true;
                                             break;
@@ -13205,7 +13365,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     // 「消費できる節が最初から無かった」場合も同じ扱いにしておくと、
                                     // パーツ定義を空にしたときに無敵の敵ができあがる事故を防げる。
                                     bool anyLeft = false;
-                                    for (const auto& part : enemy.parts) { if (part.isActive) { anyLeft = true; break; } }
+                                    for (const auto& part : enemy.parts) { if (part.isActive && !part.isBody) { anyLeft = true; break; } }
                                     if (!anyLeft) {
                                         enemy.isActive = false;
                                         SoundManager::Get().PlaySe(edef->seDeath);
@@ -13295,7 +13455,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (bullets[i].isActive) {
                                     const EnemyDef* edefForParts = FindEnemyDef(enemy.assetId);
                                     for (auto& part : enemy.parts) {
-                                        if (!part.isActive) continue;
+                                        if (!part.isActive || part.isBody) continue;
                                         float partHX, partHY, partW, partH;
                                         // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
                                         GetPartHitRect(part, partHX, partHY, partW, partH);
@@ -13363,7 +13523,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 if (!gim.isActive) continue;
                                 const GimmickDef* gdefForPartHit = FindGimmickDef(gim.assetId);
                                 for (auto& part : gim.parts) {
-                                    if (!part.isActive) continue;
+                                    if (!part.isActive || part.isBody) continue;
                                     float partHX, partHY, partW, partH;
                                     // 複合オブジェクトのパーツ追従 — 判定矩形は親の倍率込みで1箇所にまとめてある
                                     GetPartHitRect(part, partHX, partHY, partW, partH);
@@ -13535,6 +13695,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         // ステージギミックの描画
+        // この範囲の DrawExtendGraph / DrawRotaGraph3 は、本体パーツが描いている絵を飛ばす版に差し替える（ループの後で元へ戻す）
+#define DrawExtendGraph(...) GimBodyDrawExtend(__VA_ARGS__)
+#define DrawRotaGraph3(...) GimBodyDrawRota3(__VA_ARGS__)
         for (const auto& gim : gimmicks) {
             // 色ロック足場・明暗ロック足場は、条件が合っていない間 isActive=false になる型。
             // この2つは「まだ実体化していない」ことを半透明のゴーストで示す描画を自前で持っているのに、
@@ -13547,6 +13710,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
+
+            // 本体パーツ：「画像を選ぶ」の絵を、パーツと同じ編集項目つきで描き、型ごとの描画では同じ絵を描かせない
+            g_hideBodyHandleA = -1; g_hideBodyHandleB = -1;
+            if (!gim.parts.empty() && gim.parts.back().isBody) {
+                const bool oneWay = (gim.type == GIMMICK_ONEWAY_WALL);
+                const float bw = oneWay ? gim.width : gim.spriteWidth, bh = oneWay ? gim.height : gim.spriteHeight;
+                const float bcx = (oneWay ? gim.x + gim.width * 0.5f : gim.x + gim.spriteWidth * 0.5f) - cameraX;
+                const float bcy = (oneWay ? gim.y + gim.height * 0.5f : gim.y + gim.spriteHeight * 0.5f) - cameraY;
+                DrawBodyPart(gim.parts.back(), bcx, bcy, 1.0f, bw, bh, oneWay ? (double)OneWayAngle(gim) : (double)gim.angle, false, 1.0f);
+                g_hideBodyHandleA = gim.handle;
+                const GimmickDef* hideDef = FindGimmickDef(gim.assetId);
+                g_hideBodyHandleB = hideDef ? hideDef->graphHandleAlt : -1;
+            }
 
             if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
                 // 橋を画像で描画 (回転とスケーリング)。カスタムスプライトが設定されていればそちらを優先する
@@ -13998,6 +14174,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             DrawPartsPass(gim.parts, cameraX, cameraY, false); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder>=0のパーツを後に描画
         }
 
+        g_hideBodyHandleA = -1; g_hideBodyHandleB = -1;
+#undef DrawExtendGraph
+#undef DrawRotaGraph3
+
         // 共通レイヤー描画ラムダ
         auto DrawLayer = [&](const std::vector<std::vector<int>>& mapToDraw) {
             int mapRowCount = (int)mapToDraw.size();
@@ -14097,7 +14277,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int icx = (int)(item.x - cameraX);
                 int icy = (int)(item.y - cameraY);
                 int useHandle = item.handle >= 0 ? item.handle : coinHandle;
-                if (item.angle == 0.0f) {
+                if (!item.parts.empty() && item.parts.back().isBody) {
+                    // 本体パーツ：絵の箱の中心に、パーツと同じ編集項目つきで描く
+                    DrawBodyPart(item.parts.back(), icx + item.spriteWidth * 0.5f, icy + item.spriteHeight * 0.5f, 1.0f,
+                                 item.spriteWidth, item.spriteHeight, item.angle, false, 1.0f);
+                } else if (item.angle == 0.0f) {
                     DrawExtendGraph(icx, icy, icx + (int)item.spriteWidth, icy + (int)item.spriteHeight, useHandle, TRUE);
                 } else {
                     // 配置で角度が付いているときだけ回転描画に切り替える。
@@ -14184,6 +14368,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int animH = enemy.anim.GetCurrentFrameHeight();
                     int animCy = (int)(enemy.y - cameraY + (animH * enemy.scale) / 2.0f);
                     enemy.anim.DrawAt(ecx, animCy, enemy.scale, bodyAngle, bodyFlipped);
+                } else if (!enemy.parts.empty() && enemy.parts.back().isBody) {
+                    // 本体パーツ：「画像を選ぶ」の絵を、パーツと同じ編集項目（ずれ・倍率・色・動き・画像切り替え）つきで描く
+                    DrawBodyPart(enemy.parts.back(), (float)ecx, (float)ecy, enemy.scale, 0.0f, 0.0f, bodyAngle, bodyFlipped, ghostDrawA);
                 } else if (!bodyFlipped) {
                     // 新アセット移行対応 — 640x640の素材を敵定義の表示サイズへ収める倍率を掛ける
                     DrawRotaGraph(ecx, ecy, ComputeFitScale(enemy.handle, (float)enemy.width, (float)enemy.height) * enemy.scale, bodyAngle, enemy.handle, TRUE);
