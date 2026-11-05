@@ -84,8 +84,10 @@ inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
 
 // ---- アイコン（コードで描く）----
 // ICON_FAST 以降は、右クリックの扇形メニューで使う
+// ICON_GRID 以降は、ポーズ画面（システムメニュー）で使う
 enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE,
-            ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL };
+            ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL,
+            ICON_GRID, ICON_KEYS, ICON_POWER };
 
 // 円弧を細い線の連なりで描く。角度は度で、数学の向き（上が正）。
 inline void DrawArc(float cx, float cy, float r, float a0, float a1, unsigned int col, float th) {
@@ -174,6 +176,30 @@ inline void DrawIcon(Icon k, int cx, int cy, unsigned int col) {
             // ×印（カット削除）
             DrawLine(cx - 6, cy - 6, cx + 6, cy + 6, col, 3);
             DrawLine(cx - 6, cy + 6, cx + 6, cy - 6, col, 3);
+            break;
+        }
+        case ICON_GRID: {
+            // 4つの小さな四角（ステージの一覧）
+            DrawBox(cx - 8, cy - 8, cx - 2, cy - 2, col, TRUE);
+            DrawBox(cx + 2, cy - 8, cx + 8, cy - 2, col, TRUE);
+            DrawBox(cx - 8, cy + 2, cx - 2, cy + 8, col, TRUE);
+            DrawBox(cx + 2, cy + 2, cx + 8, cy + 8, col, TRUE);
+            break;
+        }
+        case ICON_KEYS: {
+            // キーボード（操作一覧）：外枠と、キーの点、スペースバー
+            DrawBox(cx - 9, cy - 6, cx + 9, cy + 6, col, FALSE);
+            DrawBox(cx - 6, cy - 3, cx - 5, cy - 2, col, TRUE);
+            DrawBox(cx - 2, cy - 3, cx - 1, cy - 2, col, TRUE);
+            DrawBox(cx + 2, cy - 3, cx + 3, cy - 2, col, TRUE);
+            DrawBox(cx + 5, cy - 3, cx + 6, cy - 2, col, TRUE);
+            DrawLine(cx - 5, cy + 3, cx + 5, cy + 3, col, 2);
+            break;
+        }
+        case ICON_POWER: {
+            // 電源の印：上が欠けた輪と、縦の棒（おわる）
+            DrawArc((float)cx, (float)cy + 1.0f, 7.0f, 120.0f, 420.0f, col, 2.0f);
+            DrawLine(cx, cy - 8, cx, cy, col, 2);
             break;
         }
         case ICON_MOVE: {
