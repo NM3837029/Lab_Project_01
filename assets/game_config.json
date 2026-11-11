@@ -321,6 +321,15 @@
       "unlock": "always",
       "require": [],
       "item_total": 24
+    },
+    {
+      "file": "puzzle_7_layer.json",
+      "name": "パズル7：レイヤー",
+      "thumbnail": "",
+      "order": 8,
+      "unlock": "always",
+      "require": [],
+      "item_total": 14
     }
   ],
   "result": {

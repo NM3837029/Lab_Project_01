@@ -339,6 +339,7 @@ public class MapCanvas : Panel
                              IsSelected(en) ? Color.Magenta : Color.FromArgb(220, 50, 50));
             DrawPlacedParts(g, en.X, en.Y, bodySize, en.Angle, def?.parts, partScale, behind: false);
             DrawLockBadge(g, en.X, en.Y, bodySize, en.EditLocks);
+            DrawLayerBadge(g, en.X, en.Y, bodySize, en.Layer);
         }
 
         // 9. ギミック — ギミック定義は width/height を持たず、当たり判定サイズが表示サイズを兼ねている
@@ -353,6 +354,7 @@ public class MapCanvas : Panel
                              def?.sprite, gi.Angle, icon,
                              IsSelected(gi) ? Color.Magenta : Color.FromArgb(50, 120, 220));
             DrawLockBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.EditLocks);
+            DrawLayerBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.Layer);
         }
 
         // 10. アイテム（ギミックと同じくhitboxサイズが表示サイズ）
@@ -1430,6 +1432,26 @@ public class MapCanvas : Panel
         using var font = new Font("Meiryo UI", 7f, FontStyle.Bold);
         var size = g.MeasureString(text, font);
         var badge = new RectangleF(rect.Right - size.Width + 2, rect.Top - 4, size.Width, size.Height - 2);
+        using var br = new SolidBrush(back);
+        g.FillRectangle(br, badge);
+        g.DrawString(text, font, Brushes.White, badge.X, badge.Y - 1);
+    }
+
+    // 置いた物が「奥」「手前」の層にあるとき、左上に小さな札を重ねる（中は何も出さない）。
+    // 違う層の物はゲーム中に当たらずすり抜けるので、置いた絵を見ただけで層が分かるようにしておく。
+    //   奥   … 青紫の札（背景側にいるイメージ）
+    //   手前 … 橙の札（画面側にいるイメージ）
+    // 編集ロックの札（右上）と重ならないよう、こちらは左上に置く。
+    private void DrawLayerBadge(Graphics g, float worldX, float worldY, SizeF worldSize, ObjectLayer layer)
+    {
+        if (layer == ObjectLayer.中) return;
+        var rect = ToScreenRect(worldX, worldY, worldSize.Width, worldSize.Height);
+        if (rect.Right < 0 || rect.Left > Width || rect.Bottom < 0 || rect.Top > Height) return;
+        string text = layer == ObjectLayer.奥 ? "奥" : "手前";
+        var back = layer == ObjectLayer.奥 ? Color.FromArgb(215, 90, 70, 190) : Color.FromArgb(215, 225, 125, 20);
+        using var font = new Font("Meiryo UI", 7f, FontStyle.Bold);
+        var size = g.MeasureString(text, font);
+        var badge = new RectangleF(rect.Left - 2, rect.Top - 4, size.Width, size.Height - 2);
         using var br = new SolidBrush(back);
         g.FillRectangle(br, badge);
         g.DrawString(text, font, Brushes.White, badge.X, badge.Y - 1);

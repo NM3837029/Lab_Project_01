@@ -1858,5 +1858,25 @@
         ]
       }
     ]
+  },
+  {
+    "id": "item_1",
+    "name": "新しいアイテム",
+    "type_enum": 0,
+    "sprite": "img/149_20261108213228.png",
+    "grant_ability": "",
+    "seCollect": "",
+    "noScale": false,
+    "noRotate": false,
+    "noMove": false,
+    "noFlip": false,
+    "noPause": false,
+    "noRewind": false,
+    "noSpeed": false,
+    "hitboxOffsetX": 0,
+    "hitboxOffsetY": 0,
+    "hitboxWidth": 32,
+    "hitboxHeight": 32,
+    "parts": []
   }
 ]

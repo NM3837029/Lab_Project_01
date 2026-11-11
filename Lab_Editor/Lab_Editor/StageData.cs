@@ -346,6 +346,7 @@ public class StageData
                         PatrolRight = e["patrol_right"]?.Value<float>() ?? -1,
                         Scale = e["scale"]?.Value<float>() ?? 1.0f,
                         Angle = e["angle"]?.Value<float>() ?? 0f,
+                        Layer = ReadLayer(e),
                         EditLocks = PlacedEditLocks.ReadFrom(e)
                     });
 
@@ -362,6 +363,7 @@ public class StageData
                         // scaleY を省略した既存ステージは等方拡大として読む（ゲーム側と同じ既定）
                         ScaleY = g["scaleY"]?.Value<float>() ?? g["scale"]?.Value<float>() ?? 1.0f,
                         Angle = g["angle"]?.Value<float>() ?? 0f,
+                        Layer = ReadLayer(g),
                         EditLocks = PlacedEditLocks.ReadFrom(g)
                     });
 
@@ -391,6 +393,15 @@ public class StageData
         // ここまでに反映できた分のStageDataをそのまま返す（アプリ全体を落とさないための安全策）。
         catch { }
         return data;
+    }
+
+    // 敵・ギミックのJSONエントリから、置いた層（"layer": -1 / 0 / 1）を読む。
+    // 項目が無い（既存ステージ）・数値でない・範囲外の値のときは「中」へ丸める。
+    // ゲーム側（ClampLayer）と同じく、想定外の値で壊れず「中」として扱う。
+    private static ObjectLayer ReadLayer(JToken entry)
+    {
+        int v = entry["layer"]?.Value<int>() ?? 0;
+        return v < 0 ? ObjectLayer.奥 : v > 0 ? ObjectLayer.手前 : ObjectLayer.中;
     }
 
     // JSONのtoken（2次元配列想定）をlayer（int[,]）へコピーするための共通処理。
@@ -466,6 +477,7 @@ public class StageData
             // 既定値と同じなら書かない（既存ステージへ余計な差分を出さないため）
             if (e.Scale != 1.0f) ej["scale"] = e.Scale;
             if (e.Angle != 0f) ej["angle"] = e.Angle;
+            if (e.Layer != ObjectLayer.中) ej["layer"] = (int)e.Layer; // 中（既定）は書かない
             e.EditLocks.WriteTo(ej); // 編集操作の可否の上書き（無ければ何も書かない）
             ea.Add(ej);
         }
@@ -480,6 +492,7 @@ public class StageData
             if (g.Scale != 1.0f) gj["scale"] = g.Scale;
             if (g.ScaleY != 1.0f) gj["scaleY"] = g.ScaleY;
             if (g.Angle != 0f) gj["angle"] = g.Angle;
+            if (g.Layer != ObjectLayer.中) gj["layer"] = (int)g.Layer; // 中（既定）は書かない
             g.EditLocks.WriteTo(gj);
             ga.Add(gj);
         }
@@ -878,6 +891,24 @@ public class PlacedEditLocks
         if (MoveMode.HasValue) entry["moveMode"] = MoveMode.Value;
     }
 }
+// 置いた物（敵・ギミック）が属する「層（レイヤー）」。
+//
+// ゲーム側（DrawPixel.cpp の LAYER_BACK / LAYER_MID / LAYER_FRONT）と数値を揃えてある。
+//   奥 = -1 / 中 = 0（既定） / 手前 = +1
+// 「同じ層にいる物どうしだけが、当たり合う」というルールで、違う層の物とは
+// 接触ダメージ・弾・足場・スイッチなどが一切かみ合わない（すり抜ける）。
+// 地形タイルとアイテム・ゴールはどの層からでも同じように触れる。
+//
+// プロパティ表で選べるよう enum にしている。日本語の名前にしているのは、
+// プロパティ表がそのまま名前を表示するため（別の表示名を用意する仕組みを足すより単純）。
+// JSON へは数値（-1 / 0 / 1）で書き、0（中）のときは項目ごと省略する。
+public enum ObjectLayer
+{
+    奥 = -1,
+    中 = 0,
+    手前 = 1,
+}
+
 // マップ上に実際に1体配置された敵1体分の情報。EnemyDef（敵の「種類」の定義）とは別に、
 // 「どの種類の敵を、どこに、どんな巡回範囲で置くか」を表す。
 public class PlacedEnemy
@@ -905,6 +936,12 @@ public class PlacedEnemy
     public float Scale { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
+
+    // 置いた層（奥 / 中 / 手前）。プレイヤーや他の物と「同じ層」のときだけ当たり合う（ObjectLayer 参照）。
+    // 中（0）のときはステージJSONへ書き出さないので、既存ステージの差分は増えない。
+    [System.ComponentModel.DisplayName("レイヤー")]
+    [System.ComponentModel.Description("違う層にいる物どうしは当たらず、すり抜けます（接触ダメージ・弾・足場など）。プレイヤーは中から始まり、ゲーム中の編集で層を変えられます。")]
+    public ObjectLayer Layer { get; set; } = ObjectLayer.中;
 
     // 置いた物ごとの編集操作の可否の上書き（PlacedEditLocks 参照）。右クリックメニュー「編集の可否を設定...」で変える。
     // プロパティ表には出さない（専用のダイアログで編集する）。
@@ -938,6 +975,12 @@ public class PlacedGimmick
     public float ScaleY { get; set; } = 1.0f;
     [System.ComponentModel.DisplayName("角度(rad)")]
     public float Angle { get; set; } = 0f;
+
+    // 置いた層（奥 / 中 / 手前）。敵と同じ意味（PlacedEnemy.Layer 参照）。
+    // 違う層のプレイヤー・敵・弾は、足場としても棘・スイッチとしても反応せず、すり抜ける。
+    [System.ComponentModel.DisplayName("レイヤー")]
+    [System.ComponentModel.Description("違う層にいる物どうしは当たらず、すり抜けます（足場・棘・スイッチ・弾など）。")]
+    public ObjectLayer Layer { get; set; } = ObjectLayer.中;
 
     // 置いた物ごとの編集操作の可否の上書き（PlacedEditLocks 参照）。右クリックメニュー「編集の可否を設定...」で変える。
     // プロパティ表には出さない（専用のダイアログで編集する）。

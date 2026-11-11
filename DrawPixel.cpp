@@ -660,6 +660,7 @@ struct PlacedEnemy {
     float scale = 1.0f;
     float angle = 0.0f;
     EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（保持しないと、ここからの保存で消える）
+    int layer = 0;           // 置いたときのレイヤー（-1=奥 0=中 +1=手前）。保持しないと、ここからの保存で消える
 };
 // ステージ上に実際に配置された「ギミック1個分」の情報。
 struct PlacedGimmick {
@@ -672,6 +673,7 @@ struct PlacedGimmick {
     float scaleY = 1.0f;
     float angle = 0.0f;
     EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き
+    int layer = 0;           // 置いたときのレイヤー（-1=奥 0=中 +1=手前）。PlacedEnemy と同じ理由で保持する
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
@@ -2351,6 +2353,7 @@ struct BulletState {
     float x, y, vx, vy;   // 座標と速度
     bool isActive;         // 存在しているか
     bool isPlayerOwned;    // プレイヤーが発射した弾か（true）、敵が発射した弾か（false）
+    int layer = 0;         // 撃った側のレイヤー（巻き戻して弾が復活したとき、元の層で復活させるために覚える）
 };
 
 enum GimmickType {
@@ -2462,6 +2465,32 @@ struct Platform {
 };
 
 // プレイヤーキャラクターの実行時状態。
+// ============================================================================
+// レイヤー（層）
+//
+// プレイヤー・敵・ギミック・弾は、それぞれ「どの層にいるか」を持つ。
+//   -1 = 奥 ／ 0 = 中（既定。既存のステージは全部ここ）／ +1 = 手前
+// 【基本ルール】同じ層にいる物どうしだけが、当たり合う。
+//   接触ダメージ・弾の当たり・足場や壁になる・スイッチなどの作動、はすべて層が違えば素通りする。
+// 【例外】地形タイル（地面・壁）は、どの層の物にとっても常に固い（段階1の仕様。地形の層分けは今後）。
+// 層はプレイヤーの編集（右クリックメニューの「レイヤー」）で変えられる。
+// 見た目は、プレイヤーと違う層の物を半透明に描いて、「今は触れない」ことを伝える。
+// ステージJSONでは、敵・ギミックの各エントリに "layer": -1/0/1 と書く（省略＝0。Lab_Editor の PlacedEnemy / PlacedGimmick にも同名の項目がある）。
+// ============================================================================
+const int LAYER_BACK  = -1; // 奥
+const int LAYER_MID   =  0; // 中
+const int LAYER_FRONT =  1; // 手前
+// 範囲外の値（壊れたJSONなど）を、-1〜+1へ丸める
+inline int ClampLayer(int v) { return v < LAYER_BACK ? LAYER_BACK : (v > LAYER_FRONT ? LAYER_FRONT : v); }
+// 層の表示名
+inline const char* LayerName(int v) { return v < 0 ? "奥" : (v > 0 ? "手前" : "中"); }
+// 2つの物が、当たり合う関係にあるか（同じ層のときだけ true）
+inline bool SameLayer(int a, int b) { return a == b; }
+// プレイヤーと違う層の物を描くときの濃さ（0〜255）。「今は触れない」ことが分かる程度に薄くする
+const int LAYER_GHOST_ALPHA = 96;
+// 編集メニューで「次の層」へ進める。中 → 手前 → 奥 → 中 の順に一周する
+inline int NextLayer(int v) { return v == LAYER_MID ? LAYER_FRONT : (v == LAYER_FRONT ? LAYER_BACK : LAYER_MID); }
+
 struct Player {
     float x, y;       // 現在座標
     float vx, vy;      // 現在速度
@@ -2488,6 +2517,9 @@ struct Player {
 
     // Feature 2: アニメーション
     AnimationController anim; // スプライトアニメーションの再生状態を管理するコントローラ
+
+    // レイヤー（-1=奥 0=中 +1=手前）。同じ層の敵・ギミック・弾とだけ当たり合う。詳細は上の「レイヤー（層）」の説明を参照
+    int layer = 0;
 };
 
 // ===== プレイヤーのダメージ（被弾）=====
@@ -2601,6 +2633,10 @@ struct Enemy {
     unsigned int spawnDirtyMask = 0u;   // 配置時点で立てておくダーティビット
 
     EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き（ステージJSONの noMove 等。EditLockOverride 参照）
+
+    // レイヤー（-1=奥 0=中 +1=手前）。ステージJSONの "layer" から読む。編集メニューの「レイヤー」で変わる（巻き戻しては戻らない＝編集と同じ扱い）
+    int layer = 0;
+    int editBaseLayer = 0; // 置いたときのレイヤー（ResetStage で焼く。「リセット」で戻す先）
 };
 
 // ギミック1個分の実行時状態。GimmickDef（種類ごとの共通定義）とは別に、個体ごとの現在位置・状態を持つ。
@@ -2682,6 +2718,10 @@ struct Gimmick {
     int  lookBright = 0;     // 明るさ：-2〜+2（0＝そのまま）
     int  lookAlpha  = 0;     // 透明度：0〜3（0＝不透明、1＝75%、2＝50%、3＝25%の濃さ）
     bool lookFlipV  = false; // 上下反転（そのギミックの中心を軸に、絵を上下に裏返す）
+
+    // レイヤー（-1=奥 0=中 +1=手前）。ステージJSONの "layer" から読む。編集メニューの「レイヤー」で変わる（巻き戻しては戻らない＝編集と同じ扱い）
+    int layer = 0;
+    int editBaseLayer = 0; // 置いたときのレイヤー（ResetStage で焼く。「リセット」で戻す先）
 };
 
 // ギミックの見た目の段階 → 実際の値。
@@ -2704,6 +2744,9 @@ struct Bullet {
     // 砲台を拡大すると大きく遅い弾に、縮小すると小さく速い弾になる、という反応を成立させる。
     // 描画倍率と当たり判定の両方に掛かる。1.0なら従来と完全に同じ。
     float scale = 1.0f;
+
+    // 撃った側のレイヤー。弾は、同じ層の物にしか当たらない（撃った瞬間に、撃った側の値を写す）
+    int layer = 0;
 
     // 巻き戻しトラック
     bool isRewinding = false;          // 現在巻き戻し再生中かどうか
@@ -3746,11 +3789,13 @@ struct EditSnap {
     bool paused = false, rewinding = false;
     unsigned int mask = 0u; // editDirtyMask
     int lookHue = 0, lookBright = 0, lookAlpha = 0; bool lookFlipV = false; // ギミックのみ（見た目の編集）
+    int layer = 0; // レイヤー（-1=奥 0=中 +1=手前）。プレイヤー・敵・ギミックすべて
 };
 // どの項目が変わったか（取り消し時に、変わった項目だけを戻すためのビット）
 enum EditField : unsigned int {
     EF_POS = 1u << 0, EF_SCALE = 1u << 1, EF_ANGLE = 1u << 2, EF_SPEED = 1u << 3, EF_DIR = 1u << 4,
-    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8, EF_LOOK = 1u << 9
+    EF_PAUSE = 1u << 5, EF_REWIND = 1u << 6, EF_MASK = 1u << 7, EF_SIZE = 1u << 8, EF_LOOK = 1u << 9,
+    EF_LAYER = 1u << 10
 };
 inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
     unsigned int f = 0;
@@ -3763,6 +3808,7 @@ inline unsigned int EditSnapDiff(const EditSnap& a, const EditSnap& b) {
     if (a.rewinding != b.rewinding) f |= EF_REWIND;
     if (a.mask != b.mask) f |= EF_MASK;
     if (a.lookHue != b.lookHue || a.lookBright != b.lookBright || a.lookAlpha != b.lookAlpha || a.lookFlipV != b.lookFlipV) f |= EF_LOOK;
+    if (a.layer != b.layer) f |= EF_LAYER;
     if (a.width != b.width || a.height != b.height || a.spriteWidth != b.spriteWidth
         || a.spriteHeight != b.spriteHeight || a.editBaseY != b.editBaseY) f |= EF_SIZE;
     return f;
@@ -4215,28 +4261,45 @@ static int g_hideBodyHandleA = -1, g_hideBodyHandleB = -1;
 // デストラクタで重ね戻すので、ループの途中で continue しても必ず元の画面へ戻る。
 static int  g_lookScrA = -1, g_lookScrB = -1, g_lookW = 0, g_lookH = 0;
 static bool g_lookFilterOk = true;
+// 手前の層をぼかすフィルタ。失敗したら以後は試さず、ぼかさずに描く（ゲームは止めない）
+static bool g_layerBlurOk = true;
+// 見た目に使う層。「プレイヤーの層から見て」その物が手前か奥かを、手前(+1)／同じ(0)／奥(-1)で返す。
+// 手前の物はぼかし、同じ層は普通、奥の物は半透明に描く。プレイヤーが層を変えると、画面全体の前後が入れ替わる。
+// （物の層そのものでなく相対にしているのは、全部が「中」のステージでも、自分の層を変えれば見た目が変わるようにするため）
+static inline int LayerLookOf(int objLayer, int playerLayer) {
+    return objLayer > playerLayer ? LAYER_FRONT : (objLayer < playerLayer ? LAYER_BACK : LAYER_MID);
+}
+static const int LAYER_BLUR_WIDTH = 16;   // ガウスぼかしの範囲（8/16/32）
+static const int LAYER_BLUR_PARAM = 500;  // ぼかしの強さ（100 で約1ピクセル）
+// 描き先を、いまの画面と同じ大きさの作業用画面（g_lookScrA）へ切り替えて空にする。成功したら true（prev へ元の描き先を入れる）。
+// 失敗（画面が作れない）したら描き先は変えずに false を返すので、呼び出し側は何もせず普通に描けばよい。
+// ギミックの見た目の編集（GimLookScope）と、別の層の物を半透明にする描画（LayerGhostScope）が共有する。
+static bool LookScreenBegin(int& prev) {
+    prev = GetDrawScreen();
+    int w = 0, h = 0;
+    GetDrawScreenSize(&w, &h);
+    if (w <= 0 || h <= 0) return false;
+    if (g_lookScrA < 0 || g_lookScrB < 0 || w != g_lookW || h != g_lookH) {
+        if (g_lookScrA >= 0) DeleteGraph(g_lookScrA);
+        if (g_lookScrB >= 0) DeleteGraph(g_lookScrB);
+        g_lookScrA = MakeScreen(w, h, TRUE);
+        g_lookScrB = MakeScreen(w, h, TRUE);
+        g_lookW = w; g_lookH = h;
+    }
+    if (g_lookScrA < 0 || g_lookScrB < 0) return false;
+    SetDrawScreen(g_lookScrA);
+    ClearDrawScreen();
+    return true;
+}
 struct GimLookScope {
     const Gimmick& g;
     float cy;               // ギミックの中心の画面Y（上下反転の軸）
+    int layer;              // この物の層。奥は半透明（LAYER_GHOST_ALPHA）、手前はぼかして重ねる。中は何もしない
     bool on = false;        // 画面外へ描いていて、終わりに加工して重ねる
     int prev = -1;
-    GimLookScope(const Gimmick& gim, float centerScreenY) : g(gim), cy(centerScreenY) {
-        if (!GimmickLookActive(gim)) return;
-        prev = GetDrawScreen();
-        int w = 0, h = 0;
-        GetDrawScreenSize(&w, &h);
-        if (w <= 0 || h <= 0) return;
-        if (g_lookScrA < 0 || g_lookScrB < 0 || w != g_lookW || h != g_lookH) {
-            if (g_lookScrA >= 0) DeleteGraph(g_lookScrA);
-            if (g_lookScrB >= 0) DeleteGraph(g_lookScrB);
-            g_lookScrA = MakeScreen(w, h, TRUE);
-            g_lookScrB = MakeScreen(w, h, TRUE);
-            g_lookW = w; g_lookH = h;
-        }
-        if (g_lookScrA < 0 || g_lookScrB < 0) return;
-        SetDrawScreen(g_lookScrA);
-        ClearDrawScreen();
-        on = true;
+    GimLookScope(const Gimmick& gim, float centerScreenY, int objLayer = LAYER_MID) : g(gim), cy(centerScreenY), layer(objLayer) {
+        if (!GimmickLookActive(gim) && objLayer == LAYER_MID) return;
+        on = LookScreenBegin(prev);
     }
     ~GimLookScope() {
         if (!on) return;
@@ -4246,12 +4309,48 @@ struct GimLookScope {
             if (GraphFilterBlt(g_lookScrA, g_lookScrB, DX_GRAPH_FILTER_HSB, 0, hue, 0, br) == 0) src = g_lookScrB;
             else g_lookFilterOk = false; // 失敗したら加工なしで重ねるだけ（ゲームは止めない）
         }
+        // 手前の層：ぼかす（ガウスぼかし。色相・明るさの加工後の画面を、もう一方の作業画面へ）
+        if (layer == LAYER_FRONT && g_layerBlurOk) {
+            const int dst = (src == g_lookScrA) ? g_lookScrB : g_lookScrA;
+            if (GraphFilterBlt(src, dst, DX_GRAPH_FILTER_GAUSS, LAYER_BLUR_WIDTH, LAYER_BLUR_PARAM) == 0) src = dst;
+            else g_layerBlurOk = false;
+        }
         SetDrawScreen(prev);
-        SetDrawBlendMode(DX_BLENDMODE_PMA_ALPHA, GimmickLookAlpha255(g.lookAlpha));
+        int alpha255 = GimmickLookAlpha255(g.lookAlpha);
+        if (layer == LAYER_BACK && alpha255 > LAYER_GHOST_ALPHA) alpha255 = LAYER_GHOST_ALPHA; // 見た目の透明度とレイヤーの薄さは、薄いほうを採る
+        SetDrawBlendMode(DX_BLENDMODE_PMA_ALPHA, alpha255);
         if (g.lookFlipV) DrawExtendGraph(0, (int)(cy * 2.0f), g_lookW, (int)(cy * 2.0f) - g_lookH, src, TRUE);
         else             DrawGraph(0, 0, src, TRUE);
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
     }
+};
+
+// 層ごとの見た目（奥＝半透明、手前＝ぼかし、中＝そのまま）で描くための範囲指定。ギミック以外の絵と、その物が出す文字・パーツをまとめて薄くする。
+// 中の層のときは何もしない（描画の経路が従来と同じ）。デストラクタで重ね戻すので、途中で continue しても必ず元の画面へ戻る。
+// 重ね方は GimLookScope と同じ乗算済みαブレンド（αつき画面を普通のαブレンドで重ねると、色が濃さの2乗で薄くなるため）。
+struct LayerGhostScope {
+    bool on = false;
+    int prev = -1;
+    int layer = LAYER_MID;
+    explicit LayerGhostScope(int objLayer) : layer(objLayer) {
+        if (objLayer == LAYER_MID) return;
+        on = LookScreenBegin(prev);
+    }
+    ~LayerGhostScope() {
+        if (!on) return;
+        int src = g_lookScrA;
+        if (layer == LAYER_FRONT && g_layerBlurOk) {
+            if (GraphFilterBlt(g_lookScrA, g_lookScrB, DX_GRAPH_FILTER_GAUSS, LAYER_BLUR_WIDTH, LAYER_BLUR_PARAM) == 0) src = g_lookScrB;
+            else g_layerBlurOk = false;
+        }
+        SetDrawScreen(prev);
+        // 奥は半透明、手前はぼかした絵をそのまま重ねる
+        SetDrawBlendMode(DX_BLENDMODE_PMA_ALPHA, layer == LAYER_BACK ? LAYER_GHOST_ALPHA : 255);
+        DrawGraph(0, 0, src, TRUE);
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+    }
+    LayerGhostScope(const LayerGhostScope&) = delete;
+    LayerGhostScope& operator=(const LayerGhostScope&) = delete;
 };
 static inline bool GimBodyHidden(int h) { return h >= 0 && (h == g_hideBodyHandleA || h == g_hideBodyHandleB); }
 static inline int GimBodyDrawExtend(int x1, int y1, int x2, int y2, int h, int trans) {
@@ -4334,7 +4433,8 @@ bool CheckFrozenEnemyPlatform(float& x, float& y, float& vy, int width, int heig
 // プラットフォームおよびアクティブな衝突ギミックへの着地衝突判定
 // 着地した場合はtrueを返し、オブジェクトのY座標をプラットフォーム上に着坐するように更新します
 // outGimmickIndexを渡すと、動くギミックに着地した場合にそのインデックスを書き込む（乗り物追従用、着地しなかった/ギミック以外に着地した場合は-1）
-bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height, float scale, const std::vector<Platform>& platforms, const std::vector<Gimmick>& gimmicks, int* outGimmickIndex = nullptr) {
+// objLayer … 着地しようとしている物のレイヤー。違う層のギミックには着地しない（足場にならない）。ステージプラットフォーム（platforms）は全層で固い
+bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height, float scale, const std::vector<Platform>& platforms, const std::vector<Gimmick>& gimmicks, int* outGimmickIndex = nullptr, int objLayer = 0) {
     if (outGimmickIndex) *outGimmickIndex = -1;
     float objW = (float)width * scale;
     float objH = (float)height * scale;
@@ -4365,6 +4465,7 @@ bool CheckPlatformCollision(float& x, float& y, float& vy, int width, int height
     for (size_t gi = 0; gi < gimmicks.size(); ++gi) {
         const auto& gim = gimmicks[gi];
         if (!gim.isActive) continue;
+        if (!SameLayer(gim.layer, objLayer)) continue; // 違う層のギミックは、足場にならない
 
         if (gim.type == GIMMICK_ROTATING_BRIDGE || gim.type == GIMMICK_MANUAL_BRIDGE) {
             // 回転する木製の橋の正確な線分座標を算出
@@ -4566,12 +4667,14 @@ bool OneWayBlocksMove(const Gimmick& g, float mvx, float mvy) {
 
 // X方向についての、実体化した地形系ギミック（伸縮ボックス、伸縮地面、岩、早送りゲート、ゲート扉）との衝突判定。
 // タイルマップの衝突とは別に、ギミック側の座標・サイズをもとにX座標を押し戻す。
-void CheckGimmickCollisionX(float& x, float y, int width, float scale, int height, float vx, const std::vector<Gimmick>& gimmicks) {
+// objLayer … 動いている物のレイヤー。違う層のギミックは、壁にならない（素通りする）
+void CheckGimmickCollisionX(float& x, float y, int width, float scale, int height, float vx, const std::vector<Gimmick>& gimmicks, int objLayer = 0) {
     float objW = (float)width * scale;
     float objH = (float)height * scale;
-    
+
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
+        if (!SameLayer(gim.layer, objLayer)) continue; // 違う層のギミックは、壁にならない
         // 一方通行の壁：左右の動きだけを、通れる向きの逆から止める（上下向きの壁は、左右の動きを止めない）
         if (gim.type == GIMMICK_ONEWAY_WALL) {
             int dir = OneWayDir(gim);
@@ -4617,13 +4720,15 @@ void CheckGimmickCollisionX(float& x, float y, int width, float scale, int heigh
 }
 
 // Y方向についての、実体化した地形系ギミックとの衝突判定。着地した場合はtrueを返す。
-bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int height, float& vy, const std::vector<Gimmick>& gimmicks) {
+// objLayer … 動いている物のレイヤー。違う層のギミックは、床にも天井にもならない
+bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int height, float& vy, const std::vector<Gimmick>& gimmicks, int objLayer = 0) {
     float objW = (float)width * scale;
     float objH = (float)height * scale;
     bool isGrounded = false;
-    
+
     for (const auto& gim : gimmicks) {
         if (!gim.isActive) continue;
+        if (!SameLayer(gim.layer, objLayer)) continue; // 違う層のギミックは、床にも天井にもならない
         // 一方通行の壁：上下の動きだけを、通れる向きの逆から止める（左右向きの壁は、上下の動きを止めない）。
         // 上へ通れる壁は、下からは通り抜けられて、上からは床として乗れる。下へ通れる壁は、その逆の天井になる
         if (gim.type == GIMMICK_ONEWAY_WALL) {
@@ -4677,18 +4782,19 @@ bool CheckGimmickCollisionY(float x, float& y, int width, float scale, int heigh
 // タイルマップとギミック両方を対象にした物理移動＋衝突判定のまとめ関数。
 // X方向とY方向を分けて処理する（先にXを動かして壁判定、その後Yを動かして床/天井判定）ことで、
 // 斜め移動時にも壁・床の判定が正しく効くようにしている。戻り値は「着地したか」。
+// objLayer … 動いている物のレイヤー。違う層のギミックは壁・床にならない（地形タイルはどの層でも固い）
 bool UpdatePhysicsCollisions(float& x, float& y, float dx, float dy, float& vy, int width, int height, float scale,
                              const std::vector<std::vector<int>>& map, const std::vector<TileDefinition>& tileDefs,
-                             const std::vector<Gimmick>& gimmicks) {
+                             const std::vector<Gimmick>& gimmicks, int objLayer = 0) {
     // 先にX方向へ移動させてから、タイル・ギミック両方の左右衝突を判定して座標を補正する
     x += dx;
     CheckGridCollisionX(x, y, width, scale, height, map, tileDefs, dx);
-    CheckGimmickCollisionX(x, y, width, scale, height, dx, gimmicks);
+    CheckGimmickCollisionX(x, y, width, scale, height, dx, gimmicks, objLayer);
 
     // 続いてY方向へ移動させてから、タイル・ギミック両方の上下衝突を判定して座標を補正する
     y += dy;
     bool gridGrounded = CheckGridCollisionY(x, y, vy, width, scale, height, map, tileDefs);
-    bool gimGrounded = CheckGimmickCollisionY(x, y, width, scale, height, vy, gimmicks);
+    bool gimGrounded = CheckGimmickCollisionY(x, y, width, scale, height, vy, gimmicks, objLayer);
 
     return gridGrounded || gimGrounded;
 }
@@ -5352,6 +5458,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 実際にステージが切り替わる箇所（SwitchToStageラムダ）でのみクリアする。
     float checkpointX = -1.0f;
     float checkpointY = -1.0f;
+    // 復帰地点に触れたときの、プレイヤーの層。やり直したときに、その層から再開する
+    // （層ごとに通れる道が違うステージで、やり直すたびに「中」へ戻されて、また切り替え直しになるのを避ける）。
+    // checkpointX と同じく、ResetStage では消さず、別ステージへ移るとき（SwitchToStage）だけ戻す。
+    int checkpointLayer = LAYER_MID;
 
     float cameraX = 0.0f; // カメラのワールドX座標（プレイヤーを追従して毎フレーム更新される）
     float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
@@ -5707,11 +5817,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             sn.x = player.x; sn.y = player.y; sn.scale = player.scale; sn.angle = player.angle;
             sn.speedScale = player.speedScale; sn.direction = player.direction;
             sn.paused = player.isPaused; sn.rewinding = player.isRewinding;
+            sn.layer = player.layer;
         } else if (kind == 1 && index >= 0 && index < (int)enemies.size()) {
             const Enemy& e = enemies[index];
             sn.x = e.x; sn.y = e.y; sn.scale = e.scale; sn.angle = e.angle;
             sn.speedScale = e.speedScale; sn.direction = e.direction;
             sn.paused = e.isPaused; sn.rewinding = e.isRewinding; sn.mask = e.editDirtyMask;
+            sn.layer = e.layer;
         } else if (kind == 2 && index >= 0 && index < (int)gimmicks.size()) {
             const Gimmick& g = gimmicks[index];
             sn.x = g.x; sn.y = g.y; sn.angle = g.angle;
@@ -5720,6 +5832,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             sn.width = g.width; sn.height = g.height; sn.spriteWidth = g.spriteWidth; sn.spriteHeight = g.spriteHeight;
             sn.editBaseY = g.editBaseY;
             sn.lookHue = g.lookHue; sn.lookBright = g.lookBright; sn.lookAlpha = g.lookAlpha; sn.lookFlipV = g.lookFlipV;
+            sn.layer = g.layer;
         }
         return sn;
     };
@@ -5766,6 +5879,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (f & EF_DIR)    player.direction = sn.direction;
                 if (f & EF_PAUSE)  player.isPaused = sn.paused;
                 if (f & EF_REWIND) player.isRewinding = sn.rewinding;
+                if (f & EF_LAYER)  player.layer = sn.layer;
             } else if (sn.kind == 1 && sn.index >= 0 && sn.index < (int)enemies.size()) {
                 Enemy& e = enemies[sn.index];
                 if (f & EF_SCALE) {
@@ -5786,6 +5900,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (f & EF_PAUSE)  e.isPaused = sn.paused;
                 if (f & EF_REWIND) e.isRewinding = sn.rewinding;
                 if (f & EF_MASK)   e.editDirtyMask = sn.mask;
+                if (f & EF_LAYER)  e.layer = sn.layer;
             } else if (sn.kind == 2 && sn.index >= 0 && sn.index < (int)gimmicks.size()) {
                 Gimmick& g = gimmicks[sn.index];
                 if (f & EF_POS) {
@@ -5805,6 +5920,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (f & EF_REWIND) g.isRewinding = sn.rewinding;
                 if (f & EF_MASK)   g.editDirtyMask = sn.mask;
                 if (f & EF_LOOK)   { g.lookHue = sn.lookHue; g.lookBright = sn.lookBright; g.lookAlpha = sn.lookAlpha; g.lookFlipV = sn.lookFlipV; }
+                if (f & EF_LAYER)  g.layer = sn.layer;
             }
         }
     };
@@ -5889,6 +6005,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         add(EF_PAUSE, "一時停止");
         add(EF_REWIND, "巻き戻し");
         add(EF_LOOK, "見た目");
+        add(EF_LAYER, "レイヤー");
         if (s.empty()) s = "編集";
         return s;
     };
@@ -6268,6 +6385,56 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         return true;
     };
 
+    // 選んだ物（プレイヤー・敵・ギミック）のレイヤーを、次の層へ進める（中 → 手前 → 奥 → 中）。
+    // 代表（選択の先頭）の次の層を、選んだ全員へ入れる。反転・見た目と同じ額のコストを払い、取り消し(Ctrl+Z)で全額戻る。
+    // 層が違う物どうしは当たり合わなくなる（足場・接触ダメージ・弾・スイッチ。詳しくは「レイヤー（層）」の説明を参照）。
+    // タイムラインのカットは座標を持たないので、対象にしない。
+    auto EditLayerCycle = [&]() -> bool {
+        if (selectedPlayers.empty() && selectedEnemies.empty() && selectedGimmicks.empty()) return false;
+        int cur = LAYER_MID;
+        if (!selectedPlayers.empty())      cur = selectedPlayers[0]->layer;
+        else if (!selectedEnemies.empty()) cur = selectedEnemies[0]->layer;
+        else                               cur = selectedGimmicks[0]->layer;
+        const int next = NextLayer(cur);
+        const float cost = currentEditCost.flatDirectionFlip;
+        if (editCost < cost) { EditDeniedCost(cost); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
+        editCost -= cost;
+        for (auto* p : selectedPlayers) p->layer = next;
+        for (auto* e : selectedEnemies) e->layer = next;
+        for (auto* g : selectedGimmicks) { if (!g->isTimelineCut) g->layer = next; }
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.flip);
+        PushUndo(undoBefore, cost, false);
+        NoteEditOp("layer");
+        {
+            char b[64];
+            sprintf_s(b, sizeof(b), "レイヤーを「%s」にしました", LayerName(next));
+            ShowEditToast(b, 1);
+        }
+        return true;
+    };
+
+    // プレイヤー自身の層を、Q(奥へ)/E(手前へ)で1段ずつ動かす。端（奥・手前）では止まる。
+    // 円形メニューの「レイヤー」（中→手前→奥→中と回る）と違い、押した向きへ確実に動く。
+    // 選択状態には触れず、プレイヤーだけを対象にする。コスト・取り消し・効果音は EditLayerCycle と同じ。
+    auto EditPlayerLayerStep = [&](int dir) -> bool {
+        const int next = ClampLayer(player.layer + dir);
+        if (next == player.layer) return false;
+        const float cost = currentEditCost.flatDirectionFlip;
+        if (editCost < cost) { EditDeniedCost(cost); return false; }
+        FlushWheelUndo();
+        std::vector<EditSnap> undoBefore; undoBefore.push_back(CaptureSnap(0, 0));
+        editCost -= cost;
+        player.layer = next;
+        SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.flip);
+        PushUndo(undoBefore, cost, false);
+        NoteEditOp("layer");
+        char b[64]; sprintf_s(b, sizeof(b), "レイヤーを「%s」にしました", LayerName(next));
+        ShowEditToast(b, 1);
+        return true;
+    };
+
     // 配置時の値(editBase*)へ丸ごと戻す。
     // 以前は幅120・角度1.57079といった決め打ちだったため、120px以外のギミック
     // （gim_gate_doorは32x160、gim_edit_color_bridgeは224x24）がリセットのたびに別物のサイズへ化けていた。
@@ -6281,6 +6448,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         editCost -= currentEditCost.flatResetAll;
         for (auto* p : selectedPlayers) {
             p->scale = 1.0f; p->angle = 0.0f; p->speedScale = 1.0f; p->isPaused = false; p->isRewinding = false;
+            p->layer = LAYER_MID; // 層も「中」へ戻す
         }
         for (auto* e : selectedEnemies) {
             e->scale = e->editBaseScale;
@@ -6289,6 +6457,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             e->speedScale = 1.0f;
             e->isPaused = false;
             e->isRewinding = false;
+            e->layer = e->editBaseLayer; // 層も置いたときへ戻す
             e->editDirtyMask = EDIT_DIRTY_NONE;
         }
         for (auto* g : selectedGimmicks) {
@@ -6300,6 +6469,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             g->isPaused = false;
             g->isRewinding = false;
             g->lookHue = 0; g->lookBright = 0; g->lookAlpha = 0; g->lookFlipV = false; // 見た目も元に戻す
+            g->layer = g->editBaseLayer; // 層も置いたときへ戻す
             g->editDirtyMask = EDIT_DIRTY_NONE;
         }
         SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.reset); // 編集を戻せたときの音
@@ -6315,7 +6485,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // 円形メニューの項目数。タイムラインのカットを選んでいるときは「カット削除」だけの1項目。
     auto RadialCount = [&]() -> int {
-        return (targetGimmick != nullptr && targetGimmick->isTimelineCut) ? 1 : 6;
+        return (targetGimmick != nullptr && targetGimmick->isTimelineCut) ? 1 : 7;
     };
 
     // 今の選択から、扇形メニューの項目（表示と、押せるかどうか）を組み立てる。
@@ -6352,6 +6522,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false);
         Add(5, "リセット", "", "この物の編集をすべて元に戻す",
             EditPanel::ICON_RESET, true, currentEditCost.flatResetAll, false);
+        // レイヤー：選択の先頭の層を状態として見せる。押すたびに 中 → 手前 → 奥 → 中 と進む
+        {
+            int layerNow = LAYER_MID;
+            if (!selectedPlayers.empty())      layerNow = selectedPlayers[0]->layer;
+            else if (!selectedEnemies.empty()) layerNow = selectedEnemies[0]->layer;
+            else if (!selectedGimmicks.empty()) layerNow = selectedGimmicks[0]->layer;
+            Add(7, "レイヤー", LayerName(layerNow), "この物の層を変える（違う層の物とは当たらない）",
+                EditPanel::ICON_LAYER, selectedType != SELECT_NONE, currentEditCost.flatDirectionFlip, false);
+        }
     };
 
     // 項目 id を実行する（コスト・禁止の判定は、共通入口の中で行う）
@@ -6363,6 +6542,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         case 3: EditSpeedStep(-0.5f); break;
         case 4: EditFlip();         break;
         case 5: EditResetAll();     break;
+        case 7: EditLayerCycle();   break;
         case 6: {
             // タイムラインカットの削除。巻き戻し履歴ごと存在を消したいので、非表示にするのではなく配列から削除する
             if (targetGimmick != nullptr && targetGimmick->isTimelineCut && editCost >= currentEditCost.flatMenuToggle) {
@@ -6747,6 +6927,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             // 基準はアセット既定（倍率は defScale、角度は0）なので、
                             // ゲーム内の編集ツールで同じ倍率・角度にしたときと同じ反応になる。
                             ReadEditLockOverride(ej, jsonStage.enemies.back().lockOv); // 置いた物ごとの編集可否（noMove 等）
+                            jsonStage.enemies.back().layer = ClampLayer(ej.value("layer", 0)); // 置いたときのレイヤー（省略＝中）
                             {
                                 Enemy& placedEnemy = jsonStage.enemies.back();
                                 float scaleMul = ej.value("scale", 1.0f);
@@ -6818,6 +6999,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 }
                             }
                             ReadEditLockOverride(gj, newGim.lockOv); // 置いた物ごとの編集可否（noMove 等）
+                            newGim.layer = ClampLayer(gj.value("layer", 0)); // 置いたときのレイヤー（省略＝中）
                             jsonStage.gimmicks.push_back(newGim);
                         }
                     }
@@ -7061,6 +7243,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             enemy.editBaseX         = enemy.x;
             enemy.editBaseY         = enemy.y;
             enemy.editBaseDirection = enemy.direction;
+            enemy.editBaseLayer     = enemy.layer; // 置いたときのレイヤー（リセットで戻す先）
         }
 
         items = stage.items;
@@ -7113,6 +7296,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 gim.editBaseAngle  = gim.angle;
                 gim.editDirtyMask  = EDIT_DIRTY_NONE;
             }
+            gim.editBaseLayer = gim.layer; // 置いたときのレイヤー（リセットで戻す先）
         }
 
         platforms = stage.platforms;
@@ -7134,6 +7318,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         player.hp = 3;
         player.invulnTimer = 0.0f;
+        // ステージのやり直しでは、復帰地点があればそこに触れた層から、無ければ「中」の層から始める（敵・ギミックは配置どおりに戻る）
+        player.layer = (checkpointX >= 0.0f) ? checkpointLayer : LAYER_MID;
         currentScene = PLAY;
 
         // Feature 5: イベントアクション実行時ステートのリセット
@@ -7167,6 +7353,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // （ResetStage自体はゲームオーバー/落下死からの同ステージ内リトライで保持し続けたいのでクリアしない）
         checkpointX = -1.0f;
         checkpointY = -1.0f;
+        checkpointLayer = LAYER_MID;
         for (int i = 0; i < (int)stages.size(); i++) {
             if (stages[i].sourceFile == fileName) {
                 currentStageIdx = i;
@@ -8711,6 +8898,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 lastUndoKey = undoNow; lastRedoKey = redoNow;
             }
 
+            // Q/E でプレイヤーの層を奥/手前へ1段動かす（押した瞬間に1回だけ）。
+            // Ctrl 押下中・ドラッグ中・円形メニュー表示中は受け付けない。
+            {
+                static bool lastQKey = false, lastEKey = false;
+                bool qNow = CheckHitKey(KEY_INPUT_Q) != 0, eNow = CheckHitKey(KEY_INPUT_E) != 0;
+                if (objectEditOpEnabled && !editCtrlHeld && !gestureActive && !isAreaSelecting && !menu.isOpen) {
+                    if (qNow && !lastQKey) EditPlayerLayerStep(-1);
+                    if (eNow && !lastEKey) EditPlayerLayerStep(+1);
+                }
+                lastQKey = qNow; lastEKey = eNow;
+            }
+
             // エディタUI / ドラッグ操作
             // Gキーで可変地面を追加。
             // 以前はこの処理が「左ボタンを押している間」のブロックの中にあったため、左ボタンを押しながらでないと G が効かなかった。
@@ -9376,6 +9575,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     bullets[i].vx = fwdX * BULLET_SPEED;
                     bullets[i].vy = fwdY * BULLET_SPEED; // 傾いているときは斜めにも飛ぶ（角度0なら0）
                     bullets[i].isPlayerOwned = true; // プレイヤーの弾
+                    bullets[i].layer = player.layer; // 撃った側の層を写す（同じ層の物にしか当たらない）
                     NoteEditOp("shoot");
                     bullets[i].isRewinding = false;
                     bullets[i].history.clear();
@@ -9594,10 +9794,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // X/Y方向の移動と衝突判定を共通化
                 bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, stepVy, stepVy,
                                                           player.width, player.height, player.scale,
-                                                          stages[currentStageIdx].map, tileDefs, gimmicks);
+                                                          stages[currentStageIdx].map, tileDefs, gimmicks, player.layer);
 
                 // 従来の足場との着地衝突判定
-                bool platGrounded = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex);
+                bool platGrounded = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex, player.layer);
                 // Feature: 編集リアクション（共通層）— 個別に一時停止した敵は足場になる。
                 // 相手が何であっても必ず通用する手札として用意することで、
                 // 「届かない高さは、そこにいる敵を止めて踏み台にする」という解法がどのステージでも成立する。
@@ -9626,6 +9826,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (auto& gim : gimmicks) {
                     if (gim.type != GIMMICK_CUT_PORTAL || !gim.isActive) continue;
                     if (gim.isTimelineCut) continue; // タイムラインカットは座標を持たないので、このAABB判定の対象外
+                    if (!SameLayer(gim.layer, player.layer)) continue; // 違う層のポータルには入れない
                     bool touching = CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight);
                     // 編集リアクション：
                     //  ・幅を広げる → 出口が「広げたぶんだけ先」へずれる。同じポータル対でも到達点を伸ばせる。
@@ -9686,7 +9887,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                 // 1. 砂時計リフトの更新（プレイヤーが乗っているとゆっくり降下）
                 for (auto& gim : gimmicks) {
-                    if (gim.type == GIMMICK_FALLING_LIFT && gim.isActive) {
+                    if (gim.type == GIMMICK_FALLING_LIFT && gim.isActive && SameLayer(gim.layer, player.layer)) { // 違う層のリフトには「乗っている」ことにならない
                         // 編集リアクション：
                         //  ・幅を広げる → 支える面積が増えて沈むのが遅くなる（渡りきる時間を稼げる）。
                         //  ・幅を狭める → 一気に沈む。
@@ -9733,7 +9934,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float switchTriggerThreshold = (gdef ? gdef->triggerWidthThreshold : 140.0f) * sr.MassMul();
                     bool active = false;
                     for (const auto& boxGim : gimmicks) {
-                        if (boxGim.type == GIMMICK_SCALABLE_BOX && boxGim.isActive) {
+                        if (boxGim.type == GIMMICK_SCALABLE_BOX && boxGim.isActive && SameLayer(boxGim.layer, switchGim.layer)) { // 違う層の箱は、スイッチを押さない
                             // 拡大可能ボックスがスイッチの上にあるかチェック
                             if (boxGim.x + boxGim.spriteWidth >= switchGim.x && boxGim.x <= switchGim.x + switchGim.spriteWidth) {
                                 // スイッチが要求する横幅以上に拡大されている必要がある
@@ -9751,6 +9952,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (switchGim.param.find("enemyweight") != std::string::npos) {
                         for (const auto& e : enemies) {
                             if (!e.isActive) continue;
+                            if (!SameLayer(e.layer, switchGim.layer)) continue; // 違う層の敵は、スイッチを押さない
                             float ew = (float)e.hitboxWidth * e.scale;
                             float eh = (float)e.hitboxHeight * e.scale;
                             // スイッチの真上に乗っているか（足元がスイッチ上面付近にあるか）
@@ -10067,7 +10269,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                     stages[currentStageIdx].map, tileDefs);
                                 bool platGround = CheckPlatformCollision(enemy.x, testY, testVY,
-                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, nullptr, enemy.layer);
                                 isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
                             }
 
@@ -10185,6 +10387,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].vy = dirYs * spdS;
                                         bullets[i].scale = er.scaleRatio;
                                         bullets[i].isPlayerOwned = erFlipEdited; // 反転で味方撃ちになる
+                                        bullets[i].layer = enemy.layer; // 撃った側の層を写す
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -10281,6 +10484,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             bullets[i].vx = dxP / distP * spdP;
                                             bullets[i].vy = dyP / distP * spdP;
                                             bullets[i].isPlayerOwned = false;
+                                            bullets[i].layer = enemy.layer; // 撃った側の層を写す
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
                                             break;
@@ -10618,7 +10822,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                             stages[currentStageIdx].map, tileDefs);
                                         bool platGround = CheckPlatformCollision(probeX, probeY, probeVY,
-                                            enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                            enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, nullptr, enemy.layer);
                                         landedOnGround = (tileGround || platGround);
                                     }
                                     if (!landedOnGround) {
@@ -10685,7 +10889,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         float ddxF = pcxF - ecxF, ddyF = pcyF - ecyF;
                                         float distF = sqrtf(ddxF * ddxF + ddyF * ddyF);
                                         // 縮小されたドッスンは衝撃波を起こせない（乗れる安全な台として振る舞う）
-                                        if (!er.shrunk && distF <= shockwaveRadiusF && !isPlayerRewinding && TryHurtPlayer(player)) {
+                                        // 違う層にいるプレイヤーには、衝撃波が届かない
+                                        if (!er.shrunk && distF <= shockwaveRadiusF && !isPlayerRewinding && SameLayer(enemy.layer, player.layer) && TryHurtPlayer(player)) {
                                             float knockDirF = (distF > 0.01f) ? (ddxF / distF) : ((pcxF < ecxF) ? -1.0f : 1.0f);
                                             player.vx = knockDirF * 6.0f;
                                             player.vy = -4.0f;
@@ -10834,6 +11039,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             }
                                             bullets[i].scale = er.scaleRatio; // 拡大した本体の弾は大きい
                                             bullets[i].isPlayerOwned = false;
+                                            bullets[i].layer = enemy.layer; // 撃った側の層を写す
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
                                             break;
@@ -10954,6 +11160,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].scale = er.scaleRatio; // 拡大した砲台の弾は大きい
                                         // 向きを反転させた砲台は「味方撃ち」になり、撃った弾が他の敵に当たる
                                         bullets[i].isPlayerOwned = erFlipEdited;
+                                        bullets[i].layer = enemy.layer; // 撃った側の層を写す
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -11693,7 +11900,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 bool tileGround = CheckGridCollisionY(gtX, gtY, gtVY, enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                     stages[currentStageIdx].map, tileDefs);
                                 float gpX = enemy.x, gpY = enemy.y + 2.0f, gpVY = 1.0f;
-                                bool platGround = CheckPlatformCollision(gpX, gpY, gpVY, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                bool platGround = CheckPlatformCollision(gpX, gpY, gpVY, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, nullptr, enemy.layer);
                                 groundedM = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
                             }
                             enemy.customTimer += ets;
@@ -11734,6 +11941,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             bullets[i].vx = cosf(a) * spd; bullets[i].vy = sinf(a) * spd;
                                             bullets[i].scale = er.scaleRatio;
                                             bullets[i].isPlayerOwned = erFlipEdited; // 反転で味方撃ち（他の射撃型と同じ）
+                                            bullets[i].layer = enemy.layer; // 撃った側の層を写す
                                             bullets[i].isRewinding = false;
                                             bullets[i].history.clear();
                                             break;
@@ -11947,7 +12155,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                         stages[currentStageIdx].map, tileDefs);
                                     bool platG = CheckPlatformCollision(probeXpc, probeYpc, probeVYpc,
-                                        enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                        enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, nullptr, enemy.layer);
                                     landedPc = (tileG || platG);
                                 }
                                 // 何かの拍子に着地を取り逃しても空中で固まらないよう、滞空時間に上限を設けておく
@@ -11988,7 +12196,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     enemy.hitboxWidth, enemy.scale, enemy.hitboxHeight,
                                     stages[currentStageIdx].map, tileDefs);
                                 bool platGround = CheckPlatformCollision(enemy.x, testY, testVY,
-                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks);
+                                    enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, nullptr, enemy.layer);
                                 actor.isGrounded = (tileGround || platGround) && (std::abs(enemy.vy) < 1.0f);
                             }
                             auto& mpS = stages[currentStageIdx].map;
@@ -12019,6 +12227,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].vx = cosf(angleRad) * speed;
                                         bullets[i].vy = sinf(angleRad) * speed;
                                         bullets[i].isPlayerOwned = false;
+                                        bullets[i].layer = enemyPtr->layer; // 撃った側の層を写す
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -12246,10 +12455,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     } else {
                         enemyGrounded = UpdatePhysicsCollisions(enemy.x, enemy.y, enemy.vx, enemy.vy, enemy.vy,
                                                                  enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale,
-                                                                 stages[currentStageIdx].map, tileDefs, gimmicks);
+                                                                 stages[currentStageIdx].map, tileDefs, gimmicks, enemy.layer);
 
                         // 足場との着地衝突判定
-                        CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, &enemy.ridingGimmickIndex);
+                        CheckPlatformCollision(enemy.x, enemy.y, enemy.vy, enemy.hitboxWidth, enemy.hitboxHeight, enemy.scale, platforms, gimmicks, &enemy.ridingGimmickIndex, enemy.layer);
                         // Feature: 編集リアクション（共通層）— 敵も止まった敵の上に乗る。
                         // プレイヤー側だけ乗れて敵はすり抜ける、という食い違いを作らないため同じ判定を通す。
                         // selfに自分を渡して、自分自身の上に着地してしまうのを防ぐ。
@@ -12298,7 +12507,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             FillScriptPartTransform(partActor, part, ePartPose); // 親の拡大・傾けをパーツの位置計算へ合成する
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
-                            partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
+                            // 親（敵）の層を値で持たせる。パーツが撃つ弾も、親と同じ層の物にしか当たらない
+                            partActor.shoot = [&bullets, partPtr, ownerLayer = enemy.layer](float angleRad, float speed, float damage) {
                                 (void)damage;
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
@@ -12307,6 +12517,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].vx = cosf(angleRad) * speed;
                                         bullets[i].vy = sinf(angleRad) * speed;
                                         bullets[i].isPlayerOwned = false;
+                                        bullets[i].layer = ownerLayer;
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -12609,6 +12820,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         bullets[i].x = s.x; bullets[i].y = s.y; bullets[i].vx = s.vx; bullets[i].vy = s.vy;
                         bullets[i].isActive = s.isActive;
                         bullets[i].isPlayerOwned = s.isPlayerOwned;
+                        bullets[i].layer = s.layer; // 巻き戻して復活した弾は、撃たれたときの層に戻す
                     }
                 } else {
                     bool canBulletAct = CanUpdate(bullets[i].x, bullets[i].y, 16.0f, 16.0f, 1.0f, false);
@@ -12651,7 +12863,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
                             // 反射ミラー（GIMMICK_REFLECT_MIRROR）での弾の反射チェック
                             for (const auto& gim : gimmicks) {
-                                if (gim.type == GIMMICK_REFLECT_MIRROR && gim.isActive) {
+                                if (gim.type == GIMMICK_REFLECT_MIRROR && gim.isActive && SameLayer(gim.layer, bullets[i].layer)) { // 違う層の鏡は、弾を反射しない
                                     // 反射のバウンディングボックス交差チェック
                                     if (bullets[i].x >= gim.x && bullets[i].x <= gim.x + gim.spriteWidth &&
                                         bullets[i].y >= gim.y && bullets[i].y <= gim.y + gim.spriteHeight) {
@@ -12689,7 +12901,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         }
                     }
                     if (canBulletAct) {
-                        bullets[i].history.push_back({ bullets[i].x, bullets[i].y, bullets[i].vx, bullets[i].vy, bullets[i].isActive, bullets[i].isPlayerOwned });
+                        bullets[i].history.push_back({ bullets[i].x, bullets[i].y, bullets[i].vx, bullets[i].vy, bullets[i].isActive, bullets[i].isPlayerOwned, bullets[i].layer });
                         if (bullets[i].history.size() > MAX_HISTORY_FRAMES) bullets[i].history.erase(bullets[i].history.begin());
                     }
                 }
@@ -12825,14 +13037,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 対プレイヤー
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
-                        if (!gr.flipped && CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                        if (!gr.flipped && SameLayer(gim.layer, player.layer) && CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             player.hp = 0;
                             const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                         // 対敵
                         for (auto& enemy : enemies) {
-                            if (enemy.isActive && CheckCollision(enemy.x, enemy.y, (float)enemy.hitboxWidth * enemy.scale, (float)enemy.hitboxHeight * enemy.scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                            if (enemy.isActive && SameLayer(gim.layer, enemy.layer) && CheckCollision(enemy.x, enemy.y, (float)enemy.hitboxWidth * enemy.scale, (float)enemy.hitboxHeight * enemy.scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                 enemy.hp = 0;
                                 enemy.isActive = false;
                                 // 向きを反転させた個体は消えずに残り、次の敵も食べ続ける
@@ -12946,7 +13158,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                         float pw_s = (float)player.width * player.scale;
                         float ph_s = (float)player.height * player.scale;
-                        if (CheckCollision(player.x, player.y, pw_s, ph_s, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                        if (SameLayer(gim.layer, player.layer) && CheckCollision(player.x, player.y, pw_s, ph_s, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             // 編集リアクション：
                             //  ・幅／高さを変える → 効果範囲がそのまま伸び縮みする（判定にspriteサイズを使っているため自動）。
                             //  ・向き反転         → 効果が反転する（暗転↔明転、ズームイン↔ズームアウト、色↔補色）。
@@ -13034,6 +13246,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     bullets[i].vx = cosf(angleRad) * speed;
                                     bullets[i].vy = sinf(angleRad) * speed;
                                     bullets[i].isPlayerOwned = false;
+                                    bullets[i].layer = gimPtr->layer; // 撃った側の層を写す
                                     bullets[i].isRewinding = false;
                                     bullets[i].history.clear();
                                     break;
@@ -13073,7 +13286,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             FillScriptPartTransform(partActor, part, gPartPose);
                             partActor.playerX = player.x; partActor.playerY = player.y;
                             PartInstance* partPtr = &part;
-                            partActor.shoot = [&bullets, partPtr](float angleRad, float speed, float damage) {
+                            // 親（ギミック）の層を値で持たせる。パーツが撃つ弾も、親と同じ層の物にしか当たらない
+                            partActor.shoot = [&bullets, partPtr, ownerLayer = gim.layer](float angleRad, float speed, float damage) {
                                 (void)damage;
                                 for (int i = 0; i < MAX_BULLETS; i++) {
                                     if (!bullets[i].isActive) {
@@ -13082,6 +13296,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                         bullets[i].vx = cosf(angleRad) * speed;
                                         bullets[i].vy = sinf(angleRad) * speed;
                                         bullets[i].isPlayerOwned = false;
+                                        bullets[i].layer = ownerLayer;
                                         bullets[i].isRewinding = false;
                                         bullets[i].history.clear();
                                         break;
@@ -13375,6 +13590,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // （足場側の判定はCheckPlatformCollisionが拾う）。
                     // 拡大・縮小した場合は判定範囲もそれに追従する。
                     if (GimmickIsTipped(gim)) continue;
+                    if (!SameLayer(gim.layer, player.layer)) continue; // 違う層のトゲは刺さらない
                     float sbx, sby, sbw, sbh;
                     GetGimmickCollisionBox(gim, sbx, sby, sbw, sbh);
                     if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, sbx, sby, sbw, sbh)) {
@@ -13388,11 +13604,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // isPlayerRewinding中は巻き戻し閲覧なので発動させない。
             if (!isPlayerRewinding) {
                 for (auto& gim : gimmicks) {
-                    if (gim.type == GIMMICK_CHECKPOINT && gim.isActive && gim.val1 < 0.5f) {
+                    if (gim.type == GIMMICK_CHECKPOINT && gim.isActive && gim.val1 < 0.5f && SameLayer(gim.layer, player.layer)) { // 違う層のチェックポイントには触れない
                         if (CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.hitboxWidth, gim.hitboxHeight)) {
                             gim.val1 = 1.0f;
                             checkpointX = gim.x;
                             checkpointY = gim.y;
+                            checkpointLayer = player.layer; // この復帰地点に触れた層（チェックポイントは同じ層でないと触れない）
                             const GimmickDef* gdefCp = FindGimmickDef(gim.assetId);
                             if (gdefCp) SoundManager::Get().PlaySe(gdefCp->seActivate);
                         }
@@ -13408,6 +13625,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!isPlayerRewinding && player.invulnTimer <= 0.0f) {
                 for (const auto& gimHz : gimmicks) {
                     if (!gimHz.isActive) continue;
+                    if (!SameLayer(gimHz.layer, player.layer)) continue; // 違う層のハザード（回る棘など）には当たらない
                     bool hitDeadlyPart = false;
                     float partCx = 0.0f;
                     for (const auto& part : gimHz.parts) {
@@ -13443,6 +13661,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // この敵が現在巻き戻し中の場合はスキップ
                         bool isThisEnemyRew = (isRKeyPressed && !isRotating && (selectedType == SELECT_NONE || (selectedType == SELECT_ENEMY && targetEnemy == &enemy)));
                         if (isThisEnemyRew) continue;
+
+                        // 違う層の敵とは当たり合わない（接触ダメージを受けない）
+                        if (!SameLayer(enemy.layer, player.layer)) continue;
 
                         // Feature: 編集リアクション（共通層）—
                         // ・個別に一時停止した敵は「足場」になるので、乗った瞬間に被弾しては成立しない。
@@ -13532,6 +13753,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 // 接触ダメージだけ無効で弾は当たる、という半端な状態にすると
                                 // 「すり抜けられる相手」という理解と噛み合わなくなるため揃える。
                                 if (enemy.isRewinding) continue;
+
+                                // 違う層の敵には、弾が当たらない（素通りする）。本体にもパーツにも効く
+                                if (!SameLayer(bullets[i].layer, enemy.layer)) continue;
 
                                 float ew_scaled = (float)enemy.hitboxWidth * enemy.scale;
                                 float eh_scaled = (float)enemy.hitboxHeight * enemy.scale;
@@ -13633,6 +13857,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
                                 if (gim.type != GIMMICK_BREAKABLE_BLOCK || !gim.isActive) continue;
+                                if (!SameLayer(bullets[i].layer, gim.layer)) continue; // 違う層のブロックは、弾で壊れない
                                 if (CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                     // 弾の大きさは撃った側の大きさを引き継いでいるので、それを相手の大きさとして渡す。
                                     // 反転させた砲台の弾もここを通るため、ブロック側で「弾で壊れる」を切っておけば
@@ -13659,6 +13884,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (bullets[i].isActive) {
                             for (auto& gim : gimmicks) {
                                 if (!gim.isActive) continue;
+                                if (!SameLayer(bullets[i].layer, gim.layer)) continue; // 違う層のギミックのパーツには、弾が当たらない
                                 const GimmickDef* gdefForPartHit = FindGimmickDef(gim.assetId);
                                 for (auto& part : gim.parts) {
                                     if (!part.isActive || part.isBody) continue;
@@ -13699,7 +13925,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 敵の弾がプレイヤーにヒット
                         if (!isPlayerRewinding) {
                             // 無敵のあいだは、弾はプレイヤーをすり抜ける（ダメージも、弾が消えることも起きない）
-                            if (player.invulnTimer <= 0.0f &&
+                            if (player.invulnTimer <= 0.0f && SameLayer(bullets[i].layer, player.layer) && // 違う層の弾は、プレイヤーをすり抜ける
                                 CheckCollision(bullets[i].x, bullets[i].y, 16.0f * bullets[i].scale, 16.0f * bullets[i].scale, player.x, player.y, pw_scaled, ph_scaled)) {
                                 TryHurtPlayer(player);
                                 if (player.hp <= 0) {
@@ -13848,7 +14074,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (!gim.isActive && !drawsGhostWhenInactive) continue;
 
             // 見た目の編集（色相・明るさ・透明度・上下反転）を受けているギミックは、このあとの描画を画面外へ逃がし、イテレーションの終わりに加工して重ねる
-            GimLookScope lookScope(gim, gim.y + gim.spriteHeight * 0.5f - cameraY);
+            // 層ごとの見た目：プレイヤーの層から見て、奥は半透明、手前はぼかし、同じ層は普通
+            GimLookScope lookScope(gim, gim.y + gim.spriteHeight * 0.5f - cameraY, LayerLookOf(gim.layer, player.layer));
 
             DrawPartsPass(gim.parts, cameraX, cameraY, true); // Feature: Composite Multi-Part Objects (Parts-M5) — zOrder<0のパーツを先に描画
 
@@ -14443,6 +14670,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 敵の描画
         for (const auto& enemy : enemies) {
             if (enemy.isActive) {
+                // 層ごとの見た目（プレイヤーから見て奥＝半透明、手前＝ぼかし）。この反復の描画をまとめて加工する
+                LayerGhostScope enemyGhost(LayerLookOf(enemy.layer, player.layer));
                 // 敵の動き大幅改良プラン Phase 1-A: FALLER(どっすん)の落下予兆テレグラフ。
                 // 溜めフェーズ(auxState==1かつcustomTimer>0)の間、影を徐々に濃く・大きく表示して
                 // 「もうすぐ落ちる」を視覚化する。スローモーション中はetsが小さくなり自然にゆっくり育つため
@@ -14603,6 +14832,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (isPlayerRewinding) WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "巻き戻し中", GetColor(100, 255, 100));
         else if (player.isPaused) WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 20, "停止中", GetColor(255, 255, 100));
         
+        // いまいる層（「中」以外のときだけ、頭の上に出す。HP表示のさらに上）
+        if (player.layer != LAYER_MID) {
+            char lyb[24]; sprintf_s(lyb, sizeof(lyb), "層：%s", LayerName(player.layer));
+            WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 60, lyb, GetColor(180, 220, 255));
+        }
+
         // プレイヤーHP表示
         if (player.hp > 0) {
             { char hpb[16]; sprintf_s(hpb, sizeof(hpb), "HP %d", player.hp);
@@ -14944,7 +15179,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float bulletAngle = atan2f(bullets[i].vy, bullets[i].vx);
                 // Feature: 編集リアクション — 撃った敵の大きさを弾の見た目にも反映する
                 float bulletFit = ComputeFitScale(bullets[i].handle, (float)BULLET_DRAW_SIZE, (float)BULLET_DRAW_SIZE) * bullets[i].scale;
+                // プレイヤーから見て奥の層の弾は半透明で描く
+                const bool bulletGhost = (LayerLookOf(bullets[i].layer, player.layer) == LAYER_BACK); // 弾は奥だけ半透明（ぼかしは数が多く重いので手前でも普通に描く）
+                if (bulletGhost) SetDrawBlendMode(DX_BLENDMODE_ALPHA, LAYER_GHOST_ALPHA);
                 DrawRotaGraph(bcx, bcy, bulletFit, bulletAngle, bullets[i].handle, TRUE);
+                if (bulletGhost) SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
             }
         }
 
@@ -15315,6 +15554,35 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 char editCostStr[48];
                 sprintf_s(editCostStr, sizeof(editCostStr), "コスト %d / %d", (int)editCost, (int)currentEditCost.maxCost);
                 DrawTextEdge(gx1 + (int)(6.0f * sc), TopFor((gy1 + gy2) / 2, fsm), editCostStr, GetColor(255, 255, 255), fsm);
+            }
+
+            // --- 層インジケータ：HUDの下に、奥・中・手前の3マスを並べ、プレイヤーのいる層を光らせる ---
+            // 操作は Q（奥へ）/ E（手前へ）。オブジェクト編集が使えるステージだけに出す。
+            if (isEditMode && IsEditToolEnabled(currentEditTools.objectEditEnabled, unlockedEditTools.objectEditEnabled)) {
+                const int lx1 = X(osdX1), lx2 = X(osdX2), ly1 = Y(osdY2 + 6), ly2 = Y(osdY2 + 34);
+                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 232);
+                DrawBox(lx1, ly1, lx2, ly2, GetColor(46, 42, 40), TRUE);
+                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                DrawBox(lx1, ly1, lx2, ly2, GetColor(84, 120, 176), FALSE);
+                // 左端の見出し「層」と、右の操作キー。3マスは見出しとキーの間を等分する
+                const int lblW = (int)(30.0f * sc), keyW = (int)(44.0f * sc);
+                DrawTextPlain(lx1 + (int)(8.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "層", hudInkSub, fsm);
+                DrawTextPlain(lx2 - keyW + (int)(4.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "Q/E", hudInkSub, fsm);
+                const int cx0 = lx1 + lblW, cx1 = lx2 - keyW;
+                const int cellW = (cx1 - cx0) / 3, pad = (int)(2.0f * sc);
+                const int lays[3] = { LAYER_BACK, LAYER_MID, LAYER_FRONT };
+                for (int li = 0; li < 3; li++) {
+                    const int bx1 = cx0 + cellW * li + pad, bx2 = cx0 + cellW * (li + 1) - pad;
+                    const int by1 = ly1 + pad + 1, by2 = ly2 - pad - 1;
+                    const bool on = (player.layer == lays[li]);
+                    if (on) {
+                        DrawBox(bx1, by1, bx2, by2, GetColor(59, 66, 112), TRUE);
+                        DrawBox(bx1, by1, bx2, by2, GetColor(140, 150, 255), FALSE);
+                    }
+                    const char* nm = LayerName(lays[li]);
+                    const int tw = UiFont::Width(nm, fsm);
+                    DrawTextPlain((bx1 + bx2) / 2 - tw / 2, TopFor((by1 + by2) / 2, fsm), nm, on ? hudInk : GetColor(120, 126, 150), fsm);
+                }
             }
 
             // --- 編集コストの増減（ゲージの右隣に浮かべる）---
@@ -16027,6 +16295,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             pe.scale = e.value("scale", 1.0f);
                                             pe.angle = e.value("angle", 0.0f);
                                             ReadEditLockOverride(e, pe.lockOv);
+                                            pe.layer = ClampLayer(e.value("layer", 0));
                                             editorPlacedEnemies.push_back(pe);
                                         }
                                     }
@@ -16043,6 +16312,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             pg.scaleY = e.value("scaleY", pg.scale);
                                             pg.angle = e.value("angle", 0.0f);
                                             ReadEditLockOverride(e, pg.lockOv);
+                                            pg.layer = ClampLayer(e.value("layer", 0));
                                             editorPlacedGimmicks.push_back(pg);
                                         }
                                     }
@@ -16126,6 +16396,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (e.scale != 1.0f) j["scale"] = e.scale;
                     if (e.angle != 0.0f) j["angle"] = e.angle;
                     WriteEditLockOverride(j, e.lockOv);
+                    if (e.layer != 0) j["layer"] = e.layer; // 既定（中）のときは書かない
                     stageData["enemies"].push_back(j);
                 }
                 stageData["gimmicks"] = json::array();
@@ -16136,6 +16407,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (g.scaleY != 1.0f) j["scaleY"] = g.scaleY;
                     if (g.angle != 0.0f) j["angle"] = g.angle;
                     WriteEditLockOverride(j, g.lockOv);
+                    if (g.layer != 0) j["layer"] = g.layer; // 既定（中）のときは書かない
                     stageData["gimmicks"].push_back(j);
                 }
                 stageData["items"] = json::array();

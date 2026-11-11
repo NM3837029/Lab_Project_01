@@ -85,9 +85,10 @@ inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
 // ---- アイコン（コードで描く）----
 // ICON_FAST 以降は、右クリックの扇形メニューで使う
 // ICON_GRID 以降は、ポーズ画面（システムメニュー）で使う
+// ICON_LAYER は、右クリックの扇形メニューの「レイヤー」。既存の番号がずれないよう、末尾に足している
 enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE,
             ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL,
-            ICON_GRID, ICON_KEYS, ICON_POWER };
+            ICON_GRID, ICON_KEYS, ICON_POWER, ICON_LAYER };
 
 // 円弧を細い線の連なりで描く。角度は度で、数学の向き（上が正）。
 inline void DrawArc(float cx, float cy, float r, float a0, float a1, unsigned int col, float th) {
@@ -209,6 +210,13 @@ inline void DrawIcon(Icon k, int cx, int cy, unsigned int col) {
             DrawLine(cx - 6, cy, cx + 7, cy, col, 2);
             DrawLine(cx + 7, cy, cx + 2, cy - 5, col, 2);
             DrawLine(cx + 7, cy, cx + 2, cy + 5, col, 2);
+            break;
+        }
+        case ICON_LAYER: {
+            // ずらして重ねた3枚の板（レイヤー）。奥の2枚は枠だけ、いちばん手前だけ塗る
+            DrawBox(cx - 3, cy - 9, cx + 9, cy + 1, col, FALSE);
+            DrawBox(cx - 6, cy - 6, cx + 6, cy + 4, col, FALSE);
+            DrawBox(cx - 9, cy - 3, cx + 3, cy + 7, col, TRUE);
             break;
         }
     }
