@@ -330,6 +330,15 @@
       "unlock": "always",
       "require": [],
       "item_total": 14
+    },
+    {
+      "file": "puzzle_8_mix.json",
+      "name": "パズル8：あわせ技",
+      "thumbnail": "",
+      "order": 9,
+      "unlock": "always",
+      "require": [],
+      "item_total": 26
     }
   ],
   "result": {
