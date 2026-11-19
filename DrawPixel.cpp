@@ -54,18 +54,8 @@ bool isDedicatedEditorMode = false;
 #include "BehaviorScript.h"
 #include "UiFont.h" // 小さな文字用のフォントキャッシュ（SetFontSize を毎フレーム呼ぶと極端に重い）
 #include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
-// TMPHOOK-BEGIN
-static int g_hkX = 0, g_hkY = 0, g_hkBtn = 0; static bool g_hkOn = false;
-static int HK_GetMouseInput() { if (g_hkOn) return g_hkBtn; return GetMouseInput(); }
-#define GetMouseInput HK_GetMouseInput
-// TMPHOOK-END
 // マウス座標は、ウィンドウを拡大していても画面（1280x720）の座標で受け取る
 #define GetMousePoint(a, b) DisplayMode::GetMousePointFixed(a, b)
-// TMPHOOK-BEGIN
-#undef GetMousePoint
-static int HK_GetMousePoint(int* x, int* y) { if (g_hkOn) { *x = g_hkX; *y = g_hkY; return 0; } return DisplayMode::GetMousePointFixed(x, y); }
-#define GetMousePoint HK_GetMousePoint
-// TMPHOOK-END
 
 // ======================================================
 // Feature: Composite Multi-Part Objects (Parts-M1)
@@ -4909,9 +4899,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 1秒60コマの待ち方を決める（垂直同期の設定は DxLib_Init より前でないと効かないので、ここで呼ぶ）。
     // 60Hz 以外のモニター（120Hz・144Hz など）では垂直同期を切り、FramePacer::Wait() で 1/60 秒ずつ進める。
     FramePacer::ConfigureBeforeDxInit();
-    // TMPHOOK-BEGIN
-    if (getenv("LABPROJ_NOVSYNC")) { SetWaitVSyncFlag(FALSE); FramePacer::UseVSync() = false; FramePacer::PeriodUs() = 16667; }
-    // TMPHOOK-END
     if (DxLib_Init() == -1) return -1; // DxLibの初期化に失敗したら即座に終了する
     // 既定フォントを、DxLibの既定（ビットマップ風の等幅）から、アンチエイリアスのかかったメイリオへ変える。
     // DrawString / DrawFormatString すべてに効くので、画面中のあらゆる文字が読みやすくなる。
@@ -8453,35 +8440,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     while (ProcessMessage() == 0 && !sysQuit)
     {
         ++mainLoopTick; // タイトル・セレクト画面へ入った最初のコマを見分けるための通し番号
-        // TMPHOOK-BEGIN
-        {
-            static const char* scm = getenv("LABPROJ_SCN");
-            if (scm && std::string(scm) == "meta") {
-                int t = mainLoopTick;
-                auto LM = [&](const char* tag) { char b[256]; sprintf_s(b, sizeof(b), "%s t=%d scene=%d msg=%d sel=%d btn=%d", tag, t, (int)currentScene, (int)isShowingMessage, (int)selectedType, g_hkBtn); Logger::Info("TMP", "meta", b); };
-                if (t == 30) {
-                    const GameCfg::Grid& g = gameConfig.grid;
-                    g_hkOn = true;
-                    g_hkX = GameCfg::ToScreenX(g.x + g.cellW * 0.5f); g_hkY = GameCfg::ToScreenY(g.y + g.cellH * 0.5f);
-                    g_hkBtn = MOUSE_INPUT_LEFT;
-                    currentScene = STAGE_SELECT; SoundManager::Get().StopBgm();
-                    LM("enterSelectHeld");
-                }
-                if (t >= 31 && t <= 40) LM("held");
-                if (t == 45) g_hkBtn = 0;
-                if (t == 46) LM("released");
-                if (t == 50) g_hkBtn = MOUSE_INPUT_LEFT;
-                if (t >= 51 && t <= 53) LM("freshClick");
-                if (t == 60) { g_hkBtn = 0; g_hkX = 640; g_hkY = 300; isShowingMessage = true; currentMessageText = "hook message"; }
-                if (t == 63) LM("msgShown");
-                if (t == 65) g_hkBtn = MOUSE_INPUT_LEFT;
-                if (t >= 66 && t <= 68) LM("msgClick");
-                if (t == 72) g_hkBtn = 0;
-                if (t == 74) LM("msgReleased");
-                if (t == 80) sysQuit = true;
-            }
-        }
-        // TMPHOOK-END
         DisplayMode::PollKeys(); // F11：フルスクリーンの切り替え（タイトル・セレクトでも効く）
         // Feature: タイトル画面・ステージセレクト画面 —
         // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
@@ -8515,54 +8473,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             lastF10 = f10;
             UpdateMonitorLayout();
         }
-
-        // TMPHOOK-BEGIN
-        {
-            static const char* scn = getenv("LABPROJ_SCN");
-            static int hf = 0;
-            static LONGLONG fpsT0 = 0;
-            auto L = [&](const char* tag) {
-                char b[512];
-                int coins = 0; for (auto& it : items) if (it.isCollected) coins++;
-                float liftY = -1; for (auto& g : gimmicks) if (g.type == GIMMICK_FALLING_LIFT) liftY = g.y;
-                int chA = -1, chB = -1, ci = 0; for (auto& g : gimmicks) if (g.type == GIMMICK_CHOMPER) { if (ci++ == 0) chA = g.isActive; else chB = g.isActive; }
-                float cpv = -1; for (auto& g : gimmicks) if (g.type == GIMMICK_CHECKPOINT) cpv = g.val1;
-                sprintf_s(b, sizeof(b), "%s f=%d scene=%d px=%.1f py=%.1f vy=%.2f hp=%d spd=%.1f coins=%d e0=%d e1=%d liftY=%.1f chA=%d chB=%d cp=%.0f cpX=%.0f snapI=%d snapE=%d",
-                    tag, hf, (int)currentScene, player.x, player.y, player.vy, player.hp, player.speedScale, coins,
-                    enemies.size() > 0 ? (int)enemies[0].isActive : -1, enemies.size() > 1 ? (int)enemies[1].isActive : -1,
-                    liftY, chA, chB, cpv, checkpointX, (int)checkpointItemTaken.size(), (int)checkpointEnemyGone.size());
-                Logger::Info("TMP", "st", b);
-            };
-            if (scn && std::string(scn) == "fps") {
-                ++hf;
-                if (hf == 60) fpsT0 = GetNowHiPerformanceCount();
-                if (hf == 360) { char b[128]; sprintf_s(b, sizeof(b), "fps300=%.2f", 300.0 * 1000000.0 / (double)(GetNowHiPerformanceCount() - fpsT0)); Logger::Info("TMP", "fps", b); sysQuit = true; }
-            } else if (scn) {
-                ++hf;
-                if (currentScene == PLAY) {
-                    if (hf == 10) { L("base"); player.x = 150; player.y = 340; player.vy = 0; }
-                    if (hf == 15) L("aftercoin");
-                    if (hf == 20) { enemies[0].isActive = false; enemies[0].hp = 0; L("killE0"); }
-                    if (hf == 30) { player.x = 400; player.y = 360; player.vy = 0; }
-                    if (hf == 40) L("aftercp");
-                    if (hf == 44) { cameraX = 200; }
-                    if (hf == 50) { player.y = 3000; }
-                    if (hf == 55) L("afterdeath");
-                    if (hf == 60) { player.x = 805; player.y = 370; player.vy = 0; }
-                    if (hf == 63) L("chompA_dead_touch");
-                    if (hf == 70) { player.x = 1110; player.y = 400.0f - player.height * player.scale; player.vy = 0; L("onlift"); }
-                    if (hf > 70 && hf <= 130 && hf % 10 == 0) L("lift");
-                    if (hf == 140) { player.x = 200; player.y = 300; player.vy = 0; player.speedScale = 8.0f; }
-                    if (hf >= 141 && hf <= 170 && hf % 3 == 0) L("spd8");
-                    if (hf == 171) { player.vy = -12.0f; }
-                    if (hf >= 172 && hf <= 200 && hf % 2 == 0) L("spd8jump");
-                    if (hf == 210) { player.speedScale = 1.0f; player.x = 1505; player.y = 370; player.vy = 0; }
-                }
-                if (hf >= 211 && hf <= 216) L("chompB");
-                if (hf == 230) sysQuit = true;
-            }
-        }
-        // TMPHOOK-END
 
         // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
@@ -17054,9 +16964,6 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
-        // TMPHOOK-BEGIN
-        { static const char* scn2 = getenv("LABPROJ_SCN"); static int sf = 0; ++sf; if (scn2 && (sf == 46 || sf == 12)) { char pth[64]; sprintf_s(pth, sizeof(pth), "hook_shot_%d.png", sf); SaveDrawScreenToPNG(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, pth); } }
-        // TMPHOOK-END
         ScreenFlip();
         FramePacer::Wait(); // 1コマ 1/60 秒になるまで待つ（120Hz などのモニターで倍速にならないように）
     }

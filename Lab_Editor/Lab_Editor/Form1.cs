@@ -929,15 +929,26 @@ public partial class Form1 : Form
     // エディタからは Debug しか起動できず、「直したはずの挙動が確認できない」ことになる。
     // 両方あるときは「後からビルドされた方」を選ぶ。配布ビルド直後は Release、
     // 普段の開発中は Debug が自然に選ばれる。
-    // どちらも無ければ Debug のパスを返し、既存の「見つかりません」メッセージに任せる。
+    // どちらも無ければ、Git に入れてあるビルド済みの prebuilt\Lab_Project_01.exe を使う。
+    //
+    // x64\ はビルドするたびに中身が変わるので .gitignore で Git から外してある。
+    // そのため Git から取ってきただけの人（Visual Studio でビルドしていない人）の手元には
+    // x64\ が無く、「ゲーム実行ファイルが見つかりません」になっていた。
+    // ビルド済みの exe を prebuilt\ に入れて Git で配り、手元にビルドが無いときはそれを使う。
+    // 自分でビルドしている人は、これまでどおり自分のビルドが優先される
+    // （prebuilt\ は Git から取ってきた時刻が更新日時になるので、日時で比べると自分のビルドに勝ってしまう。
+    //   そのため日時では比べず「手元のビルドが無いときだけ」使う）。
+    // どれも無ければ Debug のパスを返し、既存の「見つかりません」メッセージに任せる。
     private static string ResolveGameExe(string root)
     {
         string dbg = Path.Combine(root, "x64", "Debug", "Lab_Project_01.exe");
         string rel = Path.Combine(root, "x64", "Release", "Lab_Project_01.exe");
+        string pre = Path.Combine(root, "prebuilt", "Lab_Project_01.exe");
         bool hasDbg = File.Exists(dbg), hasRel = File.Exists(rel);
         if (hasDbg && hasRel)
             return File.GetLastWriteTime(rel) > File.GetLastWriteTime(dbg) ? rel : dbg;
         if (hasRel) return rel;
+        if (!hasDbg && File.Exists(pre)) return pre;
         return dbg;
     }
 
