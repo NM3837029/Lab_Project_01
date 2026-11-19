@@ -11,6 +11,7 @@
 #include "GamePaths.h"
 #include "GameConfig.h"
 #include "DisplayMode.h" // ウィンドウの拡大・フルスクリーン・マウス座標の補正
+#include "FramePacer.h"  // どのモニターでも1秒60コマで動かすための待ち合わせ（120Hz/144Hzで倍速になっていた対策）
 #include <exception>
 
 #include "imgui.h"
@@ -53,8 +54,18 @@ bool isDedicatedEditorMode = false;
 #include "BehaviorScript.h"
 #include "UiFont.h" // 小さな文字用のフォントキャッシュ（SetFontSize を毎フレーム呼ぶと極端に重い）
 #include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
+// TMPHOOK-BEGIN
+static int g_hkX = 0, g_hkY = 0, g_hkBtn = 0; static bool g_hkOn = false;
+static int HK_GetMouseInput() { if (g_hkOn) return g_hkBtn; return GetMouseInput(); }
+#define GetMouseInput HK_GetMouseInput
+// TMPHOOK-END
 // マウス座標は、ウィンドウを拡大していても画面（1280x720）の座標で受け取る
 #define GetMousePoint(a, b) DisplayMode::GetMousePointFixed(a, b)
+// TMPHOOK-BEGIN
+#undef GetMousePoint
+static int HK_GetMousePoint(int* x, int* y) { if (g_hkOn) { *x = g_hkX; *y = g_hkY; return 0; } return DisplayMode::GetMousePointFixed(x, y); }
+#define GetMousePoint HK_GetMousePoint
+// TMPHOOK-END
 
 // ======================================================
 // Feature: Composite Multi-Part Objects (Parts-M1)
@@ -678,8 +689,38 @@ struct PlacedGimmick {
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
 #include <filesystem>
+#include <shellapi.h> // CommandLineToArgvW（起動引数をワイド文字のまま受け取るため）
 namespace fs = std::filesystem;
-std::string currentStageFileName = "stage_01.json"; // 現在読み込み・保存対象になっているステージファイル名
+
+// ===== ファイル名の文字コード（日本語のステージ名対策）=====
+// このゲームは文字列をすべて UTF-8 で扱う（SetUseCharCodeFormat(UTF8)、JSON も UTF-8）。
+// ところが std::ifstream にふつうの文字列（char）でパスを渡すと、Windows はそれを
+// 「パソコンの言語設定の文字コード（日本語版なら Shift-JIS）」として解釈する。
+// そのため UTF-8 の「あ.json」を渡すと別の文字に化けたファイル名を探しに行き、開けなかった。
+// 例：
+//   ・セレクト画面に日本語名のステージを並べると、選んでも読み込めない
+//   ・Lab_Editor から日本語名のステージをプレイすると、読めずに組み込みの練習ステージが始まる
+//     （起動引数は Shift-JIS で届くので手元では読めることがあるが、言語設定を UTF-8 にしたPCなどでは読めない）
+// 対策として、ファイル名は常に UTF-8 で持ち、開く直前にワイド文字（UTF-16）へ変換して渡す。
+// ワイド文字のパスは言語設定に左右されないので、どのPCでも同じファイルを開ける。
+static std::wstring Utf8ToWide(const std::string& s) {
+    if (s.empty()) return std::wstring();
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    if (n <= 0) return std::wstring();
+    std::wstring w((size_t)n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+    return w;
+}
+static std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return std::string();
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return std::string();
+    std::string s((size_t)n, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &s[0], n, nullptr, nullptr);
+    return s;
+}
+
+std::string currentStageFileName = "stage_01.json"; // 現在読み込み・保存対象になっているステージファイル名（UTF-8）
 
 // アイテム1種類分の定義データ。items.jsonから読み込まれる。
 struct ItemDef {
@@ -4865,6 +4906,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // ウィンドウの縁をつかんで大きさを変えられるようにし、画面全体をウィンドウの大きさへ拡大して見せる。
     // 大きなディスプレイでキャラ・ブロック・ギミックなどが小さく見える問題への対応（DisplayMode.h）。
     SetWindowSizeChangeEnableFlag(TRUE, TRUE);
+    // 1秒60コマの待ち方を決める（垂直同期の設定は DxLib_Init より前でないと効かないので、ここで呼ぶ）。
+    // 60Hz 以外のモニター（120Hz・144Hz など）では垂直同期を切り、FramePacer::Wait() で 1/60 秒ずつ進める。
+    FramePacer::ConfigureBeforeDxInit();
+    // TMPHOOK-BEGIN
+    if (getenv("LABPROJ_NOVSYNC")) { SetWaitVSyncFlag(FALSE); FramePacer::UseVSync() = false; FramePacer::PeriodUs() = 16667; }
+    // TMPHOOK-END
     if (DxLib_Init() == -1) return -1; // DxLibの初期化に失敗したら即座に終了する
     // 既定フォントを、DxLibの既定（ビットマップ風の等幅）から、アンチエイリアスのかかったメイリオへ変える。
     // DrawString / DrawFormatString すべてに効くので、画面中のあらゆる文字が読みやすくなる。
@@ -4879,9 +4926,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 判定になる。エディタから来た場合はタイトル画面を挟まず、指定されたステージへ直行する
     // （毎回タイトルを経由させられてはテストプレイにならない）。
     bool bootDirectToStage = false;
-    if (l != nullptr && strlen(l) > 0) {
+    // 起動引数は WinMain の l（Shift-JIS などパソコンの言語設定の文字コード）ではなく、
+    // ワイド文字のまま受け取って UTF-8 へ直す。ゲーム内のファイル名はすべて UTF-8 で扱うため
+    // （ファイル名の文字コードについては Utf8ToWide の説明を参照）。
+    std::string bootArgUtf8;
+    {
+        int argc = 0;
+        LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argvW != nullptr) {
+            // [0] は exe 自身のパス。Lab_Editor はステージ名を引用符で囲まずに渡すので、
+            // 名前に空白があると複数に分かれて届く。従来（l をそのまま使っていた）と同じになるよう、空白でつなぎ直す。
+            for (int ai = 1; ai < argc; ++ai) {
+                if (ai > 1) bootArgUtf8 += ' ';
+                bootArgUtf8 += WideToUtf8(argvW[ai]);
+            }
+            LocalFree(argvW);
+        } else if (l != nullptr) {
+            bootArgUtf8 = l; // 万一分解できなかったときは従来どおり（英数字の名前なら同じ結果になる）
+        }
+    }
+    if (!bootArgUtf8.empty()) {
         bootDirectToStage = true;
-        currentStageFileName = l;
+        currentStageFileName = bootArgUtf8;
         // コマンドライン引数の前後に空白/引用符が付くケースへの防御（呼び出し元により混入することがある）
         while (!currentStageFileName.empty() && (currentStageFileName.front() == ' ' || currentStageFileName.front() == '"')) currentStageFileName.erase(0, 1);
         while (!currentStageFileName.empty() && (currentStageFileName.back() == ' ' || currentStageFileName.back() == '"')) currentStageFileName.pop_back();
@@ -5106,6 +5172,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         tileDefs[tid].breakMinScale = bMinScale;
                         tileDefs[tid].breakSe = bSe;
                     } else if (tid >= (int)tileDefs.size()) {
+                        // 【不具合の修正】IDに抜けがあるときの穴埋め。
+                        // マップは「タイルID」で、tileDefs は「配列の何番目か」で引くので、両者が一致している必要がある。
+                        // 以前は単に後ろへ足していたので、途中のIDが削除されていると（例：17 の次が 21）
+                        // ID21 が 18番目に入り、それ以降のタイルが全部1つずつ別のタイルにすり替わっていた。
+                        // 抜けている番号には「何もない（当たり判定なし・描かない）」タイルを入れて、位置をそろえる。
+                        while ((int)tileDefs.size() < tid) {
+                            TileDefinition gap = {};
+                            gap.type = (TileType)tileDefs.size();
+                            gap.handle = -1;
+                            gap.isCollidable = false;
+                            gap.deadly = false;
+                            gap.name = "(欠番)";
+                            tileDefs.push_back(gap);
+                        }
                         // 新規タイルを追加
                         TileDefinition newTile;
                         newTile.type = (TileType)tid;
@@ -5462,6 +5542,28 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // （層ごとに通れる道が違うステージで、やり直すたびに「中」へ戻されて、また切り替え直しになるのを避ける）。
     // checkpointX と同じく、ResetStage では消さず、別ステージへ移るとき（SwitchToStage）だけ戻す。
     int checkpointLayer = LAYER_MID;
+    // Feature: チェックポイントでの進み具合の保存 — 復帰地点に触れた時点で、
+    //   ・取っていたアイテム（コインなど）
+    //   ・倒していた敵
+    // を控えておき、やり直したときにその状態から再開する。
+    // 以前は位置だけを覚えていたので、死ぬと取ったコインが全部ステージに戻り（取得数も0に戻る）、
+    // 倒した敵も全部生き返っていた。「チェックポイントまでの成果が消える」のは理不尽なので、
+    // 復帰地点に触れた時点の成果は、やり直しても残るようにする。
+    // 添字はステージデータ（stages[...].items / .enemies）の並び順と同じ。
+    // イベントで途中から出てきた敵・アイテム（配列の後ろに足される）は、ステージデータに無いので対象外。
+    // 1 = 取った／倒した、0 = まだ。checkpointX と同じく、別ステージへ移るとき（SwitchToStage）だけ消す。
+    std::vector<char> checkpointItemTaken;
+    std::vector<char> checkpointEnemyGone;
+    // 敵だけ倒したまま残して、壊したブロックや相打ちで消えた「敵食らい」が元に戻ると、
+    // 「敵食らいを消すための敵がもういないのに、敵食らいだけ復活して道をふさぐ」ような
+    // 解けない状態（詰み）になる。そこで、壊れて元に戻らない物も一緒に控えておく。
+    //   ・ギミック … 壊せるブロック（GIMMICK_BREAKABLE_BLOCK）と敵食らい（GIMMICK_CHOMPER）で、
+    //                ステージ開始時にはあったのに、触れた時点で消えているもの（添字はステージデータの並び）
+    //                ※ゲートや色ロック足場なども isActive が変わるが、あれらは毎フレーム条件から
+    //                  決め直す「開閉」なので、控えない（控えても次のフレームで上書きされる）。
+    //   ・地形タイル … 壊れて空になっているマス（行, 列）
+    std::vector<char> checkpointGimmickGone;
+    std::vector<std::pair<int, int>> checkpointBrokenTiles;
 
     float cameraX = 0.0f; // カメラのワールドX座標（プレイヤーを追従して毎フレーム更新される）
     float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
@@ -6694,7 +6796,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 起動時の初期ステージ読み込みと、GoToStageアクションによる実行時のステージ切り替えの両方から使う。
     auto LoadStageJson = [&](const std::string& fileNameArg, StageData& jsonStage) -> bool {
         std::string stageJsonPath = "assets/stages/" + fileNameArg;
-        std::ifstream stageFile(stageJsonPath);
+        // ファイル名は UTF-8 なので、ワイド文字に直してから開く（日本語のステージ名でも開けるように）
+        std::ifstream stageFile(Utf8ToWide(stageJsonPath).c_str());
         if (stageFile.is_open()) {
             try {
                 json sj = json::parse(stageFile, nullptr, false);
@@ -7179,6 +7282,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         player.vy = 0.0f;
         player.isJumping = false;
         player.history.clear();
+        // プレイヤーに加えた編集（大きさ・傾き・速さ・一時停止・巻き戻し）も、やり直しでは元へ戻す。
+        // 敵・ギミックはステージデータから作り直されて編集前に戻るのに、プレイヤーだけ残っていた。
+        // そのため「自機の速さを8倍にする → 床を突き抜けて落下死 → 8倍のまま復活してまた突き抜ける」を
+        // 毎フレーム繰り返す状態になり、選択が毎回解除される・画面に残像が残る、といった不具合になっていた。
+        // ステージ開始時のプレイヤーは常にこの既定値なので、ここで既定値へ戻せば必ず開始時と同じになる。
+        player.scale = 1.0f;
+        player.angle = 0.0f;
+        player.speedScale = 1.0f;
+        player.isPaused = false;
+        player.isRewinding = false;
+        player.ridingGimmickIndex = -1; // ギミックは作り直されるので、前に乗っていた添字は使えない
         cameraX = 0.0f;
         cameraY = 0.0f;
 
@@ -7301,6 +7415,48 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         platforms = stage.platforms;
 
+        // Feature: チェックポイントでの進み具合の保存 — 復帰地点から再開するときは、
+        // 触れた時点で取っていたアイテムを「取った」状態に、倒していた敵を「いない」状態に戻す。
+        // （ここまでで敵・アイテムはステージデータから作り直されて全部そろっているので、そこから引く）
+        if (checkpointX >= 0.0f) {
+            for (size_t i = 0; i < checkpointItemTaken.size() && i < items.size(); ++i) {
+                if (!checkpointItemTaken[i]) continue;
+                Item& it = items[i];
+                it.isCollected = true;
+                it.isActive = false;
+                // 能力をくれるアイテム（2段ジャンプ・ダッシュ・火の玉）は、上で editorPlayerCaps を
+                // ステージの設定へ戻しているので、取った扱いにするなら能力もつけ直す
+                // （アイテムは消えたのに能力も無い、という取り返しのつかない状態を防ぐ）。
+                // 編集ツールの解禁（UnlockEditTool）は unlockedEditTools に残り続けるのでつけ直し不要。
+                // 編集コストの回復（RestoreEditCost）は、コストを満タンへ戻した直後なので足さない。
+                const ItemDef* idefCp = FindItemDef(it.assetId);
+                if (idefCp) {
+                    if (idefCp->grant_ability == "DoubleJump") editorPlayerCaps.canDoubleJump = true;
+                    else if (idefCp->grant_ability == "Dash") editorPlayerCaps.canDash = true;
+                    else if (idefCp->grant_ability == "ShootFireball") editorPlayerCaps.canShootFireball = true;
+                }
+            }
+            for (size_t i = 0; i < checkpointEnemyGone.size() && i < enemies.size(); ++i) {
+                if (!checkpointEnemyGone[i]) continue;
+                enemies[i].isActive = false;
+                enemies[i].hp = 0;
+            }
+            // 壊れていたブロック・消えていた敵食らいも、消えたままにする（詰み防止。宣言部の説明を参照）
+            for (size_t i = 0; i < checkpointGimmickGone.size() && i < gimmicks.size(); ++i) {
+                if (checkpointGimmickGone[i]) gimmicks[i].isActive = false;
+            }
+            // 壊れていた地形タイルも空にする。上で無傷の地形へ戻してあるので、そこから同じマスを抜く。
+            // brokenTiles（巻き戻しで復活させるための記録）には入れない＝チェックポイントより前の破壊は確定扱い。
+            {
+                auto& cpMap = stages[currentStageIdx].map;
+                for (const auto& rc : checkpointBrokenTiles) {
+                    if (rc.first >= 0 && rc.first < (int)cpMap.size() && rc.second >= 0 && rc.second < (int)cpMap[rc.first].size()) {
+                        cpMap[rc.first][rc.second] = 0;
+                    }
+                }
+            }
+        }
+
         selectedPlayers.clear();
         selectedEnemies.clear();
         selectedGimmicks.clear();
@@ -7354,6 +7510,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         checkpointX = -1.0f;
         checkpointY = -1.0f;
         checkpointLayer = LAYER_MID;
+        checkpointItemTaken.clear(); // 前のステージで取ったアイテム・倒した敵の控えも持ち越さない
+        checkpointEnemyGone.clear();
+        checkpointGimmickGone.clear();
+        checkpointBrokenTiles.clear();
         for (int i = 0; i < (int)stages.size(); i++) {
             if (stages[i].sourceFile == fileName) {
                 currentStageIdx = i;
@@ -7689,6 +7849,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // タイトル/セレクトのカーソル位置と、メインループへ「終了したい」と伝えるフラグ
     int titleCursor = 0;
     int selectCursor = 0;
+    // メインループが1周するたびに1増える数。タイトル・セレクト画面が「プレイ画面から入ってきた最初のコマ」を
+    // 見分けるのに使う（UpdateAndDrawMetaScene の中の説明を参照）。
+    int mainLoopTick = 0;
     bool metaWantExit = false;
     std::string metaBgmPlaying = "";
 
@@ -7703,6 +7866,31 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
         int mx, my; GetMousePoint(&mx, &my);
         bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
+
+        // プレイ画面（リザルト・Escメニュー）からこの画面へ入ってきた最初のコマかどうか。
+        // 上の mPrev* は、この画面にいる間しか更新されない static なので、プレイ中ずっと
+        // 「前回この画面を出たときの値」が残っている。そのため、
+        //   リザルトの「ステージ選択へ」を左クリック → セレクト画面の1コマ目でまだボタンが押されたまま
+        //   → mPrevClick が古い false のままだと「今押した」と判定される
+        //   → ちょうどカーソルの下にあったステージのマスが選ばれ、すぐプレイに戻ってしまう
+        // という不具合になっていた（カーソルの下にマスが無いときや、前回の値が true のときは起きないので
+        // 「機能するときと、しないときがある」ように見えていた）。
+        // 入ってきた最初のコマは、今押されているボタン・キーを「押しっぱなし」として扱い、
+        // 一度離してから押し直したときだけ反応させる。
+        // 直前のコマもこの画面だったかは、メインループが毎コマ数える mainLoopTick で判定する
+        // （この関数の中で数えると、この画面にいないコマは数えられないので判定にならない）。
+        static int mLastMetaTick = -2;
+        const bool mWasInMeta = (mLastMetaTick == mainLoopTick - 1);
+        mLastMetaTick = mainLoopTick;
+        if (!mWasInMeta) {
+            mPrevClick = click;
+            mPrevUp = CheckHitKey(KEY_INPUT_UP) != 0 || CheckHitKey(KEY_INPUT_W) != 0;
+            mPrevDown = CheckHitKey(KEY_INPUT_DOWN) != 0 || CheckHitKey(KEY_INPUT_S) != 0;
+            mPrevLeft = CheckHitKey(KEY_INPUT_LEFT) != 0 || CheckHitKey(KEY_INPUT_A) != 0;
+            mPrevRight = CheckHitKey(KEY_INPUT_RIGHT) != 0 || CheckHitKey(KEY_INPUT_D) != 0;
+            mPrevDecide = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
+            mPrevCancel = CheckHitKey(KEY_INPUT_BACK) != 0 || CheckHitKey(KEY_INPUT_X) != 0 || CheckHitKey(KEY_INPUT_ESCAPE) != 0;
+        }
         bool clickEdge = click && !mPrevClick;
 
         bool kUp     = CheckHitKey(KEY_INPUT_UP) != 0    || CheckHitKey(KEY_INPUT_W) != 0;
@@ -7953,6 +8141,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         SoundManager::Get().Update();
 
         ScreenFlip();
+        FramePacer::Wait(); // タイトル・セレクトも1秒60コマにそろえる（カーソルの点滅などが倍速にならないように）
     };
 
     // 最初のステージ初期化
@@ -8251,6 +8440,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             SoundManager::Get().Update();
             ScreenFlip();
+            FramePacer::Wait(); // 垂直同期を切ったPCで、このメニューのループが空回りしてCPUを使い切らないように
         }
         DeleteGraph(snap);
         // 選んだクリックやキーが、閉じた直後のゲーム側で「新しい入力」に見えないよう、離れるまで待つ
@@ -8262,6 +8452,36 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     while (ProcessMessage() == 0 && !sysQuit)
     {
+        ++mainLoopTick; // タイトル・セレクト画面へ入った最初のコマを見分けるための通し番号
+        // TMPHOOK-BEGIN
+        {
+            static const char* scm = getenv("LABPROJ_SCN");
+            if (scm && std::string(scm) == "meta") {
+                int t = mainLoopTick;
+                auto LM = [&](const char* tag) { char b[256]; sprintf_s(b, sizeof(b), "%s t=%d scene=%d msg=%d sel=%d btn=%d", tag, t, (int)currentScene, (int)isShowingMessage, (int)selectedType, g_hkBtn); Logger::Info("TMP", "meta", b); };
+                if (t == 30) {
+                    const GameCfg::Grid& g = gameConfig.grid;
+                    g_hkOn = true;
+                    g_hkX = GameCfg::ToScreenX(g.x + g.cellW * 0.5f); g_hkY = GameCfg::ToScreenY(g.y + g.cellH * 0.5f);
+                    g_hkBtn = MOUSE_INPUT_LEFT;
+                    currentScene = STAGE_SELECT; SoundManager::Get().StopBgm();
+                    LM("enterSelectHeld");
+                }
+                if (t >= 31 && t <= 40) LM("held");
+                if (t == 45) g_hkBtn = 0;
+                if (t == 46) LM("released");
+                if (t == 50) g_hkBtn = MOUSE_INPUT_LEFT;
+                if (t >= 51 && t <= 53) LM("freshClick");
+                if (t == 60) { g_hkBtn = 0; g_hkX = 640; g_hkY = 300; isShowingMessage = true; currentMessageText = "hook message"; }
+                if (t == 63) LM("msgShown");
+                if (t == 65) g_hkBtn = MOUSE_INPUT_LEFT;
+                if (t >= 66 && t <= 68) LM("msgClick");
+                if (t == 72) g_hkBtn = 0;
+                if (t == 74) LM("msgReleased");
+                if (t == 80) sysQuit = true;
+            }
+        }
+        // TMPHOOK-END
         DisplayMode::PollKeys(); // F11：フルスクリーンの切り替え（タイトル・セレクトでも効く）
         // Feature: タイトル画面・ステージセレクト画面 —
         // これらのシーンではゲームプレイ本体（約4500行）を丸ごと飛ばす。
@@ -8295,6 +8515,54 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             lastF10 = f10;
             UpdateMonitorLayout();
         }
+
+        // TMPHOOK-BEGIN
+        {
+            static const char* scn = getenv("LABPROJ_SCN");
+            static int hf = 0;
+            static LONGLONG fpsT0 = 0;
+            auto L = [&](const char* tag) {
+                char b[512];
+                int coins = 0; for (auto& it : items) if (it.isCollected) coins++;
+                float liftY = -1; for (auto& g : gimmicks) if (g.type == GIMMICK_FALLING_LIFT) liftY = g.y;
+                int chA = -1, chB = -1, ci = 0; for (auto& g : gimmicks) if (g.type == GIMMICK_CHOMPER) { if (ci++ == 0) chA = g.isActive; else chB = g.isActive; }
+                float cpv = -1; for (auto& g : gimmicks) if (g.type == GIMMICK_CHECKPOINT) cpv = g.val1;
+                sprintf_s(b, sizeof(b), "%s f=%d scene=%d px=%.1f py=%.1f vy=%.2f hp=%d spd=%.1f coins=%d e0=%d e1=%d liftY=%.1f chA=%d chB=%d cp=%.0f cpX=%.0f snapI=%d snapE=%d",
+                    tag, hf, (int)currentScene, player.x, player.y, player.vy, player.hp, player.speedScale, coins,
+                    enemies.size() > 0 ? (int)enemies[0].isActive : -1, enemies.size() > 1 ? (int)enemies[1].isActive : -1,
+                    liftY, chA, chB, cpv, checkpointX, (int)checkpointItemTaken.size(), (int)checkpointEnemyGone.size());
+                Logger::Info("TMP", "st", b);
+            };
+            if (scn && std::string(scn) == "fps") {
+                ++hf;
+                if (hf == 60) fpsT0 = GetNowHiPerformanceCount();
+                if (hf == 360) { char b[128]; sprintf_s(b, sizeof(b), "fps300=%.2f", 300.0 * 1000000.0 / (double)(GetNowHiPerformanceCount() - fpsT0)); Logger::Info("TMP", "fps", b); sysQuit = true; }
+            } else if (scn) {
+                ++hf;
+                if (currentScene == PLAY) {
+                    if (hf == 10) { L("base"); player.x = 150; player.y = 340; player.vy = 0; }
+                    if (hf == 15) L("aftercoin");
+                    if (hf == 20) { enemies[0].isActive = false; enemies[0].hp = 0; L("killE0"); }
+                    if (hf == 30) { player.x = 400; player.y = 360; player.vy = 0; }
+                    if (hf == 40) L("aftercp");
+                    if (hf == 44) { cameraX = 200; }
+                    if (hf == 50) { player.y = 3000; }
+                    if (hf == 55) L("afterdeath");
+                    if (hf == 60) { player.x = 805; player.y = 370; player.vy = 0; }
+                    if (hf == 63) L("chompA_dead_touch");
+                    if (hf == 70) { player.x = 1110; player.y = 400.0f - player.height * player.scale; player.vy = 0; L("onlift"); }
+                    if (hf > 70 && hf <= 130 && hf % 10 == 0) L("lift");
+                    if (hf == 140) { player.x = 200; player.y = 300; player.vy = 0; player.speedScale = 8.0f; }
+                    if (hf >= 141 && hf <= 170 && hf % 3 == 0) L("spd8");
+                    if (hf == 171) { player.vy = -12.0f; }
+                    if (hf >= 172 && hf <= 200 && hf % 2 == 0) L("spd8jump");
+                    if (hf == 210) { player.speedScale = 1.0f; player.x = 1505; player.y = 370; player.vy = 0; }
+                }
+                if (hf >= 211 && hf <= 216) L("chompB");
+                if (hf == 230) sysQuit = true;
+            }
+        }
+        // TMPHOOK-END
 
         // ステージ全体の横幅/縦幅は固定タイル数決め打ちではなく、現在のステージの実際のマップサイズから算出する
         if (currentStageIdx >= 0 && currentStageIdx < (int)stages.size() && !stages[currentStageIdx].map.empty() && !stages[currentStageIdx].map[0].empty()) {
@@ -8419,6 +8687,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 使う使わないに関わらず毎フレーム必ず読み捨てる（溜めておいて、あとでまとめて効くのを防ぐ）。
         int wheelRot = GetMouseWheelRotVol();
         bool editCtrlHeld = (CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL));
+
+        // ===== 会話（メッセージ）ウィンドウを左クリックでも閉じる =====
+        // これまでは Enter キーでしか閉じられず、マウスで遊んでいる人が閉じ方に迷っていた。
+        // 閉じるのに使ったクリックは、離すまで背後の操作（物の選択・射撃・ボタン）へ回さない
+        // （閉じたのと同じクリックで、うしろにある物を選んだり弾を撃ったりしてしまわないように）。
+        // 「押した瞬間」は、ほかの部品が currentLeftClick を書き換える前の、本物のマウス状態から求める。
+        {
+            static bool msgClickLastRaw = false, msgClickHold = false;
+            const bool msgRaw = currentLeftClick;
+            const bool msgPressed = msgRaw && !msgClickLastRaw;
+            msgClickLastRaw = msgRaw;
+            if (msgPressed && isShowingMessage && currentScene == PLAY) {
+                isShowingMessage = false;
+                SoundManager::Get().StopAnimalese();
+                msgClickHold = true;
+            }
+            if (!msgRaw) msgClickHold = false;
+            if (msgClickHold) currentLeftClick = false;
+        }
 
         // ===== カラー補正パネル（右パネルの下半分）の入力 =====
         // パネルの上でのクリックとホイールは、ここで使い切って背後の編集操作（物の選択・ホイール拡縮・射撃）へ回さない。
@@ -9789,25 +10076,61 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 当たり判定側は「速度」ではなく「このフレームの移動量」を基準に
                 // めり込み許容値(vy + 8px 等)を決めているので、判定にも同じ値を渡す。
                 // 床や天井に当たると判定側がこの値を0にするので、それを見て本体の速度を止める。
-                float stepVy = player.vy * pts;
+                const float frameMoveX = player.vx * pts;
+                const float frameMoveY = player.vy * pts;
 
-                // X/Y方向の移動と衝突判定を共通化
-                bool isGrounded = UpdatePhysicsCollisions(player.x, player.y, player.vx * pts, stepVy, stepVy,
-                                                          player.width, player.height, player.scale,
-                                                          stages[currentStageIdx].map, tileDefs, gimmicks, player.layer);
+                // 【高速移動のすり抜け対策】このフレームの移動を、小さな刻みに分けて1刻みずつ当たり判定する。
+                //
+                // 当たり判定（CheckGridCollisionX/Y など）は「移動した先」のマスしか見ないので、
+                // 1フレームに1マス(32px)以上動くと、途中の床や壁を丸ごと飛び越えてしまう。
+                // 自機の速さを8倍に編集すると、落下の勢いが1フレーム100px を超えて床を突き抜けていた。
+                //
+                // 刻みの大きさは最大12px（1マスの半分より小さくして、めり込み許容値の範囲に必ず収める）。
+                // 重力による加速は上で1フレームぶんまとめて済ませてあり、ここでは「動く量」を等分するだけなので、
+                // 何にも当たらなければ、分けずに動かした場合とまったく同じ位置に着く（ジャンプの飛距離は変わらない）。
+                // ふだんの速さ（1フレーム12px以下）では刻みは1回だけで、これまでと同じ処理になる。
+                const float SUBSTEP_MAX_PX = 12.0f;
+                float moveAbs = fabsf(frameMoveX) > fabsf(frameMoveY) ? fabsf(frameMoveX) : fabsf(frameMoveY);
+                int subSteps = (int)ceilf(moveAbs / SUBSTEP_MAX_PX);
+                if (subSteps < 1) subSteps = 1;
+                if (subSteps > 32) subSteps = 32; // 異常な値でフレームが止まらないよう上限を設ける（32刻み×12px=384px/フレーム）
+                const float subMoveX = frameMoveX / (float)subSteps;
+                const float subMoveY = frameMoveY / (float)subSteps;
 
-                // 従来の足場との着地衝突判定
-                bool platGrounded = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &player.ridingGimmickIndex, player.layer);
-                // Feature: 編集リアクション（共通層）— 個別に一時停止した敵は足場になる。
-                // 相手が何であっても必ず通用する手札として用意することで、
-                // 「届かない高さは、そこにいる敵を止めて踏み台にする」という解法がどのステージでも成立する。
-                if (!platGrounded) {
-                    platGrounded = CheckFrozenEnemyPlatform(player.x, player.y, stepVy,
-                                                            player.width, player.height, player.scale, enemies);
+                bool isGrounded = false;
+                bool platGrounded = false;
+                bool verticalStopped = false; // 床や天井に当たって縦の動きが止まったか（以降の刻みでは縦に動かさない）
+                int ridingIndex = -1;         // 最後に着地した動くギミックの添字（乗り物追従用）
+                for (int sub = 0; sub < subSteps; ++sub) {
+                    // この刻みで縦に動く量。当たり判定がこれを0にしたら「当たった」とみなす
+                    float stepVy = verticalStopped ? 0.0f : subMoveY;
+
+                    // X/Y方向の移動と衝突判定を共通化
+                    bool g = UpdatePhysicsCollisions(player.x, player.y, subMoveX, stepVy, stepVy,
+                                                     player.width, player.height, player.scale,
+                                                     stages[currentStageIdx].map, tileDefs, gimmicks, player.layer);
+
+                    // 従来の足場との着地衝突判定
+                    int ri = -1;
+                    bool pg = CheckPlatformCollision(player.x, player.y, stepVy, player.width, player.height, player.scale, platforms, gimmicks, &ri, player.layer);
+                    if (pg) ridingIndex = ri; // 動かない足場に着地したときは -1 が入る
+                    // Feature: 編集リアクション（共通層）— 個別に一時停止した敵は足場になる。
+                    // 相手が何であっても必ず通用する手札として用意することで、
+                    // 「届かない高さは、そこにいる敵を止めて踏み台にする」という解法がどのステージでも成立する。
+                    if (!pg) {
+                        pg = CheckFrozenEnemyPlatform(player.x, player.y, stepVy,
+                                                      player.width, player.height, player.scale, enemies);
+                    }
+                    // 何かに当たって移動量が0にされたなら、縦の動きはここで止める。
+                    // pts が0（速度0に編集された）のときは移動していないだけなので、止まったことにはしない。
+                    if (pts > 0.0f && stepVy == 0.0f) verticalStopped = true;
+                    isGrounded = isGrounded || g;
+                    platGrounded = platGrounded || pg;
                 }
+                // どの刻みでも足場に着地しなかったなら、乗り物には乗っていない（-1）
+                player.ridingGimmickIndex = platGrounded ? ridingIndex : -1;
                 // 何かに当たって移動量が0にされたなら、速度そのものも止める。
-                // pts が0（速度0に編集された）のときは移動していないだけなので触らない。
-                if (pts > 0.0f && stepVy == 0.0f) player.vy = 0.0f;
+                if (verticalStopped) player.vy = 0.0f;
                 
                 if (isGrounded || platGrounded) {
                     // 着地音。空中から地面に着いた瞬間だけ鳴らす。
@@ -9906,9 +10229,47 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (player.vy >= 0.0f && player.x + objW >= gim.x && player.x <= gim.x + gim.spriteWidth) {
                             float threshold = player.vy + 8.0f;
                             if (footY >= gim.y && footY <= gim.y + threshold) {
+                                const float liftOldY = gim.y;
                                 gim.y += cosf(lr.tilt) * sinkSpeed * pts; // ゆっくり降下
                                 gim.x += sinf(lr.tilt) * sinkSpeed * pts; // 傾けた向きへ滑る
-                                if (sinkSpeed > 0.0f && gim.y > groundY - maxDepth) gim.y = groundY - maxDepth; // 地面を限界とする
+                                // 【不具合の修正】沈む深さの限界。
+                                // 以前は「groundY(=400 固定) - 最大沈み込み」を限界にしていた。groundY は昔の
+                                // 地面が平らだった頃の決め打ちの値で、最大沈み込みの既定は 160 なので、限界は常に y=240。
+                                // そのため y=240 より下に置いたリフトは、乗った瞬間に y=240 まで「上へ瞬間移動」し、
+                                // それ以降は沈まなかった。置く高さで動いたり動かなかったりしたのはこのため。
+                                // 今は次の2つで止める。どちらも「沈むのを止める」だけで、上へ戻すことはしない。
+                                //   (1) 置いた位置（editBaseY）から「最大沈み込み」px より深くは沈まない
+                                //   (2) リフトの真下に地形タイル（当たり判定あり）があれば、その上面で止まる
+                                if (sinkSpeed > 0.0f && gim.y > liftOldY) {
+                                    // (1) 移動の編集で動かされたリフトは、置いた位置が意味を失うので (1) は使わず (2) だけで止める
+                                    //     （置いた位置より深くへ運ばれていると、乗っても全く沈まなくなるため）
+                                    float limitY = lr.moved ? 1.0e9f : gim.editBaseY + maxDepth;
+                                    const auto& liftMap = stages[currentStageIdx].map;
+                                    const float liftH = (gim.height > 0.0f) ? gim.height : 16.0f;
+                                    if (!liftMap.empty() && !liftMap[0].empty()) {           // (2)
+                                        const int mapH = (int)liftMap.size(), mapW = (int)liftMap[0].size();
+                                        const int colL = (int)(gim.x / TILE_SIZE);
+                                        const int colR = (int)((gim.x + gim.spriteWidth - 1.0f) / TILE_SIZE);
+                                        // 今の下端より下のマスを上から順に調べ、最初に当たったタイルの上面を床とする
+                                        int rowStart = (int)((liftOldY + liftH) / TILE_SIZE);
+                                        if (rowStart < 0) rowStart = 0;
+                                        for (int r = rowStart; r < mapH; ++r) {
+                                            bool hit = false;
+                                            for (int c = colL; c <= colR; ++c) {
+                                                if (c < 0 || c >= mapW) continue;
+                                                int tid = liftMap[r][c];
+                                                if (tid > 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) { hit = true; break; }
+                                            }
+                                            if (hit) {
+                                                float floorTopY = (float)(r * TILE_SIZE) - liftH;
+                                                if (floorTopY < limitY) limitY = floorTopY;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if (limitY < liftOldY) limitY = liftOldY; // 限界がもう上にあっても、上へは戻さない（止まるだけ）
+                                    if (gim.y > limitY) gim.y = limitY;
+                                }
                                 if (gim.y < -200.0f) gim.y = -200.0f; // 浮上時に画面外へ飛び去らないよう天井を張る
                             }
                         }
@@ -13037,13 +13398,23 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 対プレイヤー
                         float pw_scaled = (float)player.width * player.scale;
                         float ph_scaled = (float)player.height * player.scale;
-                        if (!gr.flipped && SameLayer(gim.layer, player.layer) && CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
+                        //
+                        // 【不具合の修正】以前は2つの問題があった。
+                        //  1) 体力を0にするだけで、ゲームオーバーへ移していなかった。
+                        //     ほかのダメージ源は「体力が0以下になったら RESULT_GAMEOVER へ」としているのに、
+                        //     ここだけそれが抜けていたので、HPが0のまま普通に動き回れてしまっていた。
+                        //  2) 敵と相打ちになって消えた（isActive=false）あとも、判定だけ残っていた。
+                        //     見た目は消えているのに、そこを自機が通ると体力が0になっていた。
+                        //     消えたギミックは、プレイヤーも敵も食べない。
+                        if (gim.isActive && !gr.flipped && SameLayer(gim.layer, player.layer) && CheckCollision(player.x, player.y, pw_scaled, ph_scaled, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                             player.hp = 0;
+                            currentScene = RESULT_GAMEOVER; // 即死なので、ほかのダメージ源と同じくゲームオーバーへ
                             const GimmickDef* gdef = FindGimmickDef(gim.assetId);
                             if (gdef) SoundManager::Get().PlaySe(gdef->seActivate);
                         }
                         // 対敵
                         for (auto& enemy : enemies) {
+                            if (!gim.isActive) break; // 相打ちで消えたら、同じフレームのうちに次の敵まで食べない
                             if (enemy.isActive && SameLayer(gim.layer, enemy.layer) && CheckCollision(enemy.x, enemy.y, (float)enemy.hitboxWidth * enemy.scale, (float)enemy.hitboxHeight * enemy.scale, gim.x, gim.y, gim.spriteWidth, gim.spriteHeight)) {
                                 enemy.hp = 0;
                                 enemy.isActive = false;
@@ -13610,6 +13981,29 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             checkpointX = gim.x;
                             checkpointY = gim.y;
                             checkpointLayer = player.layer; // この復帰地点に触れた層（チェックポイントは同じ層でないと触れない）
+                            // ここまでに取ったアイテムと倒した敵を控える（やり直したときに、この状態から再開する）。
+                            // 敵は「ステージ開始時にはいた（isActive）のに、今はいない」ものだけを倒したとみなす
+                            // （最初から非表示で置かれている敵を、倒した扱いにしないため）。
+                            {
+                                const StageData& cpStage = stages[currentStageIdx];
+                                checkpointItemTaken.assign(cpStage.items.size(), 0);
+                                for (size_t ci = 0; ci < cpStage.items.size() && ci < items.size(); ++ci) {
+                                    checkpointItemTaken[ci] = items[ci].isCollected ? 1 : 0;
+                                }
+                                checkpointEnemyGone.assign(cpStage.enemies.size(), 0);
+                                for (size_t ci = 0; ci < cpStage.enemies.size() && ci < enemies.size(); ++ci) {
+                                    checkpointEnemyGone[ci] = (cpStage.enemies[ci].isActive && !enemies[ci].isActive) ? 1 : 0;
+                                }
+                                // 壊れて元に戻らない物（壊せるブロック・敵食らい）と、壊れた地形タイル
+                                checkpointGimmickGone.assign(cpStage.gimmicks.size(), 0);
+                                for (size_t ci = 0; ci < cpStage.gimmicks.size() && ci < gimmicks.size(); ++ci) {
+                                    const Gimmick& g0 = cpStage.gimmicks[ci];
+                                    if (g0.type != GIMMICK_BREAKABLE_BLOCK && g0.type != GIMMICK_CHOMPER) continue;
+                                    checkpointGimmickGone[ci] = (g0.isActive && !gimmicks[ci].isActive) ? 1 : 0;
+                                }
+                                checkpointBrokenTiles.clear();
+                                for (const auto& bt : brokenTiles) checkpointBrokenTiles.push_back({ bt.row, bt.col });
+                            }
                             const GimmickDef* gdefCp = FindGimmickDef(gim.assetId);
                             if (gdefCp) SoundManager::Get().PlaySe(gdefCp->seActivate);
                         }
@@ -13997,19 +14391,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             int cgy = (int)(gim.y - cameraY);
             bool cpActive = gim.val1 > 0.5f;
             int flagBob = 0;
+            // 旗の大きさと、旗を立てる「地面の高さ」。
+            // チェックポイントの当たり判定は 32x64（2マスぶんの縦長）で、配置した y はその箱の上端。
+            // 箱の下端（y + 当たり判定の高さ）が地面に接するように置かれるので、旗もそこへ立てる。
+            // 以前は箱の上端 y を旗の中心にしていたため、旗の根元が地面から約1マス浮いて見えていた。
+            const int flagSize = (int)(TILE_SIZE * 1.9f);
+            const float cpBoxH = (gim.hitboxHeight > 0.0f) ? gim.hitboxHeight : (float)(TILE_SIZE * 2);
+            const int footY = cgy + (int)cpBoxH;
+            // 旗の絵（640x640）は、下端から 18px ぶん（約2.8%）透明な余白がある。
+            // その余白ぶん下げて、旗竿の根元がちょうど地面に乗るようにする。
+            const int flagCenterY = footY - flagSize / 2 + (int)(flagSize * 18.0f / 640.0f);
             if (cpActive) {
-                // 発動済み：足元にうっすら発光する光の柱を出す
+                // 発動済み：足元にうっすら発光する光の柱を出す（地面から2マスぶんの高さ）
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
-                DrawBox(cgx + 4, cgy - TILE_SIZE, cgx + TILE_SIZE - 4, cgy + TILE_SIZE, GetColor(120, 255, 150), TRUE);
+                DrawBox(cgx + 4, footY - TILE_SIZE * 2, cgx + TILE_SIZE - 4, footY, GetColor(120, 255, 150), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 flagBob = (int)(sinf(BehaviorInterpreter::globalFrameCounter * 0.09f + gim.x) * 2.0f);
             } else {
                 SetDrawBright(150, 150, 155); // 未発動：色褪せて見えるよう輝度を落とす
             }
-            // 旗は「棒の根元が配置マスの底」に来るよう、1マス分せり上げた位置を中心にして描く
-            DrawUiIcon(cgx + TILE_SIZE / 2, cgy + flagBob, (int)(TILE_SIZE * 1.9f), checkpointHandle);
+            // 旗は「竿の根元が当たり判定の箱の底（＝地面）」に来るように描く
+            DrawUiIcon(cgx + TILE_SIZE / 2, flagCenterY + flagBob, flagSize, checkpointHandle);
             SetDrawBright(255, 255, 255);
-            WorldLabel(cgx - 10, cgy - TILE_SIZE - 18, cpActive ? "チェックポイント済" : "チェックポイント", cpActive ? GetColor(150, 255, 180) : GetColor(200, 200, 205));
+            // 名札は旗のすぐ上に出す（旗を下げたぶん、名札も一緒に下げる）
+            WorldLabel(cgx - 10, flagCenterY - flagSize / 2 - 18, cpActive ? "チェックポイント済" : "チェックポイント", cpActive ? GetColor(150, 255, 180) : GetColor(200, 200, 205));
         }
 
         // ===== deadly タイル判定 =====
@@ -15303,7 +15708,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawString(boxX + 18, lineY, line.c_str(), UiInk());
                 lineY += MSG_LINE_H;
             }
-            DrawString(boxX + boxW - 130, boxY + boxH - 26, "[ENTER] 閉じる", UiInkSub());
+            // 閉じ方の案内。左クリックでも閉じられるようにしたので、両方を書く。
+            // 文字幅を測って右端へ寄せる（固定の位置だと、文言を長くしたときに枠からはみ出すため）。
+            {
+                const char* msgHint = "[Enter / クリック] 閉じる";
+                int hintW = GetDrawStringWidth(msgHint, (int)strlen(msgHint));
+                DrawString(boxX + boxW - 18 - hintW, boxY + boxH - 26, msgHint, UiInkSub());
+            }
         }
 
         // Feature: 進行状況のセーブ — PLAY からクリアへ移った瞬間だけ記録する。
@@ -16274,11 +16685,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (fs::exists("assets/stages")) {
                 for (const auto& entry : fs::directory_iterator("assets/stages")) {
                     if (entry.path().extension() == ".json") {
-                        std::string fname = entry.path().filename().string();
+                        std::string fname = WideToUtf8(entry.path().filename().wstring()); // UTF-8 で持つ（日本語のファイル名対策。Utf8ToWide の説明を参照）
                         if (ImGui::Selectable(fname.c_str(), currentStageFileName == fname)) {
                             currentStageFileName = fname;
                             editorPlacedEnemies.clear(); editorPlacedGimmicks.clear(); editorPlacedItems.clear();
-                            std::ifstream sf("assets/stages/" + currentStageFileName);
+                            std::ifstream sf(Utf8ToWide("assets/stages/" + currentStageFileName).c_str());
                             if (sf.is_open()) {
                                 json j = json::parse(sf, nullptr, false);
                                 if (j.is_discarded()) {
@@ -16383,7 +16794,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 既存の内容を土台にして、この画面が扱う3つの配列だけを差し替える。
                 json stageData = json::object();
                 {
-                    std::ifstream prev("assets/stages/" + currentStageFileName);
+                    std::ifstream prev(Utf8ToWide("assets/stages/" + currentStageFileName).c_str());
                     if (prev.is_open()) {
                         json loaded = json::parse(prev, nullptr, false);
                         if (!loaded.is_discarded() && loaded.is_object()) stageData = loaded;
@@ -16431,14 +16842,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     {"baseJumpPower", editorPlayerCaps.baseJumpPower},
                     {"baseSpeed", editorPlayerCaps.baseSpeed}
                 };
-                std::ofstream ofs("assets/stages/" + currentStageFileName);
+                std::ofstream ofs(Utf8ToWide("assets/stages/" + currentStageFileName).c_str());
                 ofs << stageData.dump(4);
             }
             ImGui::Separator();
             if (ImGui::Button(u8"プレイテスト開始 (Play Test)", ImVec2(-1, 30))) {
                 isDedicatedEditorMode = false;
                 try {
-                    std::ifstream sf("assets/stages/" + currentStageFileName);
+                    std::ifstream sf(Utf8ToWide("assets/stages/" + currentStageFileName).c_str());
                     if (sf.is_open()) {
                         json stageData = json::parse(sf, nullptr, false);
                         if (stageData.is_discarded()) {
@@ -16643,7 +17054,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
         }
 
+        // TMPHOOK-BEGIN
+        { static const char* scn2 = getenv("LABPROJ_SCN"); static int sf = 0; ++sf; if (scn2 && (sf == 46 || sf == 12)) { char pth[64]; sprintf_s(pth, sizeof(pth), "hook_shot_%d.png", sf); SaveDrawScreenToPNG(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, pth); } }
+        // TMPHOOK-END
         ScreenFlip();
+        FramePacer::Wait(); // 1コマ 1/60 秒になるまで待つ（120Hz などのモニターで倍速にならないように）
     }
 
     ImGui_ImplDX11_Shutdown();
