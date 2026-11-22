@@ -791,6 +791,32 @@ struct PlayerEditLocks {
     bool noGround = false; // Gキーで足場を置けない
 };
 
+// 「個別オブジェクト編集」の中で、どの操作を使えるか（ステージ単位。ステージJSONの "allowed_object_edits"）。
+//
+// これまでステージ側では「個別オブジェクト編集」を丸ごと許可／禁止するしかなく、
+// 「一時停止だけ使わせたい」「動かすのは禁止したい」といった作り分けができなかった。
+// （アセット・置いた物ごとの noScale 等は「この物は〜できない」という物側の設定で、ステージ全体には効かない）
+// そこで操作の種類ごとに許可／禁止を持たせる。false の操作は、このステージではどの物にも使えない
+// （プレイヤー自身・敵・ギミックのすべて。プレイヤー自身へのロック player_locks より広い）。
+//
+// これは「プレイヤーが使える編集」の制限で、敵がかける効果（回転させる敵の回転など）は止めない。
+// キーが無いステージは、すべて true（従来どおり）。「個別オブジェクト編集」自体が禁止なら、これらは見ない（全部使えない）。
+struct ObjectEditOps {
+    bool move = true;   // ドラッグで動かす
+    bool scale = true;  // 大きさ（拡大縮小・横幅・縦幅）
+    bool rotate = true; // 回転（傾ける）
+    bool flip = true;   // 向きの反転
+    bool pause = true;  // 物ごとの一時停止
+    bool rewind = true; // 物ごとの巻き戻し
+    bool speed = true;  // 物ごとの速さ
+    bool layer = true;  // レイヤー（層）の変更。Q/E で自分の層を変えるのも含む
+    bool look = true;   // ギミックの見た目（色相・明るさ・透明度・上下反転）
+    bool reset = true;  // 編集をすべて元に戻す（リセット）
+};
+// 今プレイしているステージの値（ResetStage で入れ替える）。
+// IsEnemyEditLocked 等のファイル直下の関数からも読むので、WinMain の外に置く。
+ObjectEditOps g_stageObjectOps;
+
 // 編集系ツールを使い続けるための「コストゲージ」に関する数値設定。
 // ゲージは時間経過で回復し、各操作を使うたびに消費される。値が尽きるとその操作が使えなくなる。
 struct EditCostSettings {
@@ -2859,6 +2885,7 @@ struct StageData {
     EditToolFlags editToolFlags;         // このステージで許可する編集ツールの設定
     EditCostSettings editCostSettings;   // このステージでの編集コストゲージの数値設定
     PlayerEditLocks playerLocks;         // プレイヤー自身への編集操作のロック（"player_locks"）
+    ObjectEditOps objectOps;             // 物の編集で使える操作（"allowed_object_edits"。無ければ全部使える）
 
     // このステージでのプレイヤーの基本性能（歩く速さ・ジャンプ力・使える行動）。
     //
@@ -2912,6 +2939,20 @@ enum EditOp {
     EDITOP_SPEED,  // 速度変更
 };
 
+// このステージで、この操作がプレイヤーに禁止されているか（ObjectEditOps を EditOp で引く）
+bool StageBansEditOp(EditOp op) {
+    const ObjectEditOps& o = g_stageObjectOps;
+    switch (op) {
+        case EDITOP_SCALE:  return !o.scale;
+        case EDITOP_ROTATE: return !o.rotate;
+        case EDITOP_MOVE:   return !o.move;
+        case EDITOP_FLIP:   return !o.flip;
+        case EDITOP_PAUSE:  return !o.pause;
+        case EDITOP_REWIND: return !o.rewind;
+        default:            return !o.speed; // EDITOP_SPEED
+    }
+}
+
 // フラグの並びはどのDefでも同じなので、読み出しだけをテンプレートで共有する。
 template <class DefT>
 bool IsDefEditLocked(const DefT* def, EditOp op) {
@@ -2926,14 +2967,25 @@ bool IsDefEditLocked(const DefT* def, EditOp op) {
         default:            return def->noSpeed; // EDITOP_SPEED
     }
 }
+// 物側の設定（アセット・置いた物ごと）だけで、この操作を禁止されているか。
 // 置いた物ごとの上書き（lockOv）があれば、アセットの設定より優先する。EditOp の並びと lockOv.v の添字は同じ。
-bool IsEnemyEditLocked(const Enemy& e, EditOp op) {
+// 敵がかける効果（回転させる敵・範囲サイズ調整の敵）は、ステージの禁止に関係なく、こちらだけを見る
+// （「このステージではプレイヤーが回せない」は、敵が回すのを止める理由にならないため）。
+bool IsEnemyEditLockedByAsset(const Enemy& e, EditOp op) {
     if (e.lockOv.v[op] >= 0) return e.lockOv.v[op] == 1;
     return IsDefEditLocked(FindEnemyDef(e.assetId), op);
 }
-bool IsGimmickEditLocked(const Gimmick& g, EditOp op) {
+bool IsGimmickEditLockedByAsset(const Gimmick& g, EditOp op) {
     if (g.lockOv.v[op] >= 0) return g.lockOv.v[op] == 1;
     return IsDefEditLocked(FindGimmickDef(g.assetId), op);
+}
+// プレイヤーがこの物にこの操作をできないか（ステージで禁止されている、または物側で禁止されている）。
+// プレイヤーの編集の入口（ドラッグ・ホイール・つまみ・インスペクター・円形メニュー）は、すべてこちらを見る。
+bool IsEnemyEditLocked(const Enemy& e, EditOp op) {
+    return StageBansEditOp(op) || IsEnemyEditLockedByAsset(e, op);
+}
+bool IsGimmickEditLocked(const Gimmick& g, EditOp op) {
+    return StageBansEditOp(op) || IsGimmickEditLockedByAsset(g, op);
 }
 
 // ドラッグ移動の向きの制限（置いた物ごとの上書き → アセットの設定の順。0=自由 1=十字 2=X字）
@@ -2975,6 +3027,18 @@ void ConstrainDragDelta(int mode, float dx, float dy, float cumX, float cumY, Dr
     }
     outDx = tx - st.appliedX; outDy = ty - st.appliedY;
     st.appliedX = tx; st.appliedY = ty;
+}
+
+// 敵が他の物へかける「編集のような効果」（回転させる敵の回転・範囲サイズ調整の敵の拡大縮小）を、
+// 相手の時間の進み方に合わせて何倍で効かせるかを返す。
+//
+// 「プレイヤーがその物に個別にかけた編集（一時停止・巻き戻し・速さ）は、敵の効果より優先する」という決まり。
+//   paused    … 個別に一時停止されている → 0（効かない。止めた物は、敵にも動かされない）
+//   rewinding … 巻き戻し中 → 0（巻き戻しで戻している値を、敵に上書きさせない）
+//   speed     … 速さの倍率（0.5なら半分の速さで効く。0なら効かない）
+inline float EditTimeFactor(bool paused, bool rewinding, float speed) {
+    if (paused || rewinding) return 0.0f;
+    return speed > 0.0f ? speed : 0.0f;
 }
 
 bool GimmickAngleIsAiOwned(GimmickType type) {
@@ -5800,16 +5864,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // インスペクターの行が「いま操作できる行か」。対象ポインタが nullptr の行は、その対象では意味を持たない
     // （＝押しても何も起きない）ので操作できない。クリック処理と指差しカーソルの両方が同じ判定を見る。
+    // ステージで禁止されている操作（ObjectEditOps）の行も、使えない（灰色）にする。
     auto InspRowUsable = [&](int row) -> bool {
+        const ObjectEditOps& ops = g_stageObjectOps;
         switch (row) {
-            case Insp::ROW_SCALE:  return targetScale != nullptr;
-            case Insp::ROW_ANGLE:  return targetAngle != nullptr;
-            case Insp::ROW_SPEED:  return targetSpeedScale != nullptr;
-            case Insp::ROW_PAUSE:  return targetPaused != nullptr;
-            case Insp::ROW_REWIND: return targetRewind != nullptr;
+            case Insp::ROW_SCALE:  return targetScale != nullptr && ops.scale;
+            case Insp::ROW_ANGLE:  return targetAngle != nullptr && ops.rotate;
+            case Insp::ROW_SPEED:  return targetSpeedScale != nullptr && ops.speed;
+            case Insp::ROW_PAUSE:  return targetPaused != nullptr && ops.pause;
+            case Insp::ROW_REWIND: return targetRewind != nullptr && ops.rewind;
             case Insp::ROW_TYPE:   return targetEnemyType != nullptr;
             case Insp::ROW_LOOK_HUE: case Insp::ROW_LOOK_BRIGHT: case Insp::ROW_LOOK_ALPHA: case Insp::ROW_LOOK_FLIP:
-                return targetGimmick != nullptr && !targetGimmick->isTimelineCut; // 見た目の編集はギミックだけ
+                return targetGimmick != nullptr && !targetGimmick->isTimelineCut && ops.look; // 見た目の編集はギミックだけ
             default:               return false;
         }
     };
@@ -6238,7 +6304,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         e.editDirtyMask |= EDIT_DIRTY_SCALE;
     };
     auto RescalePlayer = [&](Player& p, float want) {
-        if (currentPlayerLocks.noScale) return; // このステージでは、自分を拡大縮小できない
+        if (currentPlayerLocks.noScale || !g_stageObjectOps.scale) return; // このステージでは、自分を拡大縮小できない（自分へのロック、またはステージで「大きさ」が禁止）
         if (want > 3.0f) want = 3.0f;           // 自分の倍率の上限（巨大化で、穴や壁をまたいでしまわないように）
         float ox, oy;
         float got = FitAnchoredScale(p.x, p.y, (float)p.width, (float)p.height, p.scale, want, ox, oy);
@@ -6342,7 +6408,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // angleをAIが自前の状態に使っている型は回さない（回すと壊れるため）。
     auto ApplyAngleDelta = [&](float da) {
         if (da != 0.0f) NoteEditOp("rotate");
-        for (auto* p : selectedPlayers) { if (!currentPlayerLocks.noRotate) p->angle += da; }
+        for (auto* p : selectedPlayers) { if (!currentPlayerLocks.noRotate && g_stageObjectOps.rotate) p->angle += da; }
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_ROTATE)) continue;
             e->angle += da;
@@ -6363,6 +6429,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
     auto EditTogglePause = [&]() -> bool {
         if (targetPaused == nullptr) return false;
+        if (!g_stageObjectOps.pause) { EditDeniedWhy("このステージでは物ごとの一時停止が使えません"); return false; }
         // 円形メニューも、ステージの「一時停止」の許可に従う（以前は、封印したステージでも、メニューから停止できた）
         if (!IsEditToolEnabled(currentEditTools.pauseEnabled, unlockedEditTools.pauseEnabled)) { EditDeniedWhy("このステージでは時間停止が使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
@@ -6378,6 +6445,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     };
     auto EditToggleRewind = [&]() -> bool {
         if (targetRewind == nullptr) return false;
+        if (!g_stageObjectOps.rewind) { EditDeniedWhy("このステージでは物ごとの巻き戻しが使えません"); return false; }
         // 円形メニューも、ステージの「巻き戻し」の許可に従う
         if (!IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled)) { EditDeniedWhy("このステージでは巻き戻しが使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
@@ -6395,6 +6463,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 速度を delta だけ変える（下限0）。動かせる相手が1つも無ければ何もせず拒否音。
     auto EditSpeedStep = [&](float delta) -> bool {
         if (targetSpeedScale == nullptr) return false;
+        if (!g_stageObjectOps.speed) { EditDeniedWhy("このステージでは物の速さを変えられません"); return false; }
         bool any = !selectedPlayers.empty();
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
@@ -6422,6 +6491,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 選択中の全員を反転し、印も実際に反転した相手にだけ付ける。
     auto EditFlip = [&]() -> bool {
         if (targetDirection == nullptr) return false;
+        if (!g_stageObjectOps.flip) { EditDeniedWhy("このステージでは向きを反転できません"); return false; }
         bool any = !selectedPlayers.empty();
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
@@ -6451,6 +6521,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 一周すると元に戻る。反転と同じ額のコストを払い、取り消し(Ctrl+Z)で全額戻る。
     auto EditLookCycle = [&](int field) -> bool {
         if (selectedGimmicks.empty()) return false;
+        if (!g_stageObjectOps.look) { EditDeniedWhy("このステージでは見た目を変えられません"); return false; }
         const float cost = currentEditCost.flatDirectionFlip;
         if (editCost < cost) { EditDeniedCost(cost); return false; }
         FlushWheelUndo();
@@ -6480,6 +6551,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // タイムラインのカットは座標を持たないので、対象にしない。
     auto EditLayerCycle = [&]() -> bool {
         if (selectedPlayers.empty() && selectedEnemies.empty() && selectedGimmicks.empty()) return false;
+        if (!g_stageObjectOps.layer) { EditDeniedWhy("このステージではレイヤーを変えられません"); return false; }
         int cur = LAYER_MID;
         if (!selectedPlayers.empty())      cur = selectedPlayers[0]->layer;
         else if (!selectedEnemies.empty()) cur = selectedEnemies[0]->layer;
@@ -6508,6 +6580,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 円形メニューの「レイヤー」（中→手前→奥→中と回る）と違い、押した向きへ確実に動く。
     // 選択状態には触れず、プレイヤーだけを対象にする。コスト・取り消し・効果音は EditLayerCycle と同じ。
     auto EditPlayerLayerStep = [&](int dir) -> bool {
+        if (!g_stageObjectOps.layer) { EditDeniedWhy("このステージではレイヤーを変えられません"); return false; }
         const int next = ClampLayer(player.layer + dir);
         if (next == player.layer) return false;
         const float cost = currentEditCost.flatDirectionFlip;
@@ -6531,6 +6604,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // リアクションの解除手段になる。
     auto EditResetAll = [&]() -> bool {
         if (selectedType == SELECT_NONE) return false;
+        if (!g_stageObjectOps.reset) { EditDeniedWhy("このステージではリセットが使えません"); return false; }
         if (editCost < currentEditCost.flatResetAll) { EditDeniedCost(currentEditCost.flatResetAll); return false; }
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
@@ -6582,12 +6656,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     auto BuildRadialItems = [&](std::vector<RadialItem>& out) {
         out.clear();
         // 1項目を足す。applicable＝この対象に意味のある項目か。押せるのは「意味があって、コストが足りている」とき。
+        //   stageOk … このステージでこの操作が許可されているか（ObjectEditOps）。禁止なら「このステージでは使えません」と出す
         auto Add = [&](int id, const char* label, const char* state, const char* desc, EditPanel::Icon icon,
-                       bool applicable, float cost, bool on) {
+                       bool applicable, float cost, bool on, bool stageOk = true) {
             RadialItem it;
             it.id = id; it.label = label; it.state = state; it.desc = desc; it.icon = icon; it.cost = cost; it.on = on;
-            it.enabled = applicable && editCost >= cost;
-            if (!applicable) {
+            it.enabled = stageOk && applicable && editCost >= cost;
+            if (!stageOk) {
+                it.why = "禁止"; it.reason = "このステージでは使えません";
+            } else if (!applicable) {
                 it.why = "使えない"; it.reason = "この物には使えません";
             } else if (editCost < cost) {
                 char rb[64]; sprintf_s(rb, sizeof(rb), "コストが足りません（必要 %.0f）", cost);
@@ -6600,17 +6677,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             return;
         }
         Add(0, "巻き戻し", (targetRewind && *targetRewind) ? "ON" : "OFF", "この物だけ時間を戻す（すり抜け可）",
-            EditPanel::ICON_REWIND, targetRewind != nullptr, currentEditCost.flatMenuToggle, targetRewind && *targetRewind);
+            EditPanel::ICON_REWIND, targetRewind != nullptr, currentEditCost.flatMenuToggle, targetRewind && *targetRewind, g_stageObjectOps.rewind);
         Add(1, "一時停止", (targetPaused && *targetPaused) ? "ON" : "OFF", "この物だけ時間を止める（踏み台にできる）",
-            EditPanel::ICON_PAUSE, targetPaused != nullptr, currentEditCost.flatMenuToggle, targetPaused && *targetPaused);
+            EditPanel::ICON_PAUSE, targetPaused != nullptr, currentEditCost.flatMenuToggle, targetPaused && *targetPaused, g_stageObjectOps.pause);
         Add(2, "加速", "＋0.5", "この物の速さを 0.5倍ぶん上げる",
-            EditPanel::ICON_FAST, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false);
+            EditPanel::ICON_FAST, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, g_stageObjectOps.speed);
         Add(3, "減速", "−0.5", "この物の速さを 0.5倍ぶん下げる",
-            EditPanel::ICON_SLOW, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false);
+            EditPanel::ICON_SLOW, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, g_stageObjectOps.speed);
         Add(4, "反転", "", "この物の向きを左右に反転する",
-            EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false);
+            EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false, g_stageObjectOps.flip);
         Add(5, "リセット", "", "この物の編集をすべて元に戻す",
-            EditPanel::ICON_RESET, true, currentEditCost.flatResetAll, false);
+            EditPanel::ICON_RESET, true, currentEditCost.flatResetAll, false, g_stageObjectOps.reset);
         // レイヤー：選択の先頭の層を状態として見せる。押すたびに 中 → 手前 → 奥 → 中 と進む
         {
             int layerNow = LAYER_MID;
@@ -6618,7 +6695,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             else if (!selectedEnemies.empty()) layerNow = selectedEnemies[0]->layer;
             else if (!selectedGimmicks.empty()) layerNow = selectedGimmicks[0]->layer;
             Add(7, "レイヤー", LayerName(layerNow), "この物の層を変える（違う層の物とは当たらない）",
-                EditPanel::ICON_LAYER, selectedType != SELECT_NONE, currentEditCost.flatDirectionFlip, false);
+                EditPanel::ICON_LAYER, selectedType != SELECT_NONE, currentEditCost.flatDirectionFlip, false, g_stageObjectOps.layer);
         }
     };
 
@@ -6660,7 +6737,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!items[idx].enabled) {
             // 灰色の項目を選んだとき。コスト不足か、対象がロックされているかで言い分けたいが、
             // 項目側は有効/無効しか持たないので、コストが足りているかだけ見て理由を分ける。
-            if (editCost < currentEditCost.flatMenuToggle) EditDeniedCost(currentEditCost.flatMenuToggle);
+            if (items[idx].why == "禁止") EditDeniedWhy("このステージでは、この操作は使えません");
+            else if (editCost < currentEditCost.flatMenuToggle) EditDeniedCost(currentEditCost.flatMenuToggle);
             else EditDeniedWhy("この操作は今の対象には使えません");
             return;
         }
@@ -6678,7 +6756,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!selectedPlayers.empty()) {
             box = PlayerEditBox(*selectedPlayers[0]);
             angle = selectedPlayers[0]->angle;
-            canScale = true; canRotate = true;
+            // 自分へのロック・ステージの禁止があれば、そのつまみは出さない（出しても効かないため）
+            canScale = !currentPlayerLocks.noScale && g_stageObjectOps.scale;
+            canRotate = !currentPlayerLocks.noRotate && g_stageObjectOps.rotate;
             return true;
         }
         if (!selectedEnemies.empty()) {
@@ -6868,6 +6948,27 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                       ef.screenEffectEnabled ? 1 : 0, ef.objectEditEnabled ? 1 : 0, ef.cutEnabled ? 1 : 0);
                             Logger::Info("System", "LoadStageJson", toolLog);
                         }
+                    }
+
+                    // 物の編集で使える操作（キー未指定は、すべて使える）
+                    if (sj.contains("allowed_object_edits") && sj["allowed_object_edits"].is_object()) {
+                        const auto& oe = sj["allowed_object_edits"];
+                        ObjectEditOps& o = jsonStage.objectOps;
+                        o.move   = oe.value("move", true);
+                        o.scale  = oe.value("scale", true);
+                        o.rotate = oe.value("rotate", true);
+                        o.flip   = oe.value("flip", true);
+                        o.pause  = oe.value("pause", true);
+                        o.rewind = oe.value("rewind", true);
+                        o.speed  = oe.value("speed", true);
+                        o.layer  = oe.value("layer", true);
+                        o.look   = oe.value("look", true);
+                        o.reset  = oe.value("reset", true);
+                        // 「設定したのに効かない」をログで確かめられるよう、読んだ値を残す
+                        char opsLog[192];
+                        sprintf_s(opsLog, sizeof(opsLog), "objectOps move=%d scale=%d rotate=%d flip=%d pause=%d rewind=%d speed=%d layer=%d look=%d reset=%d",
+                                  o.move, o.scale, o.rotate, o.flip, o.pause, o.rewind, o.speed, o.layer, o.look, o.reset);
+                        Logger::Info("System", "LoadStageJson", opsLog);
                     }
 
                     // プレイヤー自身への編集ロック（キー未指定は、すべて許可）
@@ -7246,6 +7347,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // Feature: 編集コストゲージ（ステージ単位設定の反映とゲージリセット）
         currentEditTools = stage.editToolFlags;
         currentPlayerLocks = stage.playerLocks;
+        g_stageObjectOps = stage.objectOps; // 物の編集で使える操作（操作ごとの許可）
         currentEditCost = stage.editCostSettings;
         editCost = currentEditCost.maxCost;
         // ゲージを満タンに戻すのは「操作」ではないので、増減の浮き表示に拾わせない（基準を取り直させる）
@@ -9572,7 +9674,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     dragCumX += dx; dragCumY += dy;
 
                     // 自分のドラッグ移動は、ステージが封印していれば効かない（壁・穴・ゴールを一瞬で越えられるため）
-                    if (!currentPlayerLocks.noMove) for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
+                    // ステージで「移動」が禁止されているときも同じ
+                    if (!currentPlayerLocks.noMove && g_stageObjectOps.move) for (auto* p : selectedPlayers) { p->x += dx; p->y += dy; p->vx = 0; p->vy = 0; }
                     // アセット側で禁止されている操作は、選択に混ざっていても飛ばす。
                     // 選択時点ではなくここで1体ずつ見るのは、複数選択に
                     // 禁止された相手とそうでない相手が混ざりうるため。
@@ -9658,7 +9761,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
                 if (isInspSpeed && selectedType != SELECT_NONE) {
                     float dsp = (float)(mx - lastMouseX) * 0.05f;
-                    for (auto* p : selectedPlayers) { p->speedScale += dsp; if (p->speedScale < 0) p->speedScale = 0; }
+                    if (g_stageObjectOps.speed) for (auto* p : selectedPlayers) { p->speedScale += dsp; if (p->speedScale < 0) p->speedScale = 0; }
                     for (auto* e : selectedEnemies) {
                         if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
                         e->speedScale += dsp; if (e->speedScale < 0) e->speedScale = 0;
@@ -11965,16 +12068,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 float ddx = cx2 - rcx, ddy = cy2 - rcy;
                                 return ddx * ddx + ddy * ddy < rrange * rrange;
                             };
+                            // 【不具合の修正】プレイヤーの編集を、この敵の「回す」より優先する。
+                            // 以前は、プレイヤーが個別に一時停止した物・巻き戻し中の物も回し続けていた
+                            // （止めたはずの物が回る／巻き戻しで戻した角度をすぐ上書きされる）。
+                            // 回される側の時間の進み方（EditTimeFactor）を掛けるので、
+                            //   一時停止中・巻き戻し中 … 0倍（回らない）
+                            //   速さを編集した物       … その速さぶん（0.5倍なら半分の速さで回る、0なら回らない）
+                            // になる。
                             if (rotPlayer && inRotRange(player.x + player.width * player.scale * 0.5f, player.y + player.height * player.scale * 0.5f)) {
-                                player.angle += spin;
-                                enemy.auxState = 1;
+                                const float k = EditTimeFactor(player.isPaused, player.isRewinding || isPlayerRewinding, player.speedScale);
+                                if (k > 0.0f) { player.angle += spin * k; enemy.auxState = 1; }
                             }
                             if (rotEnemies) {
                                 for (auto& other : enemies) {
                                     if (&other == &enemy || !other.isActive) continue;
-                                    if (IsEnemyEditLocked(other, EDITOP_ROTATE)) continue;
+                                    if (IsEnemyEditLockedByAsset(other, EDITOP_ROTATE)) continue; // ステージの禁止はプレイヤー用なので見ない
+                                    const float k = EditTimeFactor(other.isPaused, other.isRewinding, other.speedScale);
+                                    if (k <= 0.0f) continue;
                                     if (inRotRange(other.x + other.width * other.scale * 0.5f, other.y + other.height * other.scale * 0.5f)) {
-                                        other.angle += spin;
+                                        other.angle += spin * k;
                                         other.editDirtyMask |= EDIT_DIRTY_ANGLE;
                                         enemy.auxState = 1;
                                     }
@@ -11983,9 +12095,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (rotGimmicks) {
                                 for (auto& rg : gimmicks) {
                                     if (!rg.isActive || rg.isTimelineCut) continue;
-                                    if (IsGimmickEditLocked(rg, EDITOP_ROTATE)) continue;
+                                    if (IsGimmickEditLockedByAsset(rg, EDITOP_ROTATE)) continue; // ステージの禁止はプレイヤー用なので見ない
+                                    const float k = EditTimeFactor(rg.isPaused, rg.isRewinding, rg.speedScale);
+                                    if (k <= 0.0f) continue;
                                     if (inRotRange(rg.x + rg.spriteWidth * 0.5f, rg.y + rg.spriteHeight * 0.5f)) {
-                                        rg.angle += spin;
+                                        rg.angle += spin * k;
                                         rg.editDirtyMask |= EDIT_DIRTY_ANGLE;
                                         enemy.auxState = 1;
                                     }
@@ -11994,6 +12108,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (rotItems) {
                                 for (auto& ri : items) {
                                     if (!ri.isActive || ri.isCollected) continue;
+                                    if (ri.isRewinding) continue; // アイテムは一時停止・速さを持たないので、巻き戻し中だけ避ける
                                     if (inRotRange(ri.x, ri.y)) { ri.angle += spin; enemy.auxState = 1; }
                                 }
                             }
@@ -13768,33 +13883,43 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (z.timer >= z.life) { sizeZones.erase(sizeZones.begin() + zi); continue; }
                 float mul = z.grow ? z.factor : (z.factor > 0.01f ? 1.0f / z.factor : 1.0f);
                 float rate = 0.05f * ts;
-                auto approach = [&](float cur, float base) {
+                // 目標へ「rate × k」の割合だけ近づける。k は相手の時間の進み方（EditTimeFactor）。
+                // 【不具合の修正】回転させる敵と同じく、プレイヤーが個別に一時停止・巻き戻しした物は変えず、
+                // 速さを編集した物はその速さで変わるようにする（プレイヤーの編集を優先する）。
+                auto approach = [&](float cur, float base, float k) {
                     float target = base * mul;
                     if (target < 0.35f) target = 0.35f;
                     if (target > 3.0f) target = 3.0f;
-                    return cur + (target - cur) * rate;
+                    float r = rate * k;
+                    if (r > 1.0f) r = 1.0f; // 速さを大きく上げても、目標を通り越さない
+                    return cur + (target - cur) * r;
                 };
                 auto inside = [&](float cx2, float cy2) {
                     float ddx = cx2 - z.x, ddy = cy2 - z.y;
                     return ddx * ddx + ddy * ddy < z.radius * z.radius;
                 };
                 if (inside(player.x + player.width * player.scale * 0.5f, player.y + player.height * player.scale * 0.5f)) {
-                    player.scale = approach(player.scale, 1.0f);
+                    const float k = EditTimeFactor(player.isPaused, player.isRewinding || isPlayerRewinding, player.speedScale);
+                    if (k > 0.0f) player.scale = approach(player.scale, 1.0f, k);
                 }
                 for (auto& zEn : enemies) {
-                    if (!zEn.isActive || IsEnemyEditLocked(zEn, EDITOP_SCALE)) continue;
+                    if (!zEn.isActive || IsEnemyEditLockedByAsset(zEn, EDITOP_SCALE)) continue; // ステージの禁止はプレイヤー用なので見ない
+                    const float k = EditTimeFactor(zEn.isPaused, zEn.isRewinding, zEn.speedScale);
+                    if (k <= 0.0f) continue;
                     if (inside(zEn.x + zEn.width * zEn.scale * 0.5f, zEn.y + zEn.height * zEn.scale * 0.5f)) {
-                        zEn.scale = approach(zEn.scale, zEn.editBaseScale > 0.01f ? zEn.editBaseScale : 1.0f);
+                        zEn.scale = approach(zEn.scale, zEn.editBaseScale > 0.01f ? zEn.editBaseScale : 1.0f, k);
                         zEn.editDirtyMask |= EDIT_DIRTY_SCALE;
                     }
                 }
                 for (auto& zg : gimmicks) {
                     if (!zg.isActive || zg.isTimelineCut || zg.editBaseWidth <= 0.01f) continue;
                     if (!(zg.type == GIMMICK_SCALABLE_BOX || zg.type == GIMMICK_SCALABLE_GROUND || zg.type == GIMMICK_PUSHABLE_ROCK)) continue;
-                    if (IsGimmickEditLocked(zg, EDITOP_SCALE)) continue;
+                    if (IsGimmickEditLockedByAsset(zg, EDITOP_SCALE)) continue; // ステージの禁止はプレイヤー用なので見ない
+                    const float k = EditTimeFactor(zg.isPaused, zg.isRewinding, zg.speedScale);
+                    if (k <= 0.0f) continue;
                     if (inside(zg.x + zg.spriteWidth * 0.5f, zg.y + zg.spriteHeight * 0.5f)) {
-                        SetGimmickWidth(zg, approach(zg.width, zg.editBaseWidth));
-                        if (zg.editBaseHeight > 0.01f) SetGimmickHeight(zg, approach(zg.height, zg.editBaseHeight));
+                        SetGimmickWidth(zg, approach(zg.width, zg.editBaseWidth, k));
+                        if (zg.editBaseHeight > 0.01f) SetGimmickHeight(zg, approach(zg.height, zg.editBaseHeight, k));
                         zg.editDirtyMask |= EDIT_DIRTY_SCALE;
                     }
                 }

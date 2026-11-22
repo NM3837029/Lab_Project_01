@@ -217,6 +217,16 @@ public partial class Form1 : Form
             chkEditScreenFx.Checked = currentStage.EditTools.screenEffectEnabled;
             chkEditObjectEdit.Checked = currentStage.EditTools.objectEditEnabled;
             chkEditCut.Checked = currentStage.EditTools.cutEnabled;
+            // 「個別オブジェクト編集」の中で使える操作（並びは Designer の chkObjOps と同じ）
+            {
+                var o = currentStage.ObjectOps;
+                bool[] v = { o.move, o.scale, o.rotate, o.flip, o.pause, o.rewind, o.speed, o.layer, o.look, o.reset };
+                for (int i = 0; i < chkObjOps.Length; i++)
+                {
+                    chkObjOps[i].Checked = v[i];
+                    chkObjOps[i].Enabled = chkEditObjectEdit.Checked; // 親が禁止なら灰色
+                }
+            }
 
             // 編集コスト（ゲージの最大値・自然回復・各操作ごとの消費量）の数値を反映する。
             numEditMaxCost.Value = (decimal)Math.Clamp(currentStage.EditCost.maxCost, 0, 999);
@@ -828,6 +838,14 @@ public partial class Form1 : Form
         currentStage.EditTools.screenEffectEnabled = chkEditScreenFx.Checked;
         currentStage.EditTools.objectEditEnabled = chkEditObjectEdit.Checked;
         currentStage.EditTools.cutEnabled = chkEditCut.Checked;
+        // 「個別オブジェクト編集」の中で使える操作を書き戻す（並びは Designer の chkObjOps と同じ）
+        currentStage.ObjectOps = new ObjectEditOps
+        {
+            move = chkObjOps[0].Checked, scale = chkObjOps[1].Checked, rotate = chkObjOps[2].Checked,
+            flip = chkObjOps[3].Checked, pause = chkObjOps[4].Checked, rewind = chkObjOps[5].Checked,
+            speed = chkObjOps[6].Checked, layer = chkObjOps[7].Checked, look = chkObjOps[8].Checked,
+            reset = chkObjOps[9].Checked,
+        };
 
         // 編集コストゲージの最大値・自然回復量・各操作の消費量（秒あたり／1回あたり）を書き戻す。
         currentStage.EditCost.maxCost = (float)numEditMaxCost.Value;

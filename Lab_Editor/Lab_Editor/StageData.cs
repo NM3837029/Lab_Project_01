@@ -205,6 +205,8 @@ public class StageData
     // プレイヤー自身への編集操作のロック（ステージJSONの "player_locks"）。ゲーム側は DrawPixel.cpp の PlayerEditLocks。
     // 片方だけだと保存時に消える。全部 false（既定）のときはJSONへ書かない。
     public PlayerEditLocks PlayerLocks { get; set; } = new();
+    // 「個別オブジェクト編集」の中で使える操作（ステージJSONの "allowed_object_edits"）。ゲーム側は DrawPixel.cpp の ObjectEditOps。
+    public ObjectEditOps ObjectOps { get; set; } = new();
     public EditCostSettings EditCost { get; set; } = new();
 
     // タイルマップ（MapH行 × MapW列）。各マスにTileDef.idの数値が入る、地形の本体データ。
@@ -311,6 +313,9 @@ public class StageData
                 data.EditCost = j["edit_cost_settings"]!.ToObject<EditCostSettings>() ?? new();
             if (j["player_locks"] != null)
                 data.PlayerLocks = j["player_locks"]!.ToObject<PlayerEditLocks>() ?? new();
+            // 物の編集で使える操作。キーが無い古いステージは、すべて使える（既定値 true のまま）
+            if (j["allowed_object_edits"] != null)
+                data.ObjectOps = j["allowed_object_edits"]!.ToObject<ObjectEditOps>() ?? new();
 
             // サウンド設定 (Feature 3) — bgm_id項目が無ければ空文字列（BGMなし）として扱う。
             data.BgmId = j["bgm_id"]?.Value<string>() ?? "";
@@ -437,6 +442,8 @@ public class StageData
         };
         // プレイヤーのロックは、1つでも設定されているときだけ書く（既存のステージに差分を出さないため）
         if (PlayerLocks.Any()) j["player_locks"] = JToken.FromObject(PlayerLocks);
+        // 物の編集で使える操作は、1つでも禁止しているときだけ書く（既存のステージに差分を出さないため）
+        if (!ObjectOps.AllAllowed()) j["allowed_object_edits"] = JToken.FromObject(ObjectOps);
 
         // ゴール — 未設定(-1)の場合はJSONにgoal項目自体を出力しない。
         if (GoalX >= 0)
@@ -675,6 +682,41 @@ public class PlayerEditLocks
     public bool noGround { get; set; }
 
     public bool Any() => noMove || noScale || noRotate || noGround;
+}
+
+// 「個別オブジェクト編集」の中で、どの操作を使えるか（ステージ単位）。
+//
+// 以前はステージ側に「個別オブジェクト編集」の1つしかなく、物の編集を丸ごと許可するか禁止するかしか選べなかった。
+// 「一時停止だけ使わせたい」「動かすのは禁止したい」といった作り分けのため、操作ごとに分けた。
+// false の操作は、このステージではどの物（プレイヤー自身・敵・ギミック）にも使えない。
+// 「個別オブジェクト編集」が禁止なら、これらに関係なく全部使えない。
+// 敵がかける効果（回転させる敵の回転など）は止めない（プレイヤーが使える操作の制限なので）。
+// JSONの "allowed_object_edits" として保存される（キーが無ければ、全部使える）。
+public class ObjectEditOps
+{
+    [System.ComponentModel.DisplayName("移動（ドラッグ）")]
+    public bool move { get; set; } = true;
+    [System.ComponentModel.DisplayName("大きさ")]
+    public bool scale { get; set; } = true;
+    [System.ComponentModel.DisplayName("回転")]
+    public bool rotate { get; set; } = true;
+    [System.ComponentModel.DisplayName("向きの反転")]
+    public bool flip { get; set; } = true;
+    [System.ComponentModel.DisplayName("物ごとの一時停止")]
+    public bool pause { get; set; } = true;
+    [System.ComponentModel.DisplayName("物ごとの巻き戻し")]
+    public bool rewind { get; set; } = true;
+    [System.ComponentModel.DisplayName("物ごとの速さ")]
+    public bool speed { get; set; } = true;
+    [System.ComponentModel.DisplayName("レイヤー（層）")]
+    public bool layer { get; set; } = true;
+    [System.ComponentModel.DisplayName("見た目（ギミック）")]
+    public bool look { get; set; } = true;
+    [System.ComponentModel.DisplayName("リセット")]
+    public bool reset { get; set; } = true;
+
+    // すべて使える（＝既定のまま）か。保存時に、既定のままならキーを書かないために使う。
+    public bool AllAllowed() => move && scale && rotate && flip && pause && rewind && speed && layer && look && reset;
 }
 
 public class EditToolFlags
