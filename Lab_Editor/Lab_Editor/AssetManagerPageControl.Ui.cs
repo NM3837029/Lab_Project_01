@@ -495,12 +495,19 @@ public partial class AssetManagerPageControl
         if (!fieldMap.TryGetValue(typeEnum, out var typeFields)) typeFields = Array.Empty<(string Field, string Label, int Decimals)>();
         object paramsObj = kind == AssetKind.Enemy ? GetOrCreateEnemyParams(row) : kind == AssetKind.Gimmick ? GetOrCreateGimmickParams(row) : (object)GetOrCreateItemParams(row);
 
+        int typeFieldStart = _detail.Controls.Count; // この下で足す数字欄の先頭（ゾーンの見本が、数字の変化を拾うのに使う）
         if (typeFields.Length > 0)
         {
             _detail.AddItem(Kit.Heading("⚙ このタイプの調整項目"));
             _detail.AddItem(Kit.Hint("数字は、空のまま（−1）にすると、そのタイプの標準の動きになります。"));
             foreach (var f in typeFields) AddParamField(paramsObj, f.Field, f.Label, f.Decimals);
         }
+        // 補正スイッチ(26)・補正ロック足場(27)：「出る条件」を共通の条件エディタで決める
+        if (kind == AssetKind.Gimmick && (typeEnum == 26 || typeEnum == 27))
+            AddGradeConditionSection((GimmickDef)paramsObj, typeEnum);
+        // 明暗ゾーン(18)・色調ゾーン(19)：数字欄の下に、仕上がりの見本を出す
+        if (kind == AssetKind.Gimmick && (typeEnum == 18 || typeEnum == 19))
+            AddZonePreviewSection((GimmickDef)paramsObj, typeEnum, typeFieldStart);
         if (isEnemy)
         {
             _detail.AddItem(Kit.Heading("🧰 共通の設定"));
@@ -626,5 +633,56 @@ public partial class AssetManagerPageControl
             SelectRow(dgv, next);
         }
         else ShowDetailEmpty();
+    }
+
+    // ── 補正スイッチ(26)・補正ロック足場(27)の「出る条件」──
+    // 共通の条件エディタ（GradeConditionEditor）を置き、変えたら定義の gradeChannel・gradeMin・gradeMax へ書く。
+    // 開いただけでは何も書かない（条件エディタは人が操作したときだけ ConditionChanged を出す）ので、
+    // 触っていない定義の値（-1／-999／999）はそのまま残り、保存しても差分が出ない。
+    private void AddGradeConditionSection(GimmickDef def, int typeEnum)
+    {
+        _detail.AddItem(Kit.Heading(typeEnum == 26 ? "🎨 スイッチが入る条件" : "🎨 足場が出る条件"));
+        _detail.AddItem(Kit.Hint("見る値を選び、帯の下の ▲ を左右に動かして範囲を決めます。白い枠の中にあるときに"
+            + (typeEnum == 26 ? "スイッチが入ります。" : "足場が現れます。")
+            + "ステージに置いたあと、右クリックの「出る条件…」で、置いた場所ごとに変えることもできます。"));
+        var ed = new GradeConditionEditor { Kind = GradeKind.Range, Height = 300 };
+        ed.SetRange(GradeCondition.ChannelOf(def.gradeChannel), def.gradeMin, def.gradeMax);
+        ed.ConditionChanged += (s, e) =>
+        {
+            if (_building) return;
+            def.gradeChannel = ed.ChannelValue;
+            def.gradeMin = ed.Lo;
+            def.gradeMax = ed.Hi;
+            _dirty = true;
+        };
+        _detail.AddItem(ed);
+    }
+
+    // ── 明暗ゾーン(18)・色調ゾーン(19)の見本 ──
+    // 数字欄（このタイプの調整項目）の下に、入る前と入ったあとの色の見本を出す。
+    // 数字を変えるたびに描き直すため、fieldStart 以降に足された数字欄の ValueChanged を拾う
+    // （数字欄の値は AddParamField の ValueChanged が先に定義へ書くので、ここではもう新しい値が読める）。
+    private void AddZonePreviewSection(GimmickDef def, int typeEnum, int fieldStart)
+    {
+        _detail.AddItem(Kit.Heading("👁 見本（ゾーンに入るとこう見える）"));
+        _detail.AddItem(Kit.Hint("グレーの帯と、よく出てくる色に、上の数字をかけた目安です。ゲームの画面とは細かな色味が少し違うことがあります。"));
+        var pic = new PictureBox { Height = typeEnum == 18 ? 96 : 68, SizeMode = PictureBoxSizeMode.Normal, BorderStyle = BorderStyle.FixedSingle, Tag = "zonePreview" };
+        void Redraw()
+        {
+            int w = Math.Max(120, pic.Width - 2), h = Math.Max(30, pic.Height - 2);
+            var old = pic.Image;
+            pic.Image = typeEnum == 18
+                ? ZonePreview.RenderBright(def.brightLevel, def.darkLevel, w, h)
+                : ZonePreview.Render(def.tintR, def.tintG, def.tintB, def.zoneSat, def.zoneHue, def.zoneContrast, w, h);
+            old?.Dispose();
+        }
+        // この区画より前に足された数字欄（このタイプの調整項目）の変化で描き直す
+        static IEnumerable<Control> Walk(Control c) { yield return c; foreach (Control k in c.Controls) foreach (var d in Walk(k)) yield return d; }
+        for (int i = fieldStart; i < _detail.Controls.Count; i++)
+            foreach (var nud in Walk(_detail.Controls[i]).OfType<NumericUpDown>())
+                nud.ValueChanged += (s, e) => Redraw();
+        pic.SizeChanged += (s, e) => Redraw();
+        _detail.AddItem(pic);
+        Redraw();
     }
 }

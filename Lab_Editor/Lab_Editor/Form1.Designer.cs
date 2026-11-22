@@ -46,7 +46,10 @@ partial class Form1
     private System.Windows.Forms.NumericUpDown numMapW = null!, numMapH = null!;        // マップの幅・高さ（タイル数）入力欄
 
     // 編集ツール許可設定・編集コスト経済設定
-    private System.Windows.Forms.CheckBox chkEditRewind = null!, chkEditPause = null!, chkEditFastForward = null!, chkEditScreenFx = null!, chkEditObjectEdit = null!, chkEditCut = null!;  // 各編集ツール（巻き戻し/一時停止/早送り/画面エフェクト/個別オブジェクト編集）をゲーム中に使用可能にするかの許可チェックボックス群
+    private System.Windows.Forms.CheckBox chkEditRewind = null!, chkEditPause = null!, chkEditFastForward = null!, chkEditScreenFx = null!, chkEditObjectEdit = null!, chkEditCut = null!;
+    // 「個別オブジェクト編集」の中で使える操作を、1つずつ許可／禁止するチェックボックス（並びは ObjectEditOps と同じ）。
+    // 移動・大きさ・回転・反転・一時停止・巻き戻し・速さ・レイヤー・見た目・リセットの10個。
+    private System.Windows.Forms.CheckBox[] chkObjOps = null!;  // 各編集ツール（巻き戻し/一時停止/早送り/画面エフェクト/個別オブジェクト編集）をゲーム中に使用可能にするかの許可チェックボックス群
     private System.Windows.Forms.NumericUpDown numEditMaxCost = null!, numEditRegen = null!, numEditDrainRewind = null!, numEditDrainPause = null!, numEditDrainFF = null!, numEditDrainScreenFx = null!;  // 編集コストゲージの最大値・自然回復量・各ツール使用時の消費量（秒あたり）
     private System.Windows.Forms.NumericUpDown numEditFlatColorCycle = null!, numEditFlatMenuToggle = null!, numEditFlatSpeedChange = null!, numEditFlatDirectionFlip = null!, numEditFlatResetAll = null!, numEditFlatCutCreate = null!, numEditCutPerTile = null!;  // 単発アクション（色フィルタ切替・メニュートグル等）ごとの固定消費コスト
     private System.Windows.Forms.Button btnResize = null!;  // マップサイズ変更を確定するボタン
@@ -269,70 +272,107 @@ partial class Form1
         chkEditScreenFx.CheckedChanged += PlayerSetting_Changed;
         chkEditObjectEdit = new System.Windows.Forms.CheckBox { Text = "個別オブジェクト編集", Location = new System.Drawing.Point(5, 420), Size = new System.Drawing.Size(180, 20), Checked = true };
         chkEditObjectEdit.CheckedChanged += PlayerSetting_Changed;
+        // 「個別オブジェクト編集」が禁止なら中身の操作も全部使えないので、そのときは下の10個を灰色にする
+        chkEditObjectEdit.CheckedChanged += (s, e) => { foreach (var c in chkObjOps) c.Enabled = chkEditObjectEdit.Checked; };
+
+        // 「個別オブジェクト編集」の中で使える操作（操作ごとの許可）。2列×5段で、少し右へ下げて親子関係を見せる。
+        // 外したものは、このステージではどの物（自分・敵・ギミック）にも使えなくなる。
+        {
+            string[] opNames = { "移動", "大きさ", "回転", "反転", "一時停止", "巻き戻し", "速さ", "レイヤー", "見た目", "リセット" };
+            string[] opTips =
+            {
+                "ドラッグで物（自分・敵・ギミック）を動かす",
+                "物の大きさを変える（ホイール・つまみ・インスペクター）",
+                "物を回す（ホイール・つまみ・インスペクター）",
+                "物の向きを左右に反転する",
+                "その物だけ時間を止める",
+                "その物だけ時間を巻き戻す",
+                "その物だけ速さを変える",
+                "物の層（奥・中・手前）を変える。Q/E で自分の層を変えるのも含む",
+                "ギミックの見た目（色相・明るさ・透明度・上下反転）を変える",
+                "物への編集をすべて元に戻す",
+            };
+            var tip = new System.Windows.Forms.ToolTip();
+            chkObjOps = new System.Windows.Forms.CheckBox[opNames.Length];
+            for (int i = 0; i < opNames.Length; i++)
+            {
+                int col = i % 2, row = i / 2;
+                chkObjOps[i] = new System.Windows.Forms.CheckBox
+                {
+                    Text = opNames[i],
+                    // タブの幅が狭い（スクロールバーを除いて約180px）ので、2列目が切れないよう詰めて置く
+                    Location = new System.Drawing.Point(18 + col * 82, 442 + row * 22),
+                    Size = new System.Drawing.Size(80, 20),
+                    Checked = true,
+                };
+                chkObjOps[i].CheckedChanged += PlayerSetting_Changed;
+                tip.SetToolTip(chkObjOps[i], opTips[i]);
+            }
+        }
         // タイムラインカット（区間を丸ごと飛ばす編集）の許可。個別オブジェクト編集とは独立して切り替えられる。
-        chkEditCut = new System.Windows.Forms.CheckBox { Text = "カット(タイムライン)", Location = new System.Drawing.Point(5, 442), Size = new System.Drawing.Size(180, 20), Checked = true };
+        chkEditCut = new System.Windows.Forms.CheckBox { Text = "カット(タイムライン)", Location = new System.Drawing.Point(5, 558), Size = new System.Drawing.Size(180, 20), Checked = true };
         chkEditCut.CheckedChanged += PlayerSetting_Changed;
 
         // 編集コスト設定セクション：編集ツール使用に伴うコストゲージの経済設定（最大値・自然回復・各種消費量）。
-        var lblEditCost = new System.Windows.Forms.Label { Text = "💰 編集コスト設定", Font = FB, Location = new System.Drawing.Point(5, 474), Size = new System.Drawing.Size(200, 20) };
+        var lblEditCost = new System.Windows.Forms.Label { Text = "💰 編集コスト設定", Font = FB, Location = new System.Drawing.Point(5, 590), Size = new System.Drawing.Size(200, 20) };
 
         // コストゲージの最大値。
-        var lblEcMax = new System.Windows.Forms.Label { Text = "最大値:", Location = new System.Drawing.Point(5, 498), Size = new System.Drawing.Size(115, 18) };
-        numEditMaxCost = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 496), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 1m, Maximum = 999, Value = 100 };
+        var lblEcMax = new System.Windows.Forms.Label { Text = "最大値:", Location = new System.Drawing.Point(5, 614), Size = new System.Drawing.Size(115, 18) };
+        numEditMaxCost = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 612), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 1m, Maximum = 999, Value = 100 };
         numEditMaxCost.ValueChanged += PlayerSetting_Changed;
 
         // 何もしていない時間経過で自然回復する量（1秒あたり）。
-        var lblEcRegen = new System.Windows.Forms.Label { Text = "自然回復/秒:", Location = new System.Drawing.Point(5, 522), Size = new System.Drawing.Size(115, 18) };
-        numEditRegen = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 520), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 6 };
+        var lblEcRegen = new System.Windows.Forms.Label { Text = "自然回復/秒:", Location = new System.Drawing.Point(5, 638), Size = new System.Drawing.Size(115, 18) };
+        numEditRegen = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 636), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 6 };
         numEditRegen.ValueChanged += PlayerSetting_Changed;
 
         // 継続使用系ツール（巻き戻し/一時停止/早送り/画面エフェクト）の秒あたり消費量。
-        var lblEcDrainRewind = new System.Windows.Forms.Label { Text = "巻き戻し消費/秒:", Location = new System.Drawing.Point(5, 546), Size = new System.Drawing.Size(115, 18) };
-        numEditDrainRewind = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 544), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 18 };
+        var lblEcDrainRewind = new System.Windows.Forms.Label { Text = "巻き戻し消費/秒:", Location = new System.Drawing.Point(5, 662), Size = new System.Drawing.Size(115, 18) };
+        numEditDrainRewind = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 660), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 18 };
         numEditDrainRewind.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcDrainPause = new System.Windows.Forms.Label { Text = "一時停止消費/秒:", Location = new System.Drawing.Point(5, 570), Size = new System.Drawing.Size(115, 18) };
-        numEditDrainPause = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 568), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 4 };
+        var lblEcDrainPause = new System.Windows.Forms.Label { Text = "一時停止消費/秒:", Location = new System.Drawing.Point(5, 686), Size = new System.Drawing.Size(115, 18) };
+        numEditDrainPause = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 684), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 4 };
         numEditDrainPause.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcDrainFF = new System.Windows.Forms.Label { Text = "早送り消費/秒:", Location = new System.Drawing.Point(5, 594), Size = new System.Drawing.Size(115, 18) };
-        numEditDrainFF = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 592), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 10 };
+        var lblEcDrainFF = new System.Windows.Forms.Label { Text = "早送り消費/秒:", Location = new System.Drawing.Point(5, 710), Size = new System.Drawing.Size(115, 18) };
+        numEditDrainFF = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 708), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 10 };
         numEditDrainFF.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcDrainScreenFx = new System.Windows.Forms.Label { Text = "画面エフェクト消費/秒:", Location = new System.Drawing.Point(5, 618), Size = new System.Drawing.Size(115, 18) };
-        numEditDrainScreenFx = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 616), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 8 };
+        var lblEcDrainScreenFx = new System.Windows.Forms.Label { Text = "画面エフェクト消費/秒:", Location = new System.Drawing.Point(5, 734), Size = new System.Drawing.Size(115, 18) };
+        numEditDrainScreenFx = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 732), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 8 };
         numEditDrainScreenFx.ValueChanged += PlayerSetting_Changed;
 
         // 単発アクション（ボタンを押した瞬間に一度だけ消費する系）の固定消費量。
-        var lblEcFlatColorCycle = new System.Windows.Forms.Label { Text = "色フィルタ切替:", Location = new System.Drawing.Point(5, 642), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatColorCycle = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 640), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 5 };
+        var lblEcFlatColorCycle = new System.Windows.Forms.Label { Text = "色フィルタ切替:", Location = new System.Drawing.Point(5, 758), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatColorCycle = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 756), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 5 };
         numEditFlatColorCycle.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcFlatMenuToggle = new System.Windows.Forms.Label { Text = "メニュートグル:", Location = new System.Drawing.Point(5, 666), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatMenuToggle = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 664), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 8 };
+        var lblEcFlatMenuToggle = new System.Windows.Forms.Label { Text = "メニュートグル:", Location = new System.Drawing.Point(5, 782), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatMenuToggle = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 780), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 8 };
         numEditFlatMenuToggle.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcFlatSpeedChange = new System.Windows.Forms.Label { Text = "速度変更:", Location = new System.Drawing.Point(5, 690), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatSpeedChange = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 688), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 6 };
+        var lblEcFlatSpeedChange = new System.Windows.Forms.Label { Text = "速度変更:", Location = new System.Drawing.Point(5, 806), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatSpeedChange = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 804), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 6 };
         numEditFlatSpeedChange.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcFlatDirectionFlip = new System.Windows.Forms.Label { Text = "向き反転:", Location = new System.Drawing.Point(5, 714), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatDirectionFlip = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 712), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 4 };
+        var lblEcFlatDirectionFlip = new System.Windows.Forms.Label { Text = "向き反転:", Location = new System.Drawing.Point(5, 830), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatDirectionFlip = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 828), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 4 };
         numEditFlatDirectionFlip.ValueChanged += PlayerSetting_Changed;
 
-        var lblEcFlatResetAll = new System.Windows.Forms.Label { Text = "すべてリセット:", Location = new System.Drawing.Point(5, 738), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatResetAll = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 736), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 10 };
+        var lblEcFlatResetAll = new System.Windows.Forms.Label { Text = "すべてリセット:", Location = new System.Drawing.Point(5, 854), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatResetAll = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 852), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 10 };
         numEditFlatResetAll.ValueChanged += PlayerSetting_Changed;
 
         // タイムラインカットを1本作るたびの固定消費量。区間を丸ごと飛ばせる最も強力な操作なので既定値は高め。
-        var lblEcFlatCutCreate = new System.Windows.Forms.Label { Text = "カット作成:", Location = new System.Drawing.Point(5, 762), Size = new System.Drawing.Size(115, 18) };
-        numEditFlatCutCreate = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 760), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 20 };
+        var lblEcFlatCutCreate = new System.Windows.Forms.Label { Text = "カット作成:", Location = new System.Drawing.Point(5, 878), Size = new System.Drawing.Size(115, 18) };
+        numEditFlatCutCreate = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 876), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.5m, Maximum = 999, Value = 20 };
         numEditFlatCutCreate.ValueChanged += PlayerSetting_Changed;
 
         // カットで飛ばした区間の長さに応じた上乗せぶん（1タイルあたり）。
         // 総コストは「カット作成」＋こちら×タイル数になる。
-        var lblEcCutPerTile = new System.Windows.Forms.Label { Text = "カット/1タイル:", Location = new System.Drawing.Point(5, 786), Size = new System.Drawing.Size(115, 18) };
-        numEditCutPerTile = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 784), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.1m, Maximum = 999, Value = 1.2m };
+        var lblEcCutPerTile = new System.Windows.Forms.Label { Text = "カット/1タイル:", Location = new System.Drawing.Point(5, 902), Size = new System.Drawing.Size(115, 18) };
+        numEditCutPerTile = new System.Windows.Forms.NumericUpDown { Location = new System.Drawing.Point(120, 900), Size = new System.Drawing.Size(60, 23), DecimalPlaces = 1, Increment = 0.1m, Maximum = 999, Value = 1.2m };
         numEditCutPerTile.ValueChanged += PlayerSetting_Changed;
 
         // マップ設定タブへ、上記で組み立てた全コントロールをまとめて登録する。
@@ -342,6 +382,8 @@ partial class Form1
             chkDoubleJump, chkDash, chkFireball, chkFly,
             lblJP, numJumpPower, lblSp, numSpeed,
             lblEditTools, chkEditRewind, chkEditPause, chkEditFastForward, chkEditScreenFx, chkEditObjectEdit, chkEditCut,
+            chkObjOps[0], chkObjOps[1], chkObjOps[2], chkObjOps[3], chkObjOps[4],
+            chkObjOps[5], chkObjOps[6], chkObjOps[7], chkObjOps[8], chkObjOps[9],
             lblEditCost,
             lblEcMax, numEditMaxCost, lblEcRegen, numEditRegen,
             lblEcDrainRewind, numEditDrainRewind, lblEcDrainPause, numEditDrainPause,
