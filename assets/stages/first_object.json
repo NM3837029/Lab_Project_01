@@ -3748,7 +3748,26 @@
       "offsetY": 0.0
     }
   ],
-  "triggers": [],
+  "triggers": [
+    {
+      "id": "trigger_001",
+      "x": 160.0,
+      "y": 352.0,
+      "width": 96.0,
+      "height": 96.0,
+      "condition": "PlayerEnter",
+      "conditionParam": "",
+      "oneShot": true,
+      "actions": [
+        {
+          "action": "ShowMessage",
+          "param1": "特定のオブジェクトをクリックすると\r\nそのオブジェクトの操作が可能になります。",
+          "param2": "",
+          "delay": 0.0
+        }
+      ]
+    }
+  ],
   "enemies": [],
   "gimmicks": [
     {
