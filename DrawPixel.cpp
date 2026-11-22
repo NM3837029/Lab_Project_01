@@ -675,6 +675,10 @@ struct PlacedGimmick {
     float angle = 0.0f;
     EditLockOverride lockOv; // 置いた物ごとの編集可否の上書き
     int layer = 0;           // 置いたときのレイヤー（-1=奥 0=中 +1=手前）。PlacedEnemy と同じ理由で保持する
+    // 置いた物ごとの「出る条件」の上書き（Gimmick::gradeOv と同じ）。この画面では編集しないが、
+    // 持っていないと、ここから保存した瞬間に Lab_Editor で決めた条件が消えてしまう。
+    bool  gradeOv = false;
+    float gradeOvCh = 0.0f, gradeOvMin = -999.0f, gradeOvMax = 999.0f;
 };
 std::vector<PlacedEnemy> editorPlacedEnemies;     // 現在編集中/プレイ中のステージに配置されている敵の一覧
 std::vector<PlacedGimmick> editorPlacedGimmicks;  // 現在編集中/プレイ中のステージに配置されているギミックの一覧
@@ -2717,6 +2721,11 @@ struct Gimmick {
     // 末尾に追加（既存の集成初期化リストを壊さないようデフォルト値を持たせる）
     std::string assetId = "";  // GimmickDef.id への参照（SE検索・タイプ判定補助用）
     std::string param = "";    // ステージJSONの "param" フィールド（ポータル遷移先など）
+    // 補正スイッチ(26)・補正ロック足場(27)の「出る条件」を、置いた物ごとに上書きするか。
+    // ステージJSONの配置エントリに gradeChannel・gradeMin・gradeMax の3つが全部数値で書かれているときだけ true。
+    // false ならアセット（GimmickDef）の条件を使う（従来どおり）。Lab_Editor の右クリック「出る条件…」で決める。
+    bool  gradeOv = false;
+    float gradeOvCh = 0.0f, gradeOvMin = -999.0f, gradeOvMax = 999.0f;
     int handle = -1;           // GimmickDef.graphHandle（カスタムスプライト）。-1なら種別ごとの既定画像を使う
 
     // Feature: Puzzle-like Behavior Scripting (M2) — type==GIMMICK_CUSTOM_SCRIPTの実行状態
@@ -4009,10 +4018,10 @@ inline float GradeChannelValue(int ch) {
         default: return (float)g_screenFx.colorFilter;
     }
 }
-// 成立する範囲。下限・上限とも未指定なら、見る値ごとの既定（暗い／コントラスト高／ほぼ白黒／色相が正／暖色／赤）
-inline void GradeRange(const GimmickDef* d, int ch, float& lo, float& hi) {
-    lo = d ? d->gradeMin : -999.0f;
-    hi = d ? d->gradeMax : 999.0f;
+// 下限・上限とも未指定なら、見る値ごとの既定（暗い／コントラスト高／ほぼ白黒／色相が正／暖色／赤）にする。
+// アセットの条件にも、置いた物ごとの上書きにも同じ約束を使うので、1か所にまとめてある。
+// 【重要】Lab_Editor の GradeCondition.cs（Channels の DefLo/DefHi）と同じ表にしておくこと。
+inline void GradeApplyDefault(int ch, float& lo, float& hi) {
     if (lo <= -998.0f && hi >= 998.0f) {
         // 6：拡大中（Z。1.15倍以上）／ 7：縮小中（V。0.95倍以下）。押し始めから約17フレームで成立する
         static const float L[8] = { -999.0f, 0.3f, -999.0f, 30.0f, 0.3f, 1.0f, 1.15f, -999.0f };
@@ -4020,20 +4029,45 @@ inline void GradeRange(const GimmickDef* d, int ch, float& lo, float& hi) {
         lo = L[ch]; hi = H[ch];
     }
 }
-// 条件が成立しているか。flipped（向き反転の編集）なら成立と不成立を入れ替える
-inline bool GradeConditionMet(const GimmickDef* d, bool flipped) {
-    int ch = GradeChannelOf(d);
-    float lo, hi;
+// アセット（GimmickDef）の成立する範囲
+inline void GradeRange(const GimmickDef* d, int ch, float& lo, float& hi) {
+    lo = d ? d->gradeMin : -999.0f;
+    hi = d ? d->gradeMax : 999.0f;
+    GradeApplyDefault(ch, lo, hi);
+}
+// ギミックの個体の条件（見る値・下限・上限）。置いた物ごとの上書きがあればそちら、無ければアセットの条件。
+inline void GradeSpecOf(const Gimmick& g, int& ch, float& lo, float& hi) {
+    if (g.gradeOv) {
+        ch = (int)(g.gradeOvCh + 0.5f);
+        if (ch < 0 || ch > 7) ch = 0;
+        lo = g.gradeOvMin; hi = g.gradeOvMax;
+        GradeApplyDefault(ch, lo, hi);
+        return;
+    }
+    const GimmickDef* d = FindGimmickDef(g.assetId);
+    ch = GradeChannelOf(d);
     GradeRange(d, ch, lo, hi);
+}
+// 条件が成立しているか。flipped（向き反転の編集）なら成立と不成立を入れ替える
+inline bool GradeMetSpec(int ch, float lo, float hi, bool flipped) {
     float v = GradeChannelValue(ch);
     bool met = (ch == 5) ? (v >= lo - 0.01f && v <= hi + 0.01f) : (v >= lo && v <= hi);
     return flipped ? !met : met;
 }
-// 条件を短い日本語にしたもの（ゲーム内のラベルに出す）
-inline std::string GradeConditionLabel(const GimmickDef* d) {
+inline bool GradeConditionMet(const GimmickDef* d, bool flipped) {
     int ch = GradeChannelOf(d);
     float lo, hi;
     GradeRange(d, ch, lo, hi);
+    return GradeMetSpec(ch, lo, hi, flipped);
+}
+// ギミックの個体の条件で判定する（置いた物ごとの上書きを見る）。補正スイッチ・補正ロック足場はこちらを使う
+inline bool GradeConditionMet(const Gimmick& g, bool flipped) {
+    int ch; float lo, hi;
+    GradeSpecOf(g, ch, lo, hi);
+    return GradeMetSpec(ch, lo, hi, flipped);
+}
+// 条件を短い日本語にしたもの（ゲーム内のラベルに出す）
+inline std::string GradeLabelSpec(int ch, float lo, float hi) {
     char b[64];
     bool noLo = lo <= -998.0f, noHi = hi >= 998.0f;
     switch (ch) {
@@ -4083,10 +4117,7 @@ inline std::string GradeConditionLabel(const GimmickDef* d) {
     }
 }
 // 補正ロック足場・補正スイッチを描くときの色（見る値と範囲から決める）
-inline int GradeConditionColor(const GimmickDef* d) {
-    int ch = GradeChannelOf(d);
-    float lo, hi;
-    GradeRange(d, ch, lo, hi);
+inline int GradeColorSpec(int ch, float lo, float hi) {
     switch (ch) {
         case 0: return (hi <= 0.7f && lo <= -998.0f) ? GetColor(60, 60, 110) : GetColor(255, 240, 150);
         case 1: return GetColor(210, 210, 220);
@@ -4101,6 +4132,11 @@ inline int GradeConditionColor(const GimmickDef* d) {
         }
     }
 }
+// 条件の文字・色を、アセットから／ギミックの個体から（置いた物ごとの上書きを見て）求める
+inline std::string GradeConditionLabel(const GimmickDef* d) { int ch = GradeChannelOf(d); float lo, hi; GradeRange(d, ch, lo, hi); return GradeLabelSpec(ch, lo, hi); }
+inline std::string GradeConditionLabel(const Gimmick& g) { int ch; float lo, hi; GradeSpecOf(g, ch, lo, hi); return GradeLabelSpec(ch, lo, hi); }
+inline int GradeConditionColor(const GimmickDef* d) { int ch = GradeChannelOf(d); float lo, hi; GradeRange(d, ch, lo, hi); return GradeColorSpec(ch, lo, hi); }
+inline int GradeConditionColor(const Gimmick& g) { int ch; float lo, hi; GradeSpecOf(g, ch, lo, hi); return GradeColorSpec(ch, lo, hi); }
 
 // この敵の「弱点色」。色フィルタがこれと一致している間、実体化したり弱ったりする。
 // type_enumから機械的に決めているので、今後追加される敵タイプにも自動で割り当たる。
@@ -7169,6 +7205,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             Gimmick newGim{ (GimmickType)t_enum, x + hx * gimScale, y + hy * gimScaleY, gw, gh, gsw, gsh, (float)hx, (float)hy, gw, gh, true, 0.0f, 0.0f, initAngle, 0.0f, false, false, {} };
                             newGim.assetId = id;
                             newGim.param = param;
+                            // 置いた物ごとの「出る条件」の上書き。3つそろっていないときは、壊れた指定とみなしてアセットの条件を使う
+                            if (gj.contains("gradeChannel") && gj["gradeChannel"].is_number()
+                                && gj.contains("gradeMin") && gj["gradeMin"].is_number()
+                                && gj.contains("gradeMax") && gj["gradeMax"].is_number()) {
+                                newGim.gradeOv = true;
+                                newGim.gradeOvCh  = gj["gradeChannel"].get<float>();
+                                newGim.gradeOvMin = gj["gradeMin"].get<float>();
+                                newGim.gradeOvMax = gj["gradeMax"].get<float>();
+                            }
                             newGim.handle = gHandle;
                             // 敵と同じく、配置ごとの指定があったときだけ「編集がかかっている」扱いにする。
                             // 角度の基準は「そのタイプの既定の姿勢」。手動橋は縦向き(1.5708)が既定なので、
@@ -10364,7 +10409,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (gsw.type != GIMMICK_GRADE_SWITCH) continue;
                     const GimmickDef* gswDef = FindGimmickDef(gsw.assetId);
                     EditReaction gsr = GetGimmickEditReaction(gsw);
-                    bool gactive = GradeConditionMet(gswDef, gsr.flipped);
+                    bool gactive = GradeConditionMet(gsw, gsr.flipped); // 置いた物ごとの上書きがあればそちら
                     bool gwasPressed = (gsw.customTimer > 0.5f);
                     if (gactive && !gwasPressed && gswDef) SoundManager::Get().PlaySe(gswDef->seActivate); // 入った瞬間だけ鳴らす
                     gsw.customTimer = gactive ? 1.0f : 0.0f; // 押されている状態（描画側が読む）
@@ -13607,7 +13652,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     else if (gim.type == GIMMICK_GRADE_LOCK_PLATFORM) {
                         // 補正ロック足場：gradeChannel の値が gradeMin〜gradeMax の間にあるときだけ実体化する。
                         // 向き反転の編集で条件が裏返る（色ロック・明暗ロックと同じ約束）。
-                        gim.isActive = GradeConditionMet(FindGimmickDef(gim.assetId), gr.flipped);
+                        gim.isActive = GradeConditionMet(gim, gr.flipped); // 置いた物ごとの上書きがあればそちら
                     }
                     else if (gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM) {
                         // 明暗ロック足場：param("dark"既定/"bright")と現在の画面の明るさが一致する時だけ実体化する。
@@ -14896,7 +14941,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 補正ロック足場：実体化中は不透明、不成立の間は半透明のゴーストで位置だけ示す。
                 // 「何のときに現れるのか」が分からないと切り替える手掛かりが無いので、条件を足場の上に文字で出す。
                 const GimmickDef* glDef = FindGimmickDef(gim.assetId);
-                int lockColor = GradeConditionColor(glDef);
+                int lockColor = GradeConditionColor(gim); // 置いた物ごとの上書きがあればそちらの色
+                (void)glDef;
                 int gx1 = (int)(gim.x - cameraX);
                 int gy1 = (int)(gim.y - cameraY);
                 int gx2 = (int)(gim.x + gim.spriteWidth - cameraX);
@@ -14909,7 +14955,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawBox(gx1, gy1, gx2, gy2, lockColor, TRUE);
                     SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 }
-                std::string glLabel = GradeConditionLabel(glDef);
+                std::string glLabel = GradeConditionLabel(gim);
                 DrawString(gx1, gy1 - 18, glLabel.c_str(), gim.isActive ? GetColor(255, 255, 255) : GetColor(200, 200, 200));
             }
             else if (gim.type == GIMMICK_GRADE_SWITCH) {
@@ -14932,8 +14978,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     DrawBox(sx1, sy1, sx2, sy2, GetColor(255, 255, 255), FALSE);
                 }
                 // 条件の色の小さな印（スイッチの隅）
-                DrawBox(sx1 + 2, sy1 + 2, sx1 + 8, sy1 + 8, GradeConditionColor(gsDef), TRUE);
-                std::string gsLabel = GradeConditionLabel(gsDef);
+                DrawBox(sx1 + 2, sy1 + 2, sx1 + 8, sy1 + 8, GradeConditionColor(gim), TRUE);
+                std::string gsLabel = GradeConditionLabel(gim); // 置いた物ごとの上書きがあればそちらの条件
                 DrawString(sx1, sy1 - 20, gsLabel.c_str(), gsPressed ? GetColor(120, 230, 120) : GetColor(255, 190, 90));
             }
             else if (gim.type == GIMMICK_BRIGHTNESS_ZONE || gim.type == GIMMICK_COLOR_ZONE
@@ -16759,6 +16805,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                             pg.angle = e.value("angle", 0.0f);
                                             ReadEditLockOverride(e, pg.lockOv);
                                             pg.layer = ClampLayer(e.value("layer", 0));
+                                            // 置いた物ごとの「出る条件」の上書き（3つそろっているときだけ。ゲーム本体の読み込みと同じ約束）
+                                            if (e.contains("gradeChannel") && e["gradeChannel"].is_number()
+                                                && e.contains("gradeMin") && e["gradeMin"].is_number()
+                                                && e.contains("gradeMax") && e["gradeMax"].is_number()) {
+                                                pg.gradeOv = true;
+                                                pg.gradeOvCh = e["gradeChannel"].get<float>();
+                                                pg.gradeOvMin = e["gradeMin"].get<float>();
+                                                pg.gradeOvMax = e["gradeMax"].get<float>();
+                                            }
                                             editorPlacedGimmicks.push_back(pg);
                                         }
                                     }
@@ -16849,6 +16904,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 for (auto& g : editorPlacedGimmicks) {
                     json j = { {"id", gimmickDefs[g.def_idx].id}, {"x", g.x}, {"y", g.y} };
                     if (g.stringParam != "") j["param"] = g.stringParam;
+                    // 置いた物ごとの「出る条件」の上書き（Lab_Editor で決めたもの）を落とさない
+                    if (g.gradeOv) { j["gradeChannel"] = g.gradeOvCh; j["gradeMin"] = g.gradeOvMin; j["gradeMax"] = g.gradeOvMax; }
                     if (g.scale != 1.0f) j["scale"] = g.scale;
                     if (g.scaleY != 1.0f) j["scaleY"] = g.scaleY;
                     if (g.angle != 0.0f) j["angle"] = g.angle;

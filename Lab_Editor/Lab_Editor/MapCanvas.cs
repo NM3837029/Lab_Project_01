@@ -355,6 +355,7 @@ public class MapCanvas : Panel
                              IsSelected(gi) ? Color.Magenta : Color.FromArgb(50, 120, 220));
             DrawLockBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.EditLocks);
             DrawLayerBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.Layer);
+            if (def != null) DrawConditionBadge(g, gi, def, new SizeF(gimW, gimH)); // 色・明るさで出入りする物の条件
         }
 
         // 10. アイテム（ギミックと同じくhitboxサイズが表示サイズ）
@@ -1191,6 +1192,13 @@ public class MapCanvas : Panel
             var miLocks = new ToolStripMenuItem(lockText);
             miLocks.Click += (s, e) => EditPlacedLocks(target);
             menu.Items.Add(miLocks);
+            // 色・明るさで出入りするギミックは、出る条件をここで決める（パラメータ欄へ手で打たなくてよいように）
+            if (target is PlacedGimmick condPg && IsConditionGimmick(condPg, out _))
+            {
+                var miCond = new ToolStripMenuItem("出る条件...（" + ConditionShortText(condPg) + "）");
+                miCond.Click += (s, e) => EditPlacedCondition(condPg);
+                menu.Items.Add(miCond);
+            }
             menu.Items.Add(new ToolStripSeparator());
         }
         if (_tileSel.HasValue) { AddTileSelectionMenuItems(menu); menu.Items.Add(new ToolStripSeparator()); }
@@ -1435,6 +1443,88 @@ public class MapCanvas : Panel
         using var br = new SolidBrush(back);
         g.FillRectangle(br, badge);
         g.DrawString(text, font, Brushes.White, badge.X, badge.Y - 1);
+    }
+
+    // ===== 色・明るさで出入りするギミックの「出る条件」 =====
+    // 対象は 色ロック足場(22)・明暗ロック足場(23)・補正スイッチ(26)・補正ロック足場(27)。
+    private bool IsConditionGimmick(PlacedGimmick pg, out GimmickDef? def)
+    {
+        def = Assets?.Gimmicks.FirstOrDefault(d => d.id == pg.Id);
+        return def != null && (def.type_enum == 22 || def.type_enum == 23 || def.type_enum == 26 || def.type_enum == 27);
+    }
+
+    // この置いた物の条件（見る値・下限・上限）。置いた物ごとの上書き → アセットの順に見る（ゲームの GradeSpecOf と同じ）
+    private static void RangeSpecOf(PlacedGimmick pg, GimmickDef def, out int ch, out float lo, out float hi)
+    {
+        if (pg.HasGradeOverride) { ch = GradeCondition.ChannelOf(pg.GradeChannelOv!.Value); lo = pg.GradeMinOv!.Value; hi = pg.GradeMaxOv!.Value; }
+        else { ch = GradeCondition.ChannelOf(def.gradeChannel); lo = def.gradeMin; hi = def.gradeMax; }
+    }
+
+    // メニュー・地図の札に出す短い条件（例：「赤」「暗い」「明≤60%」）
+    private string ConditionShortText(PlacedGimmick pg)
+    {
+        if (!IsConditionGimmick(pg, out var def) || def == null) return "";
+        switch (def.type_enum)
+        {
+            case 22: return GradeCondition.FilterName(GradeCondition.ColorFromParam(pg.Param));
+            case 23: return GradeCondition.BrightFromParam(pg.Param) ? "明るい" : "暗い";
+            default: RangeSpecOf(pg, def, out int ch, out float lo, out float hi); return GradeCondition.Short(ch, lo, hi);
+        }
+    }
+
+    // 条件の色（ゲームの描画と同じ色）
+    private static Color ConditionColorOf(PlacedGimmick pg, GimmickDef def)
+    {
+        switch (def.type_enum)
+        {
+            case 22: return GradeCondition.ColorLockColor(GradeCondition.ColorFromParam(pg.Param));
+            case 23: return GradeCondition.BrightLockColor(GradeCondition.BrightFromParam(pg.Param));
+            default: RangeSpecOf(pg, def, out int ch, out float lo, out float hi); return GradeCondition.ConditionColor(ch, lo, hi);
+        }
+    }
+
+    // 右クリックメニュー「出る条件...」。条件エディタのダイアログを開き、決定したら param／上書きへ書く。
+    private void EditPlacedCondition(PlacedGimmick pg)
+    {
+        if (!IsConditionGimmick(pg, out var def) || def == null) return;
+        using var dlg = new GradeConditionForm(string.IsNullOrEmpty(def.name) ? def.id : def.name, def.type_enum, pg,
+                                               GradeCondition.ChannelOf(def.gradeChannel), def.gradeMin, def.gradeMax);
+        if (dlg.ShowDialog(FindForm()) != DialogResult.OK) return;
+        dlg.ApplyTo(pg);
+        // 保存と「元に戻す」への登録（ほかの右クリックの編集と同じ流れ）
+        Fire(); Invalidate();
+        EditCompleted?.Invoke(this, EventArgs.Empty);
+    }
+
+    // 地図の印：条件の色で物を枠取りし、上に短い条件の札を出す（どれが何色・何の条件かを地図で見分けられるように）。
+    // 上書きしている補正スイッチ・補正ロック足場は、札の頭に「＊」を付ける（アセットと違う条件だと分かるように）。
+    private void DrawConditionBadge(Graphics g, PlacedGimmick pg, GimmickDef def, SizeF worldSize)
+    {
+        var rect = ToScreenRect(pg.X, pg.Y, worldSize.Width, worldSize.Height);
+        if (rect.Right < 0 || rect.Left > Width || rect.Bottom < 0 || rect.Top > Height) return;
+        // 明暗ゾーン(18)・色調ゾーン(19)：範囲を、ゾーンの中の色で薄く塗る（どこが何色になるゾーンかを地図で見分けられるように）
+        if (def.type_enum == 18 || def.type_enum == 19)
+        {
+            Color zc = def.type_enum == 18
+                ? Color.FromArgb(40, 40, 90)  // 明暗ゾーンは「暗くなる」側を代表に紺
+                : Color.FromArgb((int)(255 * Math.Clamp(def.tintR < 0 ? 1f : def.tintR, 0f, 1f)),
+                                 (int)(255 * Math.Clamp(def.tintG < 0 ? 1f : def.tintG, 0f, 1f)),
+                                 (int)(255 * Math.Clamp(def.tintB < 0 ? 1f : def.tintB, 0f, 1f)));
+            using (var zb = new SolidBrush(Color.FromArgb(60, zc))) g.FillRectangle(zb, rect);
+            using (var zp = new Pen(Color.FromArgb(160, zc), 1f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash }) g.DrawRectangle(zp, rect.X, rect.Y, rect.Width, rect.Height);
+            return;
+        }
+        if (!(def.type_enum == 22 || def.type_enum == 23 || def.type_enum == 26 || def.type_enum == 27)) return;
+        var col = ConditionColorOf(pg, def);
+        using (var pen = new Pen(col, 3f)) g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+        string text = (pg.HasGradeOverride && (def.type_enum == 26 || def.type_enum == 27) ? "＊" : "") + ConditionShortText(pg);
+        using var font = new Font("Meiryo UI", 7.5f, FontStyle.Bold);
+        var size = g.MeasureString(text, font);
+        var badge = new RectangleF(rect.Left, rect.Top - size.Height - 1, size.Width, size.Height - 1);
+        using var br = new SolidBrush(Color.FromArgb(225, col));
+        g.FillRectangle(br, badge);
+        var ink = col.GetBrightness() < 0.5f ? Brushes.White : Brushes.Black;
+        g.DrawString(text, font, ink, badge.X, badge.Y - 1);
     }
 
     // 置いた物が「奥」「手前」の層にあるとき、左上に小さな札を重ねる（中は何も出さない）。

@@ -199,16 +199,16 @@ public sealed class GradeConditionEditor : UserControl
         var info = GradeCondition.Channel(ChannelValue);
         GradeCondition.EffectiveRange(ChannelValue, Lo, Hi, out float elo, out float ehi);
         float v = info.FromView(Math.Clamp(view, info.ViewMin, info.ViewMax));
+        // つまみがもう片方を越えたら、もう片方も一緒に押していく（止めてしまうと「動かない」と迷うため）
         if (lower)
         {
-            // 上限より上へは行かない
-            if (!GradeCondition.IsNoHi(ehi) && v > ehi) v = ehi;
-            Lo = v; Hi = ehi;
+            Lo = v;
+            Hi = (!GradeCondition.IsNoHi(ehi) && v > ehi) ? v : ehi;
         }
         else
         {
-            if (!GradeCondition.IsNoLo(elo) && v < elo) v = elo;
-            Hi = v; Lo = elo;
+            Hi = v;
+            Lo = (!GradeCondition.IsNoLo(elo) && v < elo) ? v : elo;
         }
         RefreshView();
         Fire();

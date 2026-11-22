@@ -369,7 +369,11 @@ public class StageData
                         ScaleY = g["scaleY"]?.Value<float>() ?? g["scale"]?.Value<float>() ?? 1.0f,
                         Angle = g["angle"]?.Value<float>() ?? 0f,
                         Layer = ReadLayer(g),
-                        EditLocks = PlacedEditLocks.ReadFrom(g)
+                        EditLocks = PlacedEditLocks.ReadFrom(g),
+                        // 出る条件の上書き。3つとも数値のときだけ読む（そろっていなければ、アセットの条件に従う）
+                        GradeChannelOv = ReadGradeOv(g, "gradeChannel"),
+                        GradeMinOv = ReadGradeOv(g, "gradeMin"),
+                        GradeMaxOv = ReadGradeOv(g, "gradeMax"),
                     });
 
             // アイテム — 配置座標を読み込む。
@@ -407,6 +411,15 @@ public class StageData
     {
         int v = entry["layer"]?.Value<int>() ?? 0;
         return v < 0 ? ObjectLayer.奥 : v > 0 ? ObjectLayer.手前 : ObjectLayer.中;
+    }
+
+    // ギミックの配置エントリから、出る条件の上書き（gradeChannel／gradeMin／gradeMax）の1つを読む。
+    // 項目が無い・数値でないときは null。3つとも読めたときだけ上書きとして扱う（PlacedGimmick.HasGradeOverride）。
+    private static float? ReadGradeOv(JToken entry, string key)
+    {
+        var t = entry[key];
+        if (t == null || (t.Type != JTokenType.Float && t.Type != JTokenType.Integer)) return null;
+        return t.Value<float>();
     }
 
     // JSONのtoken（2次元配列想定）をlayer（int[,]）へコピーするための共通処理。
@@ -501,6 +514,13 @@ public class StageData
             if (g.Angle != 0f) gj["angle"] = g.Angle;
             if (g.Layer != ObjectLayer.中) gj["layer"] = (int)g.Layer; // 中（既定）は書かない
             g.EditLocks.WriteTo(gj);
+            // 出る条件の上書き：3つそろっているときだけ書く（上書きしていない配置には何も足さない）
+            if (g.HasGradeOverride)
+            {
+                gj["gradeChannel"] = g.GradeChannelOv!.Value;
+                gj["gradeMin"] = g.GradeMinOv!.Value;
+                gj["gradeMax"] = g.GradeMaxOv!.Value;
+            }
             ga.Add(gj);
         }
         j["gimmicks"] = ga;
@@ -1028,6 +1048,21 @@ public class PlacedGimmick
     // プロパティ表には出さない（専用のダイアログで編集する）。
     [System.ComponentModel.Browsable(false)]
     public PlacedEditLocks EditLocks { get; set; } = new();
+
+    // 補正スイッチ(26)・補正ロック足場(27)の「出る条件」を、この1つだけ上書きする値。
+    // null（3つとも）＝アセットの条件に従う（既定）。右クリックメニュー「出る条件…」で決める。
+    // JSONの配置エントリには、上書きしたときだけ gradeChannel・gradeMin・gradeMax の3つを書く。
+    // 値の意味はアセットの GimmickDef.gradeChannel／gradeMin／gradeMax と同じ（-999/999＝未指定）。
+    // ゲーム側は DrawPixel.cpp の Gimmick::gradeOv。プロパティ表には出さない（専用のダイアログで編集する）。
+    [System.ComponentModel.Browsable(false)]
+    public float? GradeChannelOv { get; set; }
+    [System.ComponentModel.Browsable(false)]
+    public float? GradeMinOv { get; set; }
+    [System.ComponentModel.Browsable(false)]
+    public float? GradeMaxOv { get; set; }
+    // 上書きがあるか（3つそろっているときだけ有効。ゲームの読み方と同じ）
+    [System.ComponentModel.Browsable(false)]
+    public bool HasGradeOverride => GradeChannelOv.HasValue && GradeMinOv.HasValue && GradeMaxOv.HasValue;
 }
 
 // マップ上に実際に1個配置されたアイテム1個分の情報。
