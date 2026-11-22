@@ -44,7 +44,9 @@ public sealed class GradeConditionEditor : UserControl
     private bool _setting; // 外から値を入れている最中（イベントを出さない）
 
     // ---- 部品 ----
-    private readonly FlowLayoutPanel _root = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(4) };
+    // 中身は縦に積むだけで、スクロールはさせない（アセット画面の縦に長い欄の中に置くと、スクロールが二重になって操作しにくいため）。
+    // 高さは使う側が決める（目安：範囲条件で 300px、色・明暗のボタンだけなら 90px）。
+    private readonly FlowLayoutPanel _root = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = false, Padding = new Padding(4) };
     private readonly Panel _channelRow = new() { Height = 28 };
     private readonly ComboBox _cboChannel = new() { DropDownStyle = ComboBoxStyle.DropDownList, Font = UiTheme.Base, Width = 200 };
     private readonly RangeBar _bar;
@@ -369,10 +371,12 @@ public sealed class GradeConditionEditor : UserControl
 
             // 2) 出ない範囲を暗く覆う
             var (lx, hx, noLo, noHi) = KnobXs();
+            // 暗く覆うだけだと、もともと暗い色（明るさの左端など）の上では区別がつかないので、斜線も重ねる
             using (var shade = new SolidBrush(Color.FromArgb(170, 30, 30, 40)))
+            using (var hatch = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(150, 200, 200, 210), Color.Transparent))
             {
-                if (lx > t.Left) g.FillRectangle(shade, t.Left, t.Top, lx - t.Left, t.Height);
-                if (hx < t.Right) g.FillRectangle(shade, hx, t.Top, t.Right - hx, t.Height);
+                if (lx > t.Left) { g.FillRectangle(shade, t.Left, t.Top, lx - t.Left, t.Height); g.FillRectangle(hatch, t.Left, t.Top, lx - t.Left, t.Height); }
+                if (hx < t.Right) { g.FillRectangle(shade, hx, t.Top, t.Right - hx, t.Height); g.FillRectangle(hatch, hx, t.Top, t.Right - hx, t.Height); }
             }
             // 出る範囲の縁
             using (var pen = new Pen(Color.FromArgb(255, 255, 255), 2f)) g.DrawRectangle(pen, lx, t.Top, Math.Max(1, hx - lx), t.Height);

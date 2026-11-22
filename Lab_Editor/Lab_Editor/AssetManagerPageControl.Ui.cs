@@ -645,7 +645,7 @@ public partial class AssetManagerPageControl
         _detail.AddItem(Kit.Hint("見る値を選び、帯の下の ▲ を左右に動かして範囲を決めます。白い枠の中にあるときに"
             + (typeEnum == 26 ? "スイッチが入ります。" : "足場が現れます。")
             + "ステージに置いたあと、右クリックの「出る条件…」で、置いた場所ごとに変えることもできます。"));
-        var ed = new GradeConditionEditor { Kind = GradeKind.Range, Height = 262 };
+        var ed = new GradeConditionEditor { Kind = GradeKind.Range, Height = 300 };
         ed.SetRange(GradeCondition.ChannelOf(def.gradeChannel), def.gradeMin, def.gradeMax);
         ed.ConditionChanged += (s, e) =>
         {
