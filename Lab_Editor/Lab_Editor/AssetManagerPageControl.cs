@@ -167,10 +167,11 @@ public partial class AssetManagerPageControl : UserControl
                        ("zoneSat", "彩度の倍率 (1=そのまま 0=白黒)", 2), ("zoneHue", "色相の回転(度)", 0), ("zoneContrast", "コントラスト (-1〜1)", 2) },
         [20] = new[] { ("zoomLevel", "ズーム倍率", 2) }, // type_enum=20: ズームレンズ(Zoom Lens)
         [21] = new[] { ("zoomLevel", "ズーム倍率", 2), ("brightLevel", "明るさ倍率", 2) }, // type_enum=21: スローフィールド(Slowmo Field)
-        // type_enum=26/27: 補正スイッチ・補正ロック足場。「どの値が・どの範囲のとき」成立するかを決める。
-        // 見る値(gradeChannel)は専用の選択欄で描く（UpdateBehaviorParamsPanel）。下限・上限は -999 / 999 で「未指定」。
-        [26] = new[] { ("gradeChannel", "見る値", 0), ("gradeMin", "成立する下限 (-999=未指定)", 2), ("gradeMax", "成立する上限 (999=未指定)", 2) },
-        [27] = new[] { ("gradeChannel", "見る値", 0), ("gradeMin", "成立する下限 (-999=未指定)", 2), ("gradeMax", "成立する上限 (999=未指定)", 2) },
+        // type_enum=26/27: 補正スイッチ・補正ロック足場。「どの値が・どの範囲のとき」成立するかは、
+        // 数字の欄ではなく共通の条件エディタ（GradeConditionEditor）で決める（BuildBehaviorSections の「出る条件」）。
+        // 以前は 見る値・下限(-999=未指定)・上限(999=未指定) の3つの数字欄で、値ごとの単位や範囲を知らないと決められなかった。
+        [26] = Array.Empty<(string, string, int)>(),
+        [27] = Array.Empty<(string, string, int)>(),
     };
 
     // 敵のtype_enum(タイプ番号)ごとの説明一覧。
