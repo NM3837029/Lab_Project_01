@@ -4132,6 +4132,21 @@ inline int GradeColorSpec(int ch, float lo, float hi) {
         }
     }
 }
+// 近くのメーター（DrawConditionMeters）に使う、見る値ごとの目盛りの範囲と帯の両端の色。
+// 【重要】Lab_Editor の GradeCondition.cs（ViewMin/ViewMax を内部の値に直したもの・Low/High の色）と同じにしておく。
+// 色相(3)だけは虹で描くので、色は使わない。色フィルタ(5)はメーターではなく3つの丸で描く。
+inline void GradeMeterScale(int ch, float& vmin, float& vmax, int& lowR, int& lowG, int& lowB, int& highR, int& highG, int& highB) {
+    switch (ch) {
+        case 1:  vmin = -1.0f; vmax = 1.0f;   lowR = 150; lowG = 150; lowB = 150; highR = 20;  highG = 20;  highB = 20;  break; // コントラスト
+        case 2:  vmin = 0.0f;  vmax = 2.0f;   lowR = 150; lowG = 150; lowB = 150; highR = 255; highG = 40;  highB = 160; break; // 彩度
+        case 3:  vmin = -180.0f; vmax = 180.0f; lowR = lowG = lowB = highR = highG = highB = 255; break;                    // 色相（虹）
+        case 4:  vmin = -1.0f; vmax = 1.0f;   lowR = 80;  lowG = 140; lowB = 255; highR = 255; highG = 160; highB = 60;  break; // 色温度
+        case 6:  vmin = 1.0f;  vmax = 2.0f;   lowR = 200; lowG = 235; lowB = 255; highR = 40;  highG = 160; highB = 230; break; // 拡大中
+        case 7:  vmin = 0.5f;  vmax = 1.0f;   lowR = 230; lowG = 140; lowB = 40;  highR = 255; highG = 235; highB = 200; break; // 縮小中
+        default: vmin = 0.3f;  vmax = 1.7f;   lowR = 20;  lowG = 20;  lowB = 30;  highR = 255; highG = 250; highB = 220; break; // 明るさ
+    }
+}
+
 // 条件の文字・色を、アセットから／ギミックの個体から（置いた物ごとの上書きを見て）求める
 inline std::string GradeConditionLabel(const GimmickDef* d) { int ch = GradeChannelOf(d); float lo, hi; GradeRange(d, ch, lo, hi); return GradeLabelSpec(ch, lo, hi); }
 inline std::string GradeConditionLabel(const Gimmick& g) { int ch; float lo, hi; GradeSpecOf(g, ch, lo, hi); return GradeLabelSpec(ch, lo, hi); }
@@ -6864,6 +6879,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         Screen_ZoomOutView(zl, zt, zw, zh);
         worldX = cameraX + zl + gx * zw / (float)SCREEN_WIDTH;
         worldY = cameraY + zt + gy * zh / (float)SCREEN_HEIGHT;
+    };
+    // ワールド（ゲーム内）の座標を、HUD を描くウィンドウ上の位置へ変換する（Screen_MouseToWorld の逆向き）。
+    //   ワールド → ズームアウトの範囲の中の位置 → 画面(640x480) → ズームインで映している範囲の中の位置 → 転送先（ox,oy,ow,oh）
+    // HUD の層は色補正・ズームの影響を受けないので、ゲーム内の物の近くに何かを出すときは、ここで位置を合わせる。
+    auto Screen_WorldToHud = [&](float worldX, float worldY, int ox, int oy, int ow, int oh, float& hudX, float& hudY) {
+        float zl = 0.0f, zt = 0.0f, zw = (float)SCREEN_WIDTH, zh = (float)SCREEN_HEIGHT;
+        Screen_ZoomOutView(zl, zt, zw, zh);
+        float gx = (worldX - cameraX - zl) * (float)SCREEN_WIDTH / zw;
+        float gy = (worldY - cameraY - zt) * (float)SCREEN_HEIGHT / zh;
+        int vx = 0, vy = 0, vw = SCREEN_WIDTH, vh = SCREEN_HEIGHT;
+        Screen_ComputeView(vx, vy, vw, vh);
+        float px = (gx - (float)vx) * (float)SCREEN_WIDTH / (float)vw;
+        float py = (gy - (float)vy) * (float)SCREEN_HEIGHT / (float)vh;
+        hudX = (float)ox + px * (float)ow / (float)SCREEN_WIDTH;
+        hudY = (float)oy + py * (float)oh / (float)SCREEN_HEIGHT;
     };
     auto UpdateMonitorLayout = [&]() {
         if (bigView) {
@@ -15943,8 +15973,113 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         //   ・色補正（X/C/T）・ズーム（Z）・ぼかしの影響を受けない（暗転中でもコストが読める）
         //   ・文字はネイティブ解像度のメイリオで描くので、F10 の拡大表示でもにじまない
         // 引数 ox,oy,ow,oh は、ゲーム画面（640x480）を転送した矩形。内部座標は X()/Y() で変換する。
+        // ===== 色・明るさで出入りするギミックの「近くのメーター」 =====
+        // 色ロック足場(22)・明暗ロック足場(23)・補正スイッチ(26)・補正ロック足場(27)にプレイヤーが近づくと、
+        // その上に小さなメーターを出し、「今の値」と「出る（入る）範囲」を見せる。
+        // 以前は、足場が半透明のまま出てこないとき、あとどれだけ明るく・暗く（どの色に）すればよいかが分からなかった。
+        //   範囲の条件 … 見る値の帯。出る範囲はそのまま、出ない範囲は暗く。今の値を白い縦線で示す
+        //   色の条件   … 赤・緑・青の3つの丸。必要な色に白い輪、今の色フィルタの丸を明るく
+        // HUD の層に描くので、画面を暗く・色付きにしても、メーター自体は見やすいまま。
+        const float CONDITION_METER_RANGE = 6.0f * TILE_SIZE; // これより近い（中心どうしの距離）ときだけ出す。頭上の足場にも届くよう6マス
+        auto DrawConditionMeters = [&](int ox, int oy, int ow, int oh) {
+            if (isShowingMessage) return;
+            const float sc = (float)ow / (float)SCREEN_WIDTH;
+            const float pcx = player.x + player.width * player.scale * 0.5f;
+            const float pcy = player.y + player.height * player.scale * 0.5f;
+            SetDrawArea(ox, oy, ox + ow, oy + oh); // モニターの外へはみ出さない
+            for (auto& gim : gimmicks) {
+                const bool colorLock = gim.type == GIMMICK_COLOR_LOCK_PLATFORM;
+                const bool brightLock = gim.type == GIMMICK_BRIGHTNESS_LOCK_PLATFORM;
+                const bool graded = gim.type == GIMMICK_GRADE_LOCK_PLATFORM || gim.type == GIMMICK_GRADE_SWITCH;
+                if (!(colorLock || brightLock || graded) || gim.isTimelineCut) continue;
+                if (!SameLayer(gim.layer, player.layer)) continue; // 違う層の物は、プレイヤーには関係が無い
+                const float gcx = gim.x + gim.spriteWidth * 0.5f, gcy = gim.y + gim.spriteHeight * 0.5f;
+                const float ddx = gcx - pcx, ddy = gcy - pcy;
+                if (ddx * ddx + ddy * ddy > CONDITION_METER_RANGE * CONDITION_METER_RANGE) continue;
+
+                // 置く位置：物の上端の中央から、既存の条件の文字（約20px）のさらに上
+                float hx = 0.0f, hy = 0.0f;
+                Screen_WorldToHud(gcx, gim.y - 24.0f, ox, oy, ow, oh, hx, hy);
+                const int mw = (int)(96.0f * sc), mh = (int)(9.0f * sc);
+                const int mx1 = (int)hx - mw / 2, my2 = (int)hy, my1 = my2 - mh;
+                EditReaction mr = GetGimmickEditReaction(gim);
+
+                // 色の条件（色ロック足場、または見る値が色フィルタ）：3つの丸
+                int ch = 0; float lo = 0.0f, hi = 0.0f;
+                if (graded) GradeSpecOf(gim, ch, lo, hi);
+                if (colorLock || (graded && ch == 5)) {
+                    int need = 1;
+                    if (colorLock) {
+                        need = gim.param.empty() ? 1 : atoi(gim.param.c_str());
+                        need = ((((need - 1 + mr.tiltSteps) % 3) + 3) % 3) + 1; // 傾けると必要な色が進む（判定と同じ）
+                    } else need = (int)(lo + 0.5f);
+                    const int cur = colorLock ? playerColorFilter : g_screenFx.colorFilter;
+                    const int r = (int)(6.0f * sc);
+                    for (int i = 1; i <= 3; i++) {
+                        const int cx = (int)hx + (i - 2) * r * 3, cy = my2 - r;
+                        const int col = i == 2 ? GetColor(80, 220, 80) : i == 3 ? GetColor(80, 140, 255) : GetColor(255, 90, 90);
+                        if (i != cur) SetDrawBlendMode(DX_BLENDMODE_ALPHA, 110); // 今の色でない丸は薄く
+                        DrawCircle(cx, cy, r, col, TRUE);
+                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                        if (i == need) { DrawCircle(cx, cy, r + 2, GetColor(255, 255, 255), FALSE); DrawCircle(cx, cy, r + 3, GetColor(20, 20, 20), FALSE); }
+                    }
+                    continue;
+                }
+
+                // 範囲の条件：帯
+                float vmin, vmax, cur;
+                int lr, lg, lb, hr, hg, hb;
+                float inLo, inHi; // 出る範囲（内部の値。-999/999 は端なし）
+                if (brightLock) {
+                    GradeMeterScale(0, vmin, vmax, lr, lg, lb, hr, hg, hb);
+                    bool wantsBright = (gim.param == "bright");
+                    if (mr.flipped) wantsBright = !wantsBright;
+                    inLo = wantsBright ? 1.3f : -999.0f;
+                    inHi = wantsBright ? 999.0f : 0.6f;
+                    cur = g_screenFx.brightness;
+                } else {
+                    GradeMeterScale(ch, vmin, vmax, lr, lg, lb, hr, hg, hb);
+                    inLo = lo; inHi = hi;
+                    cur = GradeChannelValue(ch);
+                }
+                auto T = [&](float v) { float t = (v - vmin) / (vmax - vmin); return t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t); };
+                // 下地（縁取り）
+                DrawBox(mx1 - 2, my1 - 2, mx1 + mw + 2, my2 + 2, GetColor(20, 20, 24), TRUE);
+                const int segs = 24;
+                for (int i = 0; i < segs; i++) {
+                    float t = (i + 0.5f) / segs;
+                    int col;
+                    if (!brightLock && ch == 3) { // 色相は虹
+                        float hdeg = vmin + t * (vmax - vmin);
+                        float rr, gg, bb;
+                        ColorGrade::HsvToRgb((hdeg < 0 ? hdeg + 360.0f : hdeg), 1.0f, 1.0f, rr, gg, bb);
+                        col = GetColor((int)(rr * 255), (int)(gg * 255), (int)(bb * 255));
+                    } else {
+                        col = GetColor(lr + (int)((hr - lr) * t), lg + (int)((hg - lg) * t), lb + (int)((hb - lb) * t));
+                    }
+                    int x1 = mx1 + mw * i / segs, x2 = mx1 + mw * (i + 1) / segs;
+                    DrawBox(x1, my1, x2, my2, col, TRUE);
+                    // 出ない範囲を暗く覆う（向き反転の編集で条件が裏返っている物は、覆う側も裏返す）
+                    float v = vmin + t * (vmax - vmin);
+                    bool inRange = (inLo <= -998.0f || v >= inLo) && (inHi >= 998.0f || v <= inHi);
+                    if (graded && mr.flipped) inRange = !inRange;
+                    if (!inRange) {
+                        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
+                        DrawBox(x1, my1, x2, my2, GetColor(15, 15, 20), TRUE);
+                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+                    }
+                }
+                // 今の値（白い縦線。黒で縁取って、明るい帯の上でも見えるように）
+                const int cx = mx1 + (int)(T(cur) * mw);
+                DrawBox(cx - 2, my1 - 4, cx + 2, my2 + 4, GetColor(10, 10, 10), TRUE);
+                DrawBox(cx - 1, my1 - 3, cx + 1, my2 + 3, GetColor(255, 255, 255), TRUE);
+            }
+            SetDrawArea(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+        };
+
         auto DrawHudLayer = [&](int ox, int oy, int ow, int oh) {
             if (currentScene != PLAY) return;
+            DrawConditionMeters(ox, oy, ow, oh); // 色・明るさで出入りする物の近くのメーター（HUDの一番下に描く）
             const float sx = (float)ow / (float)SCREEN_WIDTH, sy = (float)oh / (float)SCREEN_HEIGHT;
             const float sc = sx < sy ? sx : sy; // 文字・丸の大きさ用（縦横の倍率が違うときは小さいほう）
             auto X = [&](float gx) { return ox + (int)(gx * sx + 0.5f); };

@@ -210,12 +210,27 @@ public static class GradeCondition
     public static string FilterName(int c) => c == 2 ? "緑" : c == 3 ? "青" : "赤";
 
     // ===== 色ロック足場(22)の param =====
-    // ゲームは atoi で読み、空なら赤(1)。1〜3 以外（不正な文字を含む）はどの色とも一致しないが、
-    // エディタでは「赤」として見せ、ダイアログで決め直せるようにする（打ち間違いを直す入口になる）。
+    // ゲーム（DrawPixel.cpp の色ロック足場）と1つも違わない読み方にする：
+    //   空なら赤(1)。それ以外は C の atoi で読み（先頭の数字だけ。数字で始まらなければ 0）、
+    //   ((n−1) mod 3)+1 で 1〜3 へ一周させる。つまり "0"・"abc" は青、"4" は赤、"2x" は緑になる。
+    // 以前は不正な値を「赤」と見せていたが、ゲームでは青を要求していたので、地図の印と実際が食い違っていた。
     public static int ColorFromParam(string? p)
     {
-        if (string.IsNullOrWhiteSpace(p)) return 1;
-        return int.TryParse(p.Trim(), out int c) && c >= 1 && c <= 3 ? c : 1;
+        if (string.IsNullOrEmpty(p)) return 1;
+        int n = Atoi(p);
+        return ((((n - 1) % 3) + 3) % 3) + 1;
+    }
+
+    // C の atoi と同じ読み方：先頭の空白を飛ばし、符号と続く数字だけを読む（数字が無ければ 0）
+    private static int Atoi(string s)
+    {
+        int i = 0;
+        while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+        int sign = 1;
+        if (i < s.Length && (s[i] == '+' || s[i] == '-')) { if (s[i] == '-') sign = -1; i++; }
+        long v = 0;
+        while (i < s.Length && s[i] >= '0' && s[i] <= '9' && v < int.MaxValue) { v = v * 10 + (s[i] - '0'); i++; }
+        return (int)(sign * Math.Min(v, int.MaxValue));
     }
     public static string ParamFromColor(int c) => (c >= 1 && c <= 3 ? c : 1).ToString();
     public static string ColorSentence(int c) => ToSentence(FilterName(c) + "フィルタ");
