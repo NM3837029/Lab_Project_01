@@ -3050,6 +3050,28 @@ inline float EditTimeFactor(bool paused, bool rewinding, float speed) {
     return speed > 0.0f ? speed : 0.0f;
 }
 
+// 跳ね回る節足敵（機械いもむし）にとって「壁・床」になるギミックか。
+// プレイヤーの足場・壁になるもの（CheckGimmickCollisionX/Y・CheckPlatformCollision の顔ぶれ）と同じにしてある。
+//   ・壁にも床にもなる物 … 拡大できるブロック・サイズ変更できる地面・岩・早送りゲート・逆行ゲート・ゲート扉
+//   ・足場になる物       … 壊せるブロック・落下リフト・動く足場・コマ送りリフト・色ロック／明暗ロック／補正ロック足場・
+//                          ちくわブロック（落ちていない間）・倒したトゲ
+// isActive が false の物（消えたブロック・現れていないロック足場・開いた扉）は含めない。
+// 回る橋（手動・自動）は細い線の判定なので含めない。一方通行の壁は向きで変わるので、呼ぶ側で別に扱う。
+bool GimmickIsTipped(const Gimmick& g);
+bool WormSolidGimmick(const Gimmick& g) {
+    if (!g.isActive || g.isTimelineCut) return false;
+    switch (g.type) {
+        case GIMMICK_SCALABLE_BOX: case GIMMICK_SCALABLE_GROUND: case GIMMICK_PUSHABLE_ROCK:
+        case GIMMICK_FASTFORWARD_GATE: case GIMMICK_REWIND_GATE: case GIMMICK_GATE_DOOR:
+        case GIMMICK_BREAKABLE_BLOCK: case GIMMICK_FALLING_LIFT: case GIMMICK_MOVING_PLATFORM: case GIMMICK_FRAMESTEP_LIFT:
+        case GIMMICK_COLOR_LOCK_PLATFORM: case GIMMICK_BRIGHTNESS_LOCK_PLATFORM: case GIMMICK_GRADE_LOCK_PLATFORM:
+            return true;
+        case GIMMICK_CHIKUWA_BLOCK: return g.angle == 0.0f;   // 落ちている間（angle=1）は足場でない
+        case GIMMICK_SPIKES:        return GimmickIsTipped(g); // 倒したトゲだけが無害な足場
+        default: return false;
+    }
+}
+
 bool GimmickAngleIsAiOwned(GimmickType type) {
     return type == GIMMICK_ROTATING_BRIDGE
         || type == GIMMICK_CHIKUWA_BLOCK
@@ -12782,6 +12804,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                     GetOneWayBox(gOW, obx, oby, obw, obh);
                                     if (px < obx + obw && px + bw > obx && py < oby + obh && py + bh > oby) return true;
                                 }
+                                // 足場・ブロックとして働くギミックも、地形タイルと同じく壁・床・天井として跳ね返る。
+                                // 以前は地形タイルと一方通行の壁しか見ていなかったので、拡大できるブロック・サイズ変更できる地面などを
+                                // すり抜けてしまい、「ブロックを置いて芋虫の通り道を変える」といった使い方ができなかった。
+                                // プレイヤーにとって足場・壁になるもの（CheckGimmickCollisionX/Y・CheckPlatformCollision と同じ顔ぶれ）を、
+                                // 上下左右どの面からでも固い物として扱う（足場は上からしか乗れないが、この敵は向きを問わず跳ね返る）。
+                                // 当たり判定の箱はプレイヤーと同じ GetGimmickCollisionBox（傾けた物は縦横が入れ替わる）。
+                                for (const auto& gS : gimmicks) {
+                                    if (!WormSolidGimmick(gS)) continue;
+                                    if (!SameLayer(gS.layer, enemy.layer)) continue; // 違う層のギミックは、壁にならない
+                                    float gbx, gby, gbw, gbh;
+                                    GetGimmickCollisionBox(gS, gbx, gby, gbw, gbh);
+                                    // いま体が重なっている物は無視する（拡大したブロックや動く足場が芋虫にかぶさったとき、
+                                    // どの向きにも進めなくなって、その場で震え続けるのを防ぐ。抜け出したあとは、また壁になる）
+                                    if (enemy.x < gbx + gbw && enemy.x + bw > gbx && enemy.y < gby + gbh && enemy.y + bh > gby) continue;
+                                    if (px < gbx + gbw && px + bw > gbx && py < gby + gbh && py + bh > gby) return true;
+                                }
                                 return false;
                             };
                             float bwW = (float)enemy.hitboxWidth * enemy.scale;
@@ -12824,6 +12862,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 for (int rr = br0; rr <= br1; rr++) {
                                     for (int cc = bc0; cc <= bc1; cc++) {
                                         if (TryBreakTile(rr, cc, BREAK_RAM, enemy.scale)) brokeW = true;
+                                    }
+                                }
+                                // 壊せるブロック（ギミック）も壁として跳ね返るようになったので、ぶつかりに行った先で重なるものを
+                                // 体当たりで壊してみる（壊せるかはブロック側の breakByRam・breakMinScale が決める）。
+                                // 壊せれば下の判定で道が開いたとみなして突き抜け、壊せなければ跳ね返る。
+                                for (auto& gB : gimmicks) {
+                                    if (gB.type != GIMMICK_BREAKABLE_BLOCK || !gB.isActive) continue;
+                                    if (!SameLayer(gB.layer, enemy.layer)) continue;
+                                    float gbx, gby, gbw, gbh;
+                                    GetGimmickCollisionBox(gB, gbx, gby, gbw, gbh);
+                                    if (tgtXw < gbx + gbw && tgtXw + bwW > gbx && tgtYw < gby + gbh && tgtYw + bhW > gby) {
+                                        if (TryBreakGimmick(gB, BREAK_RAM, enemy.scale)) brokeW = true;
                                     }
                                 }
                             }
