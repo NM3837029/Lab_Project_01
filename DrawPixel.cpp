@@ -9761,7 +9761,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // ドラッグ移動の向きの制限用：ドラッグを始めてからのマウスの総移動量と、物ごとの状態。離したら捨てる
                 static float dragCumX = 0.0f, dragCumY = 0.0f;
                 static std::map<const void*, DragAxisState> dragAxes;
-                if (!isDragging) { dragCumX = 0.0f; dragCumY = 0.0f; dragAxes.clear(); }
+                // 【不具合の修正】新しいドラッグを始めたら、必ず前のドラッグの記録を捨てる。
+                // この処理は「左ボタンを押している間」のブロックの中にあるので、以前の
+                // 「ドラッグしていなければ捨てる」は、ボタンを離したフレームには一度も実行されなかった。
+                // 次に押した瞬間には、もう isDragging が立っているので、前のドラッグの総移動量と
+                // 「どの線の上を動くか」がそのまま残り、
+                //   ・押した瞬間に、前のドラッグの総移動量ぶん物が飛ぶ
+                //   ・前のドラッグの向きに線が固定され、別の向きへ引いても動かない
+                // という不具合になっていた（自由な物は総移動量を使わないので、十字・X字の物だけで起きる）。
+                // ドラッグ中のフレームが前のフレームから続いていなければ「新しいドラッグ」とみなして捨てる。
+                static int dragLastTick = -100;
+                if (!isDragging || dragLastTick != mainLoopTick - 1) { dragCumX = 0.0f; dragCumY = 0.0f; dragAxes.clear(); }
+                if (isDragging) dragLastTick = mainLoopTick;
                 if (isDragging && selectedType != SELECT_NONE) {
                     float prevGx = 0.0f, prevGy = 0.0f;
                     Screen_MouseToWorld((float)lastMouseX, (float)lastMouseY, prevGx, prevGy);
@@ -9937,6 +9948,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         auto EnemyOnScreen = [&](const Enemy& e) {
             float ew = (float)e.hitboxWidth * e.scale, eh = (float)e.hitboxHeight * e.scale;
             return e.x < viewR && e.x + ew > viewL && e.y < viewB && e.y + eh > viewT;
+        };
+        // 敵が「プレイヤーの近く」にいるか。画面に映っていなくても、近くの敵は動かすために使う（敵の更新の判定を参照）。
+        // 距離は中心どうしで測る。14マス（448px）は、ふつうの表示（横640px・プレイヤーはほぼ中央）で
+        // 画面の端から約4マス外まで。端のすぐ外で敵が固まって見えることがなく、遠くの敵は止まったままになる。
+        const float ENEMY_WAKE_DISTANCE = 14.0f * TILE_SIZE;
+        auto EnemyNearPlayer = [&](const Enemy& e) {
+            float ecx = e.x + (float)e.hitboxWidth * e.scale * 0.5f, ecy = e.y + (float)e.hitboxHeight * e.scale * 0.5f;
+            float pcx = player.x + (float)player.width * player.scale * 0.5f, pcy = player.y + (float)player.height * player.scale * 0.5f;
+            float ddx = ecx - pcx, ddy = ecy - pcy;
+            return ddx * ddx + ddy * ddy <= ENEMY_WAKE_DISTANCE * ENEMY_WAKE_DISTANCE;
         };
 
         bool canPlayerAct = CanUpdate(player.x, player.y, (float)player.width, (float)player.height, player.scale, player.isPaused);
@@ -10529,7 +10550,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 例外は定義の activeOffscreen（幽霊など）。更新の全体（移動・重力・射撃・画面エフェクト・タイマー・
                 // パーツのスクリプト・巻き戻し用の記録）がこの1つの判定に乗っているので、ここで止めれば全部止まる。
                 // ※ ズーム固定の「固定」は、更新の外の別ループ（毎フレームの申告）で保たれるので、画面外でも解けない。
-                if (canEnemyAct && !(pauseDef != nullptr && pauseDef->activeOffscreen) && !EnemyOnScreen(enemy)) canEnemyAct = false;
+                // 【変更】画面に映っていなくても、プレイヤーの近く（中心どうしの距離が ENEMY_WAKE_DISTANCE 以内）なら動かす。
+                // 以前は「映っているか」だけで決めていたので、
+                //   ・画面の端のすぐ外にいる敵が、端で固まったまま待っている（近づいた瞬間に急に動き出す）
+                //   ・Zキーで拡大して映す範囲が狭まると、すぐ隣の敵まで止まってしまう
+                //   ・縦に長いステージで、すぐ上・すぐ下の敵が止まる
+                // といった不自然さがあった。遠くの敵は従来どおり止めるので、画面のはるか外から撃たれることはない。
+                if (canEnemyAct && !(pauseDef != nullptr && pauseDef->activeOffscreen) && !EnemyOnScreen(enemy) && !EnemyNearPlayer(enemy)) canEnemyAct = false;
                 if (canEnemyAct) {
                     float ets = ts * enemy.speedScale;
 
