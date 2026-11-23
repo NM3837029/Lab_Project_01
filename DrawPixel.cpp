@@ -9976,8 +9976,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     //   右向き: ( cos a,  sin a)    左向き: (-cos a, -sin a)
                     // になる。angle=0 なら従来どおり真横へ飛ぶ。
                     const float shotSign = (player.direction == 0) ? 1.0f : -1.0f;
-                    const float fwdX = shotSign * cosf(player.angle);
-                    const float fwdY = shotSign * sinf(player.angle);
+                    float fwdX = shotSign * cosf(player.angle);
+                    float fwdY = shotSign * sinf(player.angle);
                     // 発射位置：体の中心から見て、前へ「体の半分の幅＋少し」、上へ「高さの1/4」ずれた点を、体と同じ角度 a で回した位置。
                     // （従来の、右向き＝体の右端／左向き＝体の左端、上から1/4の高さと同じ点。弾の当たり判定は16x16で x,y が左上）
                     // 画面座標（y が下）での回転は (x,y) → (x cos a - y sin a, x sin a + y cos a)。左右反転は x だけなので上は常に上。
@@ -9985,8 +9985,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     const float pcy = player.y + (float)player.height * player.scale / 2.0f;
                     const float lx = shotSign * ((float)player.width * player.scale / 2.0f + 5.0f);
                     const float ly = -(float)player.height * player.scale / 4.0f;
-                    const float shotCx = pcx + lx * cosf(player.angle) - ly * sinf(player.angle);
-                    const float shotCy = pcy + lx * sinf(player.angle) + ly * cosf(player.angle);
+                    float shotCx = pcx + lx * cosf(player.angle) - ly * sinf(player.angle);
+                    float shotCy = pcy + lx * sinf(player.angle) + ly * cosf(player.angle);
+
+                    // 【変更】マウスのカーソルがゲーム画面の上にあるときは、カーソルの方向へ撃つ。
+                    // 以前は「向いている方向」（左右と傾き）にしか撃てず、上や斜めの敵・スイッチを狙えなかった。
+                    //   ・向き … 体の中心からカーソル（ゲーム内の座標に直した位置）への向き
+                    //   ・発射位置 … 体の中心から、その向きへ「体の半径＋少し」出た点（体に重ならずに出ていく）
+                    //   ・体の向き … 撃った側（左右）を向く（後ろへ撃つと、くるっと振り向く）
+                    // カーソルがゲーム画面の外（右のパネルなど）にあるとき、カーソルが体の中心にほぼ重なるときは、
+                    // 狙う先が決められないので、従来どおり向いている方向へ撃つ。
+                    if (isClickInScreen) {
+                        float aimWx = 0.0f, aimWy = 0.0f;
+                        Screen_MouseToWorld((float)mx, (float)my, aimWx, aimWy); // ズーム・拡大表示中でも指した場所に合う
+                        const float adx = aimWx - pcx, ady = aimWy - pcy;
+                        const float alen = sqrtf(adx * adx + ady * ady);
+                        if (alen > 4.0f) {
+                            fwdX = adx / alen;
+                            fwdY = ady / alen;
+                            const float bodyR = 0.5f * fmaxf((float)player.width, (float)player.height) * player.scale + 5.0f;
+                            shotCx = pcx + fwdX * bodyR;
+                            shotCy = pcy + fwdY * bodyR;
+                            if (fabsf(fwdX) > 0.01f) player.direction = (fwdX > 0.0f) ? 0 : 1; // 真上・真下へ撃つときは向きを変えない
+                        }
+                    }
                     bullets[i].isActive = true;
                     bullets[i].x = shotCx - 8.0f;
                     bullets[i].y = shotCy - 8.0f;
