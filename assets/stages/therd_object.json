@@ -3736,7 +3736,17 @@
       0
     ]
   ],
-  "backgrounds": [],
+  "backgrounds": [
+    {
+      "sprite": "",
+      "color": "#ACEDF9",
+      "drawOrder": 0,
+      "scrollRate": 0.3,
+      "loop": true,
+      "offsetX": 0.0,
+      "offsetY": 0.0
+    }
+  ],
   "triggers": [],
   "enemies": [
     {
