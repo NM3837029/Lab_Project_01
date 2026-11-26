@@ -5695,6 +5695,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // いまのステージに、コントラスト・彩度・色相・色温度（見る値が1〜4）を見る補正スイッチ／補正ロック足場があるか。
     // あれば「画面全体」の枠の「細かい調整」タブに「使う」の札を付ける（ステージを始めるときに1回だけ調べる）
     bool stageUsesFineGrade = false;
+    // ステージの経過時間（コマ数）。下のパネルの時間表示に出す。世界が進むと増え、全体の巻き戻しで減り、止まっている間は変わらない
+    int stageClockFrames = 0;
 
     auto Screen_SetBrightness = [&](float b) { fxTargetBright = b; };
     auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
@@ -7523,6 +7525,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
         cgUi.tab = 0;
         cgUi.drag = -1;
+        stageClockFrames = 0;   // 時間表示はステージの始めから数え直す
         for (auto& gim : gimmicks) {
             gim.history.clear();
             // Feature: Puzzle-like Behavior Scripting (M2)。Parts-M1で全ギミックタイプ共通のdef検索に変更
@@ -8993,6 +8996,17 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             static bool lastRewindKey = false;
             if (isRKeyPressed && !lastRewindKey) SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.rewind);
             lastRewindKey = isRKeyPressed;
+        }
+
+        // ステージの経過時間（下のパネルの時間表示）。
+        // 全体の巻き戻し（R・プレイヤーの巻き戻し）中は1コマずつ減らす。それ以外は、世界が進んでいるときだけ増やす
+        // （早送りは時間の速さが2倍なので2コマ）。時間停止・ドラッグなどで世界が止まっている間・メッセージ中は変えない。
+        if (currentScene == PLAY && !isShowingMessage) {
+            const bool globalRewind = isRKeyPressed || player.isRewinding;
+            const bool frozenNow = isPaused || isDragging || isScaling || isScalingHeight || isRotating || isHandleScale || isHandleRotate
+                                || isColorDrag || EditToolbar::S().autoPaused;
+            const int steps = globalRewind ? 1 : (frozenNow ? 0 : (isFastForward ? 2 : 1));
+            stageClockFrames = UiTheme::StepStageClock(stageClockFrames, steps, globalRewind);
         }
 
         // 「巻き戻しが今アクティブか」の集約フラグ（コストドレイン計算用）
@@ -16197,6 +16211,35 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             SetDrawArea(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
         };
 
+        // 操作のヒントの項目（いまの状況で使えるものだけ。優先度の高い順で、幅が足りないときは後ろから落とす）。
+        // 編集パネルがあるときは下の状態バーに、パネルが無いとき（F10 の拡大表示・編集パネルの無いプレイ）はモニターの下に出す。
+        // 末尾の「F1 操作一覧」「Esc メニュー」は、ここには入れず、出す側で必ず残す（全部の操作を教える入口なので）。
+        auto BuildHintMid = [&]() -> std::vector<std::string> {
+            std::vector<std::string> mid;
+            if (isEditMode && EditToolbar::S().autoPaused) {
+                mid = { "ツール詳細を確認中", "カードの外をクリックで閉じる" };
+            } else if (!bigView && screenEffectOpEnabled && ColorGrade::InPanel(WINDOW_WIDTH, mx, my)) {
+                // 右下の「画面全体」の枠の上：ダブルクリックで元に戻せること・ホイールで微調整できること・キー
+                mid = { "画面全体の色と明るさ", "ダブルクリックで元に戻す", "ホイール 少しずつ動かす", "X/C 明るさ　T 色" };
+            } else if (isEditMode && isPaused) {
+                mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
+                if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
+            } else if (isEditMode && objectEditOpEnabled && selectedType != SELECT_NONE) {
+                mid = { "ドラッグ 移動", "つまみ 変形", "ホイール 拡縮", "Ctrl+ホイール 回転", "右クリック メニュー", "Ctrl+Z 取り消し" };
+            } else {
+                mid = { "A/D 移動", "W ジャンプ" };
+                if (isEditMode) {
+                    mid.push_back("Space 時間停止");
+                    if (objectEditOpEnabled) mid.push_back("右クリック 物を選ぶ");
+                    else mid.push_back("このステージでは物の編集は使えません");
+                    if (cutOpEnabled) mid.push_back("Ctrl+クリック2回 カット");
+                }
+                // 優先度の低い順（幅が足りないときは後ろから落ちる）。ダッシュと弾は F1 の一覧にも載っている
+                mid.push_back("Shift ダッシュ"); mid.push_back("Enter 弾");
+            }
+            return mid;
+        };
+
         auto DrawHudLayer = [&](int ox, int oy, int ow, int oh) {
             if (currentScene != PLAY) return;
             DrawConditionMeters(ox, oy, ow, oh); // 色・明るさで出入りする物の近くのメーター（HUDの一番下に描く）
@@ -16423,31 +16466,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // --- 下端：いまの状況に合わせた操作のヒント（1行）---
-            // 状況ごとに「いま使えるもの」だけを出す。幅に収まらないときは後ろの項目から落とすが、
-            // 末尾の「F1 操作一覧」「Esc メニュー」は必ず残す（全部の操作を教える入口なので）。
+            // 編集パネルがあるときは、下のパネルの状態バーに出すので、ここでは出さない（ゲーム画面の上に文字を重ねない）。
+            // パネルが無いとき（F10 の拡大表示・編集パネルの無いプレイ）だけ、モニターの下に1行で出す。
+            // 幅に収まらないときは後ろの項目から落とすが、末尾の「F1 操作一覧」「Esc メニュー」は必ず残す。
             // メッセージ窓が出ている間は、同じ場所に窓があるので出さない。
-            if (!isShowingMessage) {
-                std::vector<std::string> mid;
-                if (isEditMode && EditToolbar::S().autoPaused) {
-                    mid = { "ツール詳細を確認中", "カードの外をクリックで閉じる" };
-                } else if (!bigView && screenEffectOpEnabled && ColorGrade::InPanel(WINDOW_WIDTH, mx, my)) {
-                    // 右下の「画面全体」の枠の上：ダブルクリックで元に戻せること・ホイールで微調整できることを教える
-                    mid = { "画面全体の色と明るさ", "ダブルクリックで元に戻す", "ホイール 少しずつ動かす" };
-                } else if (isEditMode && isPaused) {
-                    mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
-                    if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
-                } else if (isEditMode && objectEditOpEnabled && selectedType != SELECT_NONE) {
-                    mid = { "ドラッグ 移動", "つまみ 変形", "ホイール 拡縮", "Ctrl+ホイール 回転", "右クリック メニュー", "Ctrl+Z 取り消し" };
-                } else {
-                    mid = { "A/D 移動", "W ジャンプ" };
-                    if (isEditMode) {
-                        mid.push_back("Space 時間停止");
-                        if (objectEditOpEnabled) mid.push_back("右クリック 物を選ぶ");
-                        else mid.push_back("このステージでは物の編集は使えません");
-                    }
-                    // 優先度の低い順（幅が足りないときは後ろから落ちる）。ダッシュと弾は F1 の一覧にも載っている
-                    mid.push_back("Shift ダッシュ"); mid.push_back("Enter 弾");
-                }
+            if (!isShowingMessage && (bigView || !isEditMode)) {
+                std::vector<std::string> mid = BuildHintMid();
                 const std::string tail = "F1 操作一覧　Esc メニュー";
                 auto Join = [&](const std::vector<std::string>& v) {
                     std::string r;
@@ -16455,14 +16479,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     return r + tail;
                 };
                 const int margin = (int)(12.0f * sc);
-                while (mid.size() > 1 && TextEdgeWidth(Join(mid).c_str(), fsm) > ow - margin * 2) mid.pop_back();
+                while (mid.size() > 1 && UiFont::Width(Join(mid).c_str(), fsm) > ow - margin * 2) mid.pop_back();
                 std::string line = Join(mid);
                 int barH = (int)(26.0f * sy + 0.5f);
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 185);
-                DrawBox(ox, oy + oh - barH, ox + ow, oy + oh, GetColor(24, 22, 20), TRUE);
-                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                DrawTextEdge(ox + margin, TopFor(oy + oh - barH / 2, fsm), line.c_str(),
-                             isPaused ? GetColor(255, 235, 140) : GetColor(235, 235, 235), fsm);
+                // 見た目のテーマの地の帯（上に明るい線）と、テーマの文字
+                const UiTheme::Palette& tp = UiTheme::P();
+                UiTheme::Fill({ ox, oy + oh - barH, ox + ow - 1, oy + oh - 1 }, tp.face);
+                UiTheme::HLine(ox, ox + ow - 1, oy + oh - barH, tp.hilite);
+                UiFont::Draw(ox + margin, oy + oh - barH / 2 - fsm / 2, line.c_str(), UiTheme::Col(isPaused ? tp.warn : tp.ink), fsm);
             }
         };
 
@@ -16538,9 +16562,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             UiTheme::Fill({ WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH - 1, WINDOW_HEIGHT - 101 }, UiTheme::P().face);
             UiTheme::VLine(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_HEIGHT - 101, UiTheme::P().dark);
             UiTheme::VLine(WINDOW_WIDTH - Insp::PANEL_W + 1, 0, WINDOW_HEIGHT - 101, UiTheme::P().hilite);
-            // 下部パネル（タイムライン）。左のバー・右のパネルと同じ、暗い平らな下地と、モニター側（上辺）の青い縁
-            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, EditPanel::ColBack(), TRUE);
-            DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT - 97, EditPanel::ColEdge(), TRUE);
+            // 下部パネル（タイムライン）。地は face、モニター側（上辺）は盛り上がったパネルの明るい線
+            UiTheme::Fill({ 0, WINDOW_HEIGHT - 100, WINDOW_WIDTH - 1, WINDOW_HEIGHT - 1 }, UiTheme::P().face);
+            UiTheme::HLine(0, WINDOW_WIDTH - 1, WINDOW_HEIGHT - 100, UiTheme::P().hilite);
 
             } // ← 編集パネル（左・右・下の枠と左パネルの中身）ここまで
 
@@ -16601,16 +16625,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // Feature: カット機能の復活 — 下部パネルのタイムライン表示。
             // 帯の左端がステージ左端、右端がステージ右端に対応し、赤い縦棒が現在のプレイヤー位置（再生ヘッド）。
             // Ctrl+クリックで打った1点目はシアンの縦線、確定したカット区間は赤い半透明の帯で示す。
-            // 見た目は動画編集ソフトのトラック：暗い溝に、10%ごとの目盛りを入れる（位置の見当がつくように）。
-            // パネルの下地も暗くしたので、溝は下地より一段濃くして、輪郭は明るい枠線で出す。
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(30, 30, 36), TRUE);
-            for (int tk = 1; tk < 10; tk++) {
-                int tx = 50 + (int)((float)(WINDOW_WIDTH - 100) * (float)tk / 10.0f);
-                DrawLine(tx, WINDOW_HEIGHT - 60, tx, WINDOW_HEIGHT - 54, GetColor(124, 134, 168));
+            // 見た目は 2000年代の動画編集ソフトのトラック（UiTheme）：へこんだ溝と、その下にタイル数の目盛り。
+            // 帯の位置・当たり判定（y=660〜680、当たりは 660〜700）は今までと同じ。
+            {
+                const UiTheme::Palette& tp = UiTheme::P();
+                const int tlX1 = 50, tlX2 = WINDOW_WIDTH - 50;
+                UiTheme::Sunken({ tlX1 - 2, WINDOW_HEIGHT - 62, tlX2 + 1, WINDOW_HEIGHT - 39 }, tp.field);
+                // 目盛り：ステージの幅をタイル数で。数字が詰まりすぎないよう、長いステージほど間を広げる
+                const int stageTiles = (int)((float)STAGE_WIDTH / (float)TILE_SIZE);
+                const int stepTiles = (stageTiles > 400) ? 50 : (stageTiles > 160) ? 20 : 10;
+                for (int tick : UiTheme::RulerTicks(stageTiles, stepTiles)) {
+                    const int tx = tlX1 + (int)((float)(tlX2 - tlX1) * (float)tick / (float)(stageTiles > 0 ? stageTiles : 1));
+                    UiTheme::VLine(tx, WINDOW_HEIGHT - 38, WINDOW_HEIGHT - 34, tp.inkSub);
+                    char tb[16]; sprintf_s(tb, sizeof(tb), "%d", tick);
+                    UiFont::Draw(tx + 2, WINDOW_HEIGHT - 35, tb, UiTheme::Col(tp.inkSub), 10);
+                }
             }
-            DrawBox(50, WINDOW_HEIGHT - 60, WINDOW_WIDTH - 50, WINDOW_HEIGHT - 40, GetColor(124, 134, 168), FALSE);
+            // 今の位置（再生ヘッド）：赤い線と、上の小さな三角
             float mxp = 50.0f + (player.x / (float)STAGE_WIDTH) * (float)(WINDOW_WIDTH - 100);
-            DrawBox((int)mxp - 2, WINDOW_HEIGHT - 70, (int)mxp + 2, WINDOW_HEIGHT - 30, GetColor(255, 0, 0), TRUE);
+            DrawBox((int)mxp - 1, WINDOW_HEIGHT - 66, (int)mxp + 1, WINDOW_HEIGHT - 38, GetColor(230, 30, 30), TRUE);
+            DrawTriangle((int)mxp - 5, WINDOW_HEIGHT - 70, (int)mxp + 5, WINDOW_HEIGHT - 70, (int)mxp, WINDOW_HEIGHT - 63, GetColor(230, 30, 30), TRUE);
 
             // 確定済みカット区間の描画（選択中のものは輪郭を白くして分かるようにする）
             for (auto& gim : gimmicks) {
@@ -16658,32 +16692,46 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 float spanRatio = hoverRatio - tempCutStart;
                 if (spanRatio < 0.0f) spanRatio = -spanRatio;
                 int spanTiles = (int)((spanRatio * STAGE_WIDTH) / (float)TILE_SIZE);
-                int labelX = (bandL + bandR) / 2 - 70;
-                if (labelX < 50) labelX = 50;
-                if (labelX > WINDOW_WIDTH - 200) labelX = WINDOW_WIDTH - 200;
-                DrawFormatString(labelX, WINDOW_HEIGHT - 78,
-                                 affordable ? EditPanel::ColInkAccent() : EditPanel::ColInkWarn(),
-                                 "カット %dタイル　コスト %.0f / 手持ち %.0f", spanTiles, previewCost, editCost);
+                char pv[96];
+                sprintf_s(pv, sizeof(pv), "カット %dタイル　コスト %.0f / 手持ち %.0f", spanTiles, previewCost, editCost);
+                // 帯の下（目盛りの行）に、地の色の小さな札を敷いて出す（上は時間操作のボタンと重なるため）
+                {
+                    const int pw = UiFont::Width(pv, 12) + 12;
+                    int px1 = (bandL + bandR) / 2 - pw / 2;
+                    if (px1 < 50) px1 = 50;
+                    if (px1 + pw > WINDOW_WIDTH - 50) px1 = WINDOW_WIDTH - 50 - pw;
+                    UiTheme::Raised({ px1, WINDOW_HEIGHT - 38, px1 + pw, WINDOW_HEIGHT - 21 });
+                    UiFont::Draw(px1 + 6, WINDOW_HEIGHT - 35, pv, UiTheme::Col(affordable ? UiTheme::P().hot : UiTheme::P().danger), 12);
+                }
             }
-            // 操作ヒント。中央の一時停止ボタン(x 616..664)に文字がかぶらない長さに収めてある。
-            // カットのコストは距離で変わるので、その計算式もここに出しておく。
-            // コストのプレビューを出している間（1点目を打ってから2点目を打つまで）は、同じ行を使うので出さない
-            // （以前は両方が重なって読めなかった）。
-            if (tempCutStart < 0.0f) {
-            // 左から「タイムライン」の札・「カット」「選択」の操作の札。時間操作ボタン（x 552〜824）に重ならない長さに収めてある。
+            // 1段目の左：「タイムライン」のタブと、ステージの経過時間の表示（へこんだ黒い窓に、時:分:秒;コマ）。
+            // 以前ここにあった「Ctrl＋クリック2回 カット」「右クリック 選択」の札は、下の状態バーのヒントへまとめた。
             {
-                const unsigned int chipFg = EditPanel::ColInkSub(), chipBack = EditPanel::ColGroove(), chipEdge = GetColor(124, 134, 168);
-                const int cy = WINDOW_HEIGHT - 91;
-                int cx = EditPanel::DrawChip(50, cy, "タイムライン", EditPanel::ColInk(), chipBack, chipEdge, 12) + 6;
-                cx = EditPanel::DrawChip(cx, cy, "Ctrl＋クリック2回　カット", chipFg, chipBack, chipEdge, 12) + 6;
-                EditPanel::DrawChip(cx, cy, "右クリック　選択", chipFg, chipBack, chipEdge, 12);
-                // カットのコスト式は、時間操作ボタンより右の空きスペースの右端に、強調の札で出す。
-                // 操作ヒントと同じ行に置くことで、下のタイムライン帯やコストプレビューと行がぶつからない。
-                char cb[64];
-                sprintf_s(cb, sizeof(cb), "カットのコスト　%.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
-                EditPanel::DrawChip(WINDOW_WIDTH - 50 - (EditPanel::TextWidth(cb, 12) + 12), cy, cb,
-                                    EditPanel::ColInkAccent(), GetColor(28, 64, 118), GetColor(120, 190, 255), 12);
+                const UiTheme::Palette& tp = UiTheme::P();
+                UiTheme::Tab({ 6, WINDOW_HEIGHT - 97, 92, WINDOW_HEIGHT - 78 }, "タイムライン", true);
+                const UiTheme::Box tc = { 98, WINDOW_HEIGHT - 96, 210, WINDOW_HEIGHT - 77 };
+                UiTheme::Sunken(tc, tp.well);
+                const std::string tcs = UiTheme::FormatTimecode(stageClockFrames);
+                const int tw = UiFont::Width(tcs.c_str(), 13);
+                UiFont::Draw((tc.x1 + tc.x2 + 1 - tw) / 2, UiTheme::TextTop(tc, 13), tcs.c_str(), UiTheme::Col(tp.timeInk), 13);
             }
+            // いちばん下：状態バー（当時の窓のいちばん下の帯）。左＝いまの状況の操作ヒント、中＝カットのコスト、右＝F1・Esc
+            {
+                const int sy1 = WINDOW_HEIGHT - 19, sy2 = WINDOW_HEIGHT - 2;
+                const int paneCostX = 860, paneTailX = 1090;
+                char cb[64];
+                sprintf_s(cb, sizeof(cb), "カット：%.0f ＋ %.1f／タイル", currentEditCost.flatCutCreate, currentEditCost.cutCostPerTile);
+                // ヒント：区画の幅に収まるまで、後ろの項目から落とす
+                std::vector<std::string> mid = BuildHintMid();
+                auto JoinMid = [&](const std::vector<std::string>& v) {
+                    std::string r;
+                    for (size_t i = 0; i < v.size(); i++) { if (i > 0) r += "　"; r += v[i]; }
+                    return r;
+                };
+                while (mid.size() > 1 && UiFont::Width(JoinMid(mid).c_str(), 12) > (paneCostX - 4) - 4 - 10) mid.pop_back();
+                UiTheme::StatusPane({ 4, sy1, paneCostX - 4, sy2 }, JoinMid(mid).c_str());
+                UiTheme::StatusPane({ paneCostX, sy1, paneTailX - 4, sy2 }, cutOpEnabled ? cb : "カット：このステージでは使えません");
+                UiTheme::StatusPane({ paneTailX, sy1, WINDOW_WIDTH - 5, sy2 }, "F1 操作一覧　Esc メニュー");
             }
 
             // 右パネル上半分：「選んだ物」の枠（選んだ物のカード＋3列の大きなタイル）。

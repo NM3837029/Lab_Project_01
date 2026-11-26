@@ -27,6 +27,8 @@
 #include "UiFont.h"
 #include <cmath>
 #include <string>
+#include <vector>
+#include <cstdio>
 
 namespace UiTheme {
 
@@ -148,6 +150,35 @@ inline Rgb MeterColor(int i, int segments) {
 
 // 選択の点線（蟻の行列）を流す量。4フレームに1px、8で一周する
 inline int AntsOffset(int frame) { return ((frame < 0 ? 0 : frame) / 4) % 8; }
+
+// ---- 下のパネル（タイムライン）の計算 ----
+
+// 時間表示の文字。映像編集ソフトのタイムコードと同じ「時:分:秒;コマ」（1秒60コマ）。例：192コマ → "00:00:03;12"
+inline std::string FormatTimecode(int frames) {
+    if (frames < 0) frames = 0;
+    const int f = frames % 60, sec = (frames / 60) % 60, min = (frames / 3600) % 60, hour = frames / 216000;
+    char b[32];
+    sprintf_s(b, sizeof(b), "%02d:%02d:%02d;%02d", hour, min, sec, f);
+    return std::string(b);
+}
+
+// ステージの経過時間（コマ数）を1フレームぶん進める。
+//   steps        … このフレームに世界が進んだ回数（ふつう1、早送りで2以上、時間停止中は0）
+//   globalRewind … 全体の巻き戻し中か（そのときは steps だけ減らす。0 より前には戻らない）
+inline int StepStageClock(int frames, int steps, bool globalRewind) {
+    if (steps <= 0) return frames;
+    if (globalRewind) { const int v = frames - steps; return (v < 0) ? 0 : v; }
+    return frames + steps;
+}
+
+// タイムラインの目盛り（タイル数）。0 から stepTiles ごとに、ステージの長さ（stageTiles）以下まで
+inline std::vector<int> RulerTicks(int stageTiles, int stepTiles) {
+    std::vector<int> v;
+    v.push_back(0);
+    if (stepTiles <= 0) return v;
+    for (int t = stepTiles; t <= stageTiles; t += stepTiles) v.push_back(t);
+    return v;
+}
 
 // ---- 描き方 ----
 
