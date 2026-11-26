@@ -5740,6 +5740,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     ColorGrade::PanelState cgState;
     ColorGrade::PanelUi cgUi;
     bool isColorDrag = false;
+    // いまのステージに、コントラスト・彩度・色相・色温度（見る値が1〜4）を見る補正スイッチ／補正ロック足場があるか。
+    // あれば「画面全体」の枠の「細かい調整」タブに「使う」の札を付ける（ステージを始めるときに1回だけ調べる）
+    bool stageUsesFineGrade = false;
 
     auto Screen_SetBrightness = [&](float b) { fxTargetBright = b; };
     auto Screen_SetTint = [&](float r, float g, float b) { fxTargetTintR = r; fxTargetTintG = g; fxTargetTintB = b; };
@@ -7556,6 +7559,18 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         }
 
         gimmicks = stage.gimmicks;
+        // 「細かい調整」の値（見る値 1=コントラスト 2=彩度 3=色相 4=色温度）を条件にしている補正スイッチ／補正ロック足場があるか。
+        // 置いた物ごとの条件の上書きも含めて見るため、GradeSpecOf（ゲームの判定と同じ関数）で調べる。
+        // あわせて、カラー補正の枠のタブは「色と明るさ」へ戻す（ステージを始めるたびに同じ見た目から始める）
+        stageUsesFineGrade = false;
+        for (const auto& gim : gimmicks) {
+            if (gim.type != GIMMICK_GRADE_SWITCH && gim.type != GIMMICK_GRADE_LOCK_PLATFORM) continue;
+            int ch = 0; float lo = 0.0f, hi = 0.0f;
+            GradeSpecOf(gim, ch, lo, hi);
+            if (ch >= 1 && ch <= 4) { stageUsesFineGrade = true; break; }
+        }
+        cgUi.tab = 0;
+        cgUi.drag = -1;
         for (auto& gim : gimmicks) {
             gim.history.clear();
             // Feature: Puzzle-like Behavior Scripting (M2)。Parts-M1で全ギミックタイプ共通のdef検索に変更
@@ -16409,6 +16424,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 std::vector<std::string> mid;
                 if (isEditMode && EditToolbar::S().autoPaused) {
                     mid = { "ツール詳細を確認中", "カードの外をクリックで閉じる" };
+                } else if (!bigView && screenEffectOpEnabled && ColorGrade::InPanel(WINDOW_WIDTH, mx, my)) {
+                    // 右下の「画面全体」の枠の上：ダブルクリックで元に戻せること・ホイールで微調整できることを教える
+                    mid = { "画面全体の色と明るさ", "ダブルクリックで元に戻す", "ホイール 少しずつ動かす" };
                 } else if (isEditMode && isPaused) {
                     mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
                     if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
@@ -16838,10 +16856,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 }
             }
 
-            // 右パネルの下半分：カラー補正パネル（動画編集ソフトのカラー補正に近い操作。ColorGrade.h）
-            ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH,
-                             EditPanel::ColInk(), EditPanel::ColInkSub(), EditPanel::ColInkAccent(), EditPanel::ColGroove(),
-                             EditPanel::ColInkOk(), EditPanel::ColInkWarn());
+            // 右パネルの下半分：「画面全体」の枠（色相の輪＋中の四角、細かい調整のタブ。ColorGrade.h）。
+            // X / C を押して明るさを一時的に 0.3 / 1.7 にしている間は、四角の上にその高さの薄いつまみも出す
+            // （実際に効いているときだけ＝画面エフェクトが使えて、コストが残っているとき）
+            {
+                const bool fxUsable = screenEffectOpEnabled && editCost > 0.0f;
+                const float briPreview = (xHeldThisFrame && fxUsable) ? 0.3f : (cHeldThisFrame && fxUsable) ? 1.7f : -1.0f;
+                ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH, stageUsesFineGrade, briPreview,
+                                 EditPanel::ColInk(), EditPanel::ColInkSub(), EditPanel::ColInkAccent(), EditPanel::ColGroove(),
+                                 EditPanel::ColInkOk(), EditPanel::ColInkWarn());
+            }
 
             // ===== 下の時間操作ボタンと、説明カード（EditToolbar.h）=====
             // 巻き戻し・時間停止・早送りを中央に、カットを少し離して右に置く。時間停止は以前の一時停止ボタンの位置のまま。

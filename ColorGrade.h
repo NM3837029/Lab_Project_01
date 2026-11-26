@@ -6,11 +6,13 @@
 // これまでの画面の明るさ・色の操作は「X長押し＝固定の暗転(0.3)」「C長押し＝固定の明転(1.7)」
 // 「Tキー＝赤→緑→青の3段階」だけで、どれだけ暗い／どの色になるのかを自分で決められなかった。
 // しかも「明転(1.7)」は SetDrawBright が255で頭打ちになるため、見た目には何も変わっていなかった。
-// ここでは動画編集ソフト（Premiere の Lumetri カラー、Photoshop の色調補正）に近い操作を用意する。
-//   ・スライダー … 明るさ／コントラスト／彩度／色相／色温度（ダブルクリックで初期値へ戻る）
-//   ・色の輪   … 色フィルタの色（角度）と強さ（中心からの距離）を、輪の上でつまんで決める
-//   ・テストチャート … 灰色の階調と虹色の帯を「補正前／補正後」で並べ、いま何が起きているかを見せる
-//   ・ゲームの判定の表示 … 「いま暗い判定」「いま赤フィルタ判定」を文字で出す
+// ここでは、右パネルの下半分の「画面全体」の枠で、画面の色と明るさを自分で決められるようにする。
+// （2026-11-26 作り直し：テスターから「ごちゃごちゃして分かりにくい」と言われたため、
+//   スライダー5本＋小さな色の輪＋前/後のテストチャートの形をやめ、ペイントソフトの色の選び方に寄せた）
+//   ・「色と明るさ」タブ … 外の色相の輪＝色フィルタの色、中の四角の横＝色フィルタの強さ、縦＝明るさ。
+//                          ゲームの判定とコストに効くのはこの2つだけなので、1つの点でまとめて決められるようにした
+//   ・「細かい調整」タブ … コントラスト／彩度／色相／色温度のスライダー（コストはかからない）
+//   ・ゲームの判定の表示 … 「明るさ：暗い」「フィルタ：赤」のような札と、四角の上の点線（判定の境目）で見せる
 //
 // 【ゲームの判定との関係】
 // 画面にはスライダーの値がそのまま反映されるが、ゲームの判定（敵の弱点色・色ロック足場・暗いと動く敵…）は
@@ -22,6 +24,7 @@
 // このヘッダーは DrawPixel.cpp の1つの翻訳単位からだけ読み込まれる（DxLib にだけ依存する。UIの色は引数で受け取る）。
 // ============================================================================
 #include "DxLib.h"
+#include "UiFont.h"
 #include <cmath>
 #include <algorithm>
 #include <cstdio>
@@ -124,57 +127,43 @@ inline int JudgeBright(float b) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 画像（色の輪・テストチャート・補正の作業用画面）
+// 2. 画像（色相の輪・補正の作業用画面）
 // ---------------------------------------------------------------------------
-const int kWheelR  = 44;                 // 色の輪の半径(px)
-const int kChartW  = 200, kChartH = 16;  // テストチャートの大きさ（上半分＝灰色の階調、下半分＝虹色）
-
+// 以前の「小さな色の輪（中心＝白）」と「前/後のテストチャート」は、色相の輪＋中の四角に置き換えたので作らない。
 struct Resources {
-    int  wheel     = -1;   // 色の輪の画像
-    int  chartSrc  = -1;   // テストチャートの元画像
-    int  chartDst  = -1;   // 補正をかけたあとのテストチャート
+    int  ring      = -1;   // 色相の輪の画像（外側の半径 kRingOuter、内側の半径 kRingInner の帯）
     int  workScreen = -1;  // ゲーム画面にコントラスト・彩度・色相をかけた結果の置き場
     bool filterOk  = true; // GraphFilter が失敗したら false。以降は補正なしで描く（落とさない）
 };
 
+// 色相の輪の大きさ（4-A章の配置と同じ値。画像は起動時に1回だけ作るので、ここで先に決めておく）
+const int kRingImgOuter = 91, kRingImgInner = 77;
+
 inline void CreateResources(Resources& r, int screenW, int screenH) {
-    // 色の輪：中心＝白（色を掛けない）、縁＝その色相の純色
-    int D = kWheelR * 2 + 2;
+    // 色相の輪：帯の上の各点を、その角度の純色（彩度・明度いっぱい）で塗る。
+    // 向きは数学の向き（右が0度＝赤、上が90度）で、今までの色の輪・判定（赤0・緑120・青240度）と同じ。
+    // 外周と内周は 1px ぶん透明度をなだらかにして、ギザギザに見えないようにする。
+    const int D = kRingImgOuter * 2 + 2;
     int si = MakeARGB8ColorSoftImage(D, D);
     if (si >= 0) {
-        float c = (float)D * 0.5f;
+        const float c = (float)D * 0.5f;
         for (int y = 0; y < D; y++) {
             for (int x = 0; x < D; x++) {
-                float dx = (float)x + 0.5f - c, dy = (float)y + 0.5f - c;
-                float rr = sqrtf(dx * dx + dy * dy);
-                if (rr > (float)kWheelR + 0.5f) continue;
-                float hue = atan2f(-dy, dx) * 180.0f / kPi; // 右が0度、上が90度（数学の向き）
-                float sat = (std::min)(1.0f, rr / (float)kWheelR);
+                const float dx = (float)x + 0.5f - c, dy = (float)y + 0.5f - c;
+                const float rr = sqrtf(dx * dx + dy * dy);
+                // 帯の外と内からの距離で、端を 1px ぼかした不透明度を決める
+                const float outer = (float)kRingImgOuter + 0.5f - rr;
+                const float inner = rr - ((float)kRingImgInner - 0.5f);
+                const float edge = (std::min)(1.0f, (std::max)(0.0f, (std::min)(outer, inner)));
+                if (edge <= 0.0f) { DrawPixelSoftImage(si, x, y, 0, 0, 0, 0); continue; }
+                const float hue = atan2f(-dy, dx) * 180.0f / kPi;
                 float cr, cg, cb;
-                HsvToRgb(hue, sat, 1.0f, cr, cg, cb);
-                float edge = (std::min)(1.0f, (std::max)(0.0f, ((float)kWheelR + 0.5f - rr)));
+                HsvToRgb(hue, 1.0f, 1.0f, cr, cg, cb);
                 DrawPixelSoftImage(si, x, y, (int)(cr * 255.0f), (int)(cg * 255.0f), (int)(cb * 255.0f), (int)(edge * 255.0f));
             }
         }
-        r.wheel = CreateGraphFromSoftImage(si);
+        r.ring = CreateGraphFromSoftImage(si);
         DeleteSoftImage(si);
-    }
-
-    // テストチャート：上半分は黒→白の灰色階調、下半分は左から右へ虹色（色相0〜360度）
-    r.chartSrc = MakeScreen(kChartW, kChartH, TRUE);
-    r.chartDst = MakeScreen(kChartW, kChartH, TRUE);
-    if (r.chartSrc >= 0) {
-        int prev = GetDrawScreen();
-        SetDrawScreen(r.chartSrc);
-        ClearDrawScreen();
-        for (int x = 0; x < kChartW; x++) {
-            int g = x * 255 / (kChartW - 1);
-            DrawBox(x, 0, x + 1, kChartH / 2, GetColor(g, g, g), TRUE);
-            float cr, cg, cb;
-            HsvToRgb((float)x * 360.0f / (float)kChartW, 1.0f, 1.0f, cr, cg, cb);
-            DrawBox(x, kChartH / 2, x + 1, kChartH, GetColor((int)(cr * 255.0f), (int)(cg * 255.0f), (int)(cb * 255.0f)), TRUE);
-        }
-        SetDrawScreen(prev);
     }
 
     // ゲーム画面に補正をかけるための作業用画面（ゲーム画面と同じ大きさ）
@@ -241,15 +230,9 @@ inline void DrawGraded(int dx1, int dy1, int dx2, int dy2, int sx1, int sy1, int
 // ---------------------------------------------------------------------------
 // 4. パネル（右パネルの下半分）の配置・入力・描画
 // ---------------------------------------------------------------------------
-// 配置は右パネル(インスペクター)の左端 PX から。インスペクターは y=215 までなので、その下を使う。
-const int kPanelW   = 230;
-const int kTitleY   = 232;
-const int kChartY   = 254;  // 補正前(上2帯)・補正後(下2帯)
-const int kSliderY0 = 296;  // スライダー1本目の上端
-const int kSliderPitch = 32;
+// スライダーの項目（0=明るさ 1=コントラスト 2=彩度 3=色相 4=色温度）。
+// 明るさは「色と明るさ」タブの四角の縦で動かし、1〜4 は「細かい調整」タブのスライダーで動かす。
 const int kSliderCount = 5;
-const int kWheelCY  = 518;  // 色の輪の中心Y
-const int kPanelBottom = 618;
 
 struct SliderInfo { const char* label; float lo, hi, def, wheelStep; };
 inline const SliderInfo& Slider(int i) {
@@ -301,32 +284,6 @@ struct PanelResult {
     bool changed = false;  // 値が変わった
 };
 
-inline int PanelX(int windowW) { return windowW - 240; }
-
-inline int WheelCX(int windowW) { return PanelX(windowW) + 60; }
-
-// スライダーの値を、マウスのX座標から決める。初期値の近く(幅の2.5%)ではぴたりと初期値へ吸い付く
-inline float SliderFromX(int i, int mx, int px) {
-    const SliderInfo& si = Slider(i);
-    float t = (float)(mx - (px + 8)) / (float)(kPanelW - 16);
-    t = (std::max)(0.0f, (std::min)(1.0f, t));
-    float v = si.lo + (si.hi - si.lo) * t;
-    if (fabsf(v - si.def) < (si.hi - si.lo) * 0.025f) v = si.def;
-    if (i == 3) v = roundf(v);
-    return v;
-}
-
-// 色の輪の上のマウス位置から、色相と強さを決める
-inline void WheelFromMouse(PanelState& s, int mx, int my, int cx, int cy) {
-    float dx = (float)(mx - cx), dy = (float)(my - cy);
-    float rr = sqrtf(dx * dx + dy * dy) / (float)kWheelR;
-    s.tintHue = WrapDeg(atan2f(-dy, dx) * 180.0f / kPi);
-    float a = (std::min)(1.0f, rr);
-    if (a < 0.12f) a = 0.0f;       // 中心付近＝かけない
-    if (a > 0.92f) a = 1.0f;       // 縁の近く＝いっぱい
-    s.tintAmount = a;
-}
-
 // 色の輪を「赤・緑・青・なし」のどれかへ一気に合わせる（Tキーと同じ状態）
 inline void SetQuickFilter(PanelState& s, int f) {
     if (f <= 0) { s.tintAmount = 0.0f; return; }
@@ -336,8 +293,6 @@ inline void SetQuickFilter(PanelState& s, int f) {
 
 // ボタンなどの矩形（Update と Draw で同じ値を使う）
 struct Rect { int x1, y1, x2, y2; };
-inline Rect ResetAllRect(int px) { return { px + 146, kTitleY - 2, px + kPanelW - 6, kTitleY + 18 }; }
-inline Rect QuickRect(int px, int i) { return { px + 130 + i * 24, 484, px + 130 + i * 24 + 21, 506 }; }
 inline bool Hit(const Rect& r, int x, int y) { return x >= r.x1 && x <= r.x2 && y >= r.y1 && y <= r.y2; }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +335,7 @@ const int kRingCY    = 452;
 const int kRingOuter = 91;   // 色相の輪の外側の半径
 const int kRingInner = 77;   // 色相の輪の内側の半径
 const int kArcBand   = 8;    // 輪のすぐ外側の「判定の弧」を押せる幅（細い弧を、押しやすいよう太めに拾う）
+static_assert(kRingOuter == kRingImgOuter && kRingInner == kRingImgInner, "色相の輪の画像と配置の半径をそろえる");
 const int kSquare    = 104;  // 中の四角の一辺（内側の半径77の円に収まる大きさ）
 const int kPickTop = 356, kPickBottom = 548;  // 輪と四角を置く場所の上端・下端
 // 四角の左上（右下は +kSquare で、その座標自体は含まない）
@@ -657,8 +613,9 @@ inline PanelResult Update(PanelState& st, PanelUi& ui, const PanelInput& in, boo
 }
 
 // ---- 描画 ----
-inline int RightAlignX(const char* s, int rightX) { return rightX - GetDrawStringWidth(s, (int)strlen(s)); }
+// 文字はすべて UiFont（サイズ別のフォントハンドル）で描く。SetFontSize を毎フレーム呼ぶと極端に重くなるため。
 
+// スライダーの値を、画面に出す文字にする（0=明るさ% 1=コントラスト± 2=彩度% 3=色相の度 4=色温度±）
 inline void FormatValue(int i, float v, char* buf, size_t n) {
     switch (i) {
         case 0: sprintf_s(buf, n, "%d%%", (int)roundf(v * 100.0f)); break;
@@ -669,150 +626,250 @@ inline void FormatValue(int i, float v, char* buf, size_t n) {
     }
 }
 
-// パネル全体を描く。呼び出し側は SetDrawScreen(DX_SCREEN_BACK) の状態で、右パネルの枠を描いたあとに呼ぶ。
-//   ink / inkSub / inkAccent / groove … ゲームのUIテーマの色（UiInk() など）
-inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool locked, int windowW,
-                 int ink, int inkSub, int inkAccent, int groove, int inkOk, int inkWarn) {
-    const int px = PanelX(windowW);
-    const int wcx = WheelCX(windowW);
+// 点線（3px 描いて 3px あける）。a＝不透明度 0〜255
+inline void DashH(int x1, int x2, int y, unsigned int col, int a) {
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, a);
+    for (int x = x1; x < x2; x += 6) DrawLine(x, y, (std::min)(x + 3, x2), y, col);
+    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+}
+inline void DashV(int x, int y1, int y2, unsigned int col, int a) {
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, a);
+    for (int y = y1; y < y2; y += 6) DrawLine(x, y, x, (std::min)(y + 3, y2), col);
+    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+}
 
-    // 上のインスペクターとの区切り線と、タイトル行
-    DrawLine(px - 4, kTitleY - 8, windowW - 8, kTitleY - 8, GetColor(78, 76, 86));
-    DrawString(px, kTitleY, "カラー補正", inkAccent);
+// 角の丸い小さな札（判定のチップ）。描いた札の右端のxを返す
+inline int DrawPill(int x, int y, const char* s, unsigned int fg, unsigned int bg) {
+    const int w = UiFont::Width(s, 11) + 16;
+    DrawRoundRectAA((float)x, (float)y, (float)(x + w), (float)(y + 20), 9.0f, 9.0f, 12, bg, TRUE);
+    UiFont::Draw(x + 8, y + 3, s, fg, 11);
+    return x + w;
+}
+
+// 頂点ごとに色を付けた四角形を1枚描く（左上・右上・左下・右下の色。透明度つき）。
+// 色の変わり方が位置について一次式なら、頂点の色だけで正確に塗れる（画像を作り直さなくてよい）。
+inline void DrawGradQuad(float x1, float y1, float x2, float y2, COLOR_U8 tl, COLOR_U8 tr, COLOR_U8 bl, COLOR_U8 br) {
+    VERTEX2D v[6];
+    auto Set = [](VERTEX2D& p, float x, float y, COLOR_U8 c) { p.pos = VGet(x, y, 0.0f); p.rhw = 1.0f; p.dif = c; p.u = 0.0f; p.v = 0.0f; };
+    Set(v[0], x1, y1, tl); Set(v[1], x2, y1, tr); Set(v[2], x1, y2, bl);
+    Set(v[3], x2, y1, tr); Set(v[4], x2, y2, br); Set(v[5], x1, y2, bl);
+    DrawPrimitive2D(v, 6, DX_PRIMTYPE_TRIANGLELIST, DX_NONE_GRAPH, TRUE);
+}
+
+// 「色と明るさ」タブの中身：判定の弧・色相の輪・中の四角・四隅の文字・右下の2色
+inline void DrawColorTab(const PanelState& st, Resources& res, int w, float briPreview, int ink, int inkAccent) {
+    const int cx = kRingCX(w), cy = kRingCY;
+    const unsigned int zoneCols[3] = { GetColor(230, 60, 60), GetColor(60, 190, 60), GetColor(70, 110, 240) };
+
+    // 判定の弧：輪のすぐ外に、赤・緑・青それぞれ ±35度 の範囲を太い弧で描く（押すとその色に合わせる）
     {
-        Rect rr = ResetAllRect(px);
-        DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, ui.flash > 0 ? inkAccent : groove, TRUE);
-        DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, GetColor(124, 134, 168), FALSE);
-        DrawString(rr.x1 + 7, rr.y1 + 2, "リセット", GetColor(255, 255, 255));
-    }
-
-    // テストチャート：上＝補正前、下＝いまの補正をかけたもの
-    DrawString(px, kChartY, "前", inkSub);        // 補正前（上の帯）
-    DrawString(px, kChartY + 18, "後", inkSub);   // 補正後（下の帯）
-    const int chx = px + 26;
-    if (res.chartSrc >= 0) {
-        DrawGraph(chx, kChartY, res.chartSrc, TRUE);
-        float mr, mg, mb;
-        TintMultiplier(st, mr, mg, mb);
-        mr *= st.bright; mg *= st.bright; mb *= st.bright;
-        int showHandle = res.chartSrc;
-        if (res.chartDst >= 0 && NeedsFilter(st.saturation, st.hue, st.contrast)
-            && ApplyFilters(res, res.chartSrc, res.chartDst, st.saturation, st.hue, st.contrast)) showHandle = res.chartDst;
-        DrawGraded(chx, kChartY + 18, chx + kChartW, kChartY + 18 + kChartH, 0, 0, kChartW, kChartH, showHandle, mr, mg, mb);
-    }
-    DrawBox(chx - 1, kChartY - 1, chx + kChartW + 1, kChartY + kChartH + 1, inkAccent, FALSE);
-    DrawBox(chx - 1, kChartY + 17, chx + kChartW + 1, kChartY + 18 + kChartH + 1, inkAccent, FALSE);
-
-    // スライダー
-    const int tx0 = px + 8, tx1 = px + kPanelW - 8;
-    for (int i = 0; i < kSliderCount; i++) {
-        const SliderInfo& si = Slider(i);
-        int ry = kSliderY0 + i * kSliderPitch;
-        float v = SliderValueC(st, i);
-        bool changed = fabsf(v - si.def) > (si.hi - si.lo) * 0.004f;
-
-        DrawString(px + 4, ry, si.label, changed ? ink : inkSub);
-        // 明るさだけは、ゲームがいま何と判定しているかをラベルの横へ出す
-        if (i == 0) {
-            int j = JudgeBright(v);
-            if (j < 0)      DrawString(px + 4 + 56, ry, "[暗い判定]", GetColor(120, 160, 255));
-            else if (j > 0) DrawString(px + 4 + 56, ry, "[明るい判定]", GetColor(255, 190, 80));
+        const float centers[3] = { 0.0f, 120.0f, 240.0f };
+        const float r0 = (float)kRingOuter + 3.5f;
+        for (int c = 0; c < 3; c++) {
+            for (float a = centers[c] - kFilterZoneDeg; a < centers[c] + kFilterZoneDeg; a += 4.0f) {
+                const float a2 = (std::min)(a + 4.0f, centers[c] + kFilterZoneDeg);
+                DrawLineAA(cx + cosf(a * kPi / 180.0f) * r0, cy - sinf(a * kPi / 180.0f) * r0,
+                           cx + cosf(a2 * kPi / 180.0f) * r0, cy - sinf(a2 * kPi / 180.0f) * r0, zoneCols[c], 4.0f);
+            }
         }
+    }
+    // 色相の輪（起動時に作った画像）と、いまの色相の位置のつまみ（帯の真ん中の半径）
+    if (res.ring >= 0) DrawGraph(cx - (kRingImgOuter + 1), cy - (kRingImgOuter + 1), res.ring, TRUE);
+    {
+        const float rm = ((float)kRingOuter + (float)kRingInner) * 0.5f;
+        const float a = st.tintHue * kPi / 180.0f;
+        const float px = cx + cosf(a) * rm, py = cy - sinf(a) * rm;
+        DrawCircleAA(px, py, 6.0f, 16, GetColor(20, 20, 24), FALSE, 3.5f);
+        DrawCircleAA(px, py, 6.0f, 16, GetColor(255, 255, 255), FALSE, 2.0f);
+    }
+
+    // 中の四角：横＝色フィルタの強さ、縦＝明るさ。塗りは「その点を選んだら画面に掛かる色」。
+    //   1枚目：左の2頂点＝白、右の2頂点＝その色相で強さいっぱいの乗算の色
+    //   2枚目：下半分に黒を重ねる（明るさ1.0の高さで透明 → 下端の0.3で不透明度0.7）
+    //   3枚目：上半分に白を重ねる（明るさ1.0の高さで透明 → 上端の1.7で半透明）。白より明るい色は描けないので「白っぽさ」で表す
+    {
+        float er, eg, eb;
+        SquareEdgeColor(st.tintHue, er, eg, eb);
+        const COLOR_U8 white = GetColorU8(255, 255, 255, 255);
+        const COLOR_U8 edge  = GetColorU8((int)(er * 255.0f), (int)(eg * 255.0f), (int)(eb * 255.0f), 255);
+        const float L = (float)SquareLeft(w), T = (float)SquareTop();
+        const float R = L + (float)kSquare, B = T + (float)kSquare;
+        const float mid = T + (kBrightMax - 1.0f) / (kBrightMax - kBrightMin) * (float)(kSquare - 1) + 0.5f;
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        DrawGradQuad(L, T, R, B, white, edge, white, edge);
+        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 255);
+        DrawGradQuad(L, mid, R, B, GetColorU8(0, 0, 0, 0), GetColorU8(0, 0, 0, 0), GetColorU8(0, 0, 0, 179), GetColorU8(0, 0, 0, 179));
+        DrawGradQuad(L, T, R, mid, GetColorU8(255, 255, 255, 128), GetColorU8(255, 255, 255, 128), GetColorU8(255, 255, 255, 0), GetColorU8(255, 255, 255, 0));
+        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+        // 判定の境目：横の点線＝明るさ 1.3（上）と 0.6（下）、縦の点線＝強さ 0.5
+        const int li = (int)L, ti = (int)T, ri = (int)R;
+        const int yBright = ti + (int)lroundf((kBrightMax - kBrightAbove) / (kBrightMax - kBrightMin) * (float)(kSquare - 1));
+        const int yDark   = ti + (int)lroundf((kBrightMax - kDarkBelow) / (kBrightMax - kBrightMin) * (float)(kSquare - 1));
+        const int xHalf   = li + (int)lroundf(kFilterMinAmount * (float)(kSquare - 1));
+        DashH(li, ri, yBright, GetColor(20, 20, 24), 170);
+        DashH(li, ri, yDark, GetColor(255, 255, 255), 190);
+        DashV(xHalf, ti, ti + kSquare, GetColor(110, 110, 120), 220);
+        UiFont::Draw(li + 3, ti + 2, "明るい", GetColor(58, 52, 40), 10);
+        UiFont::Draw(li + 3, ti + kSquare - 15, "暗い", GetColor(216, 222, 240), 10);
+
+        // いまの値のつまみ。X / C を押している間（明るさを一時的に 0.3 / 1.7 にする操作）は、その高さに薄いつまみも出す
+        if (briPreview >= 0.0f) {
+            int gx, gy;
+            SquarePos(st.tintAmount, briPreview, w, gx, gy);
+            SetDrawBlendMode(DX_BLENDMODE_ALPHA, 140);
+            DrawCircleAA((float)gx, (float)gy, 6.0f, 16, GetColor(255, 255, 255), FALSE, 2.0f);
+            SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+        }
+        int kx, ky;
+        SquarePos(st.tintAmount, st.bright, w, kx, ky);
+        DrawCircleAA((float)kx, (float)ky, 6.0f, 16, GetColor(20, 20, 24), FALSE, 3.5f);
+        DrawCircleAA((float)kx, (float)ky, 6.0f, 16, GetColor(255, 255, 255), FALSE, 2.0f);
+    }
+
+    // 四隅の文字（押すとその色に合わせる）
+    {
+        const char* names[3] = { "赤", "緑", "青" };
+        const unsigned int cols[3] = { GetColor(255, 138, 138), GetColor(111, 216, 111), GetColor(143, 168, 255) };
+        for (int c = 0; c < 3; c++) {
+            const Rect r = CornerLabelRect(w, c);
+            UiFont::Draw(r.x1 + 2, r.y1 + 1, names[c], cols[c], 11);
+        }
+    }
+
+    // 右下の2色：後ろ＝元の色（白）、手前＝いま画面に掛かっている色。どちらを押しても明るさと色フィルタを元に戻す
+    {
+        const Rect s = SwatchRect(w);
+        DrawBox(s.x2 - 18, s.y2 - 18, s.x2, s.y2, GetColor(255, 255, 255), TRUE);
+        DrawBox(s.x2 - 18, s.y2 - 18, s.x2, s.y2, GetColor(142, 150, 176), FALSE);
+        float nr, ng, nb;
+        NowColor(st, nr, ng, nb);
+        DrawBox(s.x1, s.y1, s.x1 + 22, s.y1 + 22, GetColor((int)(nr * 255.0f), (int)(ng * 255.0f), (int)(nb * 255.0f)), TRUE);
+        DrawBox(s.x1, s.y1, s.x1 + 22, s.y1 + 22, inkAccent, FALSE);
+        DrawBox(s.x1 + 1, s.y1 + 1, s.x1 + 21, s.y1 + 21, inkAccent, FALSE);
+    }
+    (void)ink;
+}
+
+// 「細かい調整」タブの中身：コントラスト・彩度・色相・色温度のスライダー4本
+inline void DrawFineTab(const PanelState& st, int w, int ink, int inkSub, int inkAccent) {
+    const int tx0 = FineTrackX1(w), tx1 = FineTrackX2(w);
+    for (int k = 0; k < 4; k++) {
+        const int i = k + 1;                     // Slider(i) の添字（1=コントラスト 2=彩度 3=色相 4=色温度）
+        const SliderInfo& si = Slider(i);
+        const int rowTop = kFineY0 + k * kFinePitch;
+        const float v = SliderValueC(st, i);
+        const bool changed = fabsf(v - si.def) > (si.hi - si.lo) * 0.004f;
+
+        UiFont::Draw(kSecInX1(w) + 4, rowTop, si.label, changed ? ink : inkSub, 12);
         char vb[24];
         FormatValue(i, v, vb, sizeof(vb));
-        DrawString(RightAlignX(vb, tx1), ry, vb, changed ? inkAccent : inkSub);
+        UiFont::Draw(kSecInX2(w) - 4 - UiFont::Width(vb, 12), rowTop, vb, changed ? inkAccent : inkSub, 12);
 
-        // つまみの溝。色の帯にして、動かすとどうなるかを見せる
-        int ty = ry + 19;
+        // 溝は色の帯にして、動かすとどうなるかを見せる（今までのスライダーと同じ塗り分け）
+        const int ty = rowTop + 20;
         for (int x = tx0; x < tx1; x++) {
-            float t = (float)(x - tx0) / (float)(tx1 - tx0);
+            const float t = (float)(x - tx0) / (float)(tx1 - tx0);
             int cr = 120, cg = 120, cb = 120;
-            if (i == 0) { int g = (int)(60 + 180 * t); cr = cg = cb = g; }
-            else if (i == 1) { int g = (int)(150 - 70 * fabsf(t * 2.0f - 1.0f)); cr = cg = cb = g; } // 中央が灰色、両端ほど濃い（強弱の幅）
-            else if (i == 2) { float k = t; cr = (int)(130 + 125 * k); cg = (int)(130 - 80 * k); cb = (int)(130 - 80 * k); }
+            if (i == 1) { int g = (int)(150 - 70 * fabsf(t * 2.0f - 1.0f)); cr = cg = cb = g; }  // 中央が灰色、両端ほど濃い
+            else if (i == 2) { cr = (int)(130 + 125 * t); cg = (int)(130 - 80 * t); cb = (int)(130 - 80 * t); }
             else if (i == 3) { float fr, fg, fb; HsvToRgb(t * 360.0f, 0.75f, 1.0f, fr, fg, fb); cr = (int)(fr * 255); cg = (int)(fg * 255); cb = (int)(fb * 255); }
             else { cr = (int)(90 + 165 * t); cg = (int)(150 + 20 * t); cb = (int)(255 - 185 * t); }
             DrawLine(x, ty, x, ty + 8, GetColor(cr, cg, cb));
         }
-        if (i == 0) {
-            // 暗い判定(0.6未満)・明るい判定(1.3超)の境目に印を付ける
-            for (int k = 0; k < 2; k++) {
-                float bv = k == 0 ? kDarkBelow : kBrightAbove;
-                int bx = tx0 + (int)((bv - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
-                DrawLine(bx, ty - 2, bx, ty + 10, inkAccent);
-            }
-        }
+        DrawBox(tx0, ty, tx1, ty + 8, GetColor(92, 102, 128), FALSE);
         // 初期値の目印
-        {
-            int dx = tx0 + (int)((si.def - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
-            DrawLine(dx, ty + 9, dx, ty + 12, ink);
-        }
-        DrawBox(tx0, ty, tx1, ty + 8, inkAccent, FALSE);
-        int kx = tx0 + (int)((v - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
+        const int dx = tx0 + (int)((si.def - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
+        DrawLine(dx, ty + 9, dx, ty + 12, ink);
+        // つまみ
+        const int kx = tx0 + (int)((v - si.lo) / (si.hi - si.lo) * (float)(tx1 - tx0));
         DrawBox(kx - 4, ty - 4, kx + 4, ty + 12, GetColor(255, 255, 255), TRUE);
         DrawBox(kx - 4, ty - 4, kx + 4, ty + 12, GetColor(20, 20, 24), FALSE);
     }
+}
 
-    // 色の輪
+// 「画面全体」の枠を丸ごと描く。呼び出し側は SetDrawScreen(DX_SCREEN_BACK) の状態で、右パネルの下地を描いたあとに呼ぶ。
+//   locked        … このステージでは画面エフェクトが封印されている（枠を沈めて、そう書く）
+//   stageUsesFine … このステージに、コントラスト・彩度・色相・色温度を見るギミックがある（タブに「使う」の札）
+//   briPreview    … X / C を押している間の明るさ（0.3 / 1.7）。押していなければ負の値
+//   ink 〜 inkWarn … ゲームのUIの色（EditPanel::ColInk() など）
+inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool locked, int windowW,
+                 bool stageUsesFine, float briPreview,
+                 int ink, int inkSub, int inkAccent, int groove, int inkOk, int inkWarn) {
+    const int w = windowW;
+    const int x1 = kSecX1(w), x2 = kSecX2(w), ix1 = kSecInX1(w);
+    const unsigned int orange = GetColor(242, 166, 90), orangeInk = GetColor(245, 192, 138), dim = GetColor(142, 150, 176);
+    const unsigned int back = GetColor(51, 48, 47);
+
+    // 枠：下地と、半透明のオレンジの縁（上の「選んだ物」の青い枠と色で見分ける）
+    DrawRoundRectAA((float)x1, (float)kSecTop, (float)x2, (float)kSecBottom, 10.0f, 10.0f, 16, back, TRUE);
+    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 120);
+    DrawRoundRectAA((float)x1, (float)kSecTop, (float)x2, (float)kSecBottom, 10.0f, 10.0f, 16, orange, FALSE, 1.0f);
+    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
+
+    // 見出し：オレンジの点＋「画面全体」、右端に「リセット」
+    DrawCircleAA((float)(ix1 + 4), (float)(kHeadY + 9), 4.0f, 12, orange, TRUE);
+    UiFont::Draw(ix1 + 13, kHeadY + 1, "画面全体", orangeInk, 13);
     {
-        if (res.wheel >= 0) DrawGraph(wcx - (kWheelR + 1), kWheelCY - (kWheelR + 1), res.wheel, TRUE);
-        DrawCircle(wcx, kWheelCY, kWheelR, inkAccent, FALSE);
-        // 赤・緑・青の「判定が効く範囲」を輪の外側に太線で示す
-        const float centers[3] = { 0.0f, 120.0f, 240.0f };
-        const unsigned int cols[3] = { GetColor(230, 60, 60), GetColor(60, 190, 60), GetColor(70, 110, 240) };
-        const char* names[3] = { "赤", "緑", "青" };
-        for (int c = 0; c < 3; c++) {
-            for (float a = centers[c] - kFilterZoneDeg; a < centers[c] + kFilterZoneDeg; a += 4.0f) {
-                float a2 = (std::min)(a + 4.0f, centers[c] + kFilterZoneDeg);
-                float r0 = (float)kWheelR + 4.0f;
-                DrawLineAA(wcx + cosf(a * kPi / 180.0f) * r0, kWheelCY - sinf(a * kPi / 180.0f) * r0,
-                           wcx + cosf(a2 * kPi / 180.0f) * r0, kWheelCY - sinf(a2 * kPi / 180.0f) * r0, cols[c], 3.0f);
-            }
-            float lr = (float)kWheelR + 15.0f;
-            DrawString(wcx + (int)(cosf(centers[c] * kPi / 180.0f) * lr) - 8, kWheelCY - (int)(sinf(centers[c] * kPi / 180.0f) * lr) - 8, names[c], cols[c]);
-        }
-        // 現在の位置
-        float r1 = st.tintAmount * (float)kWheelR;
-        int dotx = wcx + (int)(cosf(st.tintHue * kPi / 180.0f) * r1);
-        int doty = kWheelCY - (int)(sinf(st.tintHue * kPi / 180.0f) * r1);
-        DrawCircle(dotx, doty, 6, GetColor(255, 255, 255), TRUE);
-        DrawCircle(dotx, doty, 6, GetColor(20, 20, 24), FALSE);
-
-        // 右側：数値と判定、クイック選択
-        int rx = px + 130;
-        DrawString(rx, 462, "色フィルタ", ink);
-        const unsigned int qcols[4] = { cols[0], cols[1], cols[2], GetColor(200, 200, 200) };
-        const char* qn[4] = { "赤", "緑", "青", "×" };
-        for (int q = 0; q < 4; q++) {
-            Rect rr = QuickRect(px, q);
-            DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, qcols[q], TRUE);
-            DrawBox(rr.x1, rr.y1, rr.x2, rr.y2, inkAccent, FALSE);
-            DrawString(rr.x1 + 3, rr.y1 + 3, qn[q], q == 3 ? ink : GetColor(255, 255, 255));
-        }
-        char b1[32], b2[32];
-        sprintf_s(b1, sizeof(b1), "色相 %d度", (int)roundf(WrapDeg(st.tintHue)));
-        sprintf_s(b2, sizeof(b2), "強さ %d%%", (int)roundf(st.tintAmount * 100.0f));
-        DrawString(rx, 514, b1, st.tintAmount > 0.0f ? ink : inkSub);
-        DrawString(rx, 534, b2, st.tintAmount > 0.0f ? ink : inkSub);
-        int jf = JudgeFilter(st);
-        const char* jn = jf == 1 ? "赤フィルタ" : jf == 2 ? "緑フィルタ" : jf == 3 ? "青フィルタ" : "判定なし";
-        DrawString(rx, 556, jn, jf ? cols[jf - 1] : inkSub);
+        const Rect rb = ResetButtonRect(w);
+        DrawRoundRectAA((float)rb.x1, (float)rb.y1, (float)rb.x2, (float)rb.y2, 9.0f, 9.0f, 12, ui.flash > 0 ? (unsigned int)inkAccent : back, TRUE);
+        DrawRoundRectAA((float)rb.x1, (float)rb.y1, (float)rb.x2, (float)rb.y2, 9.0f, 9.0f, 12, GetColor(106, 100, 112), FALSE, 1.0f);
+        const int tw = UiFont::Width("リセット", 11);
+        UiFont::Draw((rb.x1 + rb.x2 - tw) / 2, rb.y1 + 2, "リセット", ui.flash > 0 ? GetColor(20, 20, 24) : GetColor(216, 222, 240), 11);
     }
 
-    // 注意書き
-    DrawString(px + 4, 578, "ダブルクリック＝初期値", inkSub); // 枠の下端（618）に食い込まない高さ
-    DrawString(px + 4, 596, "コスト：明るさ・色のみ", inkSub);
+    // タブ：開いているほうだけ明るい下地。右の小さな札で、コストがかかるかどうかを見せる
+    for (int i = 0; i < 2; i++) {
+        const Rect tr = TabRect(w, i);
+        const bool active = (ui.tab == i);
+        if (active) DrawRoundRectAA((float)tr.x1, (float)tr.y1, (float)tr.x2, (float)tr.y2, 6.0f, 6.0f, 12, GetColor(74, 71, 82), TRUE);
+        const char* label = (i == 0) ? "色と明るさ" : "細かい調整";
+        // 札：色と明るさ＝「コスト」。細かい調整＝ふだんは「無料」、このステージのギミックが見ているときは「使う」
+        const bool useBadge = (i == 1 && stageUsesFine);
+        const char* badge = (i == 0) ? "コスト" : (useBadge ? "使う" : "無料");
+        const int lw = UiFont::Width(label, 11), bw = UiFont::Width(badge, 9) + 8;
+        const int sx = (tr.x1 + tr.x2 - (lw + 4 + bw)) / 2;
+        UiFont::Draw(sx, tr.y1 + 4, label, active ? (unsigned int)ink : dim, 11);
+        const int bx = sx + lw + 4, by = tr.y1 + 5;
+        if (useBadge) {
+            DrawRoundRectAA((float)bx, (float)by, (float)(bx + bw), (float)(by + 12), 6.0f, 6.0f, 8, GetColor(90, 58, 28), TRUE);
+        } else {
+            DrawRoundRectAA((float)bx, (float)by, (float)(bx + bw), (float)(by + 12), 6.0f, 6.0f, 8, i == 0 ? orange : GetColor(92, 102, 128), FALSE, 1.0f);
+        }
+        UiFont::Draw(bx + 4, by, badge, (i == 0 || useBadge) ? orangeInk : dim, 9);
+    }
 
-    // 封印されているステージ
+    if (ui.tab == 0) DrawColorTab(st, res, w, briPreview, ink, inkAccent);
+    else             DrawFineTab(st, w, ink, inkSub, inkAccent);
+
+    // ゲームがいま何と判定しているか（どちらのタブでも出す）
+    {
+        const int y = kPickBottom + 6;
+        const int jb = JudgeBright(st.bright);
+        const char* bt = jb < 0 ? "明るさ：暗い" : jb > 0 ? "明るさ：明るい" : "明るさ：ふつう";
+        const unsigned int bfg = jb < 0 ? GetColor(157, 180, 255) : jb > 0 ? GetColor(255, 214, 120) : GetColor(216, 222, 240);
+        const unsigned int bbg = jb < 0 ? GetColor(30, 42, 76) : jb > 0 ? GetColor(90, 74, 30) : GetColor(74, 71, 82);
+        const int nx = DrawPill(ix1, y, bt, bfg, bbg) + 5;
+        const int jf = JudgeFilter(st);
+        const char* ft[4] = { "フィルタ：なし", "フィルタ：赤", "フィルタ：緑", "フィルタ：青" };
+        const unsigned int ffg[4] = { GetColor(216, 222, 240), GetColor(255, 180, 180), GetColor(170, 240, 170), GetColor(168, 188, 255) };
+        const unsigned int fbg[4] = { GetColor(74, 71, 82), GetColor(90, 30, 30), GetColor(30, 80, 30), GetColor(30, 42, 90) };
+        DrawPill(nx, y, ft[jf], ffg[jf], fbg[jf]);
+    }
+    // キーのヒント（小さく1行）
+    UiFont::Draw(ix1, kPickBottom + 32, ui.tab == 0 ? "X / C で明るさ　T で色　点線＝判定の境目" : "コストはかからない　ダブルクリック＝初期値", dim, 10);
+
+    // 封印されているステージ：枠の中身を沈めて、使えないことを書く
     if (locked) {
         SetDrawBlendMode(DX_BLENDMODE_ALPHA, 170);
-        DrawBox(px - 6, kTitleY + 20, windowW - 2, kPanelBottom, GetColor(30, 26, 24), TRUE);
+        DrawBox(x1 + 1, kTabY - 2, x2 - 1, kSecBottom - 2, GetColor(30, 26, 24), TRUE);
         SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-        DrawString(px + 6, 420, "このステージでは", GetColor(255, 220, 160));
-        DrawString(px + 6, 442, "画面エフェクトが封印", GetColor(255, 220, 160));
-        DrawString(px + 6, 464, "されています", GetColor(255, 220, 160));
+        const char* l1 = "このステージでは";
+        const char* l2 = "画面エフェクトが封印されています";
+        UiFont::Draw((x1 + x2 - UiFont::Width(l1, 12)) / 2, 430, l1, GetColor(255, 220, 160), 12);
+        UiFont::Draw((x1 + x2 - UiFont::Width(l2, 12)) / 2, 452, l2, GetColor(255, 220, 160), 12);
     }
-    (void)inkOk; (void)inkWarn;
+    (void)groove; (void)inkOk; (void)inkWarn;
 }
 
 } // namespace ColorGrade
