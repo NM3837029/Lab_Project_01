@@ -16490,13 +16490,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 以前は幅250pxの文字パネルに「使える編集」「マウス操作」「キー操作」を並べていた。
             // いまは、ツールをアイコンのボタンにして幅68pxへ収めた。各ツールの説明・キー・実演は、マウスを重ねたカードに出る。
             // 「マウス操作」「キー操作」の一覧は、F1の操作一覧と、モニター下のヒントバーにある。
+            // 見た目は 2000年代の編集ソフトのツールパレット（UiTheme）：盛り上がったパネル、上につまみ、ボタンは立体
             {
                 const int lw = EditToolbar::LEFT_W, lh = WINDOW_HEIGHT - 100;
-                DrawBox(0, 0, lw, lh, GetColor(46, 42, 40), TRUE);                        // 暗い下地
-                DrawBox(lw - 3, 0, lw, lh, GetColor(84, 120, 176), TRUE);                 // モニター側の縁（枠の青と同系色）
+                const UiTheme::Palette& tp = UiTheme::P();
+                // モニターのまわりの空き（左バーと右パネルの間）：作業領域の色。モニターはこのあとで上に描く
+                UiTheme::Fill({ lw, 0, WINDOW_WIDTH - Insp::PANEL_W - 1, lh - 1 }, tp.workspace);
+                // パネルの地と、モニター側の縁（暗い線）
+                UiTheme::Fill({ 0, 0, lw - 1, lh - 1 }, tp.face);
+                UiTheme::VLine(lw - 1, 0, lh - 1, tp.dark);
+                UiTheme::VLine(lw - 2, 0, lh - 1, tp.shadow);
+                // いちばん上の「つまみ」（点々の帯。当時のツールパレットの掴む所）
+                for (int gx = 6; gx < lw - 8; gx += 3) {
+                    DrawPixel(gx, 5, UiTheme::Col(tp.hilite)); DrawPixel(gx + 1, 6, UiTheme::Col(tp.dark));
+                    DrawPixel(gx, 8, UiTheme::Col(tp.hilite)); DrawPixel(gx + 1, 9, UiTheme::Col(tp.dark));
+                }
 
-                // いま再生中か時間停止中か（アイコンで示す）
-                DrawUiIcon(lw / 2 - 1, 32, 30, isPaused ? uiPauseHandle : uiPlayHandle);
+                // いま再生中か時間停止中か（アイコンで示す）。画像ではなく、見た目のテーマの文字の色で描く
+                // （明るい灰色の地では、白い画像のアイコンが見えなくなるため）
+                EditPanel::DrawIcon(isPaused ? EditPanel::ICON_PAUSE : EditPanel::ICON_PLAY, lw / 2 - 1, 32, UiTheme::Col(tp.ink));
 
                 // 画面・物のツール4つ（物の編集 / ズーム / 縮小 / 色・明暗）
                 for (int ti = 0; ti <= EditToolbar::COLOR; ti++) {
@@ -16510,16 +16522,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     if (leftRatio < 0.0f) leftRatio = 0.0f;
                     if (leftRatio > 1.0f) leftRatio = 1.0f;
                     const int gx1 = 22, gx2 = 46, gy1 = 340, gy2 = lh - 40;
-                    DrawUiIcon(lw / 2 - 1, gy1 - 18, 26, energyHandle);
-                    DrawBox(gx1, gy1, gx2, gy2, UiGaugeBack(), TRUE);
-                    int fillH = (int)((float)(gy2 - gy1) * leftRatio);
-                    DrawBox(gx1, gy2 - fillH, gx2, gy2, UiGaugeFill(), TRUE);
-                    DrawBox(gx1, gy1, gx2, gy2, UiInkAccent(), FALSE);
+                    // 見出し「コスト」と、区切りのあるメーター（暗い灰色は緑→黄→赤、明るい灰色は青いブロック）
+                    const int lab = UiFont::Width("コスト", 12);
+                    UiFont::Draw(lw / 2 - lab / 2 - 1, gy1 - 18, "コスト", UiTheme::Col(tp.inkSub), 12);
+                    UiTheme::Meter({ gx1, gy1, gx2, gy2 }, leftRatio, true);
                     char cb[16]; sprintf_s(cb, sizeof(cb), "%d", (int)editCost);
-                    int cw = GetDrawStringWidth(cb, (int)strlen(cb));
-                    DrawString(lw / 2 - cw / 2 - 1, gy2 + 5, cb, GetColor(235, 235, 235));
+                    const int cw = UiFont::Width(cb, 12);
+                    UiFont::Draw(lw / 2 - cw / 2 - 1, gy2 + 6, cb, UiTheme::Col(tp.ink), 12);
                 }
-                EditToolbar::DrawSmall(6, lh - 20, "[F1]一覧", GetColor(190, 190, 196), 11);
+                EditToolbar::DrawSmall(6, lh - 20, "[F1]一覧", UiTheme::Col(tp.inkSub), 11);
             }
 
             // 右パネル（インスペクター＋カラー補正）。左のアイコンバーと同じ、暗い平らな下地とモニター側の青い縁
@@ -16533,8 +16544,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
             } // ← 編集パネル（左・右・下の枠と左パネルの中身）ここまで
 
-            // モニタープレビューウィンドウ
-            DrawBox(monitorX - 2, monitorY - 2, monitorX + monitorW + 2, monitorY + monitorH + 2, GetColor(100, 100, 100), FALSE);
+            // モニタープレビューウィンドウ。まわりの縁は、へこんだ窓の線（2000年代の編集ソフトのプレビューの枠）
+            UiTheme::Bevel({ monitorX - 2, monitorY - 2, monitorX + monitorW + 1, monitorY + monitorH + 1 },
+                           UiTheme::P().shadow, UiTheme::P().hilite, UiTheme::P().dark, UiTheme::P().light);
             Screen_DrawComposited(monitorX, monitorY, monitorW, monitorH, gameScreen);
             DrawHudLayer(monitorX, monitorY, monitorW, monitorH); // HUDはモニターの上に重ねる（色補正・ズームの影響を受けない）
 
