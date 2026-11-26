@@ -16929,9 +16929,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             {
                 const bool fxUsable = screenEffectOpEnabled && editCost > 0.0f;
                 const float briPreview = (xHeldThisFrame && fxUsable) ? 0.3f : (cHeldThisFrame && fxUsable) ? 1.7f : -1.0f;
-                ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH, stageUsesFineGrade, briPreview,
-                                 EditPanel::ColInk(), EditPanel::ColInkSub(), EditPanel::ColInkAccent(), EditPanel::ColGroove(),
-                                 EditPanel::ColInkOk(), EditPanel::ColInkWarn());
+                ColorGrade::Draw(cgState, cgUi, cgRes, !screenEffectOpEnabled, WINDOW_WIDTH, stageUsesFineGrade, briPreview);
             }
 
             // ===== 下の時間操作ボタンと、説明カード（EditToolbar.h）=====
