@@ -3207,62 +3207,11 @@ const char* EnemyTypeNameJa(EnemyType t) {
     }
 }
 
-// ===== インスペクター（右パネル上部）の行の並び =====
-// これまで行の y 座標が「描画」「クリック判定」「指差しカーソル」の3か所に数値で重複していて、
-// どれか1つだけ動かすと見た目と当たりがずれた（行間も 15px・20px と不揃いだった）。
-// 行の位置はここ1か所で決め、3か所はすべてここを見る。
-// 右パネルは左のアイコンバーと同じ「カード」の見た目に作り替えたので、行は文字の位置でなく矩形（RowBox）で持つ。
-// 一時停止と巻き戻しは左右に並べるため、当たり判定は y だけでなく x も見る（RowAt(mx, my)）。
-namespace Insp {
-    // ROW_LOOK_* はギミックを選んだときだけ出る4つの小さなカード（敵の「動き」行と同じ段に置く）。
-    enum Row { ROW_SCALE, ROW_ANGLE, ROW_SPEED, ROW_PAUSE, ROW_REWIND, ROW_TYPE,
-               ROW_LOOK_HUE, ROW_LOOK_BRIGHT, ROW_LOOK_ALPHA, ROW_LOOK_FLIP, ROW_REACT, ROW_COUNT };
-    // いま選んでいるのがギミックか（true なら ROW_TYPE の段は見た目の4枚になる）。クリック・指差し・描画の前に毎回更新する
-    static bool lookMode = false;
-    const int PANEL_W   = 250; // パネルの幅（右端から）
-    const int HEAD_Y    = 8;   // 選んだ物の絵と名前の上端
-    const int HEAD_SIZE = 40;  // 絵の枠の一辺
-    const int CARD_H    = 22;  // カード1枚の高さ
-    inline int Left()  { return WINDOW_WIDTH - PANEL_W + 6; }   // カードの左端x（パネルの左端 + 余白）
-    inline int Right() { return WINDOW_WIDTH - 6; }              // カードの右端x
-    // 行ごとの上端y。値の行は 24px 間隔、一時停止と巻き戻しは同じ段に左右で並べる
-    inline int RowTop(int row) {
-        switch (row) {
-            case ROW_SCALE:  return 58;
-            case ROW_ANGLE:  return 82;
-            case ROW_SPEED:  return 106;
-            case ROW_PAUSE:
-            case ROW_REWIND: return 132;
-            case ROW_TYPE:
-            case ROW_LOOK_HUE: case ROW_LOOK_BRIGHT: case ROW_LOOK_ALPHA: case ROW_LOOK_FLIP: return 158;
-            default:         return 186; // ROW_REACT（反応のチップ。押せない）
-        }
-    }
-    inline EditPanel::Box RowBox(int row) {
-        const int L = Left(), R = Right();
-        const int half = (R - L - 6) / 2;
-        int y = RowTop(row);
-        if (row == ROW_PAUSE)  return { L, y, L + half, y + CARD_H };
-        if (row == ROW_REWIND) return { R - half, y, R, y + CARD_H };
-        if (row == ROW_REACT)  return { L, y, R, y + 20 };
-        if (row >= ROW_LOOK_HUE && row <= ROW_LOOK_FLIP) {
-            const int gap = 4, qw = (R - L - gap * 3) / 4;
-            const int i = row - ROW_LOOK_HUE;
-            return { L + i * (qw + gap), y, L + i * (qw + gap) + qw, y + CARD_H };
-        }
-        return { L, y, R, y + CARD_H };
-    }
-    // マウスがどの行の上か（行の外なら -1）。値を操作できるのは ROW_REACT より前の行だけ
-    inline int RowAt(int mx, int my) {
-        for (int r = 0; r < ROW_REACT; r++) {
-            const bool isLook = (r >= ROW_LOOK_HUE && r <= ROW_LOOK_FLIP);
-            if (r == ROW_TYPE && lookMode) continue; // ギミックでは同じ段が見た目の4枚
-            if (isLook && !lookMode) continue;
-            if (EditPanel::HitBox(RowBox(r), mx, my)) return r;
-        }
-        return -1;
-    }
-}
+// ===== インスペクター（右パネル上半分「選んだ物」の枠）のタイルの並び =====
+// タイルの位置は InspLayout.h の表1か所で決め、描画・クリック判定・指差しカーソルの3か所はすべてそこを見る。
+// （2026-11-26 に、行7本の並びから「カード＋3列の大きなタイル」へ作り直した）
+#include "InspLayout.h"
+static_assert(Insp::kWindowW == WINDOW_WIDTH, "InspLayout.h の画面の幅を WINDOW_WIDTH とそろえる");
 
 // プレイヤーが加えた編集を、AI側が読みやすい形へ正規化したもの。
 struct EditReaction {
