@@ -273,12 +273,19 @@ inline float& SliderValue(PanelState& s, int i) {
 }
 inline float SliderValueC(const PanelState& s, int i) { return SliderValue(const_cast<PanelState&>(s), i); }
 
-// パネルの操作状態（ドラッグ中の項目、ダブルクリック判定用の時刻、ボタンの押下表示）
+// つかんでいる部品の番号（PanelUi::drag）。1〜4 は「細かい調整」のスライダーで、Slider(i) の添字そのまま
+const int kDragRing   = 20;  // 色相の輪
+const int kDragSquare = 21;  // 中の四角
+// ダブルクリック判定用の「最後に押したフレーム」の置き場（PanelUi::lastPress の添字）
+const int kPressRing = 5, kPressSquare = 6, kPressCount = 7;
+
+// パネルの操作状態（開いているタブ、つかんでいる部品、ダブルクリック判定用の時刻、ボタンの押下表示）
 struct PanelUi {
-    int drag = -1;                   // -1=なし 0〜4=スライダー 10=色の輪
+    int tab = 0;                     // 開いているタブ。0＝色と明るさ、1＝細かい調整（ステージを出入りしたら 0 に戻す）
+    int drag = -1;                   // -1=なし 1〜4=細かい調整のスライダー 20=色相の輪 21=中の四角
     int frame = 0;                   // 通算フレーム（ダブルクリック判定用）
-    int lastPress[kSliderCount + 1] = { -999, -999, -999, -999, -999, -999 }; // 最後に押したフレーム（5=色の輪）
-    int flash = 0;                   // 「全リセット」を押した直後の強調（フレーム）
+    int lastPress[kPressCount] = { -999, -999, -999, -999, -999, -999, -999 }; // 最後に押したフレーム（0〜4=スライダー 5=輪 6=四角）
+    int flash = 0;                   // 「リセット」を押した直後の強調（フレーム）
 };
 
 struct PanelInput {
@@ -295,10 +302,6 @@ struct PanelResult {
 };
 
 inline int PanelX(int windowW) { return windowW - 240; }
-
-inline bool InPanel(int windowW, int mx, int my) {
-    return mx >= PanelX(windowW) - 6 && my >= kTitleY - 4 && my <= kPanelBottom;
-}
 
 inline int WheelCX(int windowW) { return PanelX(windowW) + 60; }
 
@@ -395,6 +398,11 @@ inline Rect SwatchRect(int w) { return { kSecInX2(w) - 34, kPickBottom - 34, kSe
 const int kFineY0 = 362, kFinePitch = 46, kFineRowH = 40;
 inline int FineTrackX1(int w) { return kSecInX1(w) + 4; }
 inline int FineTrackX2(int w) { return kSecInX2(w) - 4; }
+
+// マウスが「画面全体」の枠の中か（枠の線の上も含む）。枠の中のクリック・ホイールは背後の編集操作へ回さない
+inline bool InPanel(int w, int mx, int my) {
+    return mx >= kSecX1(w) && mx <= kSecX2(w) && my >= kSecTop && my <= kSecBottom;
+}
 
 // パネルのどの部品の上か。HitPart の結果で、Update はどの操作を始めるかを決める
 enum PickPart {
@@ -505,106 +513,146 @@ inline void NowColor(const PanelState& s, float& r, float& g, float& b) {
     }
 }
 
-// 入力を処理して PanelState を書き換える。locked＝このステージでは画面エフェクトが封印されている
+// 「細かい調整」のスライダー i（1〜4。Slider(i) の添字）の値を、マウスのX座標から決める。
+// 溝の左端＝下限、右端＝上限。初期値の近く（幅の2.5%）ではぴたりと初期値へ吸い付く。色相は1度刻み。
+inline float FineSliderFromX(int i, int mx, int w) {
+    const SliderInfo& si = Slider(i);
+    float t = (float)(mx - FineTrackX1(w)) / (float)(FineTrackX2(w) - FineTrackX1(w));
+    t = (std::max)(0.0f, (std::min)(1.0f, t));
+    float v = si.lo + (si.hi - si.lo) * t;
+    if (fabsf(v - si.def) < (si.hi - si.lo) * 0.025f) v = si.def;
+    if (i == 3) v = roundf(v);
+    return v;
+}
+
+// 値が1つでも変わったか（Update の「changed」を正しく返すため）
+inline bool SameValues(const PanelState& a, const PanelState& b) {
+    return a.bright == b.bright && a.contrast == b.contrast && a.saturation == b.saturation && a.hue == b.hue
+        && a.temperature == b.temperature && a.tintHue == b.tintHue && a.tintAmount == b.tintAmount;
+}
+
+// 入力を処理して PanelState を書き換える。locked＝このステージでは画面エフェクトが封印されている。
+// 流れは今までと同じ：
+//   1. つかんでいる部品があれば、離すまで動かし続ける（枠の外へ出てもつかんだまま）
+//   2. 枠の外のマウスは相手にしない（背後の編集操作へ回す）
+//   3. ホイール：乗っている部品を少しずつ動かす（四角＝明るさ、輪＝色相、スライダー＝その値）
+//   4. 押した瞬間：押した部品の操作を始める
+// 部品の場所は HitPart（4-A章）で決める。描画も同じ配置を見るので、見た目と当たり判定がずれない。
 inline PanelResult Update(PanelState& st, PanelUi& ui, const PanelInput& in, bool locked, int windowW) {
     PanelResult res;
     ui.frame++;
     if (ui.flash > 0) ui.flash--;
-    const int px = PanelX(windowW);
-    const int wcx = WheelCX(windowW);
-    bool inside = InPanel(windowW, in.mx, in.my);
+    const int w = windowW;
+    const PanelState before = st;
 
-    // ドラッグ中の更新（枠の外へ出ても握ったまま）
+    // 1. ドラッグ中の更新
     if (ui.drag >= 0) {
         if (!in.down || locked) {
             ui.drag = -1;
         } else {
             res.consumed = true;
             res.dragging = true;
-            if (ui.drag < kSliderCount) {
-                float nv = SliderFromX(ui.drag, in.mx, px);
-                if (nv != SliderValue(st, ui.drag)) { SliderValue(st, ui.drag) = nv; res.changed = true; }
-            } else {
-                PanelState before = st;
-                WheelFromMouse(st, in.mx, in.my, wcx, kWheelCY);
-                if (before.tintHue != st.tintHue || before.tintAmount != st.tintAmount) res.changed = true;
-            }
+            if (ui.drag == kDragRing)        HueFromMouse(st, in.mx, in.my, w);
+            else if (ui.drag == kDragSquare) SquareFromMouse(st, in.mx, in.my, w);
+            else if (ui.drag >= 1 && ui.drag < kSliderCount) SliderValue(st, ui.drag) = FineSliderFromX(ui.drag, in.mx, w);
+            res.changed = !SameValues(before, st);
             return res;
         }
     }
 
-    if (!inside) return res;
+    // 2. 枠の外は相手にしない
+    if (!InPanel(w, in.mx, in.my)) return res;
 
-    // パネルの上でのクリック・ホイールは、背後の編集操作（オブジェクト選択や拡縮）へ回さない
+    // 枠の上でのクリック・ホイールは、背後の編集操作（物の選択・ホイール拡縮・射撃）へ回さない。
+    // 封印されたステージでも「押したこと」は使い切る（押した先の物が選ばれてしまわないように）
     if (in.pressed || in.wheel != 0) res.consumed = true;
     if (locked) return res;
 
-    // ホイール：ポインタが乗っている項目を微調整
+    const PickPart part = HitPart(ui.tab, w, in.mx, in.my);
+
+    // 3. ホイール：乗っている部品を微調整する
     if (in.wheel != 0) {
-        for (int i = 0; i < kSliderCount; i++) {
-            int ry = kSliderY0 + i * kSliderPitch;
-            if (in.my >= ry && in.my < ry + kSliderPitch) {
-                const SliderInfo& si = Slider(i);
-                float nv = (std::max)(si.lo, (std::min)(si.hi, SliderValue(st, i) + si.wheelStep * (float)in.wheel));
-                if (fabsf(nv - si.def) < si.wheelStep * 0.5f) nv = si.def;
-                SliderValue(st, i) = nv; res.changed = true;
-                return res;
-            }
+        if (part == PICK_SQUARE) {
+            // 四角の上は明るさ（縦の軸）。1.0 を通り過ぎるときは 1.0 でぴたりと止める
+            float nv = (std::max)(kBrightMin, (std::min)(kBrightMax, st.bright + 0.05f * (float)in.wheel));
+            if (fabsf(nv - 1.0f) < 0.025f) nv = 1.0f;
+            st.bright = nv;
+        } else if (part == PICK_RING) {
+            // 輪の上は色相を 5 度ずつ回す
+            st.tintHue = WrapDeg(st.tintHue + 5.0f * (float)in.wheel);
+        } else if (part >= PICK_FINE0) {
+            const int i = (int)(part - PICK_FINE0) + 1;
+            const SliderInfo& si = Slider(i);
+            float nv = (std::max)(si.lo, (std::min)(si.hi, SliderValue(st, i) + si.wheelStep * (float)in.wheel));
+            if (fabsf(nv - si.def) < si.wheelStep * 0.5f) nv = si.def;
+            SliderValue(st, i) = nv;
         }
-        float dx = (float)(in.mx - wcx), dy = (float)(in.my - kWheelCY);
-        if (sqrtf(dx * dx + dy * dy) <= (float)kWheelR + 10.0f) {
-            st.tintAmount = (std::max)(0.0f, (std::min)(1.0f, st.tintAmount + 0.05f * (float)in.wheel));
-            res.changed = true;
-        }
+        res.changed = !SameValues(before, st);
         return res;
     }
 
     if (!in.pressed) return res;
 
-    // 全リセット
-    if (Hit(ResetAllRect(px), in.mx, in.my)) {
-        Reset(st); ui.flash = 12; res.changed = true; return res;
-    }
-    // 赤・緑・青・なし
-    for (int i = 0; i < 4; i++) {
-        if (Hit(QuickRect(px, i), in.mx, in.my)) {
-            SetQuickFilter(st, i == 3 ? 0 : i + 1); res.changed = true; return res;
-        }
-    }
-    // スライダー（押した瞬間にその場へ飛び、握ったまま動かせる。短い間隔の2回押しは初期値へ戻す）
-    for (int i = 0; i < kSliderCount; i++) {
-        int ry = kSliderY0 + i * kSliderPitch;
-        if (in.my >= ry && in.my < ry + kSliderPitch) {
-            if (ui.frame - ui.lastPress[i] <= 20) {
-                SliderValue(st, i) = Slider(i).def; res.changed = true; ui.lastPress[i] = -999;
-                return res;
+    // 4. 押した瞬間
+    switch (part) {
+        case PICK_TAB_COLOR: ui.tab = 0; return res;
+        case PICK_TAB_FINE:  ui.tab = 1; return res;
+        case PICK_RESET_ALL:
+            // 見出しの「リセット」：細かい調整も含めて、全部を初期値へ
+            Reset(st); ui.flash = 12;
+            break;
+        case PICK_SWATCH_RESET:
+            // 右下の2色：明るさと色フィルタだけ元に戻す（細かい調整はそのまま）
+            st.bright = 1.0f; st.tintAmount = 0.0f;
+            break;
+        case PICK_ARC_R: case PICK_ARC_G: case PICK_ARC_B:
+            // 判定の弧・四隅の文字：その色に、強さいっぱいでぴったり合わせる（Tキーと同じ状態）
+            SetQuickFilter(st, (int)(part - PICK_ARC_R) + 1);
+            break;
+        case PICK_SQUARE:
+            // 短い間隔の2回押しは、明るさと強さを初期値へ
+            if (ui.frame - ui.lastPress[kPressSquare] <= 20) {
+                st.bright = 1.0f; st.tintAmount = 0.0f; ui.lastPress[kPressSquare] = -999;
+                break;
             }
-            ui.lastPress[i] = ui.frame;
-            // ラベルの行（上段）を押しても値は飛ばさない。以前は行全体が当たり判定で、
-            // 項目名を押しただけで値が動いていた。値を動かすのは溝（バー）の高さから。
-            // ダブルクリックでの初期値戻しは、ラベルの上でも効く（上の分岐）。
-            if (in.my < ry + 14) return res;
-            ui.drag = i;
-            SliderValue(st, i) = SliderFromX(i, in.mx, px);
-            res.changed = true; res.dragging = true;
-            return res;
-        }
-    }
-    // 色の輪
-    {
-        float dx = (float)(in.mx - wcx), dy = (float)(in.my - kWheelCY);
-        if (sqrtf(dx * dx + dy * dy) <= (float)kWheelR + 4.0f) {
-            if (ui.frame - ui.lastPress[kSliderCount] <= 20) {
-                st.tintAmount = 0.0f; res.changed = true; ui.lastPress[kSliderCount] = -999;
-                return res;
+            ui.lastPress[kPressSquare] = ui.frame;
+            ui.drag = kDragSquare;
+            SquareFromMouse(st, in.mx, in.my, w);
+            res.dragging = true;
+            break;
+        case PICK_RING:
+            // 短い間隔の2回押しは、色フィルタを外す（今までの色の輪と同じ）
+            if (ui.frame - ui.lastPress[kPressRing] <= 20) {
+                st.tintAmount = 0.0f; ui.lastPress[kPressRing] = -999;
+                break;
             }
-            ui.lastPress[kSliderCount] = ui.frame;
-            ui.drag = 10;
-            WheelFromMouse(st, in.mx, in.my, wcx, kWheelCY);
-            res.changed = true; res.dragging = true;
-            return res;
-        }
+            ui.lastPress[kPressRing] = ui.frame;
+            ui.drag = kDragRing;
+            HueFromMouse(st, in.mx, in.my, w);
+            // 色フィルタをかけていないときに輪を押したら、強さをいっぱいにする
+            // （色を選んだのに何も起きない、を作らない。強さは四角の横で弱められる）
+            if (!TintActive(st)) st.tintAmount = 1.0f;
+            res.dragging = true;
+            break;
+        default:
+            if (part >= PICK_FINE0) {
+                const int i = (int)(part - PICK_FINE0) + 1;
+                const int rowTop = kFineY0 + (i - 1) * kFinePitch;
+                if (ui.frame - ui.lastPress[i] <= 20) {
+                    SliderValue(st, i) = Slider(i).def; ui.lastPress[i] = -999;
+                    break;
+                }
+                ui.lastPress[i] = ui.frame;
+                // ラベルの行（上の14px）を押しても値は飛ばさない。値を動かすのは溝の高さから
+                // （ダブルクリックでの初期値戻しは、ラベルの上でも効く＝上の分岐）
+                if (in.my < rowTop + 14) return res;
+                ui.drag = i;
+                SliderValue(st, i) = FineSliderFromX(i, in.mx, w);
+                res.dragging = true;
+            }
+            break;
     }
+    res.changed = !SameValues(before, st);
     return res;
 }
 
