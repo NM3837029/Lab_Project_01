@@ -16523,8 +16523,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
 
             // 右パネル（インスペクター＋カラー補正）。左のアイコンバーと同じ、暗い平らな下地とモニター側の青い縁
-            DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH, WINDOW_HEIGHT - 100, EditPanel::ColBack(), TRUE);
-            DrawBox(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH - Insp::PANEL_W + 3, WINDOW_HEIGHT - 100, EditPanel::ColEdge(), TRUE);
+            // 地は face、モニター側の縁は立体の線（暗い線の右に明るい線＝盛り上がったパネルの左端）
+            UiTheme::Fill({ WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_WIDTH - 1, WINDOW_HEIGHT - 101 }, UiTheme::P().face);
+            UiTheme::VLine(WINDOW_WIDTH - Insp::PANEL_W, 0, WINDOW_HEIGHT - 101, UiTheme::P().dark);
+            UiTheme::VLine(WINDOW_WIDTH - Insp::PANEL_W + 1, 0, WINDOW_HEIGHT - 101, UiTheme::P().hilite);
             // 下部パネル（タイムライン）。左のバー・右のパネルと同じ、暗い平らな下地と、モニター側（上辺）の青い縁
             DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT, EditPanel::ColBack(), TRUE);
             DrawBox(0, WINDOW_HEIGHT - 100, WINDOW_WIDTH, WINDOW_HEIGHT - 97, EditPanel::ColEdge(), TRUE);
@@ -16672,67 +16674,65 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             }
             }
 
-            // 右パネル上半分：青い枠「選んだ物」（選んだ物のカード＋3列の大きなタイル。2026-11-26 作り直し）。
-            // テスターから「ボタンが小さく、何に対してできるのか分かりにくい」と言われたため、
-            //   ・青い枠でひとまとめにし、見出し「選んだ物」と選んだ物のカード（モニターの選択の角かっこと同じ青）を上に置く
-            //   ・操作は大きなタイルにし、ドラッグする値のタイルには小さな帯、マウスが乗ると「◀ ドラッグ ▶」を出す
+            // 右パネル上半分：「選んだ物」の枠（選んだ物のカード＋3列の大きなタイル）。
+            // 2026-11-26：テスターの「ボタンが小さく、何に対してできるのか分かりにくい」を受けてカードと大きなタイルにし、
+            // そのあと「AIっぽい」を受けて、2000年代の編集ソフト風の見た目（UiTheme）で描くようにした。
+            //   暗い灰色：タブ「選んだ物」の付いたページ　　明るい灰色：見出しバー「プロパティ」＋グループ枠「選んだ物」
             // タイルの位置は InspLayout.h の表から決める（クリック判定・指差しカーソルと同じ表なので、見た目と当たりがずれない）。
             {
                 const bool canEdit = objectEditOpEnabled;
                 const bool hasSel = (selectedType != SELECT_NONE);
-                const unsigned int inkMain = EditPanel::ColInk(), inkSub = EditPanel::ColInkSub(), inkDim = GetColor(120, 124, 140);
-                const unsigned int inkAcc = EditPanel::ColInkAccent(), blue = GetColor(120, 190, 255);
+                const UiTheme::Palette& tp = UiTheme::P();
+                const bool themeDark = (UiTheme::Current() == UiTheme::DARK);
+                const unsigned int inkMain = UiTheme::Col(tp.ink), inkSub = UiTheme::Col(tp.inkSub), inkDim = UiTheme::Col(tp.inkDim);
+                const unsigned int inkAcc = UiTheme::Col(tp.hot);
                 SyncInspMode();
 
-                // 枠と見出し
-                EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1, Insp::SEC_X2, Insp::SEC_Y2 }, blue, GetColor(50, 47, 56));
-                EditPanel::DrawSectionHeader(Insp::CX1, Insp::HEADER_Y, "選んだ物", blue, inkAcc);
-                if (canEdit) {
-                    const char* hint = "右クリックで選ぶ";
-                    EditPanel::DrawText(Insp::CX2 - EditPanel::TextWidth(hint, 11), Insp::HEADER_Y + 2, hint, GetColor(154, 162, 188), 11);
+                // 枠と見出し（中身の矩形は見た目によって上端が違う：暗い灰色はタブの下から、明るい灰色は見出しバーの下から）
+                if (themeDark) {
+                    EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1 + 12, Insp::SEC_X2, Insp::SEC_Y2 }, "選んだ物");
+                } else {
+                    UiTheme::Caption({ WINDOW_WIDTH - Insp::PANEL_W + 3, 2, WINDOW_WIDTH - 3, 21 }, "プロパティ");
+                    EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1 + 20, Insp::SEC_X2, Insp::SEC_Y2 }, "選んだ物");
                 }
 
                 if (!canEdit) {
                     // 物の編集が封印されたステージ：選ぶこと自体ができないので、使えないことだけを出す
                     EditPanel::DrawLockedState({ Insp::CX1, 40, Insp::CX2, Insp::SEC_Y2 - 10 });
                 } else if (!hasSel) {
-                    // 何も選んでいない：何をすればいいかだけを大きく出す（枠の高さは同じなので、選んでも下の枠は動かない）
+                    // 何も選んでいない：枠の中に小さく一言（選び方は下の状態バー／ヒント行に出る）
                     EditPanel::DrawEmptyState({ Insp::CX1, 40, Insp::CX2, Insp::SEC_Y2 - 10 });
                 } else {
                     // ---- 選んだ物のカード ----
                     // 名前は定義ファイルの名前を「（」で分け、前を太字の名前、後ろを小さな説明にする
                     std::string fullName = "不明";
                     const char* tag = "";
-                    unsigned int tagFg = inkSub, tagBg = GetColor(60, 62, 80);
-                    char tagBuf[32] = "";
+                    char tagBuf[48] = "";
                     int thumbHandle = -1, thumbKind = 0;
                     const size_t totalSelected = selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size();
                     if (totalSelected > 1) {
                         char nb[48]; sprintf_s(nb, sizeof(nb), "%d個まとめて", (int)totalSelected);
-                        fullName = nb; tag = "まとめて"; thumbKind = 2;
+                        fullName = nb; tag = "種類：まとめて編集"; thumbKind = 2;
                     } else if (selectedType == SELECT_PLAYER) {
-                        fullName = "プレイヤー"; tag = "自分"; thumbHandle = playerHandle;
-                        tagFg = GetColor(170, 240, 190); tagBg = GetColor(36, 72, 50);
+                        fullName = "プレイヤー"; tag = "種類：自分"; thumbHandle = playerHandle;
                     } else if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
                         const EnemyDef* ed = FindEnemyDef(targetEnemy->assetId);
                         fullName = (ed && !ed->name.empty()) ? ed->name : EnemyTypeNameJa(targetEnemy->type);
-                        if (targetEnemy->hp > 0) sprintf_s(tagBuf, sizeof(tagBuf), "敵 HP%d", targetEnemy->hp); else sprintf_s(tagBuf, sizeof(tagBuf), "敵");
+                        if (targetEnemy->hp > 0) sprintf_s(tagBuf, sizeof(tagBuf), "種類：敵　HP：%d", targetEnemy->hp); else sprintf_s(tagBuf, sizeof(tagBuf), "種類：敵");
                         tag = tagBuf; thumbHandle = targetEnemy->handle;
-                        tagFg = GetColor(255, 180, 180); tagBg = GetColor(74, 46, 52);
                     } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
                         // 同じCUT_PORTAL型でも、タイムラインカットとワールド配置のワープポータルは別物なので表示名を分ける
                         if (targetGimmick->type == GIMMICK_CUT_PORTAL && targetGimmick->isTimelineCut) {
-                            fullName = "カット区間"; tag = "タイムライン"; thumbKind = 1;
+                            fullName = "カット区間"; tag = "種類：タイムライン"; thumbKind = 1;
                         } else {
                             const GimmickDef* gd = FindGimmickDef(targetGimmick->assetId);
                             fullName = (gd && !gd->name.empty()) ? gd->name : "ギミック";
-                            tag = "ギミック"; thumbHandle = targetGimmick->handle; thumbKind = 1;
+                            tag = "種類：ギミック"; thumbHandle = targetGimmick->handle; thumbKind = 1;
                         }
-                        tagFg = GetColor(240, 215, 154); tagBg = GetColor(62, 58, 42);
                     }
                     std::string name, desc;
                     EditPanel::SplitNameDesc(fullName, name, desc);
-                    EditPanel::DrawTargetCard(Insp::CardBox(), thumbHandle, thumbKind, name, desc, tag, tagFg, tagBg);
+                    EditPanel::DrawTargetCard(Insp::CardBox(), thumbHandle, thumbKind, name, desc, tag);
 
                     // ---- 効いている編集（拡大・加速…）。タイルの「変えた印」にも使う ----
                     EditReaction ins;
@@ -16766,40 +16766,51 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         return EditPanel::HitBox(Insp::RowBox(row), mx, my) ? EditPanel::TILE_HOVER : EditPanel::TILE_NORMAL;
                     };
                     const bool big = !Insp::lookMode;  // 敵・プレイヤーは高さ63の大きなタイル、ギミックは高さ49
-                    const int valueSize = big ? 16 : 14;
+                    // 値の文字の大きさと上端。暗い灰色の大きなタイルだけ 15px、それ以外（低いタイル・明るい灰色の数値欄）は 13px
+                    const int valueSize = (big && themeDark) ? 15 : 13;
                     auto DrawLockMark = [&](const EditPanel::Box& b) {
-                        EditPanel::DrawIcon(EditPanel::ICON_LOCK, b.x2 - 10, b.y1 + 10, GetColor(200, 190, 170));
+                        EditPanel::DrawIcon(EditPanel::ICON_LOCK, b.x2 - 10, b.y1 + 10, inkDim);
                     };
 
                     // 値のタイル（大きさ・角度・速さ）：左上にアイコンと項目名、真ん中に値、下に細い帯。
                     //   fraction … 帯の位置（0〜1）。marker が true なら帯を塗らずに印だけ（角度のように真ん中が基準の値）
-                    //   changed  … 配置したときから変えた（右上に青い点）
-                    //   grabbed  … いまつかんでドラッグしている
+                    //   changed  … 配置したときから変えた（右上に小さな四角の印）
+                    //   grabbed  … いまつかんでドラッグしている（押し込まれたボタンになる）
+                    // 値の見せ方は見た目で変える：暗い灰色＝点線の下線つきの「ホットテキスト」、明るい灰色＝白い数値欄＋「↔」
                     auto ValueTile = [&](int row, EditPanel::Icon icon, const char* label, const char* value,
                                          float fraction, bool marker, bool changed, bool grabbed) {
                         const EditPanel::Box b = Insp::RowBox(row);
                         const EditPanel::TileLook lk = Look(row, grabbed);
                         const bool usable = (lk != EditPanel::TILE_DISABLED);
                         EditPanel::DrawTile(b, lk);
-                        const unsigned int labCol = !usable ? inkDim : (grabbed ? inkAcc : inkSub);
+                        const unsigned int labCol = !usable ? inkDim : ((grabbed && themeDark) ? UiTheme::Col(tp.selInk) : inkMain);
                         EditPanel::DrawIcon(icon, b.x1 + 12, b.y1 + 12, labCol);
-                        EditPanel::DrawText(b.x1 + 24, b.y1 + 5, label, labCol, 11);
+                        EditPanel::DrawText(b.x1 + 24, b.y1 + 5, label, labCol, 12);
                         const char* v = (value != nullptr) ? value : "—";
-                        UiFont::DrawBold(b.x1 + 7, (b.y1 + b.y2) / 2 - valueSize / 2 - (big ? 1 : 0), v,
-                                         !usable ? inkDim : (changed || grabbed ? inkAcc : inkMain), valueSize);
-                        if (changed && usable) DrawCircleAA((float)(b.x2 - 7), (float)(b.y1 + 7), 3.0f, 10, blue, TRUE);
+                        const int vy = b.y1 + (big ? 26 : 20);
+                        if (!usable || value == nullptr) {
+                            UiFont::Draw(b.x1 + 7, vy, v, inkDim, valueSize);
+                        } else if (themeDark) {
+                            UiTheme::HotText(b.x1 + 7, vy, v, valueSize);
+                        } else {
+                            UiTheme::Sunken({ b.x1 + 4, vy - 3, b.x2 - 4, vy + valueSize + 2 }, tp.field);
+                            UiFont::Draw(b.x1 + 8, vy, v, inkAcc, valueSize);
+                            EditPanel::DrawText(b.x2 - 6 - EditPanel::TextWidth("↔", 11), vy + 1, "↔", inkSub, 11);
+                        }
+                        if (changed && usable) DrawBox(b.x2 - 8, b.y1 + 4, b.x2 - 4, b.y1 + 8, inkAcc, TRUE);
                         if (Locked(row)) DrawLockMark(b);
-                        const int ty = b.y2 - 8;
+                        const int ty = b.y2 - 7;
                         if (lk == EditPanel::TILE_HOVER) {
                             // 乗っている間は、帯の代わりに「左右にドラッグ」と書く
-                            EditPanel::DrawText((b.x1 + b.x2) / 2 - EditPanel::TextWidth("◀ ドラッグ ▶", 10) / 2, b.y2 - 15, "◀ ドラッグ ▶", inkMain, 10);
+                            EditPanel::DrawText((b.x1 + b.x2) / 2 - EditPanel::TextWidth("◀ ドラッグ ▶", 11) / 2, b.y2 - 16, "◀ ドラッグ ▶", inkMain, 11);
                         } else if (usable && value != nullptr) {
+                            // いまの位置の細い目盛り：溝の線の上に、値の所までの線（角度は真ん中が基準なので印だけ）
                             const int x1 = b.x1 + 7, x2 = b.x2 - 7;
                             const float f = (std::max)(0.0f, (std::min)(1.0f, fraction));
-                            DrawBox(x1, ty, x2, ty + 3, GetColor(85, 88, 110), TRUE);
+                            UiTheme::Etched(x1, x2, ty);
                             const int fx = x1 + (int)((float)(x2 - x1) * f);
-                            if (marker) DrawBox(fx - 1, ty - 2, fx + 1, ty + 5, grabbed || changed ? blue : GetColor(142, 150, 176), TRUE);
-                            else        DrawBox(x1, ty, fx, ty + 3, grabbed || changed ? blue : GetColor(142, 150, 176), TRUE);
+                            if (marker) DrawBox(fx - 1, ty - 3, fx + 2, ty + 3, inkAcc, TRUE);
+                            else        DrawBox(x1, ty - 1, fx + 1, ty + 1, inkAcc, TRUE);
                         }
                     };
                     // 切り替え・巡回のタイル：上にアイコン（無ければ項目名だけ）、真ん中に項目名、下に状態（ON/OFF や今の値）
@@ -16809,14 +16820,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         const bool usable = (lk != EditPanel::TILE_DISABLED);
                         EditPanel::DrawTile(b, lk);
                         const int cx = (b.x1 + b.x2) / 2;
-                        const unsigned int col = !usable ? inkDim : (on ? inkAcc : inkSub);
+                        // ON（押し込まれたボタン）の文字：暗い灰色は選択の色、明るい灰色はふつうの黒
+                        const unsigned int onInk = themeDark ? UiTheme::Col(tp.selInk) : inkMain;
+                        const unsigned int col = !usable ? inkDim : (on ? onInk : inkMain);
                         if (big) {
                             if (icon >= 0) EditPanel::DrawIcon((EditPanel::Icon)icon, cx, b.y1 + 16, col);
-                            EditPanel::DrawCentered(cx, b.y1 + 28, label, !usable ? inkDim : inkMain, 12, false);
-                            EditPanel::DrawCentered(cx, b.y1 + 45, state, !usable ? inkDim : stateCol, 10, false);
+                            EditPanel::DrawCentered(cx, b.y1 + 28, label, col, 12, false);
+                            EditPanel::DrawCentered(cx, b.y1 + 45, state, !usable ? inkDim : (on ? onInk : stateCol), 11, false);
                         } else {
-                            EditPanel::DrawCentered(cx, b.y1 + 7, label, !usable ? inkDim : (on ? inkAcc : inkSub), 11, false);
-                            UiFont::DrawBold(cx - UiFont::WidthBold(state, 13) / 2, b.y1 + 24, state, !usable ? inkDim : (on ? inkAcc : stateCol), 13);
+                            EditPanel::DrawCentered(cx, b.y1 + 7, label, col, 12, false);
+                            UiFont::DrawBold(cx - UiFont::WidthBold(state, 13) / 2, b.y1 + 25, state, !usable ? inkDim : (on ? onInk : stateCol), 13);
                         }
                         if (Locked(row)) DrawLockMark(b);
                     };
@@ -16852,8 +16865,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 一時停止・巻き戻し（この物だけ時間が止まる／戻る）。アイコンは「いまの状態」
                     const bool pausedOn = targetPaused != nullptr && *targetPaused;
                     const bool rewindOn = targetRewind != nullptr && *targetRewind;
-                    StateTile(Insp::ROW_PAUSE, pausedOn ? EditPanel::ICON_PAUSE : EditPanel::ICON_PLAY, "一時停止", pausedOn ? "ON" : "OFF", pausedOn, GetColor(142, 150, 176));
-                    StateTile(Insp::ROW_REWIND, EditPanel::ICON_REWIND, "巻き戻し", rewindOn ? "ON" : "OFF", rewindOn, GetColor(142, 150, 176));
+                    StateTile(Insp::ROW_PAUSE, pausedOn ? EditPanel::ICON_PAUSE : EditPanel::ICON_PLAY, "一時停止", pausedOn ? "ON" : "OFF", pausedOn, inkSub);
+                    StateTile(Insp::ROW_REWIND, EditPanel::ICON_REWIND, "巻き戻し", rewindOn ? "ON" : "OFF", rewindOn, inkSub);
 
                     if (Insp::lookMode) {
                         // ギミックの見た目の4つ（クリックで1段ずつ進む）。変えている項目は青い下地
@@ -16864,7 +16877,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         else                           sprintf_s(lb, sizeof(lb), "±0");
                         sprintf_s(la, sizeof(la), "%d%%", lg ? (int)(GimmickLookAlpha255(lg->lookAlpha) * 100 / 255.0f + 0.5f) : 100);
                         const unsigned int plain = inkMain;
-                        StateTile(Insp::ROW_LOOK_FLIP,   -1, "上下反転", lg && lg->lookFlipV ? "ON" : "OFF", lg && lg->lookFlipV, GetColor(142, 150, 176));
+                        StateTile(Insp::ROW_LOOK_FLIP,   -1, "上下反転", lg && lg->lookFlipV ? "ON" : "OFF", lg && lg->lookFlipV, inkSub);
                         StateTile(Insp::ROW_LOOK_HUE,    -1, "色相",     lh, lg && lg->lookHue != 0,    plain);
                         StateTile(Insp::ROW_LOOK_BRIGHT, -1, "明るさ",   lb, lg && lg->lookBright != 0, plain);
                         StateTile(Insp::ROW_LOOK_ALPHA,  -1, "透明度",   la, lg && lg->lookAlpha != 0,  plain);
@@ -16897,13 +16910,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         if (ins.moved)         tags.push_back("移動");
                         if (!tags.empty()) {
                             const EditPanel::Box rb = Insp::RowBox(Insp::ROW_REACT);
-                            EditPanel::DrawText(rb.x1 + 1, rb.y1 + 3, "効いている編集", inkSub, 11);
-                            int cx = rb.x1 + EditPanel::TextWidth("効いている編集", 11) + 6;
-                            // 枠の幅に収まる分だけ並べ、入らない分は「…」で切る
+                            EditPanel::DrawText(rb.x1 + 1, rb.y1 + 3, "▼ 効いている編集", inkSub, 11);
+                            int cx = rb.x1 + EditPanel::TextWidth("▼ 効いている編集", 11) + 6;
+                            // 枠の幅に収まる分だけ並べ、入らない分は「…」で切る。札は角の四角い「選ばれている」色の地
                             for (size_t ti = 0; ti < tags.size(); ti++) {
                                 const int need = EditPanel::TextWidth(tags[ti], 11) + 12 + 4;
                                 if (cx + need > rb.x2 - 12 && ti + 1 < tags.size()) { EditPanel::DrawText(cx, rb.y1 + 2, "…", inkSub, 12); break; }
-                                cx = EditPanel::DrawChip(cx, rb.y1 + 1, tags[ti], inkAcc, GetColor(28, 64, 118), GetColor(120, 190, 255), 11) + 4;
+                                cx = EditPanel::DrawChip(cx, rb.y1 + 1, tags[ti], UiTheme::Col(tp.selInk), UiTheme::Col(tp.sel), UiTheme::Col(tp.shadow), 11) + 4;
                             }
                         }
                     }

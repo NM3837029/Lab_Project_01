@@ -47,8 +47,6 @@ const int SEC_Y2 = 286;
 // 枠の中身の左右（枠の線から 7px 内側）
 const int CX1 = SEC_X1 + 7;              // 1048
 const int CX2 = SEC_X2 - 7;              // 1264
-// 見出しの行（青い点＋「選んだ物」）の上端
-const int HEADER_Y = 17;
 // タイルの幅と、タイルどうしの間（3列で CX1〜CX2 をちょうど埋める：68×3 + 6×2 + 3 = 216）
 const int TILE_W = 68, TILE_GAP = 6;
 
