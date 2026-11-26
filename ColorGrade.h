@@ -337,6 +337,174 @@ inline Rect ResetAllRect(int px) { return { px + 146, kTitleY - 2, px + kPanelW 
 inline Rect QuickRect(int px, int i) { return { px + 130 + i * 24, 484, px + 130 + i * 24 + 21, 506 }; }
 inline bool Hit(const Rect& r, int x, int y) { return x >= r.x1 && x <= r.x2 && y >= r.y1 && y <= r.y2; }
 
+// ---------------------------------------------------------------------------
+// 4-A. 「画面全体」の枠（色相の輪＋中の四角）の配置と、マウス→値・値→色の計算
+// ---------------------------------------------------------------------------
+// 【なぜ作り直すか】
+// テスターから「右下の色・明るさがごちゃごちゃして分かりにくい」と言われた。
+// 前/後の帯・スライダー5本・小さな色の輪・ボタン4つ・数値3つ・注意書き2行が同じ重さで並び、
+// ゲームの判定とコストに効く「明るさ」と「色フィルタ」がどれなのか見分けがつかなかった。
+// そこで、ペイントソフトでおなじみの「色相の輪＋中の四角」1つに、効く2つの値をまとめる。
+//   ・外の輪   … 色フィルタの色（tintHue）。向きは今までの色の輪と同じ（右＝赤0度、左上＝緑120度、左下＝青240度）
+//   ・四角の横 … 色フィルタの強さ（tintAmount）。左端＝かけない、右端＝いっぱい
+//   ・四角の縦 … 明るさ（bright）。下端＝0.3、上端＝1.7、真ん中＝1.0（ふつう）
+// 判定に効かない4項目（コントラスト・彩度・色相・色温度）は「細かい調整」タブへ移す。
+//
+// ここに置くのは「どこが何か（配置）」と「マウスの位置→値」「値→色」の計算だけで、DxLib は呼ばない。
+// 描画（Draw）と入力（Update）は、この配置と計算を同じように見ることで、見た目と当たり判定をずらさない。
+// 座標はすべてウィンドウ座標（1280×720）。右端からの距離で決めるので、windowW を受け取る。
+
+// 枠の外形（右パネルの下半分。上の「選んだ物」の枠は y=10〜286 で、その10px下から始まる）
+inline int kSecX1(int w) { return w - 239; }   // 枠の左端x（1280 のとき 1041）
+inline int kSecX2(int w) { return w - 9; }     // 枠の右端x（1280 のとき 1271）
+const int kSecTop    = 296;                     // 枠の上端y
+const int kSecBottom = 610;                     // 枠の下端y（下のタイムラインの帯は 620 から）
+// 枠の中身の左右（枠の線から 8px 内側）
+inline int kSecInX1(int w) { return kSecX1(w) + 8; }   // 1049
+inline int kSecInX2(int w) { return kSecX2(w) - 8; }   // 1263
+// 見出しの行（「画面全体」と、右端の「リセット」ボタン）
+const int kHeadY = 304, kHeadH = 18;
+inline Rect ResetButtonRect(int w) { return { kSecInX2(w) - 54, kHeadY, kSecInX2(w), kHeadY + kHeadH }; }
+// タブの行（左＝色と明るさ、右＝細かい調整。2つの間は 4px あける）
+const int kTabY = 328, kTabH = 22;
+inline Rect TabRect(int w, int i) {
+    const int mid = (kSecInX1(w) + kSecInX2(w)) / 2;
+    return (i == 0) ? Rect{ kSecInX1(w), kTabY, mid - 2, kTabY + kTabH } : Rect{ mid + 2, kTabY, kSecInX2(w), kTabY + kTabH };
+}
+// 輪と四角を置く場所（y=356〜548 の 192px）。中心は枠の中身の左端から 106px
+inline int kRingCX(int w) { return w - 125; }  // 1280 のとき 1155
+const int kRingCY    = 452;
+const int kRingOuter = 91;   // 色相の輪の外側の半径
+const int kRingInner = 77;   // 色相の輪の内側の半径
+const int kArcBand   = 8;    // 輪のすぐ外側の「判定の弧」を押せる幅（細い弧を、押しやすいよう太めに拾う）
+const int kSquare    = 104;  // 中の四角の一辺（内側の半径77の円に収まる大きさ）
+const int kPickTop = 356, kPickBottom = 548;  // 輪と四角を置く場所の上端・下端
+// 四角の左上（右下は +kSquare で、その座標自体は含まない）
+inline int SquareLeft(int w) { return kRingCX(w) - kSquare / 2; }
+inline int SquareTop()       { return kRingCY - kSquare / 2; }
+// 四隅の文字（左上＝緑、右上＝赤、左下＝青）。押すと、その色にぴったり合わせる
+inline Rect CornerLabelRect(int w, int c /* 0=赤 1=緑 2=青 */) {
+    const int x1 = kSecInX1(w), x2 = kSecInX2(w);
+    if (c == 0) return { x2 - 15, kPickTop, x2, kPickTop + 15 };
+    if (c == 1) return { x1, kPickTop, x1 + 15, kPickTop + 15 };
+    return { x1, kPickBottom - 15, x1 + 15, kPickBottom };
+}
+// 右下の2色（手前＝いまの色、後ろ＝元の白）。この34px四方のどこを押しても「元に戻す」
+inline Rect SwatchRect(int w) { return { kSecInX2(w) - 34, kPickBottom - 34, kSecInX2(w), kPickBottom }; }
+// 「細かい調整」タブのスライダー4本（コントラスト・彩度・色相・色温度）。1本ぶんは 40px、間隔 46px
+const int kFineY0 = 362, kFinePitch = 46, kFineRowH = 40;
+inline int FineTrackX1(int w) { return kSecInX1(w) + 4; }
+inline int FineTrackX2(int w) { return kSecInX2(w) - 4; }
+
+// パネルのどの部品の上か。HitPart の結果で、Update はどの操作を始めるかを決める
+enum PickPart {
+    PICK_NONE,
+    PICK_RING,          // 色相の輪
+    PICK_SQUARE,        // 中の四角
+    PICK_ARC_R, PICK_ARC_G, PICK_ARC_B,  // 判定の弧（と四隅の文字）
+    PICK_SWATCH_RESET,  // 右下の2色（元に戻す）
+    PICK_TAB_COLOR, PICK_TAB_FINE,       // タブ
+    PICK_RESET_ALL,     // 見出しの「リセット」
+    PICK_FINE0          // 細かい調整のスライダー。+0〜3 ＝ コントラスト・彩度・色相・色温度
+};
+
+// 輪の中心からの距離と角度（数学の向き：右＝0度、上＝90度）
+inline float RingDist(int w, int mx, int my) {
+    const float dx = (float)(mx - kRingCX(w)), dy = (float)(my - kRingCY);
+    return sqrtf(dx * dx + dy * dy);
+}
+inline float RingAngle(int w, int mx, int my) {
+    return WrapDeg(atan2f(-(float)(my - kRingCY), (float)(mx - kRingCX(w))) * 180.0f / kPi);
+}
+
+// マウスがパネルのどの部品の上か。tab＝いま開いているタブ（0＝色と明るさ、1＝細かい調整）。
+// 調べる順番は「タブ→リセット→右下の2色→四角→輪→判定の弧・四隅の文字→細かい調整のスライダー」。
+// 四角は輪より先に見る（四角の角は輪の内側の近くにあるので、四角を優先しないと角が押しにくい）。
+inline PickPart HitPart(int tab, int w, int mx, int my) {
+    if (Hit(TabRect(w, 0), mx, my)) return PICK_TAB_COLOR;
+    if (Hit(TabRect(w, 1), mx, my)) return PICK_TAB_FINE;
+    if (Hit(ResetButtonRect(w), mx, my)) return PICK_RESET_ALL;
+    if (tab == 0) {
+        if (Hit(SwatchRect(w), mx, my)) return PICK_SWATCH_RESET;
+        if (mx >= SquareLeft(w) && mx < SquareLeft(w) + kSquare && my >= SquareTop() && my < SquareTop() + kSquare) return PICK_SQUARE;
+        const float d = RingDist(w, mx, my);
+        if (d >= (float)(kRingInner - 2) && d <= (float)(kRingOuter + 1)) return PICK_RING;
+        if (d > (float)(kRingOuter + 1) && d <= (float)(kRingOuter + kArcBand)) {
+            // 判定の弧：赤0度・緑120度・青240度それぞれ ±35度（kFilterZoneDeg）の範囲だけ
+            const float a = RingAngle(w, mx, my);
+            const float centers[3] = { 0.0f, 120.0f, 240.0f };
+            for (int i = 0; i < 3; i++) {
+                float dd = fabsf(a - centers[i]);
+                if (dd > 180.0f) dd = 360.0f - dd;
+                if (dd <= kFilterZoneDeg) return (PickPart)(PICK_ARC_R + i);
+            }
+        }
+        for (int c = 0; c < 3; c++) if (Hit(CornerLabelRect(w, c), mx, my)) return (PickPart)(PICK_ARC_R + c);
+        return PICK_NONE;
+    }
+    // 細かい調整のタブ：スライダーの行（ラベルの行と溝を合わせた 40px）
+    if (mx >= kSecInX1(w) && mx <= kSecInX2(w)) {
+        for (int k = 0; k < 4; k++) {
+            const int y = kFineY0 + k * kFinePitch;
+            if (my >= y && my < y + kFineRowH) return (PickPart)(PICK_FINE0 + k);
+        }
+    }
+    return PICK_NONE;
+}
+
+// 輪の上のマウス位置から色相を決める（強さには触らない）
+inline void HueFromMouse(PanelState& s, int mx, int my, int w) {
+    s.tintHue = RingAngle(w, mx, my);
+}
+
+// 四角の上のマウス位置から、強さ（横）と明るさ（縦）を同時に決める。
+// 四角の外へはみ出しても、端の値で止める（つかんだまま枠の外へ出たときのため）。
+// 「かけていない」状態へ戻しやすいよう、強さ0.04未満は0、明るさ1.0±0.035は1.0へ吸い付かせる
+// （0.035は縦の幅の2.5%。今までのスライダーの吸い付きと同じ割合）。
+inline void SquareFromMouse(PanelState& s, int mx, int my, int w) {
+    float tx = (float)(mx - SquareLeft(w)) / (float)(kSquare - 1);
+    float ty = (float)(my - SquareTop()) / (float)(kSquare - 1);
+    tx = (std::max)(0.0f, (std::min)(1.0f, tx));
+    ty = (std::max)(0.0f, (std::min)(1.0f, ty));
+    float amount = tx;
+    float bright = kBrightMax - (kBrightMax - kBrightMin) * ty;
+    if (amount < 0.04f) amount = 0.0f;
+    if (fabsf(bright - 1.0f) <= 0.035f) bright = 1.0f;
+    s.tintAmount = amount;
+    s.bright = bright;
+}
+
+// 値から四角の上の位置（つまみを描く場所）を求める。SquareFromMouse の逆
+inline void SquarePos(float amount, float bright, int w, int& x, int& y) {
+    const float tx = (std::max)(0.0f, (std::min)(1.0f, amount));
+    const float ty = (std::max)(0.0f, (std::min)(1.0f, (kBrightMax - bright) / (kBrightMax - kBrightMin)));
+    x = SquareLeft(w) + (int)lroundf(tx * (float)(kSquare - 1));
+    y = SquareTop() + (int)lroundf(ty * (float)(kSquare - 1));
+}
+
+// 四角の右端の色＝その色相で「強さいっぱい」にしたとき画面に掛かる乗算の色（色温度は含めない）。
+// 四角の塗りは、左端の白からこの色へ横に変わる。
+inline void SquareEdgeColor(float tintHue, float& r, float& g, float& b) {
+    PanelState t;
+    t.tintHue = tintHue;
+    t.tintAmount = 1.0f;
+    TintMultiplier(t, r, g, b);
+}
+
+// いま画面に掛かっている色（右下の手前の色）。色フィルタ・色温度の乗算に、明るさを掛ける。
+// 明るさが1を超える分は「白より明るい色」になって描けないので、白へ寄せて薄くした色で表す
+// （1.7 のとき、残りの半分だけ白へ寄せる）。
+inline void NowColor(const PanelState& s, float& r, float& g, float& b) {
+    TintMultiplier(s, r, g, b);
+    const float br = s.bright;
+    if (br <= 1.0f) {
+        r *= br; g *= br; b *= br;
+    } else {
+        const float k = (br - 1.0f) / (kBrightMax - 1.0f) * 0.5f;
+        r += (1.0f - r) * k; g += (1.0f - g) * k; b += (1.0f - b) * k;
+    }
+}
+
 // 入力を処理して PanelState を書き換える。locked＝このステージでは画面エフェクトが封印されている
 inline PanelResult Update(PanelState& st, PanelUi& ui, const PanelInput& in, bool locked, int windowW) {
     PanelResult res;
