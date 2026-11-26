@@ -402,6 +402,31 @@ inline void DrawLockedState(const Box& b) {
     DrawCentered(cx, cy + 12, "物の編集が封印されています", GetColor(255, 220, 160), 12, false);
 }
 
+// ---- モニター上の選択の角かっこ ----
+// 選んだ物を、四隅だけの「角かっこ」で囲む（以前は黄色い四角の枠だった）。
+// 色を右パネルの「選んだ物」の青い枠・カードの縁と同じにして、「パネルのボタンはこの物に効く」とつなげて見せる。
+// 角の長さは短い辺の1/4。小さな物でも見えるよう最小6px、大きな物でもうるさくならないよう最大14px。
+inline int BracketLen(int w, int h) {
+    const int shortSide = (w < h) ? w : h;
+    int len = shortSide / 4;
+    if (len < 6) len = 6;
+    if (len > 14) len = 14;
+    return len;
+}
+
+// 角かっこを描く。どんな背景でも見えるよう、先に暗い縁（太さ4）を描き、その上に色の線（太さ2）を重ねる
+inline void DrawCornerBrackets(int x1, int y1, int x2, int y2, unsigned int col, unsigned int edge) {
+    const int len = BracketLen(x2 - x1, y2 - y1);
+    for (int pass = 0; pass < 2; pass++) {
+        const unsigned int c = (pass == 0) ? edge : col;
+        const int th = (pass == 0) ? 4 : 2;
+        DrawLine(x1, y1, x1 + len, y1, c, th); DrawLine(x1, y1, x1, y1 + len, c, th);   // 左上
+        DrawLine(x2, y1, x2 - len, y1, c, th); DrawLine(x2, y1, x2, y1 + len, c, th);   // 右上
+        DrawLine(x1, y2, x1 + len, y2, c, th); DrawLine(x1, y2, x1, y2 - len, c, th);   // 左下
+        DrawLine(x2, y2, x2 - len, y2, c, th); DrawLine(x2, y2, x2, y2 - len, c, th);   // 右下
+    }
+}
+
 // 選んだ物のカード：左に絵、右に太字の名前と小さな説明、右上に種類の札（敵 HP3／ギミック／自分…）。
 // 縁は青い2px で、モニターの上の選択の角かっこと同じ色にして「この物の編集」だと分かるようにする。
 // kind は DrawThumb と同じ（0=なし 1=ブロック 2=複数）。

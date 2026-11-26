@@ -15423,19 +15423,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
               WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 40, hpb, GetColor(130, 255, 130)); }
         }
 
-        // 選択枠の描画
+        // 選択枠の描画。四隅だけの青い「角かっこ」で囲む（右パネルの「選んだ物」の枠・カードの縁と同じ青）。
+        // 以前は黄色い四角の枠だったが、パネルのボタンが「どの物に効くか」を色でつなげるため、パネルと同じ色にした。
+        // どんな背景でも見えるよう、暗い縁を付けて描く（EditPanel::DrawCornerBrackets）。
         if (isEditMode) {
+            const unsigned int selCol = GetColor(120, 190, 255), selEdge = GetColor(16, 20, 32);
             for (auto* p : selectedPlayers) {
-                DrawBox((int)(p->x - cameraX), (int)(p->y - cameraY), (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale - cameraY), GetColor(255, 255, 0), FALSE);
+                EditPanel::DrawCornerBrackets((int)(p->x - cameraX), (int)(p->y - cameraY), (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale - cameraY), selCol, selEdge);
             }
             for (auto* e : selectedEnemies) {
                 if (e->isActive) {
-                    DrawBox((int)(e->x - cameraX), (int)(e->y - cameraY), (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale - cameraY), GetColor(255, 255, 0), FALSE);
+                    EditPanel::DrawCornerBrackets((int)(e->x - cameraX), (int)(e->y - cameraY), (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale - cameraY), selCol, selEdge);
                 }
             }
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
-                    DrawBox((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), GetColor(255, 255, 0), FALSE);
+                    EditPanel::DrawCornerBrackets((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), selCol, selEdge);
 
                     // 大きさを変える「つまみ」。右辺が横幅、上辺が縦幅。
                     // 引っぱれない相手には出さない（出ているのに動かない、を作らないため）。
