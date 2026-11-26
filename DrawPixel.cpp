@@ -53,6 +53,7 @@ bool isDedicatedEditorMode = false;
 #include "AnimationController.h"
 #include "BehaviorScript.h"
 #include "UiFont.h" // 小さな文字用のフォントキャッシュ（SetFontSize を毎フレーム呼ぶと極端に重い）
+#include "UiTheme.h" // プレイ画面のまわりの見た目（2000年代の編集ソフト風。暗い灰色／明るい灰色を設定で切り替える）
 #include "ColorGrade.h" // カラー補正パネルの計算・描画。色の計算（HsvToRgb）はパーツの色相モーションも使う
 // マウス座標は、ウィンドウを拡大していても画面（1280x720）の座標で受け取る
 #define GetMousePoint(a, b) DisplayMode::GetMousePointFixed(a, b)
@@ -5086,6 +5087,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 初回起動ではファイルが無いので false が返るが、それは正常な状態。
     GameCfg::SaveData saveData;
     GameCfg::LoadSaveData(saveData);
+    // 画面の見た目は、セーブに残っている選択から始める（無ければ暗い灰色）。Esc メニューの「設定」で変えられる
+    UiTheme::Set(UiTheme::ParseId(saveData.uiTheme));
     {
         // Feature 5: コモンイベント定義の読み込み。CallCommonEventアクションから参照される。
         std::ifstream cef("assets/common_events.json");
