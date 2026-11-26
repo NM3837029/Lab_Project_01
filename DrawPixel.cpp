@@ -2989,12 +2989,23 @@ bool IsGimmickEditLockedByAsset(const Gimmick& g, EditOp op) {
     if (g.lockOv.v[op] >= 0) return g.lockOv.v[op] == 1;
     return IsDefEditLocked(FindGimmickDef(g.assetId), op);
 }
-// プレイヤーがこの物にこの操作をできないか（ステージで禁止されている、または物側で禁止されている）。
-// プレイヤーの編集の入口（ドラッグ・ホイール・つまみ・インスペクター・円形メニュー）は、すべてこちらを見る。
+// プレイヤーがこの物にこの操作をできないか。プレイヤーの編集の入口（ドラッグ・ホイール・つまみ・
+// インスペクター・円形メニュー）は、すべてこちらを見る。
+//
+// 優先順位（強い順）：
+//   1. 置いた物ごとの設定（Lab_Editor の右クリック「編集の可否を設定...」で「許可」「禁止」を選んだもの）
+//   2. ステージの設定（マップ設定タブの「個別オブジェクト編集」の下の操作ごとのチェック）
+//   3. アセットの設定（アセット管理の「ゲーム内の編集の禁止」）
+// 【不具合の修正】以前はステージの禁止がいちばん強く、置いた物で「許可」を選んでも効かなかった。
+// そのため「このステージでは基本的に動かせない。ただしこの箱だけは十字に動かせる」という作り方ができず、
+// ステージの「移動」を外したステージでは、移動を許可して十字・X字にした箱がまったく動かなかった。
+// 置いた物ごとの設定は、その1つのためにわざわざ選んだものなので、ステージ全体の設定より優先する。
 bool IsEnemyEditLocked(const Enemy& e, EditOp op) {
+    if (e.lockOv.v[op] >= 0) return e.lockOv.v[op] == 1;
     return StageBansEditOp(op) || IsEnemyEditLockedByAsset(e, op);
 }
 bool IsGimmickEditLocked(const Gimmick& g, EditOp op) {
+    if (g.lockOv.v[op] >= 0) return g.lockOv.v[op] == 1;
     return StageBansEditOp(op) || IsGimmickEditLockedByAsset(g, op);
 }
 
@@ -5894,15 +5905,32 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
 
     // インスペクターの行が「いま操作できる行か」。対象ポインタが nullptr の行は、その対象では意味を持たない
     // （＝押しても何も起きない）ので操作できない。クリック処理と指差しカーソルの両方が同じ判定を見る。
+    // 選んでいる物のうち、1つでもこの操作ができるものがあるか。
+    // ステージで禁止されていても、置いた物ごとに「許可」された物は使える（IsEnemyEditLocked の優先順位を参照）ので、
+    // インスペクターの行・円形メニューの項目・各操作の入口は、ステージの設定だけでなく選んだ物を見て決める。
+    // プレイヤー自身には置いた物ごとの設定が無いので、ステージの設定と自分へのロック（player_locks）で決まる。
+    auto SelectionAllowsOp = [&](EditOp op) -> bool {
+        if (!selectedPlayers.empty()) {
+            bool playerOk = !StageBansEditOp(op);
+            if (op == EDITOP_MOVE && currentPlayerLocks.noMove) playerOk = false;
+            if (op == EDITOP_SCALE && currentPlayerLocks.noScale) playerOk = false;
+            if (op == EDITOP_ROTATE && currentPlayerLocks.noRotate) playerOk = false;
+            if (playerOk) return true;
+        }
+        for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, op)) return true;
+        for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, op)) return true;
+        return false;
+    };
     // ステージで禁止されている操作（ObjectEditOps）の行も、使えない（灰色）にする。
+    // ただし選んだ物が置いた物ごとに「許可」されていれば使える（SelectionAllowsOp）。
     auto InspRowUsable = [&](int row) -> bool {
         const ObjectEditOps& ops = g_stageObjectOps;
         switch (row) {
-            case Insp::ROW_SCALE:  return targetScale != nullptr && ops.scale;
-            case Insp::ROW_ANGLE:  return targetAngle != nullptr && ops.rotate;
-            case Insp::ROW_SPEED:  return targetSpeedScale != nullptr && ops.speed;
-            case Insp::ROW_PAUSE:  return targetPaused != nullptr && ops.pause;
-            case Insp::ROW_REWIND: return targetRewind != nullptr && ops.rewind;
+            case Insp::ROW_SCALE:  return targetScale != nullptr && SelectionAllowsOp(EDITOP_SCALE);
+            case Insp::ROW_ANGLE:  return targetAngle != nullptr && SelectionAllowsOp(EDITOP_ROTATE);
+            case Insp::ROW_SPEED:  return targetSpeedScale != nullptr && SelectionAllowsOp(EDITOP_SPEED);
+            case Insp::ROW_PAUSE:  return targetPaused != nullptr && SelectionAllowsOp(EDITOP_PAUSE);
+            case Insp::ROW_REWIND: return targetRewind != nullptr && SelectionAllowsOp(EDITOP_REWIND);
             case Insp::ROW_TYPE:   return targetEnemyType != nullptr;
             case Insp::ROW_LOOK_HUE: case Insp::ROW_LOOK_BRIGHT: case Insp::ROW_LOOK_ALPHA: case Insp::ROW_LOOK_FLIP:
                 return targetGimmick != nullptr && !targetGimmick->isTimelineCut && ops.look; // 見た目の編集はギミックだけ
@@ -6459,7 +6487,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 以降の EditXxx は、操作の前後を取り消し用に記録する（PushUndo）。コストも一緒に覚えるので、取り消すと全額戻る。
     auto EditTogglePause = [&]() -> bool {
         if (targetPaused == nullptr) return false;
-        if (!g_stageObjectOps.pause) { EditDeniedWhy("このステージでは物ごとの一時停止が使えません"); return false; }
+        if (!SelectionAllowsOp(EDITOP_PAUSE)) { EditDeniedWhy(StageBansEditOp(EDITOP_PAUSE) ? "このステージでは物ごとの一時停止が使えません" : "この相手は一時停止できません"); return false; }
         // 円形メニューも、ステージの「一時停止」の許可に従う（以前は、封印したステージでも、メニューから停止できた）
         if (!IsEditToolEnabled(currentEditTools.pauseEnabled, unlockedEditTools.pauseEnabled)) { EditDeniedWhy("このステージでは時間停止が使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
@@ -6467,7 +6495,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
         bool next = !(*targetPaused);
-        for (auto* p : selectedPlayers) p->isPaused = next;
+        if (!StageBansEditOp(EDITOP_PAUSE)) for (auto* p : selectedPlayers) p->isPaused = next;
         for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_PAUSE)) continue; e->isPaused = next; }
         for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_PAUSE)) continue; g->isPaused = next; }
         PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
@@ -6475,7 +6503,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     };
     auto EditToggleRewind = [&]() -> bool {
         if (targetRewind == nullptr) return false;
-        if (!g_stageObjectOps.rewind) { EditDeniedWhy("このステージでは物ごとの巻き戻しが使えません"); return false; }
+        if (!SelectionAllowsOp(EDITOP_REWIND)) { EditDeniedWhy(StageBansEditOp(EDITOP_REWIND) ? "このステージでは物ごとの巻き戻しが使えません" : "この相手は巻き戻せません"); return false; }
         // 円形メニューも、ステージの「巻き戻し」の許可に従う
         if (!IsEditToolEnabled(currentEditTools.rewindEnabled, unlockedEditTools.rewindEnabled)) { EditDeniedWhy("このステージでは巻き戻しが使えません"); return false; }
         if (editCost < currentEditCost.flatMenuToggle) { EditDeniedCost(currentEditCost.flatMenuToggle); return false; }
@@ -6483,7 +6511,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatMenuToggle;
         bool next = !(*targetRewind);
-        for (auto* p : selectedPlayers) p->isRewinding = next;
+        if (!StageBansEditOp(EDITOP_REWIND)) for (auto* p : selectedPlayers) p->isRewinding = next;
         for (auto* e : selectedEnemies) { if (IsEnemyEditLocked(*e, EDITOP_REWIND)) continue; e->isRewinding = next; }
         for (auto* g : selectedGimmicks) { if (IsGimmickEditLocked(*g, EDITOP_REWIND)) continue; g->isRewinding = next; }
         PushUndo(undoBefore, currentEditCost.flatMenuToggle, false);
@@ -6493,8 +6521,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 速度を delta だけ変える（下限0）。動かせる相手が1つも無ければ何もせず拒否音。
     auto EditSpeedStep = [&](float delta) -> bool {
         if (targetSpeedScale == nullptr) return false;
-        if (!g_stageObjectOps.speed) { EditDeniedWhy("このステージでは物の速さを変えられません"); return false; }
-        bool any = !selectedPlayers.empty();
+        if (!SelectionAllowsOp(EDITOP_SPEED)) { EditDeniedWhy(StageBansEditOp(EDITOP_SPEED) ? "このステージでは物の速さを変えられません" : "この相手の速度は変えられません"); return false; }
+        bool any = !selectedPlayers.empty() && !StageBansEditOp(EDITOP_SPEED);
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_SPEED)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_SPEED)) any = true;
         if (!any) { EditDeniedWhy("この相手の速度は変えられません"); return false; }
@@ -6502,7 +6530,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatSpeedChange;
-        for (auto* p : selectedPlayers) { p->speedScale += delta; if (p->speedScale < 0.0f) p->speedScale = 0.0f; }
+        if (!StageBansEditOp(EDITOP_SPEED)) for (auto* p : selectedPlayers) { p->speedScale += delta; if (p->speedScale < 0.0f) p->speedScale = 0.0f; }
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_SPEED)) continue;
             e->speedScale += delta; if (e->speedScale < 0.0f) e->speedScale = 0.0f;
@@ -6521,8 +6549,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     // 選択中の全員を反転し、印も実際に反転した相手にだけ付ける。
     auto EditFlip = [&]() -> bool {
         if (targetDirection == nullptr) return false;
-        if (!g_stageObjectOps.flip) { EditDeniedWhy("このステージでは向きを反転できません"); return false; }
-        bool any = !selectedPlayers.empty();
+        if (!SelectionAllowsOp(EDITOP_FLIP)) { EditDeniedWhy(StageBansEditOp(EDITOP_FLIP) ? "このステージでは向きを反転できません" : "この相手は反転できません"); return false; }
+        bool any = !selectedPlayers.empty() && !StageBansEditOp(EDITOP_FLIP);
         for (auto* e : selectedEnemies) if (!IsEnemyEditLocked(*e, EDITOP_FLIP)) any = true;
         for (auto* g : selectedGimmicks) if (!IsGimmickEditLocked(*g, EDITOP_FLIP)) any = true;
         if (!any) { EditDeniedWhy("この相手は反転できません"); return false; }
@@ -6530,7 +6558,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         FlushWheelUndo();
         std::vector<EditSnap> undoBefore; CaptureSelection(undoBefore);
         editCost -= currentEditCost.flatDirectionFlip;
-        for (auto* p : selectedPlayers) p->direction = (p->direction == 0 ? 1 : 0);
+        if (!StageBansEditOp(EDITOP_FLIP)) for (auto* p : selectedPlayers) p->direction = (p->direction == 0 ? 1 : 0);
         for (auto* e : selectedEnemies) {
             if (IsEnemyEditLocked(*e, EDITOP_FLIP)) continue;
             e->direction = (e->direction == 0 ? 1 : 0);
@@ -6693,7 +6721,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             it.id = id; it.label = label; it.state = state; it.desc = desc; it.icon = icon; it.cost = cost; it.on = on;
             it.enabled = stageOk && applicable && editCost >= cost;
             if (!stageOk) {
-                it.why = "禁止"; it.reason = "このステージでは使えません";
+                it.why = "禁止"; it.reason = "この操作は禁止されています（ステージまたはこの物の設定）";
             } else if (!applicable) {
                 it.why = "使えない"; it.reason = "この物には使えません";
             } else if (editCost < cost) {
@@ -6707,15 +6735,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             return;
         }
         Add(0, "巻き戻し", (targetRewind && *targetRewind) ? "ON" : "OFF", "この物だけ時間を戻す（すり抜け可）",
-            EditPanel::ICON_REWIND, targetRewind != nullptr, currentEditCost.flatMenuToggle, targetRewind && *targetRewind, g_stageObjectOps.rewind);
+            EditPanel::ICON_REWIND, targetRewind != nullptr, currentEditCost.flatMenuToggle, targetRewind && *targetRewind, SelectionAllowsOp(EDITOP_REWIND));
         Add(1, "一時停止", (targetPaused && *targetPaused) ? "ON" : "OFF", "この物だけ時間を止める（踏み台にできる）",
-            EditPanel::ICON_PAUSE, targetPaused != nullptr, currentEditCost.flatMenuToggle, targetPaused && *targetPaused, g_stageObjectOps.pause);
+            EditPanel::ICON_PAUSE, targetPaused != nullptr, currentEditCost.flatMenuToggle, targetPaused && *targetPaused, SelectionAllowsOp(EDITOP_PAUSE));
         Add(2, "加速", "＋0.5", "この物の速さを 0.5倍ぶん上げる",
-            EditPanel::ICON_FAST, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, g_stageObjectOps.speed);
+            EditPanel::ICON_FAST, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, SelectionAllowsOp(EDITOP_SPEED));
         Add(3, "減速", "−0.5", "この物の速さを 0.5倍ぶん下げる",
-            EditPanel::ICON_SLOW, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, g_stageObjectOps.speed);
+            EditPanel::ICON_SLOW, targetSpeedScale != nullptr, currentEditCost.flatSpeedChange, false, SelectionAllowsOp(EDITOP_SPEED));
         Add(4, "反転", "", "この物の向きを左右に反転する",
-            EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false, g_stageObjectOps.flip);
+            EditPanel::ICON_FLIP, targetDirection != nullptr, currentEditCost.flatDirectionFlip, false, SelectionAllowsOp(EDITOP_FLIP));
         Add(5, "リセット", "", "この物の編集をすべて元に戻す",
             EditPanel::ICON_RESET, true, currentEditCost.flatResetAll, false, g_stageObjectOps.reset);
         // レイヤー：選択の先頭の層を状態として見せる。押すたびに 中 → 手前 → 奥 → 中 と進む
@@ -6767,7 +6795,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         if (!items[idx].enabled) {
             // 灰色の項目を選んだとき。コスト不足か、対象がロックされているかで言い分けたいが、
             // 項目側は有効/無効しか持たないので、コストが足りているかだけ見て理由を分ける。
-            if (items[idx].why == "禁止") EditDeniedWhy("このステージでは、この操作は使えません");
+            if (items[idx].why == "禁止") EditDeniedWhy("この操作は禁止されています");
             else if (editCost < currentEditCost.flatMenuToggle) EditDeniedCost(currentEditCost.flatMenuToggle);
             else EditDeniedWhy("この操作は今の対象には使えません");
             return;
