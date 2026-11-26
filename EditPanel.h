@@ -21,6 +21,7 @@
 // ======================================================================
 
 #include "UiFont.h"
+#include "UiTheme.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -28,22 +29,24 @@
 
 namespace EditPanel {
 
-// 矩形（左上と右下。右下も含む）
-struct Box { int x1, y1, x2, y2; };
+// 矩形（左上と右下。右下も含む）。見た目のテーマ（UiTheme.h）と同じ形なので、同じ型を使う
+using Box = UiTheme::Box;
 
 inline bool HitBox(const Box& b, int x, int y) { return x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2; }
 
-// ---- 左バーと同じ配色 ----
-// 色は関数にして、呼ぶたびに GetColor で作る（DxLib の初期化前に色を作らないため）。
-inline unsigned int ColBack()        { return GetColor(46, 42, 40); }     // パネルの下地（左バーと同じ）
-inline unsigned int ColEdge()        { return GetColor(84, 120, 176); }   // モニター側の縁（枠の青と同系色）
-inline unsigned int ColDivider()     { return GetColor(78, 76, 86); }     // 区切り線
-inline unsigned int ColInk()         { return GetColor(238, 240, 250); }  // 主要な文字
-inline unsigned int ColInkSub()      { return GetColor(178, 186, 210); }  // 補助の文字・使えない行
-inline unsigned int ColInkAccent()   { return GetColor(160, 220, 255); }  // 強調（いまつかんでいる項目など）
-inline unsigned int ColInkOk()       { return GetColor(143, 224, 160); }  // 有効・正常を示す緑
-inline unsigned int ColInkWarn()     { return GetColor(255, 200, 80); }   // 注意（停止中・巻き戻し中など）
-inline unsigned int ColGroove()      { return GetColor(60, 62, 80); }     // ボタン・スライダーの溝の下地
+// ---- 色 ----
+// 色は、見た目のテーマ（UiTheme.h、2000年代の編集ソフト風）の表から取る。
+// 設定で暗い灰色／明るい灰色を切り替えると、ここを通して描いている部品も一度に切り替わる。
+// 関数にしてあるのは、呼ぶたびに今の見た目の色を作るため（DxLib の初期化前に色を作らないためでもある）。
+inline unsigned int ColBack()        { return UiTheme::Col(UiTheme::P().face); }    // パネルの地
+inline unsigned int ColEdge()        { return UiTheme::Col(UiTheme::P().dark); }    // パネルの縁（立体の暗い線）
+inline unsigned int ColDivider()     { return UiTheme::Col(UiTheme::P().shadow); }  // 区切り線
+inline unsigned int ColInk()         { return UiTheme::Col(UiTheme::P().ink); }     // 主要な文字
+inline unsigned int ColInkSub()      { return UiTheme::Col(UiTheme::P().inkSub); }  // 補助の文字
+inline unsigned int ColInkAccent()   { return UiTheme::Col(UiTheme::P().hot); }     // 強調（ドラッグで変える値・つかんでいる項目）
+inline unsigned int ColInkOk()       { return UiTheme::Col(UiTheme::P().ok); }      // 有効・正常
+inline unsigned int ColInkWarn()     { return UiTheme::Col(UiTheme::P().warn); }    // 注意（停止中・巻き戻し中など）
+inline unsigned int ColGroove()      { return UiTheme::Col(UiTheme::P().field); }   // 数値欄・溝の地
 
 // 文字の横幅（指定の大きさで測る）
 inline int TextWidth(const char* s, int size) {
@@ -70,16 +73,11 @@ inline std::string FitText(const std::string& src, int maxW, int size) {
 }
 
 // ---- カード（1行ぶんのボタン）----
-//   active … いまつかんでいる／効いている（青く光る）   hover … マウスが重なっている   usable … この対象で操作できる行
-// 見た目は左バーの DrawButton と同じ：平らな下地、上半分の薄いハイライト、1pxの枠。
+//   active … いまつかんでいる／効いている   hover … マウスが重なっている   usable … この対象で操作できる行
+// 2000年代の作法：盛り上がったボタン。効いている間は押し込まれたボタン（hover・usable で形は変えない。文字の色は呼び出し側）
 inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
-    unsigned int back = !usable ? GetColor(50, 50, 56) : active ? GetColor(28, 64, 118) : hover ? GetColor(84, 94, 128) : ColGroove();
-    unsigned int edge = !usable ? GetColor(84, 84, 92) : active ? GetColor(120, 190, 255) : hover ? GetColor(200, 214, 245) : GetColor(124, 134, 168);
-    DrawBox(b.x1, b.y1, b.x2, b.y2, back, TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, usable ? 30 : 12);                       // 上半分を少し明るくして、ボタンらしい厚みを出す
-    DrawBox(b.x1 + 1, b.y1 + 1, b.x2 - 1, (b.y1 + b.y2) / 2, GetColor(255, 255, 255), TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawBox(b.x1, b.y1, b.x2, b.y2, edge, FALSE);
+    (void)hover; (void)usable;
+    if (active) UiTheme::Pressed(b); else UiTheme::Raised(b);
 }
 
 // ---- アイコン（コードで描く）----
@@ -88,7 +86,7 @@ inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
 // ICON_LAYER は、右クリックの扇形メニューの「レイヤー」。既存の番号がずれないよう、末尾に足している
 enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE,
             ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL,
-            ICON_GRID, ICON_KEYS, ICON_POWER, ICON_LAYER };
+            ICON_GRID, ICON_KEYS, ICON_POWER, ICON_LAYER, ICON_LOCK, ICON_GEAR };
 
 // 円弧を細い線の連なりで描く。角度は度で、数学の向き（上が正）。
 inline void DrawArc(float cx, float cy, float r, float a0, float a1, unsigned int col, float th) {
@@ -219,6 +217,25 @@ inline void DrawIcon(Icon k, int cx, int cy, unsigned int col) {
             DrawBox(cx - 9, cy - 3, cx + 3, cy + 7, col, TRUE);
             break;
         }
+        case ICON_GEAR: {
+            // 歯車（設定）：輪と、まわりの8つの歯、真ん中の穴
+            for (int k = 0; k < 8; k++) {
+                const float a = (float)k * 3.14159265f / 4.0f;
+                const int tx = cx + (int)lroundf(cosf(a) * 7.0f), ty = cy - (int)lroundf(sinf(a) * 7.0f);
+                DrawBox(tx - 1, ty - 1, tx + 2, ty + 2, col, TRUE);
+            }
+            DrawCircle(cx, cy, 5, col, TRUE);
+            DrawCircle(cx, cy, 2, GetColor(0, 0, 0), TRUE);
+            break;
+        }
+        case ICON_LOCK: {
+            // 錠前（このステージでは使えない操作）：上の弓形と、下の四角い本体
+            DrawArc((float)cx, (float)cy - 2.0f, 3.5f, 0.0f, 180.0f, col, 1.6f);
+            DrawLine(cx - 3, cy - 2, cx - 3, cy, col, 1);
+            DrawLine(cx + 3, cy - 2, cx + 3, cy, col, 1);
+            DrawBox(cx - 5, cy, cx + 6, cy + 7, col, TRUE);
+            break;
+        }
     }
 }
 
@@ -235,7 +252,8 @@ inline int DrawChip(int x, int y, const char* s, unsigned int fg, unsigned int b
 // ---- 選んだ物の絵の枠 ----
 // handle が有効ならその絵を枠に収めて出す。無効なら、kind の印（0=なにも選んでいない 1=ブロック 2=複数）を描く。
 inline void DrawThumb(const Box& b, int handle, int kind) {
-    DrawBox(b.x1, b.y1, b.x2, b.y2, GetColor(30, 30, 36), TRUE);
+    // 絵の窓：へこんだ黒い窓（当時のプレビューの枠）
+    UiTheme::Sunken(b, UiTheme::P().well);
     const int cx = (b.x1 + b.x2) / 2, cy = (b.y1 + b.y2) / 2;
     if (handle >= 0) {
         int iw = 0, ih = 0;
@@ -264,7 +282,6 @@ inline void DrawThumb(const Box& b, int handle, int kind) {
             DrawLine(cx + 12, cy + o, cx + 12, cy + o + 3, GetColor(110, 116, 140), 1);
         }
     }
-    DrawBox(b.x1, b.y1, b.x2, b.y2, GetColor(124, 134, 168), FALSE);
 }
 
 // ---- 扇形（パイ）の1枚 ----
@@ -290,6 +307,113 @@ inline void DrawPieSector(int cx, int cy, float r0, float r1, float a0, float a1
         DrawLineAA((float)PX(r0, a0), (float)PY(r0, a0), (float)PX(r1, a0), (float)PY(r1, a0), edge, edgeW);
         DrawLineAA((float)PX(r0, a1), (float)PY(r0, a1), (float)PX(r1, a1), (float)PY(r1, a1), edge, edgeW);
     }
+}
+
+// ======================================================================
+// 右パネル上半分「選んだ物」の枠の部品（2026-11-26 の作り直しで追加）
+// ======================================================================
+// テスターから「右上はボタンが小さく、何に対してできるのか分かりにくい」と言われたので、
+// 青い枠でひとまとめにし、選んだ物のカードと3列の大きなタイルで見せる。
+// ここには見た目の部品だけを置き、どのタイルがいつ使えるか・押したら何が起きるかは DrawPixel.cpp が決める。
+// タイルの位置は InspLayout.h の表で決める。
+
+// 定義の名前を「（」の前（名前）と後ろ（説明）に分ける。
+// 例：「回転させる敵（近くの物を回し続ける）」→ 名前「回転させる敵」、説明「近くの物を回し続ける」。
+// 全角の括弧だけを見る（半角の括弧は名前の一部として使われることがあるので分けない）。
+// 先頭が「（」のとき（名前が空になってしまうとき）は分けない。閉じ括弧が無ければ、後ろを全部説明にする。
+inline void SplitNameDesc(const std::string& full, std::string& name, std::string& desc) {
+    static const std::string open = "（", close = "）";
+    const size_t pos = full.find(open);
+    if (pos == std::string::npos || pos == 0) { name = full; desc.clear(); return; }
+    name = full.substr(0, pos);
+    desc = full.substr(pos + open.size());
+    if (desc.size() >= close.size() && desc.compare(desc.size() - close.size(), close.size(), close) == 0) {
+        desc.resize(desc.size() - close.size());
+    }
+}
+
+// 枠（右パネルの「選んだ物」など）。content は中身の矩形（見出しは content の外の上に描く）。
+//   暗い灰色：上にタブ（title）を立て、中身はタブとつながったページ（faceIn の地と立体の縁）。2000年代後半の映像ソフトのパネルの作法
+//   明るい灰色：溝の線のグループ枠と、左上の見出し文字。2000年代前半の Windows の作法
+// 以前は角の丸い枠に半透明の色の縁だったが、「AIっぽい」と言われたのでやめた（2026-11-26）。
+inline void DrawSection(const Box& content, const char* title) {
+    const UiTheme::Palette& p = UiTheme::P();
+    if (UiTheme::Current() == UiTheme::LIGHT) { UiTheme::GroupBox(content, title); return; }
+    const int tw = UiFont::WidthBold(title, 12) + 20;
+    UiTheme::Fill(content, p.faceIn);
+    UiTheme::HLine(content.x1 + tw, content.x2 - 1, content.y1, p.hilite);   // タブの右からページの上の縁
+    UiTheme::VLine(content.x1, content.y1, content.y2 - 1, p.hilite);
+    UiTheme::HLine(content.x1, content.x2, content.y2, p.dark);
+    UiTheme::VLine(content.x2, content.y1, content.y2, p.dark);
+    UiTheme::Tab({ content.x1, content.y1 - 19, content.x1 + tw, content.y1 }, title, true);
+}
+
+// タイルの見た目の状態
+//   TILE_NORMAL … ふつう   TILE_HOVER … マウスが乗っている   TILE_ACTIVE … つかんでいる／ON
+//   TILE_DISABLED … いまは使えない（文字を薄くするのは呼び出し側）
+enum TileLook { TILE_NORMAL, TILE_HOVER, TILE_ACTIVE, TILE_DISABLED };
+
+// タイル：盛り上がったボタン。つかんでいる・ON のときは押し込まれたボタン。
+// 当時のボタンはマウスが乗っても形を変えないので、乗っているときも盛り上がったまま（「◀ ドラッグ ▶」の文字で知らせる）
+inline void DrawTile(const Box& b, TileLook look) {
+    if (look == TILE_ACTIVE) UiTheme::Pressed(b);
+    else                     UiTheme::Raised(b);
+}
+
+// 文字を、左右の真ん中にそろえて描く（size のふつうの太さ／bold で太字）
+inline void DrawCentered(int cx, int y, const char* s, unsigned int col, int size, bool bold) {
+    if (bold) UiFont::DrawBold(cx - UiFont::WidthBold(s, size) / 2, y, s, col, size);
+    else      UiFont::Draw(cx - UiFont::Width(s, size) / 2, y, s, col, size);
+}
+
+// 何も選んでいないとき：枠の中に小さく一言だけ。どうすれば選べるかは、下の状態バー（ヒント）に出す。
+// 以前はマウスの絵と説明文を大きく出していたが、今どきのアプリの作りで「AIっぽい」ので、当時の作法に合わせた
+inline void DrawEmptyState(const Box& b) {
+    DrawCentered((b.x1 + b.x2) / 2, b.y1 + 16, "（何も選んでいません）", UiTheme::Col(UiTheme::P().inkSub), 12, false);
+}
+
+// このステージでは物の編集が封印されているとき：錠前と、使えないことの説明
+inline void DrawLockedState(const Box& b) {
+    const UiTheme::Palette& p = UiTheme::P();
+    const int cx = (b.x1 + b.x2) / 2;
+    DrawIcon(ICON_LOCK, cx, b.y1 + 22, UiTheme::Col(p.inkSub));
+    DrawCentered(cx, b.y1 + 38, "このステージでは", UiTheme::Col(p.inkSub), 12, false);
+    DrawCentered(cx, b.y1 + 54, "物の編集が封印されています", UiTheme::Col(p.inkSub), 12, false);
+}
+
+// 選んだ物のカード：左にへこんだ窓の絵、右に太字の名前・小さな説明・「種類：敵　HP：3」の行。
+// 当時の作法に合わせ、カードそのものには枠を付けず、下に溝の区切り線を引く（以前の青い角丸の枠と丸い札はやめた）。
+// kind は DrawThumb と同じ（0=なし 1=ブロック 2=複数）。
+//   説明がある（敵）  … 1行目＝名前　2行目＝説明　3行目＝種類
+//   説明が無い（ギミック・プレイヤー）… 1行目＝名前　2行目＝種類
+// 名前が入りきらないときは、まず文字を 13px→12px に小さくし、それでも入らないときだけ末尾を「…」にする。
+inline void DrawTargetCard(const Box& b, int handle, int kind, const std::string& name, const std::string& desc,
+                           const char* info) {
+    const UiTheme::Palette& p = UiTheme::P();
+    const int th = (b.y2 - b.y1) - 4;
+    const Box tb = { b.x1, b.y1 + 1, b.x1 + th, b.y1 + 1 + th };
+    DrawThumb(tb, handle, kind);
+    const int tx = tb.x2 + 8;
+    const int maxW = b.x2 - 2 - tx;
+    int nameSize = 13;
+    if (UiFont::WidthBold(name.c_str(), nameSize) > maxW) nameSize = 12;
+    std::string shown = name;
+    if (UiFont::WidthBold(shown.c_str(), nameSize) > maxW) {
+        while (shown.size() > 1 && UiFont::WidthBold((shown + "…").c_str(), nameSize) > maxW) {
+            size_t cut = shown.size() - 1;
+            while (cut > 0 && ((unsigned char)shown[cut] & 0xC0) == 0x80) cut--;
+            shown.resize(cut);
+        }
+        shown += "…";
+    }
+    UiFont::DrawBold(tx, b.y1 + 2, shown.c_str(), UiTheme::Col(p.ink), nameSize);
+    if (desc.empty()) {
+        DrawText(tx, b.y1 + 22, FitText(info, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
+    } else {
+        DrawText(tx, b.y1 + 20, FitText(desc, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
+        DrawText(tx, b.y1 + 36, FitText(info, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
+    }
+    UiTheme::Etched(b.x1, b.x2, b.y2 + 3);
 }
 
 } // namespace EditPanel

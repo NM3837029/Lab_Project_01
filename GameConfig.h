@@ -264,6 +264,9 @@ namespace GameCfg {
         int version = 1;
         std::string lastPlayed;
         std::map<std::string, StageRecord> stages;
+        // 画面の見た目（Esc メニューの「設定」で選ぶ）。"dark"＝暗い灰色（既定）、"light"＝明るい灰色。
+        // セーブに無い・読めない値のときは "dark"（2026-11-26 に足した。古いセーブもそのまま読める）
+        std::string uiTheme = "dark";
 
         bool IsCleared(const std::string& file) const {
             auto it = stages.find(file);
@@ -512,31 +515,11 @@ namespace GameCfg {
         return dir + L"\\save.json";
     }
 
-    inline bool LoadSaveData(SaveData& out) {
+    // JSON からセーブデータを作る。壊れている（JSON でない・版が 1 でない）ときは false で、out は空のセーブ。
+    // ファイルの読み書きと分けてあるのは、中身の読み方だけをテストで確かめられるようにするため。
+    inline bool SaveDataFromJson(const json& j, SaveData& out) {
         out = SaveData();
-        std::wstring path = SaveFilePath();
-        if (path.empty()) return false;
-
-        std::ifstream f(path.c_str());
-        if (!f.is_open()) return false; // 初回起動。エラーではない
-
-        json j = json::parse(f, nullptr, false);
-        f.close();
-
-        bool broken = (j.is_discarded() || !j.is_object() || j.value("version", 0) != 1);
-        if (broken) {
-            // 壊れていても消さない。プレイヤーの進行を失わせるうえ、原因調査もできなくなる。
-            // 日時付きの名前へ退避してから、空のセーブで続行する。
-            SYSTEMTIME st; GetLocalTime(&st);
-            wchar_t stamp[64];
-            swprintf_s(stamp, L".corrupt.%04d%02d%02d_%02d%02d%02d.json",
-                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-            std::wstring backup = path.substr(0, path.size() - 5) + stamp; // ".json" を除いて付け替える
-            MoveFileW(path.c_str(), backup.c_str());
-            Logger::Error("GameCfg", "LoadSaveData", "save.json was broken; renamed and started fresh");
-            return false;
-        }
-
+        if (j.is_discarded() || !j.is_object() || j.value("version", 0) != 1) return false;
         out.version = j.value("version", 1);
         out.lastPlayed = j.value("last_played", "");
         if (j.contains("stages") && j["stages"].is_object()) {
@@ -548,13 +531,14 @@ namespace GameCfg {
                 out.stages[it.key()] = r;
             }
         }
+        // 画面の見た目。"light" のときだけ明るい灰色、それ以外（無い・文字でない・知らない値）は暗い灰色
+        if (j.contains("ui_theme") && j["ui_theme"].is_string() && j["ui_theme"].get<std::string>() == "light") out.uiTheme = "light";
+        else out.uiTheme = "dark";
         return true;
     }
 
-    inline bool WriteSaveData(const SaveData& data) {
-        std::wstring path = SaveFilePath();
-        if (path.empty()) return false;
-
+    // セーブデータを JSON にする（ファイルへ書く前の形）
+    inline json SaveDataToJson(const SaveData& data) {
         json j;
         j["version"] = 1;
         j["last_played"] = data.lastPlayed;
@@ -565,6 +549,44 @@ namespace GameCfg {
                              {"plays",   kv.second.plays} };
         }
         j["stages"] = sj;
+        j["ui_theme"] = (data.uiTheme == "light") ? "light" : "dark";
+        return j;
+    }
+
+    inline bool LoadSaveData(SaveData& out) {
+        out = SaveData();
+        std::wstring path = SaveFilePath();
+        if (path.empty()) return false;
+
+        std::ifstream f(path.c_str());
+        if (!f.is_open()) return false; // 初回起動。エラーではない
+
+        json j = json::parse(f, nullptr, false);
+        f.close();
+
+        bool broken = !SaveDataFromJson(j, out);
+        if (broken) {
+            out = SaveData();
+            // 壊れていても消さない。プレイヤーの進行を失わせるうえ、原因調査もできなくなる。
+            // 日時付きの名前へ退避してから、空のセーブで続行する。
+            SYSTEMTIME st; GetLocalTime(&st);
+            wchar_t stamp[64];
+            swprintf_s(stamp, L".corrupt.%04d%02d%02d_%02d%02d%02d.json",
+                st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+            std::wstring backup = path.substr(0, path.size() - 5) + stamp; // ".json" を除いて付け替える
+            MoveFileW(path.c_str(), backup.c_str());
+            Logger::Error("GameCfg", "LoadSaveData", "save.json was broken; renamed and started fresh");
+            return false;
+        }
+        // 中身の読み取りは SaveDataFromJson で済んでいる
+        return true;
+    }
+
+    inline bool WriteSaveData(const SaveData& data) {
+        std::wstring path = SaveFilePath();
+        if (path.empty()) return false;
+
+        json j = SaveDataToJson(data);
 
         // 一時ファイルへ書いてから差し替える。
         // 直接上書きすると、書き込み途中で電源が落ちたときにセーブが壊れる。

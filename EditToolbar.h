@@ -23,6 +23,7 @@
 // ======================================================================
 
 #include "UiFont.h"
+#include "UiTheme.h"
 #include <string>
 #include <cmath>
 #include <cstdio>
@@ -204,9 +205,11 @@ inline void DrawSmall(int x, int y, const char* str, unsigned int col, int size 
 
 // 錠前（封印中の印）。cx,cy は錠前の中心。
 inline void DrawLock(int cx, int cy) {
-    DrawBox(cx - 7, cy - 1, cx + 7, cy + 9, GetColor(60, 60, 66), TRUE);
-    DrawCircle(cx, cy - 2, 5, GetColor(60, 60, 66), FALSE, 2);
-    DrawBox(cx - 1, cy + 2, cx + 1, cy + 6, GetColor(210, 210, 215), TRUE);
+    // 色は見た目のテーマから（使えない項目の文字の色の錠前に、地の色の鍵穴）
+    const unsigned int body = UiTheme::Col(UiTheme::P().inkDim), hole = UiTheme::Col(UiTheme::P().face);
+    DrawBox(cx - 7, cy - 1, cx + 7, cy + 9, body, TRUE);
+    DrawCircle(cx, cy - 2, 5, body, FALSE, 2);
+    DrawBox(cx - 1, cy + 2, cx + 1, cy + 6, hole, TRUE);
 }
 
 // ツールのアイコン（コードで描くので、画像素材が要らない）。cx,cy は中心、s は一辺の目安。
@@ -297,40 +300,29 @@ inline int SmallWidth(const char* str, int size) {
 // 左のバー（暗い下地）でも、下のタイムライン（明るい下地）でも同じように読める。
 // （uiHandle は、UI素材の枠を使っていた以前の描き方との互換のために残してある）
 inline void DrawButton(Tool t, int uiHandle, bool hover, bool active, bool locked, bool paused) {
-    (void)uiHandle;
+    (void)uiHandle; (void)hover;
     Rect r = ButtonRect(t);
     const bool wide = IsLeftBarTool(t);
+    const UiTheme::Palette& tp = UiTheme::P();
 
-    // 下地と枠。封印中は沈んだ色、押せる状態で重なっていれば明るく、効いている最中は青く。
-    unsigned int back = locked ? GetColor(54, 54, 58) : active ? GetColor(28, 64, 118) : hover ? GetColor(84, 94, 128) : GetColor(60, 62, 80);
-    unsigned int edge = locked ? GetColor(92, 92, 98) : active ? GetColor(120, 190, 255) : hover ? GetColor(200, 214, 245) : GetColor(124, 134, 168);
-    DrawBox(r.x1, r.y1, r.x2, r.y2, back, TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, locked ? 14 : 34);                         // 上半分を少し明るくして、ボタンらしい厚みを出す
-    DrawBox(r.x1 + 1, r.y1 + 1, r.x2 - 1, (r.y1 + r.y2) / 2, GetColor(255, 255, 255), TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawBox(r.x1, r.y1, r.x2, r.y2, edge, FALSE);
+    // 2000年代の作法：盛り上がったボタン。効いている最中は押し込まれたボタン（以前の青い光の脈打ちはやめた）。
+    // マウスが乗っても形は変えない（説明のカードが出るので、乗っていることは分かる）
+    const UiTheme::Box b = { r.x1, r.y1, r.x2, r.y2 };
+    if (active && !locked) UiTheme::Pressed(b); else UiTheme::Raised(b);
 
-    // いま効いているツールは、枠をゆっくり脈打たせて光らせる
-    if (active && !locked) {
-        float p = 0.5f + 0.5f * sinf(S().demoFrame * 0.12f);
-        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 90 + (int)(150.0f * p));
-        DrawBox(r.x1 - 1, r.y1 - 1, r.x2 + 1, r.y2 + 1, GetColor(120, 200, 255), FALSE);
-        DrawBox(r.x1 + 1, r.y1 + 1, r.x2 - 1, r.y2 - 1, GetColor(120, 200, 255), FALSE);
-        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    }
-
-    unsigned int iconCol  = locked ? GetColor(120, 120, 128) : active ? GetColor(160, 220, 255) : GetColor(238, 240, 250);
-    unsigned int badgeCol = locked ? GetColor(112, 112, 120) : GetColor(178, 186, 210);
+    const UiTheme::Rgb ink = locked ? tp.inkDim : ((active && UiTheme::Current() == UiTheme::DARK) ? tp.selInk : tp.ink);
+    unsigned int iconCol  = UiTheme::Col(ink);
+    unsigned int badgeCol = UiTheme::Col(locked ? tp.inkDim : tp.inkSub);
     const int cx = (r.x1 + r.x2) / 2, cy = (r.y1 + r.y2) / 2;
 
     if (wide) {
-        // 左のバー：アイコンを大きく、キーの小さなバッジを下に
+        // 左のバー：アイコンを大きく、キーの小さな文字を下に
         DrawToolIcon(t, cx, cy - 5, 40, iconCol, paused);
         const char* keyShort = (t == OBJ) ? "右クリック" : (t == ZOOM) ? "Z" : (t == ZOOMOUT) ? "V" : "T X C";
         int kw = SmallWidth(keyShort, 10);
         DrawSmall(cx - kw / 2, r.y2 - 14, keyShort, badgeCol, 10);
     } else {
-        // 下の時間操作：アイコンは左寄り、キーのバッジは右に（ボタンが低いので、横に並べる）
+        // 下の時間操作：アイコンは左寄り、キーの小さな文字は右に（ボタンが低いので、横に並べる）
         DrawToolIcon(t, r.x1 + 15, cy, 22, iconCol, paused);
         const char* keyShort = (t == REWIND) ? "R" : (t == PAUSE) ? "Sp" : (t == FF) ? "F" : "Ctrl";
         int kw = SmallWidth(keyShort, 10);
@@ -534,60 +526,62 @@ inline void DrawCard(Tool t, bool locked, const char* costText, bool detail) {
     const ToolInfo& inf = Info(t);
     Rect c = CardRect(t, detail);
     State& s = S();
+    const UiTheme::Palette& tp = UiTheme::P();
+    const unsigned int ink = UiTheme::Col(tp.ink), inkSub = UiTheme::Col(tp.inkSub);
 
-    // 封印中は、小さな1行カードにする
+    // 封印中は、小さな窓（見出しバーにツール名、中に「使えません」）にする
     if (locked) {
         const char* msg = "このステージでは使えません";
-        int tw = GetDrawStringWidth(msg, (int)strlen(msg));
+        int tw = UiFont::Width(msg, 13);
         Rect b = ButtonRect(t);
-        int w = tw + 28, h = 54;
+        int w = tw + 28, h = 52;
         int x = IsLeftBarTool(t) ? LEFT_W + 8 : (b.x1 + b.x2) / 2 - w / 2;
         int y = IsLeftBarTool(t) ? b.y1 : PAUSE_BUTTON_Y1 - 12 - h;
-        DrawBox(x, y, x + w, y + h, GetColor(30, 26, 24), TRUE);
-        DrawBox(x, y, x + w, y + h, GetColor(120, 120, 126), FALSE);
-        DrawSmall(x + 12, y + 7, inf.name, GetColor(230, 230, 230), 16);
-        DrawSmall(x + 12, y + 30, msg, GetColor(200, 170, 140), 16);
+        UiTheme::Raised({ x, y, x + w, y + h });
+        UiTheme::Caption({ x + 3, y + 3, x + w - 3, y + 21 }, inf.name);
+        DrawSmall(x + 12, y + 28, msg, UiTheme::Col(tp.danger), 13);
         return;
     }
 
-    SetDrawBlendMode(DX_BLENDMODE_ALPHA, 242);
-    DrawBox(c.x1, c.y1, c.x2, c.y2, GetColor(24, 26, 34), TRUE);
-    SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-    DrawBox(c.x1, c.y1, c.x2, c.y2, GetColor(120, 150, 210), FALSE);
-    DrawBox(c.x1 + 1, c.y1 + 1, c.x2 - 1, c.y2 - 1, GetColor(60, 80, 130), FALSE);
+    // 窓：盛り上がった枠と、上の見出しバー（ツール名）。2000年代のツールのヘルプの小窓の作法
+    UiTheme::Raised({ c.x1, c.y1, c.x2, c.y2 });
+    UiTheme::Caption({ c.x1 + 3, c.y1 + 3, c.x2 - 3, c.y1 + 33 }, nullptr);
+    UiFont::DrawBold(c.x1 + 12, c.y1 + 11, inf.name, UiTheme::Col(tp.captionInk), 13);
+    // キーの札：見出しバーの中に、角の四角い枠で
+    {
+        int nw = UiFont::WidthBold(inf.name, 13);
+        int kw = SmallWidth(inf.key, 12) + 10;
+        const int kx = c.x1 + 20 + nw, ky = c.y1 + 9;
+        DrawBox(kx, ky, kx + kw, ky + 18, UiTheme::Col(tp.captionInk), FALSE);
+        DrawSmall(kx + 5, ky + 3, inf.key, UiTheme::Col(tp.captionInk), 12);
+    }
 
-    // 見出し：ツール名・キーのバッジ
-    DrawString(c.x1 + 14, c.y1 + 10, inf.name, GetColor(245, 245, 250));
-    int nw = GetDrawStringWidth(inf.name, (int)strlen(inf.name));
-    int kw = SmallWidth(inf.key, 12) + 12;
-    DrawBox(c.x1 + 22 + nw, c.y1 + 11, c.x1 + 22 + nw + kw, c.y1 + 31, GetColor(40, 70, 130), TRUE);
-    DrawBox(c.x1 + 22 + nw, c.y1 + 11, c.x1 + 22 + nw + kw, c.y1 + 31, GetColor(120, 160, 230), FALSE);
-    DrawSmall(c.x1 + 28 + nw, c.y1 + 14, inf.key, GetColor(200, 225, 255), 12);
-
-    // 右上のボタン：ふだんは [?]、詳細を開いているときは [×]
+    // 右上のボタン：ふだんは [?]、詳細を開いているときは [×]（盛り上がった小さなボタン）
     Rect rb = detail ? CloseButtonRect(t) : DetailButtonRect(t);
-    DrawBox(rb.x1, rb.y1, rb.x2, rb.y2, GetColor(50, 90, 170), TRUE);
-    DrawBox(rb.x1, rb.y1, rb.x2, rb.y2, GetColor(150, 190, 255), FALSE);
-    DrawSmall(rb.x1 + 6, rb.y1 + 3, detail ? "×" : "?", GetColor(255, 255, 255), 16);
+    UiTheme::Raised({ rb.x1, rb.y1, rb.x2, rb.y2 });
+    {
+        const char* g = detail ? "×" : "?";
+        DrawSmall((rb.x1 + rb.x2) / 2 - SmallWidth(g, 14) / 2, rb.y1 + 4, g, ink, 14);
+    }
 
     // 一言の説明（2行）
-    DrawSmall(c.x1 + 14, c.y1 + 38, inf.line1, GetColor(200, 205, 220), 14);
-    DrawSmall(c.x1 + 14, c.y1 + 56, inf.line2, GetColor(200, 205, 220), 14);
+    DrawSmall(c.x1 + 14, c.y1 + 40, inf.line1, ink, 13);
+    DrawSmall(c.x1 + 14, c.y1 + 58, inf.line2, ink, 13);
 
-    // 実演アニメ（詳細では広く）
+    // 実演アニメ（詳細では広く）。へこんだ窓の中に描く
     int dx = c.x1 + 12, dy = c.y1 + 82, dw = c.W() - 24, dh = detail ? 150 : 110;
+    UiTheme::Sunken({ dx - 2, dy - 2, dx + dw + 1, dy + dh + 1 }, tp.well);
     DrawDemo(t, dx, dy, dw, dh, s.demoFrame);
-    DrawBox(dx, dy, dx + dw, dy + dh, GetColor(90, 100, 130), FALSE);
 
     // コストの目安
-    DrawSmall(c.x1 + 14, dy + dh + 8, costText, GetColor(255, 214, 140), 13);
+    DrawSmall(c.x1 + 14, dy + dh + 8, costText, UiTheme::Col(tp.warn), 13);
 
-    // 詳細：使い方・対策ヒント
+    // 詳細：使い方・対策ヒント（見出しと溝の区切り線）
     if (detail) {
         int hy = dy + dh + 32;
-        DrawBox(c.x1 + 12, hy - 4, c.x2 - 12, hy - 3, GetColor(70, 90, 130), TRUE);
-        DrawSmall(c.x1 + 14, hy, "使い方・対策ヒント", GetColor(255, 228, 140), 14);
-        for (int i = 0; i < 4; i++) DrawSmall(c.x1 + 14, hy + 22 + i * 20, inf.hint[i], GetColor(215, 220, 232), 14);
+        UiTheme::Etched(c.x1 + 12, c.x2 - 12, hy - 5);
+        UiFont::DrawBold(c.x1 + 14, hy, "使い方・対策ヒント", ink, 13);
+        for (int i = 0; i < 4; i++) DrawSmall(c.x1 + 14, hy + 22 + i * 20, inf.hint[i], inkSub, 13);
     }
 }
 
