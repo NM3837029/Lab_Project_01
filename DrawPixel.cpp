@@ -16272,39 +16272,34 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
             }
 
-            // --- 左上：コイン・体力・編集コスト ---
-            // 「何のカウンタか」は、コインとエネルギーの絵のアイコンと、文字のラベルの両方で示す。
+            // --- 左上：情報の小窓（コイン・体力・編集コスト）---
+            // 2000年代の編集ソフトの小さなツールウィンドウ（UiTheme）：盛り上がった枠と、上の見出しバー「情報」。
+            // 「何のカウンタか」は、文字のラベル（とコインの絵）で示す。
             int collectedCoins = 0;
             for (const auto& item : items) { if (item.isCollected) collectedCoins++; }
-            const int osdX1 = 8, osdY1 = 8, osdX2 = 232, osdY2 = 114;
-            // 左のアイコンバー・右のパネル・下のタイムラインと同じ、暗い平らな下地と青い縁。
-            // 以前はクリーム色の窓枠（UIウィンドウ素材）で、編集パネルの暗い配色とちぐはぐだった。
-            // 少しだけ透かして、後ろのステージが完全には隠れないようにする。
-            const unsigned int hudInk = GetColor(238, 240, 250), hudInkSub = GetColor(178, 186, 210);
+            const int osdX1 = 8, osdY1 = 8, osdX2 = 232, osdY2 = 122;
+            const UiTheme::Palette& htp = UiTheme::P();
+            const unsigned int hudInk = UiTheme::Col(htp.ink), hudInkSub = UiTheme::Col(htp.inkSub);
             {
                 const int hx1 = X(osdX1), hy1 = Y(osdY1), hx2 = X(osdX2), hy2 = Y(osdY2);
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 232);
-                DrawBox(hx1, hy1, hx2, hy2, GetColor(46, 42, 40), TRUE);
-                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                DrawBox(hx1, hy1, hx2, hy2, GetColor(84, 120, 176), FALSE);
-                DrawBox(hx1 + 1, hy1 + 1, hx2 - 1, hy2 - 1, GetColor(84, 120, 176), FALSE);
-                // 行の区切り（コイン／体力／コスト）。細い線で、3段の見分けを付ける
-                const unsigned int sep = GetColor(78, 76, 86);
-                DrawLine(hx1 + 8, Y(48), hx2 - 8, Y(48), sep);
-                DrawLine(hx1 + 8, Y(74), hx2 - 8, Y(74), sep);
+                UiTheme::Raised({ hx1, hy1, hx2, hy2 });
+                UiTheme::Caption({ hx1 + 3, hy1 + 3, hx2 - 3, Y(23) }, "情報");
+                // 行の区切り（コイン／体力／コスト）：溝の線
+                UiTheme::Etched(hx1 + 6, hx2 - 6, Y(55));
+                UiTheme::Etched(hx1 + 6, hx2 - 6, Y(81));
             }
             {
                 // 1段目：コインの取得枚数
-                DrawUiIcon(X(34), Y(34), (int)(28.0f * sc), coinHandle);
+                DrawUiIcon(X(30), Y(40), (int)(22.0f * sc), coinHandle);
                 char coinStr[48];
-                sprintf_s(coinStr, sizeof(coinStr), "コイン  %d / %d", collectedCoins, (int)items.size());
-                DrawTextPlain(X(54), TopFor(Y(34), fs), coinStr, hudInk, fs);
+                sprintf_s(coinStr, sizeof(coinStr), "コイン：  %d / %d", collectedCoins, (int)items.size());
+                UiFont::Draw(X(48), TopFor(Y(40), fs), coinStr, hudInk, fs);
 
-                // 2段目：体力。数字だけでなく、ハートの並びで残りを見せる（失った分は灰色）
+                // 2段目：体力。数字だけでなく、ハートの並びで残りを見せる（失った分は薄い色）
                 {
-                    const int heartY = Y(61);
-                    const int r = (int)(8.0f * sc + 0.5f);
-                    DrawTextPlain(X(24), TopFor(heartY, fs), "HP", hudInkSub, fs);
+                    const int heartY = Y(68);
+                    const int r = (int)(7.0f * sc + 0.5f);
+                    UiFont::Draw(X(20), TopFor(heartY, fs), "HP：", hudInkSub, fs);
                     auto Heart = [&](int cx, int cy, int rr, unsigned int col) {
                         int c = rr / 2;
                         DrawCircle(cx - c, cy - rr / 4, c + 1, col, TRUE);
@@ -16314,154 +16309,156 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int hpNow = player.hp < 0 ? 0 : player.hp;
                     int slots = hpNow > 6 ? 1 : (hpNow > 3 ? hpNow : 3); // 初期値の3つは常に枠を見せる
                     for (int hi = 0; hi < slots; hi++) {
-                        int hcx = X(60.0f + hi * 22.0f);
+                        int hcx = X(68.0f + hi * 20.0f);
                         bool full = hi < hpNow;
-                        // 暗い下地で、ハートの縁が溶けないよう縁は黒に近く、失った分は沈んだ灰色にする
-                        Heart(hcx, heartY, r + 1, GetColor(16, 14, 18));
-                        Heart(hcx, heartY, r, full ? GetColor(235, 70, 80) : GetColor(104, 100, 112));
+                        Heart(hcx, heartY, r + 1, UiTheme::Col(htp.dark));
+                        Heart(hcx, heartY, r, full ? GetColor(220, 50, 60) : UiTheme::Col(htp.inkDim));
                     }
                     if (hpNow > 6) {
                         char hb[16]; sprintf_s(hb, sizeof(hb), "× %d", hpNow);
-                        DrawTextPlain(X(60.0f + 18.0f), TopFor(heartY, fs), hb, hudInk, fs);
+                        UiFont::Draw(X(68.0f + 16.0f), TopFor(heartY, fs), hb, hudInk, fs);
                     }
                 }
 
-                // 3段目：編集コストゲージ
+                // 3段目：編集コスト。区切りのあるメーター（暗い灰色は緑→黄→赤、明るい灰色は青いブロック）と数字。
+                // 残りわずか（2割未満）のときは、数字を赤で点滅させる（明るい灰色ではブロックも赤になる）
                 float ratio = editCost / currentEditCost.maxCost;
                 if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
                 bool isLow = ratio < 0.2f;
                 bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-                // 点滅の暗いほうは、明るいほうの色を暗くして作る（設定で色を変えても、点滅が成り立つように）
-                int barColor = isLow ? (blinkOn ? UiGaugeLow()
-                                                : GetColor(g_uiStyle.gaugeLow.r * 35 / 100, g_uiStyle.gaugeLow.g * 35 / 100, g_uiStyle.gaugeLow.b * 35 / 100))
-                                     : UiGaugeFill();
-                DrawUiIcon(X(34), Y(89), (int)(30.0f * sc), energyHandle);
-                // ゲージの器は、下地より一段濃い溝にする。残量が減ってバーが後退しても、上に乗る白文字が読める。
-                const int gx1 = X(54), gx2 = X(218), gy1 = Y(79), gy2 = Y(99);
-                DrawBox(gx1, gy1, gx2, gy2, GetColor(30, 30, 36), TRUE);
-                DrawBox(gx1, gy1, gx1 + (int)((gx2 - gx1) * ratio), gy2, barColor, TRUE);
-                DrawBox(gx1, gy1, gx2, gy2, GetColor(124, 134, 168), FALSE);
+                UiFont::Draw(X(14), TopFor(Y(100), fsm), "コスト：", hudInkSub, fsm);
+                const int gx1 = X(62), gx2 = X(160), gy1 = Y(92), gy2 = Y(108);
+                UiTheme::Meter({ gx1, gy1, gx2, gy2 }, ratio, false);
                 char editCostStr[48];
-                sprintf_s(editCostStr, sizeof(editCostStr), "コスト %d / %d", (int)editCost, (int)currentEditCost.maxCost);
-                DrawTextEdge(gx1 + (int)(6.0f * sc), TopFor((gy1 + gy2) / 2, fsm), editCostStr, GetColor(255, 255, 255), fsm);
+                sprintf_s(editCostStr, sizeof(editCostStr), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
+                UiFont::Draw(X(166), TopFor(Y(100), fsm), editCostStr,
+                             (isLow && blinkOn) ? UiTheme::Col(htp.danger) : hudInk, fsm);
             }
 
-            // --- 層インジケータ：HUDの下に、奥・中・手前の3マスを並べ、プレイヤーのいる層を光らせる ---
+            // --- 層インジケータ：情報の小窓の下に、奥・中・手前の3つのボタンを並べ、プレイヤーのいる層を押し込む ---
             // 操作は Q（奥へ）/ E（手前へ）。オブジェクト編集が使えるステージだけに出す。
             if (isEditMode && IsEditToolEnabled(currentEditTools.objectEditEnabled, unlockedEditTools.objectEditEnabled)) {
                 const int lx1 = X(osdX1), lx2 = X(osdX2), ly1 = Y(osdY2 + 6), ly2 = Y(osdY2 + 34);
-                SetDrawBlendMode(DX_BLENDMODE_ALPHA, 232);
-                DrawBox(lx1, ly1, lx2, ly2, GetColor(46, 42, 40), TRUE);
-                SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                DrawBox(lx1, ly1, lx2, ly2, GetColor(84, 120, 176), FALSE);
-                // 左端の見出し「層」と、右の操作キー。3マスは見出しとキーの間を等分する
+                UiTheme::Raised({ lx1, ly1, lx2, ly2 });
+                // 左端の見出し「層」と、右の操作キー。3つのボタンは見出しとキーの間を等分する
                 const int lblW = (int)(30.0f * sc), keyW = (int)(44.0f * sc);
-                DrawTextPlain(lx1 + (int)(8.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "層", hudInkSub, fsm);
-                DrawTextPlain(lx2 - keyW + (int)(4.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "Q/E", hudInkSub, fsm);
+                UiFont::Draw(lx1 + (int)(8.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "層", hudInkSub, fsm);
+                UiFont::Draw(lx2 - keyW + (int)(4.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "Q/E", hudInkSub, fsm);
                 const int cx0 = lx1 + lblW, cx1 = lx2 - keyW;
                 const int cellW = (cx1 - cx0) / 3, pad = (int)(2.0f * sc);
                 const int lays[3] = { LAYER_BACK, LAYER_MID, LAYER_FRONT };
                 for (int li = 0; li < 3; li++) {
                     const int bx1 = cx0 + cellW * li + pad, bx2 = cx0 + cellW * (li + 1) - pad;
-                    const int by1 = ly1 + pad + 1, by2 = ly2 - pad - 1;
+                    const int by1 = ly1 + pad + 2, by2 = ly2 - pad - 2;
                     const bool on = (player.layer == lays[li]);
-                    if (on) {
-                        DrawBox(bx1, by1, bx2, by2, GetColor(59, 66, 112), TRUE);
-                        DrawBox(bx1, by1, bx2, by2, GetColor(140, 150, 255), FALSE);
-                    }
+                    if (on) UiTheme::Pressed({ bx1, by1, bx2, by2 }); else UiTheme::Raised({ bx1, by1, bx2, by2 });
                     const char* nm = LayerName(lays[li]);
                     const int tw = UiFont::Width(nm, fsm);
-                    DrawTextPlain((bx1 + bx2) / 2 - tw / 2, TopFor((by1 + by2) / 2, fsm), nm, on ? hudInk : GetColor(120, 126, 150), fsm);
+                    const unsigned int col = on ? UiTheme::Col(UiTheme::Current() == UiTheme::DARK ? htp.selInk : htp.ink) : hudInkSub;
+                    UiFont::Draw((bx1 + bx2) / 2 - tw / 2, TopFor((by1 + by2) / 2, fsm), nm, col, fsm);
                 }
             }
 
-            // --- 編集コストの増減（ゲージの右隣に浮かべる）---
+            // --- 編集コストの増減（メーターの右隣に浮かべる）---
+            // ゲーム画面の上に浮かぶ数字なので、どちらの見た目でも読めるよう縁取りの文字で描く
             if (isEditMode && costFloatTimer > 0.0f) {
                 char cb[24];
                 sprintf_s(cb, sizeof(cb), "%+.0f", costFloatValue);
                 int cfx = X(240);
-                int cfy = Y(86.0f - (70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
+                int cfy = Y(98.0f - (70.0f - costFloatTimer) * 0.25f); // ゆっくり上へ浮く
                 int cfAlpha = costFloatTimer < 20.0f ? (int)(255.0f * costFloatTimer / 20.0f) : 255;
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, cfAlpha);
                 DrawTextEdge(cfx, TopFor(cfy, Px(20)), cb, costFloatValue < 0.0f ? GetColor(255, 130, 110) : GetColor(120, 230, 140), Px(20));
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
             }
 
-            // --- 右上：状態バッジ（縦に積む。重ならない）---
+            // --- 右上：状態の札（縦に積む。重ならない）---
+            // 札は盛り上がった小さな窓に色付きの文字。色は見た目ごとに読める色を選ぶ（明るい灰色の上に薄い色を置かない）
             {
-                struct Badge { std::string text; unsigned int col; };
+                enum BadgeKind { BK_INFO, BK_WARN, BK_DANGER, BK_HOT, BK_RED, BK_GREEN, BK_BLUE };
+                auto KindCol = [&](BadgeKind k) -> unsigned int {
+                    const bool dk = (UiTheme::Current() == UiTheme::DARK);
+                    switch (k) {
+                        case BK_WARN:   return UiTheme::Col(htp.warn);
+                        case BK_DANGER: return UiTheme::Col(htp.danger);
+                        case BK_HOT:    return UiTheme::Col(htp.hot);
+                        case BK_RED:    return dk ? GetColor(255, 110, 110) : GetColor(176, 0, 0);
+                        case BK_GREEN:  return dk ? GetColor(110, 230, 110) : GetColor(0, 110, 0);
+                        case BK_BLUE:   return dk ? GetColor(120, 165, 255) : GetColor(10, 36, 160);
+                        default:        return UiTheme::Col(htp.ink);
+                    }
+                };
+                struct Badge { std::string text; BadgeKind kind; };
                 std::vector<Badge> badges;
                 if (worldStopped) {
-                    badges.push_back(gestureFrozen ? Badge{ "編集中：時間が止まっています", (unsigned int)GetColor(120, 190, 255) }
+                    badges.push_back(gestureFrozen ? Badge{ "編集中：時間が止まっています", BK_HOT }
                                                    : (EditToolbar::S().autoPaused
-                                                        ? Badge{ "ツール詳細を確認中：時間が止まっています", (unsigned int)GetColor(150, 200, 255) }
-                                                        : Badge{ "時間停止中　[Space]で再開", (unsigned int)GetColor(255, 200, 80) }));
+                                                        ? Badge{ "ツール詳細を確認中：時間が止まっています", BK_HOT }
+                                                        : Badge{ "時間停止中　[Space]で再開", BK_WARN }));
                 }
                 if (playerColorFilter != 0) {
                     const char* filterName = playerColorFilter == 1 ? "赤" : playerColorFilter == 2 ? "緑" : "青";
-                    unsigned int filterColor = playerColorFilter == 1 ? GetColor(255, 110, 110) : playerColorFilter == 2 ? GetColor(110, 230, 110) : GetColor(120, 165, 255);
-                    badges.push_back({ std::string("色フィルタ：") + filterName + "だけ通す", filterColor });
+                    const BadgeKind fk = playerColorFilter == 1 ? BK_RED : playerColorFilter == 2 ? BK_GREEN : BK_BLUE;
+                    badges.push_back({ std::string("色フィルタ：") + filterName + "だけ通す", fk });
                 }
                 // 明るさをパネルやX/Cで動かしているときは、ゲームがどう判定しているか（暗い／明るい）を出す
                 if (fabsf(fxCurBright - 1.0f) > 0.05f) {
                     int jb = ColorGrade::JudgeBright(fxCurBright);
                     char bb[64];
                     sprintf_s(bb, sizeof(bb), "明るさ %d%%%s", (int)(fxCurBright * 100.0f + 0.5f), jb < 0 ? "（暗い判定）" : jb > 0 ? "（明るい判定）" : "");
-                    badges.push_back({ bb, jb < 0 ? (unsigned int)GetColor(140, 170, 255) : jb > 0 ? (unsigned int)GetColor(255, 220, 120) : (unsigned int)GetColor(230, 230, 230) });
+                    badges.push_back({ bb, jb < 0 ? BK_HOT : jb > 0 ? BK_WARN : BK_INFO });
                 }
-                // プレイヤーのズーム。倍率と、いまの操作（ホイールで倍率）を伝える。ホイールで変えた直後は少し強調する
+                // プレイヤーのズーム。倍率と、いまの操作（ホイールで倍率）を伝える。ホイールで変えた直後は強調の色
                 if (playerZoomOn) {
                     char zb[64];
                     sprintf_s(zb, sizeof(zb), "ズーム ×%.1f　ホイールで倍率", playerZoomLevel);
-                    badges.push_back({ zb, playerZoomFlash > 0 ? (unsigned int)GetColor(255, 240, 150) : (unsigned int)GetColor(190, 225, 255) });
+                    badges.push_back({ zb, playerZoomFlash > 0 ? BK_WARN : BK_HOT });
                 } else if (zHeldThisFrame && screenEffectOpEnabled && editCost <= 0.0f) {
-                    badges.push_back({ "ズーム：編集コストが足りません", (unsigned int)GetColor(255, 130, 110) });
+                    badges.push_back({ "ズーム：編集コストが足りません", BK_DANGER });
                 } else if (zHeldThisFrame && !screenEffectOpEnabled) {
                     // 押しても何も起きない理由を伝える（ステージで画面エフェクトが封印されている。アイテムで解禁できる）
-                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", (unsigned int)GetColor(255, 130, 110) });
+                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", BK_DANGER });
                 }
-                // ズームアウト。ズームインのバッジと同じ作り
+                // ズームアウト。ズームインの札と同じ作り
                 if (playerZoomOutOn) {
                     char zo[64];
                     sprintf_s(zo, sizeof(zo), "ズームアウト ×%.1f　ホイールで倍率", playerZoomOutLevel);
-                    badges.push_back({ zo, playerZoomFlash > 0 ? (unsigned int)GetColor(255, 240, 150) : (unsigned int)GetColor(190, 225, 255) });
+                    badges.push_back({ zo, playerZoomFlash > 0 ? BK_WARN : BK_HOT });
                 } else if (vHeldThisFrame && screenEffectOpEnabled && editCost <= 0.0f) {
-                    badges.push_back({ "ズームアウト：編集コストが足りません", (unsigned int)GetColor(255, 130, 110) });
+                    badges.push_back({ "ズームアウト：編集コストが足りません", BK_DANGER });
                 } else if (vHeldThisFrame && !screenEffectOpEnabled) {
-                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", (unsigned int)GetColor(255, 130, 110) });
+                    badges.push_back({ "このステージでは画面エフェクト（ズーム）が使えません", BK_DANGER });
                 }
                 // ズーム固定の敵に捕まっている間。解く方法（原因の敵を倒す）も一緒に伝える
-                if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", (unsigned int)GetColor(255, 170, 120) });
-                if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", (unsigned int)GetColor(210, 210, 210) });
-                if (isEditMode && bigView) badges.push_back({ "拡大表示中　[F10]でパネルを戻す", (unsigned int)GetColor(210, 210, 210) });
+                if (fxLockActive) badges.push_back({ "画面が固定されています：寄せている敵を倒す", BK_DANGER });
+                if (SoundManager::Get().IsMuted()) badges.push_back({ "ミュート中 [M]", BK_INFO });
+                if (isEditMode && bigView) badges.push_back({ "拡大表示中　[F10]でパネルを戻す", BK_INFO });
 
                 int by = Y(10);
-                const int bh = (int)(26.0f * sy + 0.5f), bpitch = (int)(31.0f * sy + 0.5f);
+                const int bh = (int)(24.0f * sy + 0.5f), bpitch = (int)(28.0f * sy + 0.5f);
                 for (const auto& b : badges) {
-                    int tw = TextEdgeWidth(b.text.c_str(), fsm);
+                    int tw = UiFont::Width(b.text.c_str(), fsm);
                     int bx2 = X(SCREEN_WIDTH - 10), bx1 = bx2 - tw - (int)(20.0f * sc);
-                    DrawBox(bx1, by, bx2, by + bh, GetColor(30, 26, 24), TRUE);
-                    DrawBox(bx1, by, bx2, by + bh, b.col, FALSE);
-                    DrawTextEdge(bx1 + (int)(10.0f * sc), TopFor(by + bh / 2, fsm), b.text.c_str(), b.col, fsm);
+                    UiTheme::Raised({ bx1, by, bx2, by + bh });
+                    UiFont::Draw(bx1 + (int)(10.0f * sc), TopFor(by + bh / 2, fsm), b.text.c_str(), KindCol(b.kind), fsm);
                     by += bpitch;
                 }
             }
 
             // --- 下寄り中央：トースト（取り消し／やり直し／拒否の理由）---
-            // 色だけに頼らず、頭の記号（○ 成功／× 拒否／！ 情報）でも種別を区別する。
+            // 色だけに頼らず、頭の記号（○ 成功／× 拒否／！ 情報）でも種別を区別する。盛り上がった小さな窓に出す
             if (isEditMode && editToastTimer > 0.0f && !editToastText.empty() && !isShowingMessage) {
                 std::string tt = std::string(editToastKind == 2 ? "× " : editToastKind == 1 ? "○ " : "！ ") + editToastText;
-                int tw = TextEdgeWidth(tt.c_str(), fs);
+                int tw = UiFont::Width(tt.c_str(), fs);
                 int cxm = ox + ow / 2;
                 int tx1 = cxm - tw / 2 - (int)(14.0f * sc), tx2 = cxm + tw / 2 + (int)(14.0f * sc);
                 int ty1 = Y(SCREEN_HEIGHT - 76), ty2 = ty1 + (int)(30.0f * sy);
-                unsigned int toastCol = editToastKind == 2 ? GetColor(255, 130, 110)
-                                      : editToastKind == 1 ? GetColor(130, 230, 150) : GetColor(235, 235, 235);
+                unsigned int toastCol = editToastKind == 2 ? UiTheme::Col(htp.danger)
+                                      : editToastKind == 1 ? UiTheme::Col(htp.ok) : UiTheme::Col(htp.ink);
                 int tAlpha = editToastTimer < 20.0f ? (int)(255.0f * editToastTimer / 20.0f) : 255;
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, tAlpha);
-                DrawBox(tx1, ty1, tx2, ty2, GetColor(30, 26, 24), TRUE);
-                DrawBox(tx1, ty1, tx2, ty2, toastCol, FALSE);
-                DrawTextEdge(tx1 + (int)(14.0f * sc), TopFor((ty1 + ty2) / 2, fs), tt.c_str(), toastCol, fs);
+                UiTheme::Raised({ tx1, ty1, tx2, ty2 });
+                UiFont::Draw(tx1 + (int)(14.0f * sc), TopFor((ty1 + ty2) / 2, fs), tt.c_str(), toastCol, fs);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
             }
 
