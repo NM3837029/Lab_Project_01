@@ -15491,22 +15491,22 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
               WorldLabel((int)(player.x - cameraX), (int)(player.y - cameraY) - 40, hpb, GetColor(130, 255, 130)); }
         }
 
-        // 選択枠の描画。四隅だけの青い「角かっこ」で囲む（右パネルの「選んだ物」の枠・カードの縁と同じ青）。
-        // 以前は黄色い四角の枠だったが、パネルのボタンが「どの物に効くか」を色でつなげるため、パネルと同じ色にした。
-        // どんな背景でも見えるよう、暗い縁を付けて描く（EditPanel::DrawCornerBrackets）。
+        // 選択枠の描画。2000年代のお絵描き・編集ソフトの作法：白と黒が交互に流れる点線（蟻の行列）と、8つの小さな四角（UiTheme::SelectionMarks）。
+        // 白と黒が交互なので、明るい背景・暗い背景・色フィルタが掛かった画面のどれでも見える
+        // （以前の青い角かっこは、赤フィルタで暗くなって見えにくかった）。
         if (isEditMode) {
-            const unsigned int selCol = GetColor(120, 190, 255), selEdge = GetColor(16, 20, 32);
+            const int antsFrame = (int)BehaviorInterpreter::globalFrameCounter;
             for (auto* p : selectedPlayers) {
-                EditPanel::DrawCornerBrackets((int)(p->x - cameraX), (int)(p->y - cameraY), (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale - cameraY), selCol, selEdge);
+                UiTheme::SelectionMarks((int)(p->x - cameraX), (int)(p->y - cameraY), (int)(p->x + p->width * p->scale - cameraX), (int)(p->y + p->height * p->scale - cameraY), antsFrame);
             }
             for (auto* e : selectedEnemies) {
                 if (e->isActive) {
-                    EditPanel::DrawCornerBrackets((int)(e->x - cameraX), (int)(e->y - cameraY), (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale - cameraY), selCol, selEdge);
+                    UiTheme::SelectionMarks((int)(e->x - cameraX), (int)(e->y - cameraY), (int)(e->x + e->hitboxWidth * e->scale - cameraX), (int)(e->y + e->hitboxHeight * e->scale - cameraY), antsFrame);
                 }
             }
             for (auto* g : selectedGimmicks) {
                 if (g->isActive) {
-                    EditPanel::DrawCornerBrackets((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), selCol, selEdge);
+                    UiTheme::SelectionMarks((int)(g->x - cameraX), (int)(g->y - cameraY), (int)(g->x + g->spriteWidth - cameraX), (int)(g->y + g->spriteHeight - cameraY), antsFrame);
 
                     // 大きさを変える「つまみ」。右辺が横幅、上辺が縦幅。
                     // 引っぱれない相手には出さない（出ているのに動かない、を作らないため）。
@@ -17036,8 +17036,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 const int n = (int)ritems.size();
                 const int hover = RadialSectorAt(menu.x, menu.y, mx, my, n);
                 const float span = 360.0f / (float)n;
-                const unsigned int inkMain = GetColor(238, 240, 250), inkSub = GetColor(178, 186, 210), inkDim = GetColor(128, 130, 142);
-                const unsigned int inkCost = GetColor(255, 200, 80), inkOn = GetColor(143, 224, 160);
+                // 色は見た目のテーマから（2000年代風。扇の地は face、向けている扇は「選ばれている」色、縁は立体の暗い線）
+                const UiTheme::Palette& tp = UiTheme::P();
+                const bool themeDark = (UiTheme::Current() == UiTheme::DARK);
+                const unsigned int inkMain = UiTheme::Col(tp.ink), inkSub = UiTheme::Col(tp.inkSub), inkDim = UiTheme::Col(tp.inkDim);
+                const unsigned int inkCost = UiTheme::Col(tp.warn), inkOn = UiTheme::Col(tp.ok);
                 for (int i = 0; i < n; i++) {
                     const RadialItem& it = ritems[i];
                     const bool isHover = (i == hover);
@@ -17046,19 +17049,21 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     const float a1 = (n == 1) ? 360.0f : ca + span * 0.5f - 1.2f;
                     unsigned int fill, edge;
                     float edgeW = 1.2f;
-                    if (!it.enabled)  { fill = GetColor(44, 44, 50);  edge = isHover ? GetColor(140, 142, 156) : GetColor(84, 84, 92); }
-                    else if (isHover) { fill = GetColor(28, 64, 118); edge = GetColor(120, 190, 255); edgeW = 2.5f; }
-                    else if (it.on)   { fill = GetColor(34, 76, 66);  edge = GetColor(143, 224, 160); }
-                    else              { fill = GetColor(54, 52, 66);  edge = GetColor(124, 134, 168); }
+                    if (!it.enabled)  { fill = UiTheme::Col(tp.face);  edge = UiTheme::Col(tp.shadow); }
+                    else if (isHover) { fill = UiTheme::Col(tp.sel);   edge = UiTheme::Col(tp.dark); edgeW = 2.0f; }
+                    else if (it.on)   { fill = UiTheme::Col(tp.light); edge = UiTheme::Col(tp.dark); }
+                    else              { fill = UiTheme::Col(tp.faceIn); edge = UiTheme::Col(tp.dark); }
                     EditPanel::DrawPieSector(menu.x, menu.y, RADIAL_R_IN, RADIAL_R_OUT, a0, a1, fill, edge, edgeW);
 
                     // 扇の中：アイコン／名前／状態とコスト
                     const float rad = ca * 3.14159265f / 180.0f;
                     const int lx = menu.x + (int)lroundf(RADIAL_LABEL_R * sinf(rad));
                     const int ly = menu.y - (int)lroundf(RADIAL_LABEL_R * cosf(rad));
-                    const unsigned int iconCol = !it.enabled ? inkDim : (isHover ? GetColor(160, 220, 255) : inkSub);
+                    // 向けている扇（選ばれている色の地）の文字：暗い灰色は選択の文字の色、明るい灰色は白
+                    const unsigned int selInk = UiTheme::Col(tp.selInk);
+                    const unsigned int iconCol = !it.enabled ? inkDim : (isHover ? selInk : inkSub);
                     EditPanel::DrawIcon(it.icon, lx, ly - 17, iconCol);
-                    const unsigned int labelCol = !it.enabled ? inkDim : (it.id == 6 ? EditPanel::ColInkWarn() : inkMain);
+                    const unsigned int labelCol = !it.enabled ? inkDim : (isHover ? selInk : (it.id == 6 ? EditPanel::ColInkWarn() : inkMain));
                     UiFont::Draw(lx - UiFont::Width(it.label.c_str(), 13) / 2, ly - 6, it.label.c_str(), labelCol, 13);
                     // 2行目：押せるときは「状態　−コスト」、押せないときは理由
                     if (!it.enabled) {
@@ -17069,20 +17074,19 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         const int cw = UiFont::Width(cb, 11);
                         const int gap = it.state.empty() ? 0 : 5;
                         int x = lx - (sw + gap + cw) / 2;
-                        if (sw > 0) UiFont::Draw(x, ly + 11, it.state.c_str(), it.on ? inkOn : inkSub, 11);
-                        UiFont::Draw(x + sw + gap, ly + 11, cb, inkCost, 11);
+                        if (sw > 0) UiFont::Draw(x, ly + 11, it.state.c_str(), isHover ? selInk : (it.on ? inkOn : inkSub), 11);
+                        UiFont::Draw(x + sw + gap, ly + 11, cb, isHover ? selInk : inkCost, 11);
                     }
                 }
                 // 中心の目印と不感帯（この中では何も選ばない）
-                const int accent = (int)EditPanel::ColInkAccent();
+                const int accent = (int)UiTheme::Col(themeDark ? tp.hilite : tp.dark);
                 DrawCircle(menu.x, menu.y, (int)RADIAL_DEAD, accent, FALSE);
                 DrawCircle(menu.x, menu.y, 3, accent, TRUE);
 
                 // 下の説明の帯。向けた項目の説明（押せないなら理由）を出す。何も向けていないときは、使い方を出す
                 {
                     const int bw = 340, bh = 20, bx = menu.x - bw / 2, by = menu.y + (int)RADIAL_R_OUT + 4;
-                    DrawBox(bx, by, bx + bw, by + bh, EditPanel::ColBack(), TRUE);
-                    DrawBox(bx, by, bx + bw, by + bh, GetColor(124, 134, 168), FALSE);
+                    UiTheme::Raised({ bx, by, bx + bw, by + bh });
                     std::string msg;
                     unsigned int msgCol = inkMain;
                     if (hover >= 0) {
