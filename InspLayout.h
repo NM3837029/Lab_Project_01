@@ -95,11 +95,4 @@ inline int RowAt(int mx, int my) {
     return -1;
 }
 
-// ---- 以前の行の描画が使っていた値（タスク5で描画を作り直すまでの間だけ残す）----
-inline int Left()  { return CX1; }
-inline int Right() { return CX2; }
-const int HEAD_Y    = 8;
-const int HEAD_SIZE = 40;
-const int CARD_H    = 22;
-
 } // namespace Insp
