@@ -8324,7 +8324,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         int snap = MakeGraph(WINDOW_WIDTH, WINDOW_HEIGHT);
         GetDrawScreenGraph(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, snap);
 
-        // メニューの項目（id: 0=つづける 1=もういちど 2=セレクトへ 3=操作一覧 4=おわる）
+        // メニューの項目（id: 0=つづける 1=もういちど 2=セレクトへ 3=操作一覧 4=おわる 5=設定）
         // （ゲーム本体の「アイテム一覧 items」を、状況カードのコイン枚数に使うので、ここは entries という名前にして隠さない）
         struct SysItem { const char* label; int id; EditPanel::Icon icon; };
         std::vector<SysItem> entries;
@@ -8333,31 +8333,40 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // タイトル画面を使わない設定のときは、セレクトへ戻れても意味が無いので出さない（リザルト画面と同じ方針）
         if (gameConfig.titleEnabled && !gameConfig.stages.empty()) entries.push_back({ "ステージセレクトへ", 2, EditPanel::ICON_GRID });
         entries.push_back({ "操作一覧", 3, EditPanel::ICON_KEYS });
+        // 設定（2026-11-26 追加）：いまは「画面の見た目」（暗い灰色／明るい灰色）を選ぶだけ
+        entries.push_back({ "設定", 5, EditPanel::ICON_GEAR });
         entries.push_back({ "ゲームをおわる", 4, EditPanel::ICON_POWER });
 
-        int page = helpOnly ? 1 : 0;   // 0=メニュー 1=操作一覧
+        int page = helpOnly ? 1 : 0;   // 0=メニュー 1=操作一覧 2=設定
         int cur = 0;                   // キーボードで選んでいる項目
         int lastHover = -1;            // 前フレームでマウスが指していた項目（動いたときだけ選択を追従させる）
         bool confirmQuit = false;      // 「ゲームをおわる」を1回押した状態（もう1回で確定）
+        int setCur = 0;                // 設定のページで選んでいる行（0=暗い灰色 1=明るい灰色 2=もどる）
+        int lastHoverSet = -1;         // 設定のページで、前フレームにマウスが指していた行
         // 押しっぱなしで開いた直後に反応しないよう、開いた時点の状態を「前フレーム」として始める
-        bool pClick = true, pUp = true, pDown = true, pOk = true, pEsc = true, pF1 = true;
+        bool pClick = true, pUp = true, pDown = true, pOk = true, pEsc = true, pF1 = true, pLeft = true, pRight = true;
         bool done = false;
 
         // 画面の基準：編集画面ではゲーム画面（モニター）の範囲、通常のプレイでは窓全体。
-        // ポーズ画面は左右・下のパネルやHUDと同じ「暗い平らな下地＋青い縁」で描く（見た目の部品は EditPanel.h）。
-        // 以前は「UIデザイン」タブの窓枠素材を使っていたが、編集パネルの配色とちぐはぐだったので、そろえた。
+        // ポーズ画面は、左右・下のパネルと同じ「2000年代の編集ソフト風」の見た目（UiTheme）で描く。
+        // 以前は「UIデザイン」タブの窓枠素材を使っていたが、編集パネルの見た目とちぐはぐだったので、そろえた。
         const int ox = isEditMode ? monitorX : 0, oy = isEditMode ? monitorY : 0;
         const int areaW = isEditMode ? monitorW : WINDOW_WIDTH, areaH = isEditMode ? monitorH : WINDOW_HEIGHT;
         const int cx = ox + areaW / 2, cy = oy + areaH / 2;
-        const unsigned int cAccent = EditPanel::ColInkAccent(), cInk = EditPanel::ColInk(), cSub = EditPanel::ColInkSub();
-        const unsigned int cEdgeLine = GetColor(78, 76, 86);   // カード内の区切り線・溝の縁
-        const unsigned int cWell = GetColor(30, 30, 36);       // 暗い溝（状況カード・列のカードの地）
-        const unsigned int cBlue = GetColor(120, 190, 255);    // 見出しの縦棒など、明るい青
-        const unsigned int cDanger = GetColor(255, 176, 160);  // 「ゲームをおわる」の赤み
-        // 見出し：青い縦棒＋文字
-        auto drawTitle = [&](int x, int y, const char* s) {
-            DrawBox(x, y + 2, x + 4, y + 22, cBlue, TRUE);
-            EditPanel::DrawText(x + 12, y, s, cAccent, 20);
+        // 色と描き方は UiTheme（2000年代の編集ソフト風）から取る。
+        // 「設定」で見た目を切り替えたら、次のフレームからこの窓も新しい見た目で描かれる
+        // （後ろに見えているゲーム画面とパネルは、メニューを開いた瞬間の写真なので、閉じたときに切り替わる）。
+        auto TC = [](UiTheme::Rgb c) { return UiTheme::Col(c); };
+        // 窓：盛り上がった枠と、上の見出しバー（高さ20px）
+        auto drawWindow = [&](int x1, int y1, int x2, int y2, const char* title) {
+            UiTheme::Raised({ x1, y1, x2, y2 });
+            UiTheme::Caption({ x1 + 3, y1 + 3, x2 - 3, y1 + 22 }, title);
+        };
+        // 当時の「いま選んでいる所」の印：1px おきの点線の四角
+        auto drawFocus = [&](const UiTheme::Box& b, UiTheme::Rgb c) {
+            const unsigned int col = TC(c);
+            for (int x = b.x1; x <= b.x2; x += 2) { DrawPixel(x, b.y1, col); DrawPixel(x, b.y2, col); }
+            for (int y = b.y1; y <= b.y2; y += 2) { DrawPixel(b.x1, y, col); DrawPixel(b.x2, y, col); }
         };
 
         // 操作一覧の中身。左右2列で並べる
@@ -8407,12 +8416,15 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             bool click = (GetMouseInput() & MOUSE_INPUT_LEFT) != 0;
             bool kUp = CheckHitKey(KEY_INPUT_UP) != 0 || CheckHitKey(KEY_INPUT_W) != 0;
             bool kDown = CheckHitKey(KEY_INPUT_DOWN) != 0 || CheckHitKey(KEY_INPUT_S) != 0;
+            bool kLeft = CheckHitKey(KEY_INPUT_LEFT) != 0 || CheckHitKey(KEY_INPUT_A) != 0;
+            bool kRight = CheckHitKey(KEY_INPUT_RIGHT) != 0 || CheckHitKey(KEY_INPUT_D) != 0;
             bool kOk = CheckHitKey(KEY_INPUT_RETURN) != 0 || CheckHitKey(KEY_INPUT_Z) != 0;
             bool kEsc = CheckHitKey(KEY_INPUT_ESCAPE) != 0;
             bool kF1 = CheckHitKey(KEY_INPUT_F1) != 0;
             bool clickEdge = click && !pClick, upEdge = kUp && !pUp, downEdge = kDown && !pDown;
+            bool leftEdge = kLeft && !pLeft, rightEdge = kRight && !pRight;
             bool okEdge = kOk && !pOk, escEdge = kEsc && !pEsc, f1Edge = kF1 && !pF1;
-            pClick = click; pUp = kUp; pDown = kDown; pOk = kOk; pEsc = kEsc; pF1 = kF1;
+            pClick = click; pUp = kUp; pDown = kDown; pOk = kOk; pEsc = kEsc; pF1 = kF1; pLeft = kLeft; pRight = kRight;
 
             // 十字キー全押しの脱出口は、ここでも生かしておく（メニューが固まったときの最後の手段）
             if (CheckHitKey(KEY_INPUT_UP) && CheckHitKey(KEY_INPUT_DOWN)
@@ -8421,90 +8433,143 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             SetDrawScreen(DX_SCREEN_BACK);
             ClearDrawScreen();
             DrawGraph(0, 0, snap, FALSE);
-            // 全体を暗くして、メニューへ目が行くようにする
-            // 左のパネルへ目が行くよう暗くするが、ゲーム画面は透けて見える程度にとどめる
+            // 全体を暗くして、メニューへ目が行くようにする（ゲーム画面は透けて見える程度にとどめる）
             SetDrawBlendMode(DX_BLENDMODE_ALPHA, 120);
             DrawBox(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, GetColor(0, 0, 0), TRUE);
             SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
 
             if (page == 1) {
-                // ---- 操作一覧 ----
+                // ---- 操作一覧：見出しバーつきの窓に、へこんだ2列。キーは小さな盛り上がったキーの形 ----
                 if (escEdge || f1Edge || clickEdge || okEdge) {
                     if (helpOnly) done = true; else page = 0;
                 }
-                // 2列ぶんの幅が要るので、ゲーム画面より広く取る。左の列が20行あるので、フッターと重ならない高さにする
+                const UiTheme::Palette& tp = UiTheme::P();
+                // 2列ぶんの幅が要るので、ゲーム画面より広く取る。左の列が20行あるので、下の案内と重ならない高さにする
                 const int pw = 960, ph = 580;
                 int px1 = cx - pw / 2, py1 = cy - ph / 2;
                 if (px1 < 8) px1 = 8;
-                DrawBox(px1, py1, px1 + pw, py1 + ph, EditPanel::ColBack(), TRUE);
-                DrawBox(px1, py1, px1 + pw, py1 + ph, EditPanel::ColEdge(), FALSE);
-                DrawBox(px1 + 1, py1 + 1, px1 + pw - 1, py1 + ph - 1, EditPanel::ColEdge(), FALSE);
-                drawTitle(px1 + 18, py1 + 16, "操作一覧");
+                drawWindow(px1, py1, px1 + pw, py1 + ph, "操作一覧");
                 const int colW = (pw - 36 - 12) / 2;
                 auto drawCol = [&](const HelpRow* rows, int n, int cardX) {
-                    // 列ごとに暗い溝のカードを敷き、見出しで区切る。キーは枠付きの札（キーキャップ風）にする
-                    const int cy1 = py1 + 54, cy2 = py1 + ph - 46;
-                    DrawBox(cardX, cy1, cardX + colW, cy2, cWell, TRUE);
-                    DrawBox(cardX, cy1, cardX + colW, cy2, cEdgeLine, FALSE);
+                    const int cy1 = py1 + 36, cy2 = py1 + ph - 40;
+                    UiTheme::Sunken({ cardX, cy1, cardX + colW, cy2 }, tp.faceIn);
                     for (int i = 0; i < n; i++) {
                         const int ry = cy1 + 10 + i * 22;
                         if (rows[i].what[0] == '\0' && rows[i].key[0] == '\0') continue;
-                        if (rows[i].what[0] == '\0') { // 見出し：文字と、下の細い線
-                            EditPanel::DrawText(cardX + 12, ry, rows[i].key, cAccent, 14);
-                            DrawLine(cardX + 10, ry + 19, cardX + colW - 10, ry + 19, cEdgeLine);
+                        if (rows[i].what[0] == '\0') { // 見出し：太字と、下の溝の線
+                            UiFont::DrawBold(cardX + 12, ry, rows[i].key, TC(tp.ink), 13);
+                            UiTheme::Etched(cardX + 10, cardX + colW - 10, ry + 17);
                             continue;
                         }
-                        EditPanel::DrawChip(cardX + 12, ry, rows[i].key, cInk, EditPanel::ColGroove(), GetColor(124, 134, 168), 13);
-                        EditPanel::DrawText(cardX + 12 + 182, ry + 2, rows[i].what, cSub, 13);
+                        const int kw = UiFont::Width(rows[i].key, 12) + 12;
+                        UiTheme::Raised({ cardX + 12, ry - 2, cardX + 12 + kw, ry + 16 });
+                        UiFont::Draw(cardX + 18, ry + 1, rows[i].key, TC(tp.ink), 12);
+                        UiFont::Draw(cardX + 12 + 182, ry + 1, rows[i].what, TC(tp.inkSub), 12);
                     }
                 };
                 drawCol(leftCol, (int)(sizeof(leftCol) / sizeof(leftCol[0])), px1 + 18);
                 drawCol(rightCol, (int)(sizeof(rightCol) / sizeof(rightCol[0])), px1 + 18 + colW + 12);
-                EditPanel::DrawChip(px1 + 18, py1 + ph - 34, helpOnly ? "F1 / Esc / クリックで閉じる" : "Esc / クリックでもどる",
-                                    cSub, EditPanel::ColGroove(), GetColor(124, 134, 168), 12);
+                UiFont::Draw(px1 + 18, py1 + ph - 26, helpOnly ? "F1 / Esc / クリックで閉じる" : "Esc / クリックでもどる", TC(tp.inkSub), 12);
+            } else if (page == 2) {
+                // ---- 設定：画面の見た目を2つから選ぶ（ラジオボタン）。選んだ瞬間に切り替わり、セーブに残る ----
+                const int pw = 440, ph = 232;
+                const int px1 = cx - pw / 2, py1 = cy - ph / 2;
+                const UiTheme::Box grp = { px1 + 16, py1 + 44, px1 + pw - 16, py1 + 166 };
+                struct Opt { const char* label; const char* note; UiTheme::Id id; };
+                const Opt opts[2] = {
+                    { "暗い灰色（標準）", "2000年代後半のプロ用映像ソフト風", UiTheme::DARK },
+                    { "明るい灰色",       "2000年代前半の Windows ソフト風",   UiTheme::LIGHT },
+                };
+                auto OptBox = [&](int i) { return UiTheme::Box{ grp.x1 + 10, grp.y1 + 14 + i * 50, grp.x2 - 10, grp.y1 + 14 + i * 50 + 42 }; };
+                const UiTheme::Box back = { px1 + pw - 16 - 90, py1 + ph - 50, px1 + pw - 16, py1 + ph - 22 };
+                auto In = [&](const UiTheme::Box& b) { return mx >= b.x1 && mx <= b.x2 && my >= b.y1 && my <= b.y2; };
+
+                // 入力：マウスが指した行へ選択を追従させる（メニューと同じ）
+                int hoverSet = -1;
+                for (int i = 0; i < 2; i++) if (In(OptBox(i))) hoverSet = i;
+                if (In(back)) hoverSet = 2;
+                if (hoverSet >= 0 && hoverSet != lastHoverSet) setCur = hoverSet;
+                lastHoverSet = hoverSet;
+                if (upEdge)   setCur = (setCur + 2) % 3;
+                if (downEdge) setCur = (setCur + 1) % 3;
+                // 見た目を選ぶ：その場で切り替え、セーブに書く（同じものを選び直したときは書かない）
+                auto choose = [&](UiTheme::Id id) {
+                    if (UiTheme::Current() == id) return;
+                    UiTheme::Set(id);
+                    saveData.uiTheme = UiTheme::IdName(id);
+                    GameCfg::WriteSaveData(saveData);
+                };
+                if (leftEdge || rightEdge) {
+                    choose(UiTheme::Current() == UiTheme::DARK ? UiTheme::LIGHT : UiTheme::DARK);
+                    setCur = (UiTheme::Current() == UiTheme::LIGHT) ? 1 : 0;
+                }
+                if (okEdge) { if (setCur < 2) choose(opts[setCur].id); else page = 0; }
+                if (clickEdge && hoverSet >= 0) { setCur = hoverSet; if (hoverSet < 2) choose(opts[hoverSet].id); else page = 0; }
+                if (escEdge || f1Edge) page = 0;
+
+                // 描画（選んだあとの新しい見た目で描く）
+                const UiTheme::Palette& tp = UiTheme::P();
+                drawWindow(px1, py1, px1 + pw, py1 + ph, "設定");
+                UiTheme::GroupBox(grp, "画面の見た目");
+                for (int i = 0; i < 2; i++) {
+                    const UiTheme::Box b = OptBox(i);
+                    const bool on = (UiTheme::Current() == opts[i].id);
+                    // ラジオボタン：白い（暗い灰色では暗い）丸い窓と、選ばれていれば中の黒い点
+                    const int rcx = b.x1 + 12, rcy = b.y1 + 12;
+                    DrawCircle(rcx, rcy, 6, TC(tp.field), TRUE);
+                    DrawCircle(rcx, rcy, 6, TC(tp.shadow), FALSE);
+                    DrawCircle(rcx, rcy, 7, TC(tp.hilite), FALSE);
+                    if (on) DrawCircle(rcx, rcy, 2, TC(tp.ink), TRUE);
+                    UiFont::Draw(b.x1 + 26, b.y1 + 5, opts[i].label, TC(tp.ink), 13);
+                    UiFont::Draw(b.x1 + 26, b.y1 + 24, opts[i].note, TC(tp.inkSub), 12);
+                    if (setCur == i) drawFocus({ b.x1 + 22, b.y1 + 2, b.x1 + 30 + UiFont::Width(opts[i].label, 13), b.y1 + 20 }, tp.ink);
+                }
+                if (setCur == 2) UiTheme::Pressed(back); else UiTheme::Raised(back);
+                {
+                    const int tw = UiFont::Width("もどる", 13);
+                    const UiTheme::Rgb ink = (setCur == 2 && UiTheme::Current() == UiTheme::DARK) ? tp.selInk : tp.ink;
+                    UiFont::Draw((back.x1 + back.x2 + 1 - tw) / 2, UiTheme::TextTop(back, 13), "もどる", TC(ink), 13);
+                }
+                UiFont::Draw(px1 + 18, back.y1 + 7, "← → 切り替え　Esc もどる", TC(tp.inkSub), 12);
             } else {
-                // ---- メニュー：左に寄せたサイドパネル。上に今のステージの状況、下に項目 ----
+                // ---- メニュー：左に寄せたサイドパネル（見出しバー「ポーズ」）。上に今のステージの状況、下に項目 ----
                 // ゲーム画面が右に見えたままになるので、止まった世界を見ながら選べる。
+                const UiTheme::Palette& tp = UiTheme::P();
                 const int n = (int)entries.size();
                 const int pw = 262;
                 const int px1 = ox, py1 = oy, ph = areaH;
-                const int bx = px1 + 16, bw = pw - 32, bh = 38, gap = 7;
-                const int stY1 = py1 + 58, stY2 = stY1 + 118;     // 状況カード
+                const int bx = px1 + 14, bw = pw - 28, bh = 34, gap = 6;
+                const int stY1 = py1 + 40, stY2 = stY1 + 112;     // 状況のグループ枠
                 const int btnY0 = stY2 + 16;                      // 項目の先頭
 
-                // パネルの下地と、ゲーム画面側（右端）の青い縁
-                DrawBox(px1, py1, px1 + pw, py1 + ph, EditPanel::ColBack(), TRUE);
-                DrawBox(px1 + pw - 3, py1, px1 + pw, py1 + ph, EditPanel::ColEdge(), TRUE);
-                drawTitle(px1 + 16, py1 + 18, "ポーズ");
+                drawWindow(px1, py1, px1 + pw, py1 + ph, "ポーズ");
 
-                // 状況カード：ステージ名・コイン・体力・編集コスト
+                // 状況：グループ枠「いまのステージ」に、ステージ名・コイン・体力・編集コスト
                 {
                     std::string stageName = currentStageFileName;
                     for (const auto& se : gameConfig.stages) { if (se.file == currentStageFileName) { stageName = se.name; break; } }
                     if (stageName.size() > 5 && stageName.compare(stageName.size() - 5, 5, ".json") == 0) stageName.resize(stageName.size() - 5);
-                    DrawBox(bx, stY1, bx + bw, stY2, cWell, TRUE);
-                    DrawBox(bx, stY1, bx + bw, stY2, cEdgeLine, FALSE);
-                    EditPanel::DrawText(bx + 10, stY1 + 7, EditPanel::FitText(stageName, bw - 20, 14).c_str(), cAccent, 14);
-                    DrawLine(bx + 8, stY1 + 29, bx + bw - 8, stY1 + 29, cEdgeLine);
+                    UiTheme::GroupBox({ bx, stY1 + 6, bx + bw, stY2 }, "いまのステージ");
+                    UiFont::DrawBold(bx + 10, stY1 + 18, EditPanel::FitText(stageName, bw - 20, 13).c_str(), TC(tp.ink), 13);
 
                     int gotCoins = 0;
                     for (const auto& it : items) { if (it.isCollected) gotCoins++; }
                     auto statRow = [&](int row, const char* label, const char* value) {
-                        const int ry = stY1 + 36 + row * 26;
-                        EditPanel::DrawText(bx + 10, ry, label, cSub, 13);
-                        EditPanel::DrawText(bx + bw - 10 - EditPanel::TextWidth(value, 14), ry - 1, value, cInk, 14);
+                        const int ry = stY1 + 40 + row * 22;
+                        UiFont::Draw(bx + 10, ry, label, TC(tp.inkSub), 12);
+                        UiFont::Draw(bx + bw - 10 - UiFont::Width(value, 12), ry, value, TC(tp.ink), 12);
                     };
                     char vb[48];
                     sprintf_s(vb, sizeof(vb), "%d / %d", gotCoins, (int)items.size());
-                    statRow(0, "コイン", vb);
+                    statRow(0, "コイン：", vb);
                     // 体力：数字ではなくハートの並びで（失った分は灰色）。HUDと同じ作り
                     {
-                        const int ry = stY1 + 36 + 1 * 26;
-                        EditPanel::DrawText(bx + 10, ry, "体力", cSub, 13);
+                        const int ry = stY1 + 40 + 1 * 22;
+                        UiFont::Draw(bx + 10, ry, "体力：", TC(tp.inkSub), 12);
                         int hpNow = player.hp < 0 ? 0 : player.hp;
                         if (hpNow > 6) {
                             sprintf_s(vb, sizeof(vb), "× %d", hpNow);
-                            EditPanel::DrawText(bx + bw - 10 - EditPanel::TextWidth(vb, 14), ry - 1, vb, cInk, 14);
+                            UiFont::Draw(bx + bw - 10 - UiFont::Width(vb, 12), ry, vb, TC(tp.ink), 12);
                         } else {
                             int slots = hpNow > 3 ? hpNow : 3;
                             auto Heart = [&](int hx, int hy, int rr, unsigned int col) {
@@ -8514,14 +8579,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 DrawTriangle(hx - rr, hy - rr / 6, hx + rr, hy - rr / 6, hx, hy + rr, col, TRUE);
                             };
                             for (int hi = 0; hi < slots; hi++) {
-                                int hx = bx + bw - 18 - (slots - 1 - hi) * 20, hy = ry + 8;
-                                Heart(hx, hy, 8, GetColor(16, 14, 18));
-                                Heart(hx, hy, 7, hi < hpNow ? GetColor(235, 70, 80) : GetColor(104, 100, 112));
+                                int hx = bx + bw - 18 - (slots - 1 - hi) * 18, hy = ry + 6;
+                                Heart(hx, hy, 7, TC(tp.dark));
+                                Heart(hx, hy, 6, hi < hpNow ? GetColor(220, 50, 60) : TC(tp.inkDim));
                             }
                         }
                     }
                     sprintf_s(vb, sizeof(vb), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
-                    statRow(2, "コスト", vb);
+                    statRow(2, "コスト：", vb);
                 }
 
                 int hover = -1;
@@ -8540,44 +8605,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (okEdge) act = entries[cur].id;
                 if (clickEdge && hover >= 0) { cur = hover; act = entries[hover].id; }
 
+                // 項目：盛り上がったボタン。選んでいる項目は押し込まれたボタン。「ゲームをおわる」は赤い文字
                 for (int i = 0; i < n; i++) {
                     const int by = btnY0 + i * (bh + gap);
-                    const EditPanel::Box b = { bx, by, bx + bw, by + bh };
+                    const UiTheme::Box b = { bx, by, bx + bw, by + bh };
                     const bool sel = (i == cur);
                     const bool quitRow = (entries[i].id == 4);
                     const char* label = entries[i].label;
                     if (quitRow && confirmQuit) label = "もう一度おすと終了";
-                    unsigned int labelCol, iconCol;
-                    if (quitRow) {
-                        // 終了だけは赤みのカードにして、ほかの項目と見分ける（2回目の確認中は黄色く）
-                        DrawBox(b.x1, b.y1, b.x2, b.y2, sel ? GetColor(96, 34, 40) : GetColor(66, 40, 48), TRUE);
-                        SetDrawBlendMode(DX_BLENDMODE_ALPHA, 28);
-                        DrawBox(b.x1 + 1, b.y1 + 1, b.x2 - 1, (b.y1 + b.y2) / 2, GetColor(255, 255, 255), TRUE);
-                        SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
-                        DrawBox(b.x1, b.y1, b.x2, b.y2, confirmQuit ? GetColor(255, 200, 80) : (sel ? GetColor(255, 150, 140) : GetColor(176, 96, 100)), FALSE);
-                        labelCol = iconCol = confirmQuit ? EditPanel::ColInkWarn() : cDanger;
-                    } else {
-                        EditPanel::DrawCard(b, sel, false, true);
-                        labelCol = sel ? cAccent : cInk;
-                        iconCol = sel ? cAccent : cSub;
-                    }
-                    EditPanel::DrawIcon(entries[i].icon, b.x1 + 24, (b.y1 + b.y2) / 2, iconCol);
-                    EditPanel::DrawText(b.x1 + 46, (b.y1 + b.y2) / 2 - 10, label, labelCol, 16);
+                    if (sel) UiTheme::Pressed(b); else UiTheme::Raised(b);
+                    UiTheme::Rgb ink = (sel && UiTheme::Current() == UiTheme::DARK) ? tp.selInk : tp.ink;
+                    if (quitRow) ink = tp.danger;
+                    EditPanel::DrawIcon(entries[i].icon, b.x1 + 20, (b.y1 + b.y2) / 2, TC(ink));
+                    if (quitRow && confirmQuit) UiFont::DrawBold(b.x1 + 40, UiTheme::TextTop(b, 13), label, TC(ink), 13);
+                    else                        UiFont::Draw(b.x1 + 40, UiTheme::TextTop(b, 13), label, TC(ink), 13);
                 }
 
-                // 操作のヒント：下に札で並べる
-                {
-                    const unsigned int back = EditPanel::ColGroove(), edge = GetColor(124, 134, 168);
-                    int hy = py1 + ph - 60;
-                    int hx = EditPanel::DrawChip(bx, hy, "↑↓ えらぶ", cSub, back, edge, 12) + 6;
-                    EditPanel::DrawChip(hx, hy, "Enter きめる", cSub, back, edge, 12);
-                    EditPanel::DrawChip(bx, hy + 26, "Esc とじる", cSub, back, edge, 12);
-                }
+                // 操作のヒント：下に1行
+                UiFont::Draw(bx, py1 + ph - 28, "↑↓ えらぶ　Enter きめる　Esc とじる", TC(tp.inkSub), 12);
 
                 if (act == 0) done = true;
                 else if (act == 1) { ResetStage(); done = true; }
                 else if (act == 2) { currentScene = STAGE_SELECT; SoundManager::Get().StopBgm(); done = true; }
                 else if (act == 3) { page = 1; }
+                else if (act == 5) { page = 2; setCur = (UiTheme::Current() == UiTheme::LIGHT) ? 1 : 0; lastHoverSet = -1; }
                 else if (act == 4) {
                     // 終了は取り返しがつかないので、2回押して確定する（別の項目へ動かすと取り消し）
                     if (confirmQuit) { sysQuit = true; done = true; }

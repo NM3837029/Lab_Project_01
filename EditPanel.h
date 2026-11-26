@@ -88,7 +88,7 @@ inline void DrawCard(const Box& b, bool active, bool hover, bool usable) {
 // ICON_LAYER は、右クリックの扇形メニューの「レイヤー」。既存の番号がずれないよう、末尾に足している
 enum Icon { ICON_SCALE, ICON_ANGLE, ICON_SPEED, ICON_PAUSE, ICON_PLAY, ICON_REWIND, ICON_MOVE,
             ICON_FAST, ICON_SLOW, ICON_FLIP, ICON_RESET, ICON_CUTDEL,
-            ICON_GRID, ICON_KEYS, ICON_POWER, ICON_LAYER, ICON_LOCK };
+            ICON_GRID, ICON_KEYS, ICON_POWER, ICON_LAYER, ICON_LOCK, ICON_GEAR };
 
 // 円弧を細い線の連なりで描く。角度は度で、数学の向き（上が正）。
 inline void DrawArc(float cx, float cy, float r, float a0, float a1, unsigned int col, float th) {
@@ -217,6 +217,17 @@ inline void DrawIcon(Icon k, int cx, int cy, unsigned int col) {
             DrawBox(cx - 3, cy - 9, cx + 9, cy + 1, col, FALSE);
             DrawBox(cx - 6, cy - 6, cx + 6, cy + 4, col, FALSE);
             DrawBox(cx - 9, cy - 3, cx + 3, cy + 7, col, TRUE);
+            break;
+        }
+        case ICON_GEAR: {
+            // 歯車（設定）：輪と、まわりの8つの歯、真ん中の穴
+            for (int k = 0; k < 8; k++) {
+                const float a = (float)k * 3.14159265f / 4.0f;
+                const int tx = cx + (int)lroundf(cosf(a) * 7.0f), ty = cy - (int)lroundf(sinf(a) * 7.0f);
+                DrawBox(tx - 1, ty - 1, tx + 2, ty + 2, col, TRUE);
+            }
+            DrawCircle(cx, cy, 5, col, TRUE);
+            DrawCircle(cx, cy, 2, GetColor(0, 0, 0), TRUE);
             break;
         }
         case ICON_LOCK: {
