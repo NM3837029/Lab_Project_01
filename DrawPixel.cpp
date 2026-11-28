@@ -1536,6 +1536,39 @@ void AppendBodyInstance(std::vector<PartInstance>& parts, const PartDef& body, i
 //
 // 縦横比が素材と論理サイズで食い違っていても枠からはみ出さないよう、幅基準・高さ基準の小さい方を採る。
 // 画像が未読み込み(-1)、または論理サイズが未設定(0以下)の場合は 1.0 を返し、従来どおり原寸で描画する。
+// 画像の上側にある「透明な余白」の割合（0〜1）。上から見ていって最初に見えている（不透明な）行の位置 ÷ 画像の高さ。
+//
+// 素材はどれも 640x640 の共通キャンバスに描かれていて、絵の上下に透明な余白がある。
+// 落下リフト・乗ると落ちる床の板は、キャンバスの縦の真ん中あたり（上から約43%）に描かれているので、
+// 当たり判定の箱へキャンバスごと引き伸ばすと、板が箱の真ん中に見える。ところが乗れる面は箱の上端なので、
+// 「板の上に立っていない（浮いて見える）」「1マスの真ん中に床がある」ように見えていた。
+// 描くときにこの割合ぶん上へずらせば、板の上端が箱の上端（＝乗れる面）にそろう。
+//
+// 画像の読み直しは重いので、パスごとに1回だけ調べて覚えておく。読めなければ 0（ずらさない）。
+// 速さのため、列は2つおきに見る（板のような横長の絵なら取りこぼさない）。
+static float ImageOpaqueTopRatio(const std::string& path) {
+    static std::map<std::string, float> cache;
+    auto it = cache.find(path);
+    if (it != cache.end()) return it->second;
+    float ratio = 0.0f;
+    int si = path.empty() ? -1 : LoadSoftImage(path.c_str());
+    if (si != -1) {
+        int w = 0, h = 0;
+        GetSoftImageSize(si, &w, &h);
+        bool found = false;
+        for (int y = 0; y < h && !found; y++) {
+            for (int x = 0; x < w; x += 3) {
+                int r, g, b, a;
+                GetPixelSoftImage(si, x, y, &r, &g, &b, &a);
+                if (a > 16) { ratio = (h > 0) ? (float)y / (float)h : 0.0f; found = true; break; }
+            }
+        }
+        DeleteSoftImage(si);
+    }
+    cache[path] = ratio;
+    return ratio;
+}
+
 static float ComputeFitScale(int graphHandle, float logicalW, float logicalH) {
     if (graphHandle < 0) return 1.0f;
     if (logicalW <= 0.0f && logicalH <= 0.0f) return 1.0f;
@@ -3082,6 +3115,14 @@ bool WormSolidGimmick(const Gimmick& g) {
         case GIMMICK_SPIKES:        return GimmickIsTipped(g); // 倒したトゲだけが無害な足場
         default: return false;
     }
+}
+
+// 画面の広い範囲を覆う「範囲」のギミック（中に入ると画面や時間に効く）か。
+// 明暗ゾーン・色調ゾーン・ズームレンズ・スローフィールド・時間停止無効フィールド。
+// 左クリックでは選ばない（弾を撃つクリックを横取りしないように）ために使う。右クリックでは選べる。
+bool IsZoneGimmick(GimmickType type) {
+    return type == GIMMICK_BRIGHTNESS_ZONE || type == GIMMICK_COLOR_ZONE || type == GIMMICK_ZOOM_LENS
+        || type == GIMMICK_SLOWMO_FIELD || type == GIMMICK_TIME_FIELD;
 }
 
 bool GimmickAngleIsAiOwned(GimmickType type) {
@@ -5651,6 +5692,12 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
     //   ・地形タイル … 壊れて空になっているマス（行, 列）
     std::vector<char> checkpointGimmickGone;
     std::vector<std::pair<int, int>> checkpointBrokenTiles;
+    // 通過したチェックポイント（添字はステージデータのギミックの並び。1＝通過済み）。
+    // 以前は「今の復帰地点」しか覚えていなかったので、通過中は通ったもの全部が「チェックポイント済」なのに、
+    // 死んでやり直すと最新の1つだけが「済」に戻り、表示が食い違っていた。
+    // さらに、戻った古いチェックポイントにもう一度触れると、復帰地点が手前へ戻ってしまっていた。
+    // 通ったものは死んでも「済」のまま残し、もう一度触れても復帰地点は変えない。
+    std::vector<char> checkpointPassed;
 
     float cameraX = 0.0f; // カメラのワールドX座標（プレイヤーを追従して毎フレーム更新される）
     float cameraY = 0.0f; // Feature: 縦スクロール対応 — cameraXと同様、毎フレームプレイヤーへ追従させる
@@ -7574,6 +7621,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (gim.type == GIMMICK_CHECKPOINT && checkpointX >= 0.0f && gim.x == checkpointX && gim.y == checkpointY) {
                 gim.val1 = 1.0f;
             }
+            // 通過済みのチェックポイントも「済」に戻す（死んでも表示が変わらないように。checkpointPassed の説明を参照）
+            {
+                size_t gi = (size_t)(&gim - &gimmicks[0]);
+                if (gim.type == GIMMICK_CHECKPOINT && gi < checkpointPassed.size() && checkpointPassed[gi]) gim.val1 = 1.0f;
+            }
 
             // Feature: 編集リアクション — 敵側と同じく配置時の値を基準として焼く。
             // 縦幅の基準は height を正とする（Wドラッグは spriteHeight を先に動かして height へ同期し、
@@ -7698,6 +7750,7 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         checkpointEnemyGone.clear();
         checkpointGimmickGone.clear();
         checkpointBrokenTiles.clear();
+        checkpointPassed.clear(); // 別ステージへ移るなら、通過の記録も持ち越さない
         for (int i = 0; i < (int)stages.size(); i++) {
             if (stages[i].sourceFile == fileName) {
                 currentStageIdx = i;
@@ -9461,6 +9514,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                                 NoteEditOp("cut");
                                 tempCutStart = -1.0f;
                                 SoundManager::Get().PlaySeExclusive("edit", gameConfig.editSe.cut);
+                                // 作ったワープ区間は右クリックで消せる。それを知らないと、作り直したいときに困るので、作った直後に知らせる
+                                ShowEditToast("ワープ区間を作りました（右クリックで消せます）", 1);
                             }
                         } else {
                             // コスト不足。始点は残さず捨てて、打ち直しさせる
@@ -9716,6 +9771,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             if (!objectClicked) {
                                 for (auto& gim : gimmicks) {
                                     if (gim.isActive) {
+                                        // 明暗ゾーン・色調ゾーンなどの「範囲」のギミックは、左クリックでは選ばない（何も無い所と同じ扱い＝弾を撃てる）。
+                                        // 以前はマウスがゾーンの中にあると、クリックがゾーンを選ぶのに使われてしまい、弾を撃てなかった
+                                        // （ゾーンは画面の広い範囲を覆うので、狙った先がゾーンの中ということがよくある）。
+                                        // ゾーンを編集したいときは、右クリックで選べる。選んだあとのゾーンは、左ドラッグで動かせる。
+                                        if (IsZoneGimmick(gim.type)) continue;
                                         if (GimmickHitTest(gim, gx, gy)) {
                                             selectedPlayers.clear(); selectedEnemies.clear(); selectedGimmicks.clear();
                                             selectedGimmicks.push_back(&gim);
@@ -10392,6 +10452,45 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 右へ進んで始点をまたいだら終点へ、左へ戻って終点をまたいだら始点へ送る＝
                 // 動画のタイムラインからその区間を切り取ったのと同じ見え方になる。
                 {
+                    // 【不具合の修正】ワープ先が壁の中だと、プレイヤーが壁に挟まって動けなくなっていた。
+                    // ワープ先はカット区間の端の「位置（横）」だけで決まり、そこに何があるかを見ていなかったため。
+                    // ワープしたあと体が壁（当たり判定のある地形タイル・同じ層の固いギミック）に重なっていたら、
+                    // いちばん近い空いている場所へずらす。探す順番は：
+                    //   1) その場から上へ（壁の上に立てる高さ。最大6マス）
+                    //   2) 進んでいた向きへ 16px ずつ進めて、また上へ（最大20マス先まで）
+                    // どこも空いていなければ、そのまま（従来どおり）。
+                    auto PlayerBodyBlocked = [&](float px, float py) -> bool {
+                        const float bw = (float)player.width * player.scale, bh = (float)player.height * player.scale;
+                        if (px < 0.0f || px + bw > STAGE_WIDTH || py < 0.0f) return true; // ステージの外へは出さない
+                        const auto& mpP = stages[currentStageIdx].map;
+                        int c0 = (int)(px / TILE_SIZE), c1 = (int)((px + bw - 1.0f) / TILE_SIZE);
+                        int r0 = (int)(py / TILE_SIZE), r1 = (int)((py + bh - 1.0f) / TILE_SIZE);
+                        for (int rr = r0; rr <= r1; rr++) {
+                            if (rr < 0 || rr >= (int)mpP.size()) continue;
+                            for (int cc = c0; cc <= c1; cc++) {
+                                if (cc < 0 || cc >= (int)mpP[rr].size()) continue;
+                                int tid = mpP[rr][cc];
+                                if (tid > 0 && tid < (int)tileDefs.size() && tileDefs[tid].isCollidable) return true;
+                            }
+                        }
+                        for (const auto& gS : gimmicks) {
+                            if (!WormSolidGimmick(gS) || !SameLayer(gS.layer, player.layer)) continue; // 壁・足場になるギミック（機械芋虫と同じ顔ぶれ）
+                            float gbx, gby, gbw, gbh;
+                            GetGimmickCollisionBox(gS, gbx, gby, gbw, gbh);
+                            if (px < gbx + gbw && px + bw > gbx && py < gby + gbh && py + bh > gby) return true;
+                        }
+                        return false;
+                    };
+                    auto ResolveWarpOverlap = [&](float dirSign) {
+                        if (!PlayerBodyBlocked(player.x, player.y)) return;
+                        for (int k = 0; k <= 40; k++) {                     // 16px × 40 = 20マス先まで
+                            float tx = player.x + dirSign * 16.0f * (float)k;
+                            for (int up = 0; up <= 6; up++) {               // 上へ最大6マス
+                                float ty = player.y - (float)(up * TILE_SIZE);
+                                if (!PlayerBodyBlocked(tx, ty)) { player.x = tx; player.y = ty; player.vy = 0.0f; return; }
+                            }
+                        }
+                    };
                     float tp = player.x / STAGE_WIDTH;
                     float prev_tp = prevPlayerX / STAGE_WIDTH; // 前フレームのタイムライン位置
                     for (auto& gim : gimmicks) {
@@ -10405,11 +10504,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // 左の境界（timePos）を左から右へ越えたときのみ前方へワープ
                         if (player.vx > 0 && prev_tp < timePos && tp >= timePos) {
                             player.x = targetTimePos * STAGE_WIDTH + warpOffset;
+                            ResolveWarpOverlap(+1.0f); // 壁の中へ出たら、空いている所へずらす（右へ進んでいた）
                             SoundManager::Get().PlaySe(gdef ? gdef->seActivate : "ui_fastforward");
                         }
                         // 右の境界（targetTimePos）を右から左へ越えたときのみ後方へワープ
                         else if (player.vx < 0 && prev_tp > targetTimePos && tp <= targetTimePos) {
                             player.x = timePos * STAGE_WIDTH - pw_scaled - warpOffset;
+                            ResolveWarpOverlap(-1.0f); // 壁の中へ出たら、空いている所へずらす（左へ進んでいた）
                             SoundManager::Get().PlaySe(gdef ? gdef->seActivate : "ui_fastforward");
                         }
                     }
@@ -14250,6 +14351,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                             checkpointX = gim.x;
                             checkpointY = gim.y;
                             checkpointLayer = player.layer; // この復帰地点に触れた層（チェックポイントは同じ層でないと触れない）
+                            // 通過したことを覚える（死んでも「済」の表示が残るように）
+                            {
+                                size_t gi = (size_t)(&gim - &gimmicks[0]);
+                                const size_t nStage = stages[currentStageIdx].gimmicks.size();
+                                if (checkpointPassed.size() < nStage) checkpointPassed.resize(nStage, 0);
+                                if (gi < checkpointPassed.size()) checkpointPassed[gi] = 1;
+                            }
                             // ここまでに取ったアイテムと倒した敵を控える（やり直したときに、この状態から再開する）。
                             // 敵は「ステージ開始時にはいた（isActive）のに、今はいない」ものだけを倒したとみなす
                             // （最初から非表示で置かれている敵を、倒した扱いにしないため）。
@@ -14658,7 +14766,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (gim.type != GIMMICK_CHECKPOINT || !gim.isActive) continue;
             int cgx = (int)(gim.x - cameraX);
             int cgy = (int)(gim.y - cameraY);
-            bool cpActive = gim.val1 > 0.5f;
+            bool cpActive = gim.val1 > 0.5f;                                   // 通過済み（「チェックポイント済」と出す）
+            bool cpCurrent = cpActive && gim.x == checkpointX && gim.y == checkpointY; // その中でも、今の復帰地点
             int flagBob = 0;
             // 旗の大きさと、旗を立てる「地面の高さ」。
             // チェックポイントの当たり判定は 32x64（2マスぶんの縦長）で、配置した y はその箱の上端。
@@ -14670,14 +14779,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             // 旗の絵（640x640）は、下端から 18px ぶん（約2.8%）透明な余白がある。
             // その余白ぶん下げて、旗竿の根元がちょうど地面に乗るようにする。
             const int flagCenterY = footY - flagSize / 2 + (int)(flagSize * 18.0f / 640.0f);
-            if (cpActive) {
-                // 発動済み：足元にうっすら発光する光の柱を出す（地面から2マスぶんの高さ）
+            if (cpCurrent) {
+                // 今の復帰地点：足元にうっすら発光する光の柱を出し、旗を揺らす（通過済みのうち、どれから再開するかが分かるように）
                 SetDrawBlendMode(DX_BLENDMODE_ALPHA, 60);
                 DrawBox(cgx + 4, footY - TILE_SIZE * 2, cgx + TILE_SIZE - 4, footY, GetColor(120, 255, 150), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 flagBob = (int)(sinf(BehaviorInterpreter::globalFrameCounter * 0.09f + gim.x) * 2.0f);
-            } else {
-                SetDrawBright(150, 150, 155); // 未発動：色褪せて見えるよう輝度を落とす
+            } else if (!cpActive) {
+                SetDrawBright(150, 150, 155); // 未通過：色褪せて見えるよう輝度を落とす（通過済みは普通の明るさ）
             }
             // 旗は「竿の根元が当たり判定の箱の底（＝地面）」に来るように描く
             DrawUiIcon(cgx + TILE_SIZE / 2, flagCenterY + flagBob, flagSize, checkpointHandle);
@@ -14817,6 +14926,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int y1 = (int)(gim.y - cameraY);
                 int x2 = (int)(gim.x + gim.spriteWidth - cameraX);
                 int y2 = (int)(gim.y + gim.spriteHeight - cameraY);
+                // 板の絵の上端を、当たり判定の箱の上端（乗れる面）にそろえる（ImageOpaqueTopRatio の説明を参照）
+                {
+                    const GimmickDef* lfDef = FindGimmickDef(gim.assetId);
+                    const std::string lfPath = (gim.handle >= 0 && lfDef != nullptr) ? lfDef->sprite_path : std::string("img/乗ったら落ちる床.png");
+                    const int lift = (int)(ImageOpaqueTopRatio(lfPath) * (float)(y2 - y1) + 0.5f);
+                    y1 -= lift; y2 -= lift;
+                }
                 DrawExtendGraph(x1, y1, x2, y2, useHandle, TRUE);
                 if (gim.isPaused) WorldLabel(x1, y1 - 20, "停止中", GetColor(255, 255, 100));
                 else if (gim.isRewinding) WorldLabel(x1, y1 - 20, "巻き戻し中", GetColor(255, 100, 100));
@@ -14973,6 +15089,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 int cx2 = (int)(gim.x + gim.spriteWidth + shakeX - cameraX);
                 int cy2 = (int)(gim.y + gim.spriteHeight - cameraY);
                 if (gim.handle >= 0) {
+                    // 板の絵の上端を、当たり判定の箱の上端（乗れる面）にそろえる。
+                    // 以前は1マスの真ん中に板が見え、乗っているプレイヤーが板から浮いて見えていた（ImageOpaqueTopRatio の説明を参照）
+                    const GimmickDef* ckDef = FindGimmickDef(gim.assetId);
+                    if (ckDef != nullptr) {
+                        const int lift = (int)(ImageOpaqueTopRatio(ckDef->sprite_path) * (float)(cy2 - cy1) + 0.5f);
+                        cy1 -= lift; cy2 -= lift;
+                    }
                     DrawExtendGraph(cx1, cy1, cx2, cy2, gim.handle, TRUE);
                 } else {
                     DrawBox(cx1, cy1, cx2, cy2, GetColor(222, 184, 135), TRUE);
@@ -16681,10 +16804,25 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, GetColor(184, 60, 60), TRUE);
                 SetDrawBlendMode(DX_BLENDMODE_NOBLEND, 0);
                 bool isSel = (targetGimmick == &gim);
-                int edgeColor = isSel ? GetColor(255, 255, 255) : GetColor(255, 154, 154);
+                // マウスが区間の上にあるか（右クリックで消せることを、その場で教えるのに使う）
+                const bool isHover = (mx >= cx1 - 2 && mx <= cx2 + 2 && my >= WINDOW_HEIGHT - 62 && my <= WINDOW_HEIGHT - 38);
+                int edgeColor = (isSel || isHover) ? GetColor(255, 255, 255) : GetColor(255, 154, 154);
                 DrawLine(cx1, WINDOW_HEIGHT - 60, cx1, WINDOW_HEIGHT - 40, edgeColor);
                 DrawLine(cx2, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor);
-                if (isSel) DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor, FALSE);
+                if (isSel || isHover) DrawBox(cx1, WINDOW_HEIGHT - 60, cx2, WINDOW_HEIGHT - 40, edgeColor, FALSE);
+                // 区間にマウスを乗せたら、上に「右クリックで消せます」と出す。
+                // 以前は右クリックで消せることがどこにも書かれておらず、初めての人には消し方が分からなかった。
+                if (isHover && tempCutStart < 0.0f) {
+                    const char* hint = "右クリックで消せます";
+                    const int tw = UiFont::Width(hint, 12);
+                    int hx1 = (cx1 + cx2) / 2 - tw / 2 - 6;
+                    if (hx1 < 4) hx1 = 4;
+                    if (hx1 + tw + 12 > WINDOW_WIDTH - 4) hx1 = WINDOW_WIDTH - 4 - tw - 12;
+                    const int hy1 = WINDOW_HEIGHT - 82;
+                    DrawBox(hx1, hy1, hx1 + tw + 12, hy1 + 18, GetColor(40, 36, 44), TRUE);
+                    DrawBox(hx1, hy1, hx1 + tw + 12, hy1 + 18, GetColor(255, 154, 154), FALSE);
+                    UiFont::Draw(hx1 + 6, hy1 + 2, hint, GetColor(255, 235, 235), 12);
+                }
             }
             // 打ちかけの始点（2点目のクリック待ち）と、確定前のコストプレビュー。
             //

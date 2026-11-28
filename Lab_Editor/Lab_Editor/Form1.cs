@@ -923,6 +923,148 @@ public partial class Form1 : Form
     }
 
     // 「🗑削除」ボタンが押されたときの処理。確認の上で現在選択中のステージファイルを削除する。
+    // 「✎ 名前を変える」ボタン。選んでいるステージのファイル名を変える。
+    //
+    // ステージのファイル名は、ほかの場所からも名前で参照されている。名前だけ変えるとそれらが切れて、
+    // 「タイトルのステージ選択に出ない」「ステージ移動（GoToStage）で行けない」となるので、一緒に書き換える：
+    //   ・ゲーム設定（game_config.json）のステージ一覧
+    //   ・すべてのステージのトリガーの「GoToStage」（行き先のステージファイル）
+    //   ・コモンイベント（common_events.json）の「GoToStage」
+    // 遊んだ人のセーブデータ（クリア記録）は各自のPCにあるので書き換えられない。名前を変えたステージは「未クリア」に戻る。
+    private void btnRenameStage_Click(object? sender, EventArgs e)
+    {
+        if (string.IsNullOrEmpty(currentStageFile) || currentStage == null)
+        { MessageBox.Show("名前を変えるステージを、一覧で選んでください。", "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
+
+        string oldFile = currentStageFile;
+        string? input = AskStageName(Path.GetFileNameWithoutExtension(oldFile));
+        if (input == null) return; // キャンセル
+        string newName = input.Trim();
+        if (newName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) newName = newName[..^5];
+        if (newName.Length == 0) { MessageBox.Show("名前を入力してください。", "名前を変える"); return; }
+        if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        { MessageBox.Show("ファイル名に使えない文字が入っています（\\ / : * ? \" < > | など）。", "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        string newFile = newName + ".json";
+        if (newFile == "_test_play.json" || newFile == "_enemy_tune.json")
+        { MessageBox.Show("その名前は、エディタが一時的に使うので選べません。", "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        if (newFile == oldFile) return;
+        string oldPath = Path.Combine(stagesPath, oldFile), newPath = Path.Combine(stagesPath, newFile);
+        // 大文字・小文字だけを変える場合は、Windows では同じファイルとみなされるので「すでにある」とは言わない
+        if (File.Exists(newPath) && !string.Equals(oldFile, newFile, StringComparison.OrdinalIgnoreCase))
+        { MessageBox.Show($"「{newFile}」は、もうあります。別の名前にしてください。", "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+
+        // いまの編集内容を保存してから、ファイルの名前を変える
+        SaveCurrentStage();
+        try
+        {
+            if (string.Equals(oldFile, newFile, StringComparison.OrdinalIgnoreCase))
+            {
+                // 大文字・小文字だけの変更は、いったん別名を経由しないと反映されない
+                string tmp = oldPath + ".renaming";
+                File.Move(oldPath, tmp);
+                File.Move(tmp, newPath);
+            }
+            else File.Move(oldPath, newPath);
+        }
+        catch (Exception ex) { MessageBox.Show("名前を変えられませんでした：" + Environment.NewLine + ex.Message, "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+
+        var notes = RenameStageReferences(oldFile, newFile);
+
+        currentStageFile = newFile;
+        RefreshStageList();
+        for (int i = 0; i < lstStages.Items.Count; i++)
+            if (lstStages.Items[i].ToString() == newFile) { lstStages.SelectedIndex = i; break; }
+
+        string msg = $"「{oldFile}」を「{newFile}」に変えました。";
+        string nl = Environment.NewLine;
+        if (notes.Count > 0) msg += nl + nl + "あわせて書き換えた所：" + nl + "・" + string.Join(nl + "・", notes);
+        msg += nl + nl + "※ 遊んだ人のクリア記録は、名前を変えたステージでは「未クリア」に戻ります。";
+        MessageBox.Show(msg, "名前を変える", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    // ステージのファイル名を変えたとき、ほかから名前で参照している所を書き換える。書き換えた所の説明を返す。
+    private List<string> RenameStageReferences(string oldFile, string newFile)
+    {
+        var notes = new List<string>();
+        // 1) ゲーム設定のステージ一覧（タイトル画面・ステージ選択に出る並び）
+        try
+        {
+            var cfgPath = GameConfig.PathFor(assetsPath);
+            if (File.Exists(cfgPath))
+            {
+                var cfg = GameConfig.Load(assetsPath);
+                int n = 0;
+                foreach (var st in cfg.stages) if (st.file == oldFile) { st.file = newFile; n++; }
+                if (n > 0) { cfg.Save(assetsPath); notes.Add("ゲーム設定のステージ一覧"); }
+            }
+        }
+        catch (Exception ex) { notes.Add("ゲーム設定は書き換えられませんでした（" + ex.Message + "）"); }
+
+        // 「GoToStage」の行き先を書き換える。actions 配列を持つ物（トリガー・コモンイベント）の中を見る。
+        // 書き換えた数を返す。
+        static int FixActions(JToken? actions, string oldF, string newF)
+        {
+            int n = 0;
+            if (actions is not JArray arr) return 0;
+            foreach (var a in arr)
+            {
+                if (a is JObject ao && (string?)ao["action"] == "GoToStage" && (string?)ao["param1"] == oldF)
+                { ao["param1"] = newF; n++; }
+            }
+            return n;
+        }
+
+        // 2) すべてのステージのトリガー
+        foreach (var f in Directory.GetFiles(stagesPath, "*.json"))
+        {
+            try
+            {
+                var j = JObject.Parse(File.ReadAllText(f));
+                int n = 0;
+                if (j["triggers"] is JArray tr) foreach (var t in tr) n += FixActions(t["actions"], oldFile, newFile);
+                if (n > 0)
+                {
+                    File.WriteAllText(f, j.ToString(Newtonsoft.Json.Formatting.Indented));
+                    notes.Add($"{Path.GetFileName(f)} のステージ移動（{n}か所）");
+                }
+            }
+            catch { /* 読めないファイルは飛ばす（ステージ以外のJSONが混ざっていても止めない） */ }
+        }
+
+        // 3) コモンイベント
+        try
+        {
+            string cePath = Path.Combine(assetsPath, "common_events.json");
+            if (File.Exists(cePath))
+            {
+                var arr = JArray.Parse(File.ReadAllText(cePath));
+                int n = 0;
+                foreach (var ce in arr) n += FixActions(ce["actions"], oldFile, newFile);
+                if (n > 0) { File.WriteAllText(cePath, arr.ToString(Newtonsoft.Json.Formatting.Indented)); notes.Add($"コモンイベントのステージ移動（{n}か所）"); }
+            }
+        }
+        catch { }
+        return notes;
+    }
+
+    // 新しいステージ名を聞く小さな画面。キャンセルなら null。
+    private string? AskStageName(string current)
+    {
+        using var f = new Form
+        {
+            Text = "ステージの名前を変える", FormBorderStyle = FormBorderStyle.FixedDialog, MaximizeBox = false, MinimizeBox = false,
+            StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(360, 118), ShowInTaskbar = false, Font = Font,
+        };
+        var lbl = new Label { Text = "新しい名前（.json は付けなくてよい）", Location = new Point(12, 12), AutoSize = true };
+        var txt = new TextBox { Text = current, Location = new Point(12, 36), Width = 336 };
+        var ok = new Button { Text = "変える", DialogResult = DialogResult.OK, Location = new Point(176, 76), Size = new Size(84, 28) };
+        var cancel = new Button { Text = "キャンセル", DialogResult = DialogResult.Cancel, Location = new Point(264, 76), Size = new Size(84, 28) };
+        f.Controls.AddRange(new Control[] { lbl, txt, ok, cancel });
+        f.AcceptButton = ok; f.CancelButton = cancel;
+        f.Shown += (s, e) => { txt.Focus(); txt.SelectAll(); };
+        return f.ShowDialog(this) == DialogResult.OK ? txt.Text : null;
+    }
+
     private void btnDeleteStage_Click(object? sender, EventArgs e)
     {
         if (string.IsNullOrEmpty(currentStageFile)) return;

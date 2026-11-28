@@ -350,9 +350,11 @@ public class MapCanvas : Panel
             // 横縦で別々の倍率を掛ける（ゲーム側のローダと同じ計算）
             float gimW = (def?.hitboxWidth > 0 ? def.hitboxWidth : GAME_TILE) * (gi.Scale > 0 ? gi.Scale : 1f);
             float gimH = (def?.hitboxHeight > 0 ? def.hitboxHeight : GAME_TILE) * (gi.ScaleY > 0 ? gi.ScaleY : 1f);
+            // 落下リフト(4)・乗ると落ちる床(11)は、板の絵の上端を箱の上端へそろえて描く（ゲームと同じ見た目）
+            float lift = (def != null && (def.type_enum == 4 || def.type_enum == 11)) ? OpaqueTopRatio(def.sprite) : 0f;
             DrawPlacedObject(g, gi.X, gi.Y, new SizeF(gimW, gimH),
                              def?.sprite, gi.Angle, icon,
-                             IsSelected(gi) ? Color.Magenta : Color.FromArgb(50, 120, 220));
+                             IsSelected(gi) ? Color.Magenta : Color.FromArgb(50, 120, 220), lift);
             DrawLockBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.EditLocks);
             DrawLayerBadge(g, gi.X, gi.Y, new SizeF(gimW, gimH), gi.Layer);
             if (def != null) DrawConditionBadge(g, gi, def, new SizeF(gimW, gimH)); // 色・明るさで出入りする物の条件
@@ -638,8 +640,11 @@ public class MapCanvas : Panel
 
     // 配置済みオブジェクトを1つ描く。
     // 画像があれば実サイズで、無ければ従来どおりの絵文字マーカーで描く。
+    // imageLift … 絵だけを上へずらす割合（箱の高さに対して）。落下リフト・乗ると落ちる床のように、
+    //              キャンバスの真ん中に板が描かれた絵を、板の上端が箱の上端（乗れる面）にそろうよう描くのに使う。
+    //              選択の枠は当たり判定の箱のまま（ずらさない）。ゲーム側 DrawPixel.cpp の ImageOpaqueTopRatio と同じ考え方。
     private void DrawPlacedObject(Graphics g, float worldX, float worldY, SizeF worldSize,
-                                  string? spritePath, float angleRad, string icon, Color color)
+                                  string? spritePath, float angleRad, string icon, Color color, float imageLift = 0f)
     {
         var img = GetAssetImage(spritePath);
         if (img == null)
@@ -663,7 +668,8 @@ public class MapCanvas : Panel
             g.RotateTransform(angleRad * 180f / (float)Math.PI);
             g.TranslateTransform(-cx, -cy);
         }
-        g.DrawImage(img, rect);
+        if (imageLift > 0f) g.DrawImage(img, new RectangleF(rect.X, rect.Y - rect.Height * imageLift, rect.Width, rect.Height));
+        else g.DrawImage(img, rect);
         if (saved != null) g.Restore(saved);
 
         // 選択中は枠を重ねて、どれを掴んでいるか分かるようにする
@@ -989,7 +995,11 @@ public class MapCanvas : Panel
                 if (!string.IsNullOrEmpty(SelectedAssetId) && !_strokePlacedAsset)
                 {
                     var (wx, wy) = ToWorldSnapped(cx, cy);
-                    Stage.Gimmicks.Add(new PlacedGimmick { Id = SelectedAssetId, X = wx, Y = wy });
+                    var newPg = new PlacedGimmick { Id = SelectedAssetId, X = wx, Y = wy };
+                    // 重量スイッチ・補正スイッチは、マスの上端ではなく底（地面の上）に置く。
+                    // 以前はマスの上端に置かれて地面から浮き、プロパティ表の Y を手で直す必要があった。
+                    if (IsGroundButton(Assets?.Gimmicks.FirstOrDefault(d => d.id == SelectedAssetId))) DropToCellBottom(newPg);
+                    Stage.Gimmicks.Add(newPg);
                     _strokePlacedAsset = true;
                     Fire();
                 }
@@ -1192,6 +1202,18 @@ public class MapCanvas : Panel
             var miLocks = new ToolStripMenuItem(lockText);
             miLocks.Click += (s, e) => EditPlacedLocks(target);
             menu.Items.Add(miLocks);
+            // 1マスより低いギミック（スイッチ・薄い足場など）を、マスの底（地面の上）へ下ろす
+            if (target is PlacedGimmick lowPg)
+            {
+                var lowDef = Assets?.Gimmicks.FirstOrDefault(d => d.id == lowPg.Id);
+                float lowH = (lowDef?.hitboxHeight > 0 ? lowDef.hitboxHeight : GAME_TILE) * (lowPg.ScaleY > 0 ? lowPg.ScaleY : 1f);
+                if (lowDef != null && lowH < GAME_TILE - 0.5f)
+                {
+                    var miDrop = new ToolStripMenuItem("地面に下ろす（マスの底へ）");
+                    miDrop.Click += (s, e) => { DropToCellBottom(lowPg); Fire(); Invalidate(); EditCompleted?.Invoke(this, EventArgs.Empty); };
+                    menu.Items.Add(miDrop);
+                }
+            }
             // 色・明るさで出入りするギミックは、出る条件をここで決める（パラメータ欄へ手で打たなくてよいように）
             if (target is PlacedGimmick condPg && IsConditionGimmick(condPg, out _))
             {
@@ -1443,6 +1465,42 @@ public class MapCanvas : Panel
         using var br = new SolidBrush(back);
         g.FillRectangle(br, badge);
         g.DrawString(text, font, Brushes.White, badge.X, badge.Y - 1);
+    }
+
+    // 画像の上側の透明な余白の割合（0〜1）。ゲーム側 DrawPixel.cpp の ImageOpaqueTopRatio と同じ計算（列は3つおき）。
+    private readonly Dictionary<string, float> _opaqueTopCache = new();
+    private float OpaqueTopRatio(string? spritePath)
+    {
+        if (string.IsNullOrEmpty(spritePath)) return 0f;
+        if (_opaqueTopCache.TryGetValue(spritePath, out float r)) return r;
+        float ratio = 0f;
+        if (GetAssetImage(spritePath) is Bitmap bmp)
+        {
+            for (int y = 0; y < bmp.Height && ratio == 0f; y++)
+            {
+                bool hit = false;
+                for (int x = 0; x < bmp.Width; x += 3) if (bmp.GetPixel(x, y).A > 16) { hit = true; break; }
+                if (hit) { ratio = (float)y / bmp.Height; break; }
+            }
+        }
+        _opaqueTopCache[spritePath] = ratio;
+        return ratio;
+    }
+
+    // 地面に置く「ボタン」のギミック（重量スイッチ6・補正スイッチ26）か。
+    // これらは当たり判定が1マスより低い（10〜16px）ので、マスの上端に置くと地面から浮いてしまう。
+    private static bool IsGroundButton(GimmickDef? d) => d != null && (d.type_enum == 6 || d.type_enum == 26);
+
+    // 置いた物の下端を、いま下端が入っているマスの底（＝その下の地面の上面）へそろえる。
+    // 高さが1マスより低いギミックを地面に乗せるためのもの。もとから底に乗っていれば動かない。
+    private void DropToCellBottom(PlacedGimmick pg)
+    {
+        var def = Assets?.Gimmicks.FirstOrDefault(d => d.id == pg.Id);
+        if (def == null) return;
+        float h = (def.hitboxHeight > 0 ? def.hitboxHeight : GAME_TILE) * (pg.ScaleY > 0 ? pg.ScaleY : 1f);
+        float bottom = pg.Y + h;
+        float cellBottom = (float)Math.Ceiling(bottom / GAME_TILE - 0.001f) * GAME_TILE;
+        pg.Y = cellBottom - h;
     }
 
     // ===== 色・明るさで出入りするギミックの「出る条件」 =====

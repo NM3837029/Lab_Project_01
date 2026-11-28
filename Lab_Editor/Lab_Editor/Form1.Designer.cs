@@ -38,6 +38,7 @@ partial class Form1
     private System.Windows.Forms.ListBox lstStages = null!;                         // ステージ一覧リスト
     private System.Windows.Forms.TextBox txtNewStage = null!;                       // 新規ステージ名の入力欄
     private System.Windows.Forms.Button btnCreateStage = null!, btnDeleteStage = null!;  // ステージの新規作成／削除ボタン
+    private System.Windows.Forms.Button btnRenameStage = null!;                     // 選んでいるステージの名前（ファイル名）を変えるボタン
     private System.Windows.Forms.Button btnImportCsv = null!;                       // CSVからステージをインポートするボタン
 
     private System.Windows.Forms.NumericUpDown numStartX = null!, numStartY = null!;  // プレイヤー開始座標のX/Y入力欄
@@ -215,10 +216,13 @@ partial class Form1
         btnCreateStage.Click += btnCreateStage_Click;
         btnDeleteStage = new System.Windows.Forms.Button { Text = "🗑削除", Location = new System.Drawing.Point(100, 240), Size = new System.Drawing.Size(85, 26) };
         btnDeleteStage.Click += btnDeleteStage_Click;
-        btnImportCsv = new System.Windows.Forms.Button { Text = "CSVインポート", Location = new System.Drawing.Point(5, 275), Size = new System.Drawing.Size(180, 26) };
+        // 選んでいるステージの名前（ファイル名）を変える。以前は名前を変える方法が無く、作り直すしかなかった。
+        btnRenameStage = new System.Windows.Forms.Button { Text = "✎ 名前を変える", Location = new System.Drawing.Point(5, 272), Size = new System.Drawing.Size(180, 26) };
+        btnRenameStage.Click += btnRenameStage_Click;
+        btnImportCsv = new System.Windows.Forms.Button { Text = "CSVインポート", Location = new System.Drawing.Point(5, 306), Size = new System.Drawing.Size(180, 26) };
         btnImportCsv.Click += btnImportCsv_Click;
 
-        tabStages.Controls.AddRange(new System.Windows.Forms.Control[] { lstStages, txtNewStage, btnCreateStage, btnDeleteStage, btnImportCsv });
+        tabStages.Controls.AddRange(new System.Windows.Forms.Control[] { lstStages, txtNewStage, btnCreateStage, btnDeleteStage, btnRenameStage, btnImportCsv });
 
         // マップ設定タブ：マップサイズ変更セクション
         var lblSize = new System.Windows.Forms.Label { Text = "📐 マップサイズ", Font = FB, Location = new System.Drawing.Point(5, 5), Size = new System.Drawing.Size(170, 20) };
