@@ -8623,54 +8623,20 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 const int pw = 262;
                 const int px1 = ox, py1 = oy, ph = areaH;
                 const int bx = px1 + 14, bw = pw - 28, bh = 34, gap = 6;
-                const int stY1 = py1 + 40, stY2 = stY1 + 112;     // 状況のグループ枠
+                const int stY1 = py1 + 40, stY2 = stY1 + 40;      // 状況のグループ枠（ステージ名の1行だけ）
                 const int btnY0 = stY2 + 16;                      // 項目の先頭
 
                 drawWindow(px1, py1, px1 + pw, py1 + ph, "ポーズ");
 
-                // 状況：グループ枠「いまのステージ」に、ステージ名・コイン・体力・編集コスト
+                // 状況：グループ枠「いまのステージ」に、ステージ名だけを出す。
+                // 以前はコイン・体力・編集コストも並べていたが、後ろに見えている「情報」の窓と同じことを言っていたので、
+                // 文字を減らすため 2026-11-28 に外した
                 {
                     std::string stageName = currentStageFileName;
                     for (const auto& se : gameConfig.stages) { if (se.file == currentStageFileName) { stageName = se.name; break; } }
                     if (stageName.size() > 5 && stageName.compare(stageName.size() - 5, 5, ".json") == 0) stageName.resize(stageName.size() - 5);
                     UiTheme::GroupBox({ bx, stY1 + 6, bx + bw, stY2 }, "いまのステージ");
                     UiFont::DrawBold(bx + 10, stY1 + 18, EditPanel::FitText(stageName, bw - 20, 13).c_str(), TC(tp.ink), 13);
-
-                    int gotCoins = 0;
-                    for (const auto& it : items) { if (it.isCollected) gotCoins++; }
-                    auto statRow = [&](int row, const char* label, const char* value) {
-                        const int ry = stY1 + 40 + row * 22;
-                        UiFont::Draw(bx + 10, ry, label, TC(tp.inkSub), 12);
-                        UiFont::Draw(bx + bw - 10 - UiFont::Width(value, 12), ry, value, TC(tp.ink), 12);
-                    };
-                    char vb[48];
-                    sprintf_s(vb, sizeof(vb), "%d / %d", gotCoins, (int)items.size());
-                    statRow(0, "コイン：", vb);
-                    // 体力：数字ではなくハートの並びで（失った分は灰色）。HUDと同じ作り
-                    {
-                        const int ry = stY1 + 40 + 1 * 22;
-                        UiFont::Draw(bx + 10, ry, "体力：", TC(tp.inkSub), 12);
-                        int hpNow = player.hp < 0 ? 0 : player.hp;
-                        if (hpNow > 6) {
-                            sprintf_s(vb, sizeof(vb), "× %d", hpNow);
-                            UiFont::Draw(bx + bw - 10 - UiFont::Width(vb, 12), ry, vb, TC(tp.ink), 12);
-                        } else {
-                            int slots = hpNow > 3 ? hpNow : 3;
-                            auto Heart = [&](int hx, int hy, int rr, unsigned int col) {
-                                int c = rr / 2;
-                                DrawCircle(hx - c, hy - rr / 4, c + 1, col, TRUE);
-                                DrawCircle(hx + c, hy - rr / 4, c + 1, col, TRUE);
-                                DrawTriangle(hx - rr, hy - rr / 6, hx + rr, hy - rr / 6, hx, hy + rr, col, TRUE);
-                            };
-                            for (int hi = 0; hi < slots; hi++) {
-                                int hx = bx + bw - 18 - (slots - 1 - hi) * 18, hy = ry + 6;
-                                Heart(hx, hy, 7, TC(tp.dark));
-                                Heart(hx, hy, 6, hi < hpNow ? GetColor(220, 50, 60) : TC(tp.inkDim));
-                            }
-                        }
-                    }
-                    sprintf_s(vb, sizeof(vb), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
-                    statRow(2, "コスト：", vb);
                 }
 
                 int hover = -1;
@@ -16365,28 +16331,30 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
         // 操作のヒントの項目（いまの状況で使えるものだけ。優先度の高い順で、幅が足りないときは後ろから落とす）。
         // 編集パネルがあるときは下の状態バーに、パネルが無いとき（F10 の拡大表示・編集パネルの無いプレイ）はモニターの下に出す。
         // 末尾の「F1 操作一覧」「Esc メニュー」は、ここには入れず、出す側で必ず残す（全部の操作を教える入口なので）。
+        // 2026-11-28：「文字が多すぎる」の声を受けて、どの場面も2〜4個に絞った。
+        //   ・編集できるステージでは、移動・ジャンプ・ダッシュ・弾の基本操作は出さない（F1 の一覧にある。一度覚えれば要らない）
+        //   ・右上の札などで既に分かること（「時間停止中」「画面全体の色と明るさ」）は書かない
         auto BuildHintMid = [&]() -> std::vector<std::string> {
             std::vector<std::string> mid;
             if (isEditMode && EditToolbar::S().autoPaused) {
                 mid = { "ツール詳細を確認中", "カードの外をクリックで閉じる" };
             } else if (!bigView && screenEffectOpEnabled && ColorGrade::InPanel(WINDOW_WIDTH, mx, my)) {
                 // 右下の「画面全体」の枠の上：ダブルクリックで元に戻せること・ホイールで微調整できること・キー
-                mid = { "画面全体の色と明るさ", "ダブルクリックで元に戻す", "ホイール 少しずつ動かす", "X/C 明るさ　T 色" };
+                mid = { "ダブルクリックで元に戻す", "ホイール 少しずつ動かす", "X/C 明るさ　T 色" };
             } else if (isEditMode && isPaused) {
-                mid = { "時間停止中", "←/→ 1コマ戻す・進める", "Space 再開" };
+                mid = { "←/→ 1コマ戻す・進める", "Space 再開" };
                 if (objectEditOpEnabled) mid.push_back("ドラッグで物を動かす");
             } else if (isEditMode && objectEditOpEnabled && selectedType != SELECT_NONE) {
-                mid = { "ドラッグ 移動", "つまみ 変形", "ホイール 拡縮", "Ctrl+ホイール 回転", "右クリック メニュー", "Ctrl+Z 取り消し" };
+                // つまみ（見えている四角）と右クリックのメニューは、見れば・押せば分かるので書かない
+                mid = { "ドラッグ 移動", "ホイール 拡縮", "Ctrl+ホイール 回転", "Ctrl+Z 取り消し" };
+            } else if (isEditMode) {
+                mid = { "Space 時間停止" };
+                if (objectEditOpEnabled) mid.push_back("右クリック 物を選ぶ");
+                else mid.push_back("このステージでは物の編集は使えません");
+                if (cutOpEnabled) mid.push_back("Ctrl+クリック2回 カット");
             } else {
+                // 編集の無いふつうのプレイでは、ほかに出すものが無いので移動とジャンプだけ出す
                 mid = { "A/D 移動", "W ジャンプ" };
-                if (isEditMode) {
-                    mid.push_back("Space 時間停止");
-                    if (objectEditOpEnabled) mid.push_back("右クリック 物を選ぶ");
-                    else mid.push_back("このステージでは物の編集は使えません");
-                    if (cutOpEnabled) mid.push_back("Ctrl+クリック2回 カット");
-                }
-                // 優先度の低い順（幅が足りないときは後ろから落ちる）。ダッシュと弾は F1 の一覧にも載っている
-                mid.push_back("Shift ダッシュ"); mid.push_back("Enter 弾");
             }
             return mid;
         };
@@ -16443,14 +16411,16 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 // 1段目：コインの取得枚数
                 DrawUiIcon(X(30), Y(40), (int)(22.0f * sc), coinHandle);
                 char coinStr[48];
-                sprintf_s(coinStr, sizeof(coinStr), "コイン：  %d / %d", collectedCoins, (int)items.size());
+                // 「コイン：」の文字は付けない（左のコインの絵で何の数か分かる。文字を減らすため 2026-11-28 に外した）
+                sprintf_s(coinStr, sizeof(coinStr), "%d / %d", collectedCoins, (int)items.size());
                 UiFont::Draw(X(48), TopFor(Y(40), fs), coinStr, hudInk, fs);
 
                 // 2段目：体力。数字だけでなく、ハートの並びで残りを見せる（失った分は薄い色）
                 {
                     const int heartY = Y(68);
                     const int r = (int)(7.0f * sc + 0.5f);
-                    UiFont::Draw(X(20), TopFor(heartY, fs), "HP：", hudInkSub, fs);
+                    // 「HP：」の文字は付けない（ハートの並びで体力だと分かる）。ハートはコインの絵と左端をそろえる
+                    const float heartX0 = 30.0f;
                     auto Heart = [&](int cx, int cy, int rr, unsigned int col) {
                         int c = rr / 2;
                         DrawCircle(cx - c, cy - rr / 4, c + 1, col, TRUE);
@@ -16460,14 +16430,14 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     int hpNow = player.hp < 0 ? 0 : player.hp;
                     int slots = hpNow > 6 ? 1 : (hpNow > 3 ? hpNow : 3); // 初期値の3つは常に枠を見せる
                     for (int hi = 0; hi < slots; hi++) {
-                        int hcx = X(68.0f + hi * 20.0f);
+                        int hcx = X(heartX0 + hi * 20.0f);
                         bool full = hi < hpNow;
                         Heart(hcx, heartY, r + 1, UiTheme::Col(htp.dark));
                         Heart(hcx, heartY, r, full ? GetColor(220, 50, 60) : UiTheme::Col(htp.inkDim));
                     }
                     if (hpNow > 6) {
                         char hb[16]; sprintf_s(hb, sizeof(hb), "× %d", hpNow);
-                        UiFont::Draw(X(68.0f + 16.0f), TopFor(heartY, fs), hb, hudInk, fs);
+                        UiFont::Draw(X(heartX0 + 16.0f), TopFor(heartY, fs), hb, hudInk, fs);
                     }
                 }
 
@@ -16477,8 +16447,8 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 if (ratio < 0.0f) ratio = 0.0f; if (ratio > 1.0f) ratio = 1.0f;
                 bool isLow = ratio < 0.2f;
                 bool blinkOn = ((long)(BehaviorInterpreter::globalFrameCounter) / 15) % 2 == 0;
-                UiFont::Draw(X(14), TopFor(Y(100), fsm), "コスト：", hudInkSub, fsm);
-                const int gx1 = X(62), gx2 = X(160), gy1 = Y(92), gy2 = Y(108);
+                // 「コスト：」の文字は付けない（メーターと「100 / 100」で分かる）。メーターは左端から始める
+                const int gx1 = X(18), gx2 = X(160), gy1 = Y(92), gy2 = Y(108);
                 UiTheme::Meter({ gx1, gy1, gx2, gy2 }, ratio, false);
                 char editCostStr[48];
                 sprintf_s(editCostStr, sizeof(editCostStr), "%d / %d", (int)editCost, (int)currentEditCost.maxCost);
@@ -16491,11 +16461,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
             if (isEditMode && IsEditToolEnabled(currentEditTools.objectEditEnabled, unlockedEditTools.objectEditEnabled)) {
                 const int lx1 = X(osdX1), lx2 = X(osdX2), ly1 = Y(osdY2 + 6), ly2 = Y(osdY2 + 34);
                 UiTheme::Raised({ lx1, ly1, lx2, ly2 });
-                // 左端の見出し「層」と、右の操作キー。3つのボタンは見出しとキーの間を等分する
-                const int lblW = (int)(30.0f * sc), keyW = (int)(44.0f * sc);
-                UiFont::Draw(lx1 + (int)(8.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "層", hudInkSub, fsm);
-                UiFont::Draw(lx2 - keyW + (int)(4.0f * sc), TopFor((ly1 + ly2) / 2, fsm), "Q/E", hudInkSub, fsm);
-                const int cx0 = lx1 + lblW, cx1 = lx2 - keyW;
+                // 見出し「層」と操作キー「Q/E」の文字は付けない（3つのボタンの名前で分かる。キーは F1 の操作一覧にある）。
+                // 3つのボタンは、枠の内側いっぱいを等分する
+                const int edge = (int)(4.0f * sc);
+                const int cx0 = lx1 + edge, cx1 = lx2 - edge;
                 const int cellW = (cx1 - cx0) / 3, pad = (int)(2.0f * sc);
                 const int lays[3] = { LAYER_BACK, LAYER_MID, LAYER_FRONT };
                 for (int li = 0; li < 3; li++) {
@@ -16693,16 +16662,13 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     float leftRatio = editCost / currentEditCost.maxCost;
                     if (leftRatio < 0.0f) leftRatio = 0.0f;
                     if (leftRatio > 1.0f) leftRatio = 1.0f;
-                    const int gx1 = 22, gx2 = 46, gy1 = 340, gy2 = lh - 40;
-                    // 見出し「コスト」と、区切りのあるメーター（暗い灰色は緑→黄→赤、明るい灰色は青いブロック）
-                    const int lab = UiFont::Width("コスト", 12);
-                    UiFont::Draw(lw / 2 - lab / 2 - 1, gy1 - 18, "コスト", UiTheme::Col(tp.inkSub), 12);
+                    // 区切りのあるメーターだけを出す（暗い灰色は緑→黄→赤、明るい灰色は青いブロック）。
+                    // 見出し「コスト」・下の数字・「[F1]一覧」の文字は 2026-11-28 に外した
+                    // （数字は左上の「情報」の窓に、F1 は下の状態バーにあり、同じことを2か所で言っていたため）。
+                    // 外した文字のぶん、メーターを上下に伸ばす
+                    const int gx1 = 22, gx2 = 46, gy1 = 326, gy2 = lh - 14;
                     UiTheme::Meter({ gx1, gy1, gx2, gy2 }, leftRatio, true);
-                    char cb[16]; sprintf_s(cb, sizeof(cb), "%d", (int)editCost);
-                    const int cw = UiFont::Width(cb, 12);
-                    UiFont::Draw(lw / 2 - cw / 2 - 1, gy2 + 6, cb, UiTheme::Col(tp.ink), 12);
                 }
-                EditToolbar::DrawSmall(6, lh - 20, "[F1]一覧", UiTheme::Col(tp.inkSub), 11);
             }
 
             // 右パネル（インスペクター＋カラー補正）。左のアイコンバーと同じ、暗い平らな下地とモニター側の青い縁
@@ -16893,7 +16859,10 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 };
                 while (mid.size() > 1 && UiFont::Width(JoinMid(mid).c_str(), 12) > (paneCostX - 4) - 4 - 10) mid.pop_back();
                 UiTheme::StatusPane({ 4, sy1, paneCostX - 4, sy2 }, JoinMid(mid).c_str());
-                UiTheme::StatusPane({ paneCostX, sy1, paneTailX - 4, sy2 }, cutOpEnabled ? cb : "カット：このステージでは使えません");
+                // 中の区画（カットのコスト）は、カットの準備中（Ctrl を押している間・1回目のクリックのあと）だけ文字を出す。
+                // いつも見る必要は無いので、2026-11-28 に文字を減らすため、ふだんは空の区画にした（区画の形は状態バーの見た目として残す）
+                const bool cutPreparing = cutOpEnabled && (tempCutStart >= 0.0f || CheckHitKey(KEY_INPUT_LCONTROL) || CheckHitKey(KEY_INPUT_RCONTROL));
+                UiTheme::StatusPane({ paneCostX, sy1, paneTailX - 4, sy2 }, cutPreparing ? cb : "");
                 UiTheme::StatusPane({ paneTailX, sy1, WINDOW_WIDTH - 5, sy2 }, "F1 操作一覧　Esc メニュー");
             }
 
@@ -16911,13 +16880,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 const unsigned int inkAcc = UiTheme::Col(tp.hot);
                 SyncInspMode();
 
-                // 枠と見出し（中身の矩形は見た目によって上端が違う：暗い灰色はタブの下から、明るい灰色は見出しバーの下から）
-                if (themeDark) {
-                    EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1 + 12, Insp::SEC_X2, Insp::SEC_Y2 }, "選んだ物");
-                } else {
-                    UiTheme::Caption({ WINDOW_WIDTH - Insp::PANEL_W + 3, 2, WINDOW_WIDTH - 3, 21 }, "プロパティ");
-                    EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1 + 20, Insp::SEC_X2, Insp::SEC_Y2 }, "選んだ物");
-                }
+                // 枠と見出し「選んだ物」（暗い灰色はタブ、明るい灰色はグループ枠）。
+                // 明るい灰色で上に出していた見出しバー「プロパティ」は、見出しが2重になるので 2026-11-28 に外した
+                EditPanel::DrawSection({ Insp::SEC_X1, Insp::SEC_Y1 + 12, Insp::SEC_X2, Insp::SEC_Y2 }, "選んだ物");
 
                 if (!canEdit) {
                     // 物の編集が封印されたステージ：選ぶこと自体ができないので、使えないことだけを出す
@@ -16928,34 +16893,32 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                 } else {
                     // ---- 選んだ物のカード ----
                     // 名前は定義ファイルの名前を「（」で分け、前を太字の名前、後ろを小さな説明にする
+                    // （以前はここで「種類：敵　HP：3」の行も作っていたが、2026-11-28 にカードから外した）
                     std::string fullName = "不明";
-                    const char* tag = "";
-                    char tagBuf[48] = "";
                     int thumbHandle = -1, thumbKind = 0;
                     const size_t totalSelected = selectedPlayers.size() + selectedEnemies.size() + selectedGimmicks.size();
                     if (totalSelected > 1) {
                         char nb[48]; sprintf_s(nb, sizeof(nb), "%d個まとめて", (int)totalSelected);
-                        fullName = nb; tag = "種類：まとめて編集"; thumbKind = 2;
+                        fullName = nb; thumbKind = 2;
                     } else if (selectedType == SELECT_PLAYER) {
-                        fullName = "プレイヤー"; tag = "種類：自分"; thumbHandle = playerHandle;
+                        fullName = "プレイヤー"; thumbHandle = playerHandle;
                     } else if (selectedType == SELECT_ENEMY && targetEnemy != nullptr) {
                         const EnemyDef* ed = FindEnemyDef(targetEnemy->assetId);
                         fullName = (ed && !ed->name.empty()) ? ed->name : EnemyTypeNameJa(targetEnemy->type);
-                        if (targetEnemy->hp > 0) sprintf_s(tagBuf, sizeof(tagBuf), "種類：敵　HP：%d", targetEnemy->hp); else sprintf_s(tagBuf, sizeof(tagBuf), "種類：敵");
-                        tag = tagBuf; thumbHandle = targetEnemy->handle;
+                        thumbHandle = targetEnemy->handle;
                     } else if (selectedType == SELECT_GIMMICK && targetGimmick != nullptr) {
                         // 同じCUT_PORTAL型でも、タイムラインカットとワールド配置のワープポータルは別物なので表示名を分ける
                         if (targetGimmick->type == GIMMICK_CUT_PORTAL && targetGimmick->isTimelineCut) {
-                            fullName = "カット区間"; tag = "種類：タイムライン"; thumbKind = 1;
+                            fullName = "カット区間"; thumbKind = 1;
                         } else {
                             const GimmickDef* gd = FindGimmickDef(targetGimmick->assetId);
                             fullName = (gd && !gd->name.empty()) ? gd->name : "ギミック";
-                            tag = "種類：ギミック"; thumbHandle = targetGimmick->handle; thumbKind = 1;
+                            thumbHandle = targetGimmick->handle; thumbKind = 1;
                         }
                     }
                     std::string name, desc;
                     EditPanel::SplitNameDesc(fullName, name, desc);
-                    EditPanel::DrawTargetCard(Insp::CardBox(), thumbHandle, thumbKind, name, desc, tag);
+                    EditPanel::DrawTargetCard(Insp::CardBox(), thumbHandle, thumbKind, name, desc);
 
                     // ---- 効いている編集（拡大・加速…）。タイルの「変えた印」にも使う ----
                     EditReaction ins;
@@ -17046,7 +17009,11 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                         // ON（押し込まれたボタン）の文字：暗い灰色は選択の色、明るい灰色はふつうの黒
                         const unsigned int onInk = themeDark ? UiTheme::Col(tp.selInk) : inkMain;
                         const unsigned int col = !usable ? inkDim : (on ? onInk : inkMain);
-                        if (big) {
+                        if (big && state[0] == '\0') {
+                            // 状態の文字が無いタイル（一時停止・巻き戻し：ON は押し込まれた形で分かる）は、絵と名前を縦の真ん中へ寄せる
+                            if (icon >= 0) EditPanel::DrawIcon((EditPanel::Icon)icon, cx, b.y1 + 22, col);
+                            EditPanel::DrawCentered(cx, b.y1 + 36, label, col, 12, false);
+                        } else if (big) {
                             if (icon >= 0) EditPanel::DrawIcon((EditPanel::Icon)icon, cx, b.y1 + 16, col);
                             EditPanel::DrawCentered(cx, b.y1 + 28, label, col, 12, false);
                             EditPanel::DrawCentered(cx, b.y1 + 45, state, !usable ? inkDim : (on ? onInk : stateCol), 11, false);
@@ -17088,8 +17055,9 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // 一時停止・巻き戻し（この物だけ時間が止まる／戻る）。アイコンは「いまの状態」
                     const bool pausedOn = targetPaused != nullptr && *targetPaused;
                     const bool rewindOn = targetRewind != nullptr && *targetRewind;
-                    StateTile(Insp::ROW_PAUSE, pausedOn ? EditPanel::ICON_PAUSE : EditPanel::ICON_PLAY, "一時停止", pausedOn ? "ON" : "OFF", pausedOn, inkSub);
-                    StateTile(Insp::ROW_REWIND, EditPanel::ICON_REWIND, "巻き戻し", rewindOn ? "ON" : "OFF", rewindOn, inkSub);
+                    // 「ON」「OFF」の文字は出さない（押し込まれているかどうかで分かる。2026-11-28 に文字を減らすため外した）
+                    StateTile(Insp::ROW_PAUSE, pausedOn ? EditPanel::ICON_PAUSE : EditPanel::ICON_PLAY, "一時停止", "", pausedOn, inkSub);
+                    StateTile(Insp::ROW_REWIND, EditPanel::ICON_REWIND, "巻き戻し", "", rewindOn, inkSub);
 
                     if (Insp::lookMode) {
                         // ギミックの見た目の4つ（クリックで1段ずつ進む）。変えている項目は青い下地
@@ -17112,29 +17080,26 @@ int WINAPI WinMain(_In_ HINSTANCE h, _In_opt_ HINSTANCE hp, _In_ LPSTR l, _In_ i
                     // （プレイヤーには「動き」が無いので、2段目の右は空けておく）
 
                     // ---- 効いている編集のチップ（何も無いときは行ごと出さない）----
-                    // 「傾けたら照準が固定された」のような反応は、起きていることが読めなければパズルの手札として使えないため、必ず見せる
+                    // 「傾けたら照準が固定された」のような反応は、起きていることが読めなければパズルの手札として使えないため見せる。
+                    // ただし 2026-11-28 に文字を減らすため、上のタイルで分かるもの（拡大・縮小＝大きさ、傾き＝角度、
+                    // 停止・加速・減速＝速さ、一時停止・巻き戻し＝押し込まれたタイル、ギミックの見た目＝見た目の4つのタイル）は出さず、
+                    // タイルに出ないもの（横倒し・反転・移動、敵の見た目の変化）だけを、見出し「▼ 効いている編集」なしで並べる
                     if (hasReact) {
+                        const bool lookTiles = (selectedType == SELECT_GIMMICK);   // ギミックは見た目の4項目がタイルにある
                         std::vector<const char*> tags;
-                        if (ins.enlarged)      tags.push_back("拡大");
-                        if (ins.shrunk)        tags.push_back("縮小");
                         if (ins.tipped)        tags.push_back("横倒し");
-                        else if (ins.tilted)   tags.push_back("傾き");
-                        if (ins.frozen)        tags.push_back("停止");
-                        else if (ins.hastened) tags.push_back("加速");
-                        else if (ins.slowed)   tags.push_back("減速");
                         if (ins.flipped)       tags.push_back("反転");
-                        if (ins.hueShifted)    tags.push_back("色替え");
-                        if (ins.dimmed)        tags.push_back("暗く");
-                        if (ins.brightened)    tags.push_back("明るく");
-                        if (ins.faded)         tags.push_back("半透明");
-                        if (ins.flippedV)      tags.push_back("上下反転");
-                        if (ins.selfPaused)    tags.push_back("一時停止");
-                        if (ins.selfRewinding) tags.push_back("巻き戻し");
+                        if (!lookTiles) {
+                            if (ins.hueShifted)    tags.push_back("色替え");
+                            if (ins.dimmed)        tags.push_back("暗く");
+                            if (ins.brightened)    tags.push_back("明るく");
+                            if (ins.faded)         tags.push_back("半透明");
+                            if (ins.flippedV)      tags.push_back("上下反転");
+                        }
                         if (ins.moved)         tags.push_back("移動");
                         if (!tags.empty()) {
                             const EditPanel::Box rb = Insp::RowBox(Insp::ROW_REACT);
-                            EditPanel::DrawText(rb.x1 + 1, rb.y1 + 3, "▼ 効いている編集", inkSub, 11);
-                            int cx = rb.x1 + EditPanel::TextWidth("▼ 効いている編集", 11) + 6;
+                            int cx = rb.x1 + 1;
                             // 枠の幅に収まる分だけ並べ、入らない分は「…」で切る。札は角の四角い「選ばれている」色の地
                             for (size_t ti = 0; ti < tags.size(); ti++) {
                                 const int need = EditPanel::TextWidth(tags[ti], 11) + 12 + 4;

@@ -381,14 +381,13 @@ inline void DrawLockedState(const Box& b) {
     DrawCentered(cx, b.y1 + 54, "物の編集が封印されています", UiTheme::Col(p.inkSub), 12, false);
 }
 
-// 選んだ物のカード：左にへこんだ窓の絵、右に太字の名前・小さな説明・「種類：敵　HP：3」の行。
+// 選んだ物のカード：左にへこんだ窓の絵、右に太字の名前と小さな説明。
 // 当時の作法に合わせ、カードそのものには枠を付けず、下に溝の区切り線を引く（以前の青い角丸の枠と丸い札はやめた）。
 // kind は DrawThumb と同じ（0=なし 1=ブロック 2=複数）。
-//   説明がある（敵）  … 1行目＝名前　2行目＝説明　3行目＝種類
-//   説明が無い（ギミック・プレイヤー）… 1行目＝名前　2行目＝種類
+//   1行目＝名前　2行目＝説明（説明が無い物は名前だけ）
+// 以前の3行目「種類：敵　HP：3」は 2026-11-28 に外した（種類は絵で分かり、HP は敵の頭上に出ているため。文字を減らす）。
 // 名前が入りきらないときは、まず文字を 13px→12px に小さくし、それでも入らないときだけ末尾を「…」にする。
-inline void DrawTargetCard(const Box& b, int handle, int kind, const std::string& name, const std::string& desc,
-                           const char* info) {
+inline void DrawTargetCard(const Box& b, int handle, int kind, const std::string& name, const std::string& desc) {
     const UiTheme::Palette& p = UiTheme::P();
     const int th = (b.y2 - b.y1) - 4;
     const Box tb = { b.x1, b.y1 + 1, b.x1 + th, b.y1 + 1 + th };
@@ -407,12 +406,7 @@ inline void DrawTargetCard(const Box& b, int handle, int kind, const std::string
         shown += "…";
     }
     UiFont::DrawBold(tx, b.y1 + 2, shown.c_str(), UiTheme::Col(p.ink), nameSize);
-    if (desc.empty()) {
-        DrawText(tx, b.y1 + 22, FitText(info, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
-    } else {
-        DrawText(tx, b.y1 + 20, FitText(desc, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
-        DrawText(tx, b.y1 + 36, FitText(info, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
-    }
+    if (!desc.empty()) DrawText(tx, b.y1 + 22, FitText(desc, maxW, 11).c_str(), UiTheme::Col(p.inkSub), 11);
     UiTheme::Etched(b.x1, b.x2, b.y2 + 3);
 }
 

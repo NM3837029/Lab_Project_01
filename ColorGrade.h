@@ -791,7 +791,7 @@ inline void DrawFineTab(const PanelState& st, int w) {
 //   stageUsesFine … このステージに、コントラスト・彩度・色相・色温度を見るギミックがある（タブに「使う」の札）
 //   briPreview    … X / C を押している間の明るさ（0.3 / 1.7）。押していなければ負の値
 // 枠の作り（2000年代の編集ソフト風）：
-//   暗い灰色 … 立体の縁のページの左上に太字の「画面全体」　　明るい灰色 … グループ枠「画面全体の色と明るさ」
+//   暗い灰色 … 立体の縁のページの左上に太字の「画面全体」　　明るい灰色 … グループ枠「画面全体」（2026-11-28 に「画面全体の色と明るさ」から短くした）
 //   その中に、リセットのボタン・タブ（色と明るさ｜細かい調整）・タブの中身・数値・判定の行
 inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool locked, int windowW,
                  bool stageUsesFine, float briPreview) {
@@ -806,7 +806,7 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         UiTheme::Bevel({ x1, kSecTop, x2, kSecBottom }, tp.hilite, tp.dark, tp.light, tp.shadow);
         UiFont::DrawBold(ix1, kHeadY + 3, "画面全体", UiTheme::Col(tp.ink), 12);
     } else {
-        UiTheme::GroupBox({ x1, kSecTop + 4, x2, kSecBottom }, "画面全体の色と明るさ");
+        UiTheme::GroupBox({ x1, kSecTop + 4, x2, kSecBottom }, "画面全体");
     }
     // リセット：盛り上がったボタン（押した直後の少しの間は押し込まれたボタン）
     {
@@ -857,22 +857,8 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
     if (ui.tab == 0) DrawColorTab(st, res, w, briPreview);
     else             DrawFineTab(st, w);
 
-    // いまの値（色相・強さ・明るさ）の行。ここは読むだけの数字なので、ドラッグの印（点線の下線）は付けない
-    {
-        char b1[24], b2[24], b3[24];
-        sprintf_s(b1, sizeof(b1), "%d°", (int)roundf(WrapDeg(st.tintHue)));
-        sprintf_s(b2, sizeof(b2), "%d%%", (int)roundf(st.tintAmount * 100.0f));
-        sprintf_s(b3, sizeof(b3), "%d%%", (int)roundf(st.bright * 100.0f));
-        int x = ix1 + 2;
-        const int y = kPickBottom + 7;
-        auto Pair = [&](const char* lab, const char* val) {
-            UiFont::Draw(x, y, lab, UiTheme::Col(tp.inkSub), 12);
-            x += UiFont::Width(lab, 12) + 4;
-            UiFont::Draw(x, y, val, UiTheme::Col(tp.ink), 12);
-            x += UiFont::Width(val, 12) + 12;
-        };
-        Pair("色相", b1); Pair("強さ", b2); Pair("明るさ", b3);
-    }
+    // 以前はここに、いまの値（色相・強さ・明るさ）の数字の行があった。
+    // 輪と四角の点の位置で見えるので、文字を減らすため 2026-11-28 に外した（判定の行はゲームの判定そのものなので残す）
     // ゲームがいま何と判定しているか（浅くへこんだ1行）
     {
         const int jb = JudgeBright(st.bright);
@@ -881,7 +867,8 @@ inline void Draw(const PanelState& st, const PanelUi& ui, Resources& res, bool l
         const char* ft[4] = { "なし", "赤", "緑", "青" };
         char line[96];
         sprintf_s(line, sizeof(line), "判定：明るさ %s ／ フィルタ %s", bt, ft[jf]);
-        UiTheme::StatusPane({ ix1, kPickBottom + 26, ix2, kPickBottom + 45 }, line);
+        // 数字の行を外したぶん、上へ詰める
+        UiTheme::StatusPane({ ix1, kPickBottom + 10, ix2, kPickBottom + 29 }, line);
     }
 }
 
